@@ -1,5 +1,5 @@
 [package]
-name = "rest_tensors2"
+name = "rt2"
 version = "0.1.0"
 edition = "2021"
 

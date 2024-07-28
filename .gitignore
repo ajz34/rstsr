@@ -5,6 +5,7 @@ lcov.info
 tarpaulin-report.html
 .vscode
 .idea
+book
 
 # bindgen
 blas_bindgen.h
