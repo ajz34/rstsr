@@ -1,5 +1,5 @@
-- [文档前言](intro.md)
+[文档前言](intro.md)
 
 # 基本类型
 
-- [张量类型与所有权](tensor-and-own.md)
+- [张量基本类型](tensor_base.md)
