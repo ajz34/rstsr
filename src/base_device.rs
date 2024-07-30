@@ -1,3 +1,5 @@
+use crate::Result;
+
 pub trait TraitDevice: Clone {
     fn same_device(&self, other: &Self) -> bool;
 }
@@ -11,6 +13,15 @@ pub trait TraitStorage {
     fn to_rawvec(&self) -> Self::VType;
     fn into_rawvec(self) -> Self::VType;
     fn new(vector: Self::VType, device: Self::Device) -> Self;
+}
+
+pub trait TraitDeviceToStorage<S>
+where
+    S: TraitStorage,
+{
+    fn zeros_impl(&self, len: usize) -> Result<S>;
+    fn from_cpu_vec_owned(&self, vec: Vec<S::DType>) -> Result<S>;
+    fn from_cpu_vec(&self, vec: &Vec<S::DType>) -> Result<S>;
 }
 
 /// Unique identifier for cuda devices.

@@ -2,5 +2,7 @@
 #[derive(thiserror::Error, Debug)]
 pub enum CudaError {
     #[error(transparent)]
-    Cuda(#[from] cudarc::driver::DriverError),
+    CudaDriver(#[from] cudarc::driver::result::DriverError),
 }
+
+pub use CudaError::CudaDriver as CudaDriverError;

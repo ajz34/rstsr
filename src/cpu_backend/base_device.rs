@@ -1,5 +1,7 @@
-use crate::base_device::{TraitDevice, TraitStorage};
+use crate::base_device::{TraitDevice, TraitDeviceToStorage, TraitStorage};
+use crate::Result;
 use core::fmt::Debug;
+use num_traits::Num;
 
 #[derive(Clone, Debug)]
 pub struct CpuDevice;
@@ -17,7 +19,7 @@ pub struct CpuStorage<T> {
 
 impl<T> TraitStorage for CpuStorage<T>
 where
-    T: Clone
+    T: Clone,
 {
     type Device = CpuDevice;
     type DType = T;
@@ -37,6 +39,25 @@ where
 
     fn new(vector: Self::VType, device: Self::Device) -> Self {
         Self { rawvec: vector, device }
+    }
+}
+
+impl<T> TraitDeviceToStorage<CpuStorage<T>> for CpuDevice
+where
+    T: Clone + Num,
+{
+    fn zeros_impl(&self, len: usize) -> Result<CpuStorage<T>> {
+        let vec = vec![T::zero(); len];
+        Ok(CpuStorage::new(vec, self.clone()))
+    }
+
+    fn from_cpu_vec(&self, vec: &Vec<T>) -> Result<CpuStorage<T>> {
+        let vec = vec.clone();
+        Ok(CpuStorage::new(vec, self.clone()))
+    }
+
+    fn from_cpu_vec_owned(&self, vec: Vec<T>) -> Result<CpuStorage<T>> {
+        Ok(CpuStorage::new(vec, self.clone()))
     }
 }
 
