@@ -1,0 +1,67 @@
+use crate::base_device::{TraitDevice, TraitStorage};
+use core::fmt::Debug;
+
+#[derive(Clone, Debug)]
+pub struct CpuDevice;
+
+impl TraitDevice for CpuDevice {
+    fn same_device(&self, _other: &Self) -> bool {
+        true
+    }
+}
+
+pub struct CpuStorage<T> {
+    rawvec: Vec<T>,
+    device: CpuDevice,
+}
+
+impl<T> TraitStorage for CpuStorage<T>
+where
+    T: Clone
+{
+    type Device = CpuDevice;
+    type DType = T;
+    type VType = Vec<T>;
+
+    fn device(&self) -> CpuDevice {
+        self.device.clone()
+    }
+
+    fn to_rawvec(&self) -> Vec<T> {
+        self.rawvec.clone()
+    }
+
+    fn into_rawvec(self) -> Vec<T> {
+        self.rawvec
+    }
+
+    fn new(vector: Self::VType, device: Self::Device) -> Self {
+        Self { rawvec: vector, device }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_cpu_device_same_device() {
+        let device1 = CpuDevice;
+        let device2 = CpuDevice;
+        assert!(device1.same_device(&device2));
+    }
+
+    #[test]
+    fn test_cpu_storage_to_vec() {
+        let storage = CpuStorage::new(vec![1, 2, 3], CpuDevice);
+        let vec = storage.to_rawvec();
+        assert_eq!(vec, vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn test_cpu_storage_into_vec() {
+        let storage = CpuStorage::new(vec![1, 2, 3], CpuDevice);
+        let vec = storage.into_rawvec();
+        assert_eq!(vec, vec![1, 2, 3]);
+    }
+}
