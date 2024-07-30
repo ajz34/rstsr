@@ -1,2 +1,2 @@
-pub mod base_device;
+pub mod device;
 pub mod error;

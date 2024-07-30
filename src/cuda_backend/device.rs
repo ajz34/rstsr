@@ -1,6 +1,6 @@
 //! This implementation uses code from `candle`.
 use super::error::CudaDriverError;
-use crate::base_device::{DeviceId, TraitDevice, TraitDeviceToStorage, TraitStorage};
+use crate::device::{DeviceId, TraitDevice, TraitDeviceToStorage, TraitStorage};
 use crate::Result;
 use cudarc;
 use cudarc::driver::{CudaSlice, DeviceRepr, ValidAsZeroBits};

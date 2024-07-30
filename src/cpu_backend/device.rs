@@ -1,4 +1,4 @@
-use crate::base_device::{TraitDevice, TraitDeviceToStorage, TraitStorage};
+use crate::device::{TraitDevice, TraitDeviceToStorage, TraitStorage};
 use crate::Result;
 use core::fmt::Debug;
 use num_traits::Num;
