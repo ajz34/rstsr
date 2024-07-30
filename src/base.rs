@@ -1,10 +1,10 @@
-use crate::data::TraitData;
-use crate::layout::{Layout, TraitDimension};
+use crate::data::Data;
+use crate::layout::{Dimension, Layout};
 
 pub struct TensorBase<S, D>
 where
-    S: TraitData,
-    D: TraitDimension,
+    S: Data,
+    D: Dimension,
 {
     data: S,
     layout: Layout<D>,

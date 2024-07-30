@@ -1,4 +1,4 @@
-use crate::device::{TraitDevice, TraitDeviceToStorage, TraitStorage};
+use crate::device::{Device, DeviceWithDType, Storage, TraitDeviceToStorage, TraitStorage};
 use crate::Result;
 use core::fmt::Debug;
 use num_traits::Num;
@@ -6,25 +6,23 @@ use num_traits::Num;
 #[derive(Clone, Debug)]
 pub struct CpuDevice;
 
-impl TraitDevice for CpuDevice {
+impl Device for CpuDevice {
     fn same_device(&self, _other: &Self) -> bool {
         true
     }
 }
 
-pub struct CpuStorage<T> {
-    rawvec: Vec<T>,
-    device: CpuDevice,
-}
-
-impl<T> TraitStorage for CpuStorage<T>
+impl<T> DeviceWithDType<T> for CpuDevice
 where
     T: Clone,
 {
-    type Device = CpuDevice;
-    type DType = T;
-    type VType = Vec<T>;
+    type RawVec = Vec<T>;
+}
 
+impl<T> TraitStorage<T, CpuDevice> for Storage<T, CpuDevice>
+where
+    T: Clone,
+{
     fn device(&self) -> CpuDevice {
         self.device.clone()
     }
@@ -37,27 +35,27 @@ where
         self.rawvec
     }
 
-    fn new(vector: Self::VType, device: Self::Device) -> Self {
+    fn new(vector: Vec<T>, device: CpuDevice) -> Self {
         Self { rawvec: vector, device }
     }
 }
 
-impl<T> TraitDeviceToStorage<CpuStorage<T>> for CpuDevice
+impl<T> TraitDeviceToStorage<T, CpuDevice> for CpuDevice
 where
     T: Clone + Num,
 {
-    fn zeros_impl(&self, len: usize) -> Result<CpuStorage<T>> {
-        let vec = vec![T::zero(); len];
-        Ok(CpuStorage::new(vec, self.clone()))
+    fn zeros_impl(&self, len: usize) -> Result<Storage<T, CpuDevice>> {
+        let rawvec = vec![T::zero(); len];
+        Ok(Storage::<T, CpuDevice> { rawvec, device: self.clone() })
     }
 
-    fn from_cpu_vec(&self, vec: &Vec<T>) -> Result<CpuStorage<T>> {
-        let vec = vec.clone();
-        Ok(CpuStorage::new(vec, self.clone()))
+    fn from_cpu_vec(&self, vec: &Vec<T>) -> Result<Storage<T, CpuDevice>> {
+        let rawvec = vec.clone();
+        Ok(Storage::<T, CpuDevice> { rawvec, device: self.clone() })
     }
 
-    fn from_cpu_vec_owned(&self, vec: Vec<T>) -> Result<CpuStorage<T>> {
-        Ok(CpuStorage::new(vec, self.clone()))
+    fn from_cpu_vec_owned(&self, vec: Vec<T>) -> Result<Storage<T, CpuDevice>> {
+        Ok(Storage::<T, CpuDevice> { rawvec: vec, device: self.clone() })
     }
 }
 
@@ -74,14 +72,14 @@ mod tests {
 
     #[test]
     fn test_cpu_storage_to_vec() {
-        let storage = CpuStorage::new(vec![1, 2, 3], CpuDevice);
+        let storage = Storage { rawvec: vec![1, 2, 3], device: CpuDevice };
         let vec = storage.to_rawvec();
         assert_eq!(vec, vec![1, 2, 3]);
     }
 
     #[test]
     fn test_cpu_storage_into_vec() {
-        let storage = CpuStorage::new(vec![1, 2, 3], CpuDevice);
+        let storage = Storage { rawvec: vec![1, 2, 3], device: CpuDevice };
         let vec = storage.into_rawvec();
         assert_eq!(vec, vec![1, 2, 3]);
     }

@@ -1,27 +1,45 @@
+use super::cpu_backend::device::CpuDevice;
 use crate::Result;
 
-pub trait TraitDevice: Clone {
+pub trait Device: Clone {
     fn same_device(&self, other: &Self) -> bool;
 }
 
-pub trait TraitStorage {
-    type Device: TraitDevice;
-    type DType;
-    type VType;
-
-    fn device(&self) -> Self::Device;
-    fn to_rawvec(&self) -> Self::VType;
-    fn into_rawvec(self) -> Self::VType;
-    fn new(vector: Self::VType, device: Self::Device) -> Self;
+pub trait DeviceWithDType<T>
+where
+    T: Clone,
+{
+    type RawVec;
 }
 
-pub trait TraitDeviceToStorage<S>
+pub struct Storage<T, D = CpuDevice>
 where
-    S: TraitStorage,
+    T: Clone,
+    D: Device + DeviceWithDType<T>,
 {
-    fn zeros_impl(&self, len: usize) -> Result<S>;
-    fn from_cpu_vec_owned(&self, vec: Vec<S::DType>) -> Result<S>;
-    fn from_cpu_vec(&self, vec: &Vec<S::DType>) -> Result<S>;
+    pub(crate) rawvec: D::RawVec,
+    pub(crate) device: D,
+}
+
+pub trait TraitStorage<T, D>
+where
+    T: Clone,
+    D: Device + DeviceWithDType<T>,
+{
+    fn device(&self) -> D;
+    fn to_rawvec(&self) -> D::RawVec;
+    fn into_rawvec(self) -> D::RawVec;
+    fn new(vector: D::RawVec, device: D) -> Self;
+}
+
+pub trait TraitDeviceToStorage<T, D>
+where
+    T: Clone,
+    D: Device + DeviceWithDType<T>,
+{
+    fn zeros_impl(&self, len: usize) -> Result<Storage<T, D>>;
+    fn from_cpu_vec_owned(&self, vec: Vec<T>) -> Result<Storage<T, D>>;
+    fn from_cpu_vec(&self, vec: &Vec<T>) -> Result<Storage<T, D>>;
 }
 
 /// Unique identifier for cuda devices.
@@ -31,6 +49,7 @@ where
 pub struct DeviceId(usize);
 
 impl DeviceId {
+    #[allow(unused)]
     pub(crate) fn new() -> Self {
         // https://users.rust-lang.org/t/idiomatic-rust-way-to-generate-unique-id/33805
         use std::sync::atomic;
