@@ -23,3 +23,7 @@ burn-core = { version = "0.12", features = ["ndarray"] }
 opt-level = 3
 overflow-checks = true
 
+[features]
+default = []
+cuda = []
+
