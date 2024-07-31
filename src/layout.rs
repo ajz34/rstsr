@@ -4,7 +4,7 @@ use crate::{Error, Result};
 
 pub struct Dim<I>
 where
-    I: AsRef<[usize]>,
+    I: AsMut<[usize]>,
 {
     _phantom: std::marker::PhantomData<I>,
 }
@@ -13,9 +13,9 @@ pub struct Layout<D>
 where
     D: Dimension,
 {
-    shape: D::Shape,
-    stride: D::Stride,
-    offset: usize,
+    pub(crate) shape: D::Shape,
+    pub(crate) stride: D::Stride,
+    pub(crate) offset: usize,
 }
 
 /* #endregion */
@@ -23,9 +23,9 @@ where
 /* #region Dimension */
 
 pub trait Dimension {
-    type Index: AsRef<[usize]>;
-    type Shape: AsRef<[usize]>;
-    type Stride: AsRef<[isize]>;
+    type Index: AsMut<[usize]>;
+    type Shape: AsMut<[usize]>;
+    type Stride: AsMut<[isize]>;
 }
 
 impl<const N: usize> Dimension for Dim<[usize; N]> {
@@ -48,21 +48,25 @@ pub type Ix3 = Ix<3>;
 pub type Ix4 = Ix<4>;
 pub type Ix5 = Ix<5>;
 pub type Ix6 = Ix<6>;
-pub type IxDyn = Dim<Vec<usize>>;
+pub type Ix7 = Ix<7>;
+pub type Ix8 = Ix<8>;
+pub type Ix9 = Ix<9>;
+pub type IxD = Dim<Vec<usize>>;
+pub type IxDyn = IxD;
 
 /* #endregion */
 
 /* #region Shape */
 
-pub trait Shape: AsRef<[usize]> {
+pub trait Shape: AsMut<[usize]> {
     /// Number of dimensions of the shape.
     fn rank(&self) -> usize;
     /// Total number of elements in tensor.
     fn size(&self) -> usize;
     /// Stride for a f-contiguous tensor using this shape.
-    fn stride_f_contig(&self) -> impl AsRef<[isize]>;
+    fn stride_f_contig(&self) -> impl AsMut<[isize]>;
     /// Stride for a c-contiguous tensor using this shape.
-    fn stride_c_contig(&self) -> impl AsRef<[isize]>;
+    fn stride_c_contig(&self) -> impl AsMut<[isize]>;
 }
 
 impl<const N: usize> Shape for [usize; N] {
@@ -127,7 +131,7 @@ impl Shape for Vec<usize> {
 
 /* #region Strides */
 
-pub trait Stride: AsRef<[isize]> {
+pub trait Stride: AsMut<[isize]> {
     /// Number of dimensions of the shape.
     fn rank(&self) -> usize;
     /// Check if the strides are f-preferred.
@@ -213,27 +217,81 @@ impl Stride for Vec<isize> {
 /* #region Layout */
 
 pub trait LayoutTrait {
-    type Shape: AsRef<[usize]>;
-    type Stride: AsRef<[isize]>;
+    type Shape: Shape + AsRef<[usize]>;
+    type Stride: Stride + AsRef<[isize]>;
 
     /// Shape of tensor. Getter function.
-    fn shape(&self) -> impl AsRef<[usize]>;
+    fn shape(&self) -> Self::Shape;
+    fn shape_ref(&self) -> &Self::Shape;
+
     /// Stride of tensor. Getter function.
-    fn stride(&self) -> impl AsRef<[isize]>;
+    fn stride(&self) -> Self::Stride;
+    fn stride_ref(&self) -> &Self::Stride;
+
     /// Starting offset of tensor. Getter function.
     fn offset(&self) -> usize;
+
     /// Number of dimensions of tensor.
-    fn rank(&self) -> usize;
+    fn rank(&self) -> usize {
+        self.shape_ref().rank()
+    }
+
     /// Total number of elements in tensor.
-    fn size(&self) -> usize;
+    fn size(&self) -> usize {
+        self.shape_ref().size()
+    }
+
     /// Whether this tensor is f-preferred.
-    fn is_f_prefer(&self) -> bool;
+    fn is_f_prefer(&self) -> bool {
+        self.stride_ref().is_f_prefer()
+    }
+
     /// Whether this tensor is c-preferred.
-    fn is_c_prefer(&self) -> bool;
+    fn is_c_prefer(&self) -> bool {
+        self.stride_ref().is_c_prefer()
+    }
+
     /// Whether this tensor is f-contiguous.
-    fn is_f_contig(&self) -> bool;
+    ///
+    /// Special cases
+    /// - When length of a dimension is one, then stride to that dimension is
+    ///   not important.
+    /// - When length of a dimension is zero, then tensor contains no elements,
+    ///   thus f-contiguous.
+    fn is_f_contig(&self) -> bool {
+        let mut acc = 1;
+        let mut contig = true;
+        for (&s, &d) in self.stride_ref().as_ref().iter().zip(self.shape_ref().as_ref().iter()) {
+            if d == 1 {
+                continue;
+            } else if d == 0 {
+                return true;
+            } else if s != acc {
+                contig = false;
+            }
+            acc *= d as isize;
+        }
+        return contig;
+    }
+
     /// Whether this tensor is c-contiguous.
-    fn is_c_contig(&self) -> bool;
+    fn is_c_contig(&self) -> bool {
+        let mut acc = 1;
+        let mut contig = true;
+        for (&s, &d) in
+            self.stride_ref().as_ref().iter().zip(self.shape_ref().as_ref().iter()).rev()
+        {
+            if d == 1 {
+                continue;
+            } else if d == 0 {
+                return true;
+            } else if s != acc {
+                contig = false;
+            }
+            acc *= d as isize;
+        }
+        return contig;
+    }
 
     /// Generate new layout by providing everything.
     ///
@@ -242,14 +300,33 @@ pub trait LayoutTrait {
     /// This function panics when
     /// - Shape and stride length mismatch
     fn new(shape: Self::Shape, stride: Self::Stride, offset: usize) -> Self;
+
     /// Generate new layout by providing shape and offset; stride fits into
     /// c-contiguous.
     fn new_c_contig(shape: Self::Shape, offset: usize) -> Self;
+
     /// Generate new layout by providing shape and offset; stride fits into
     /// f-contiguous.
     fn new_f_contig(shape: Self::Shape, offset: usize) -> Self;
+
     /// Index of tensor by list of indexes to dimensions.
-    fn try_index(&self, index: Self::Shape) -> Result<usize>;
+    fn try_index(&self, index: Self::Shape) -> Result<usize> {
+        let mut pos = self.offset() as isize;
+        for i in 0..self.rank() {
+            if index.as_ref()[i] >= self.shape_ref().as_ref()[i] {
+                return Err(Error::IndexOutOfBound {
+                    index: index.as_ref()[i] as isize,
+                    shape: self.shape().as_ref()[i] as isize,
+                });
+            }
+            pos += self.stride_ref().as_ref()[i] * index.as_ref()[i] as isize;
+        }
+        if pos < 0 {
+            return Err(Error::IndexOutOfBound { index: pos, shape: 0 });
+        }
+        return Ok(pos as usize);
+    }
+
     /// Index of tensor by list of indexes to dimensions.
     ///
     /// # Panics
@@ -257,7 +334,10 @@ pub trait LayoutTrait {
     /// This function panics when
     /// - Negative index
     /// - Index greater than shape
-    fn index(&self, index: Self::Shape) -> usize;
+    fn index(&self, index: Self::Shape) -> usize {
+        self.try_index(index).unwrap()
+    }
+
     /// Index of tensor by list of indexes to dimensions.
     ///
     /// # Safety
@@ -265,7 +345,13 @@ pub trait LayoutTrait {
     /// This function does not check for bounds, including
     /// - Negative index
     /// - Index greater than shape
-    unsafe fn index_uncheck(&self, index: Self::Shape) -> usize;
+    unsafe fn index_uncheck(&self, index: Self::Shape) -> usize {
+        let mut pos = self.offset() as isize;
+        for i in 0..self.rank() {
+            pos += self.stride_ref().as_ref()[i] * index.as_ref()[i] as isize;
+        }
+        return pos as usize;
+    }
 
     /// Number of dimensions of tensor. Alias (numpy convention) to
     /// [LayoutTrait::rank].
@@ -282,50 +368,20 @@ impl<const N: usize> LayoutTrait for Layout<Ix<N>> {
         self.shape
     }
 
+    fn shape_ref(&self) -> &Self::Shape {
+        &self.shape
+    }
+
     fn stride(&self) -> [isize; N] {
         self.stride
     }
 
+    fn stride_ref(&self) -> &Self::Stride {
+        &self.stride
+    }
+
     fn offset(&self) -> usize {
         self.offset
-    }
-
-    fn rank(&self) -> usize {
-        self.shape.rank()
-    }
-
-    fn size(&self) -> usize {
-        self.shape.size()
-    }
-
-    fn is_f_prefer(&self) -> bool {
-        self.stride.is_f_prefer()
-    }
-
-    fn is_c_prefer(&self) -> bool {
-        let mut acc = 1;
-        for (&s, &d) in self.stride.iter().zip(self.shape.iter()).rev() {
-            if s != acc {
-                return false;
-            }
-            acc *= d as isize;
-        }
-        return true;
-    }
-
-    fn is_f_contig(&self) -> bool {
-        let mut acc = 1;
-        for (&s, &d) in self.stride.iter().zip(self.shape.iter()) {
-            if s != acc {
-                return false;
-            }
-            acc *= d as isize;
-        }
-        return true;
-    }
-
-    fn is_c_contig(&self) -> bool {
-        self.stride.is_c_prefer() && self.offset == 0
     }
 
     fn new(shape: [usize; N], stride: [isize; N], offset: usize) -> Self {
@@ -341,38 +397,9 @@ impl<const N: usize> LayoutTrait for Layout<Ix<N>> {
         let stride = shape.stride_f_contig();
         Layout { shape, stride, offset }
     }
-
-    fn try_index(&self, index: [usize; N]) -> Result<usize> {
-        let mut pos = self.offset as isize;
-        for i in 0..N {
-            if index[i] >= self.shape[i] {
-                return Err(Error::IndexOutOfBound {
-                    index: index.into(),
-                    shape: self.shape.into(),
-                });
-            }
-            pos += self.stride[i] * index[i] as isize;
-        }
-        if pos < 0 {
-            return Err(Error::IndexOutOfBound { index: index.into(), shape: self.shape.into() });
-        }
-        return Ok(pos as usize);
-    }
-
-    fn index(&self, index: [usize; N]) -> usize {
-        self.try_index(index).unwrap()
-    }
-
-    unsafe fn index_uncheck(&self, index: Self::Shape) -> usize {
-        let mut pos = self.offset as isize;
-        for i in 0..N {
-            pos += self.stride[i] * index[i] as isize;
-        }
-        return pos as usize;
-    }
 }
 
-impl LayoutTrait for Layout<IxDyn> {
+impl LayoutTrait for Layout<IxD> {
     type Shape = Vec<usize>;
     type Stride = Vec<isize>;
 
@@ -380,50 +407,20 @@ impl LayoutTrait for Layout<IxDyn> {
         self.shape.clone()
     }
 
+    fn shape_ref(&self) -> &Self::Shape {
+        &self.shape
+    }
+
     fn stride(&self) -> Vec<isize> {
         self.stride.clone()
     }
 
+    fn stride_ref(&self) -> &Self::Stride {
+        &self.stride
+    }
+
     fn offset(&self) -> usize {
         self.offset
-    }
-
-    fn rank(&self) -> usize {
-        self.shape.rank()
-    }
-
-    fn size(&self) -> usize {
-        self.shape.size()
-    }
-
-    fn is_f_prefer(&self) -> bool {
-        self.stride.is_f_prefer()
-    }
-
-    fn is_c_prefer(&self) -> bool {
-        let mut acc = 1;
-        for (&s, &d) in self.stride.iter().zip(self.shape.iter()).rev() {
-            if s != acc {
-                return false;
-            }
-            acc *= d as isize;
-        }
-        return true;
-    }
-
-    fn is_f_contig(&self) -> bool {
-        let mut acc = 1;
-        for (&s, &d) in self.stride.iter().zip(self.shape.iter()) {
-            if s != acc {
-                return false;
-            }
-            acc *= d as isize;
-        }
-        return true;
-    }
-
-    fn is_c_contig(&self) -> bool {
-        self.stride.is_c_prefer() && self.offset == 0
     }
 
     fn new(shape: Vec<usize>, stride: Vec<isize>, offset: usize) -> Self {
@@ -442,35 +439,37 @@ impl LayoutTrait for Layout<IxDyn> {
         let stride = shape.stride_f_contig();
         Layout { shape, stride, offset }
     }
-
-    fn try_index(&self, index: Vec<usize>) -> Result<usize> {
-        let mut pos = self.offset as isize;
-        for i in 0..self.shape.rank() {
-            if index[i] >= self.shape[i] {
-                return Err(Error::IndexOutOfBound { index, shape: self.shape.clone() });
-            }
-            pos += self.stride[i] * index[i] as isize;
-        }
-        if pos < 0 {
-            return Err(Error::IndexOutOfBound { index, shape: self.shape.clone() });
-        }
-        return Ok(pos as usize);
-    }
-
-    fn index(&self, index: Self::Shape) -> usize {
-        self.try_index(index).unwrap()
-    }
-
-    unsafe fn index_uncheck(&self, index: Vec<usize>) -> usize {
-        let mut pos = self.offset as isize;
-        for i in 0..self.shape.rank() {
-            pos += self.stride[i] * index[i] as isize;
-        }
-        return pos as usize;
-    }
 }
 
 /* #endregion Layout */
+
+/* #region Dimension Conversion */
+
+impl<const N: usize> From<Layout<Ix<N>>> for Layout<IxD> {
+    fn from(layout: Layout<Ix<N>>) -> Self {
+        let Layout { shape, stride, offset } = layout;
+        Layout { shape: shape.to_vec(), stride: stride.to_vec(), offset }
+    }
+}
+
+impl<const N: usize> TryFrom<Layout<IxD>> for Layout<Ix<N>> {
+    type Error = Error;
+
+    fn try_from(layout: Layout<IxD>) -> Result<Self> {
+        let Layout { shape, stride, offset } = layout;
+        Ok(Layout {
+            shape: shape
+                .try_into()
+                .map_err(|_| Error::Msg(format!("Cannot convert IxD to Ix< {:} >", N)))?,
+            stride: stride
+                .try_into()
+                .map_err(|_| Error::Msg(format!("Cannot convert IxD to Ix< {:} >", N)))?,
+            offset,
+        })
+    }
+}
+
+/* #endregion */
 
 #[cfg(test)]
 mod test {
@@ -579,7 +578,7 @@ mod test {
 
     #[test]
     fn test_layout_trait_dyn() {
-        let layout = Layout::<IxDyn> { shape: vec![1, 2, 3], stride: vec![6, 3, 1], offset: 0 };
+        let layout = Layout::<IxD> { shape: vec![1, 2, 3], stride: vec![6, 3, 1], offset: 0 };
         assert_eq!(layout.shape(), vec![1, 2, 3]);
         assert_eq!(layout.stride(), vec![6, 3, 1]);
         assert_eq!(layout.offset(), 0);
@@ -592,5 +591,12 @@ mod test {
         assert_eq!(layout.ndim(), 3);
         assert_eq!(layout.index(vec![0, 1, 2]), 5);
         assert_eq!(unsafe { layout.index_uncheck(vec![0, 1, 2]) }, 5);
+    }
+
+    #[test]
+    fn test_anyway() {
+        let layout = Layout::<Ix<4>> { shape: [8, 10, 0, 15], stride: [3, 4, 0, 7], offset: 0 };
+        println!("{:?}", layout.is_c_contig());
+        println!("{:?}", layout.is_f_contig());
     }
 }

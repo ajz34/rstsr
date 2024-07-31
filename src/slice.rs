@@ -11,6 +11,9 @@ where
     step: Option<T>,
 }
 
+/// In most cases, we will use isize for indexing.
+pub type SliceI = Slice<isize>;
+
 impl<T> Slice<T>
 where
     T: Integer + Clone,
@@ -55,30 +58,20 @@ where
     T: Integer + Clone,
 {
     fn from(range: std::ops::Range<T>) -> Self {
-        Self {
-            start: Some(range.start),
-            stop: Some(range.end),
-            step: None,
-        }
+        Self { start: Some(range.start), stop: Some(range.end), step: None }
     }
 }
 
 #[macro_export]
 macro_rules! slice {
     ($stop:expr) => {
-        Slice::<isize>::from(
-            Slice { start: None, stop: $stop.into(), step: None }
-        )
+        Slice::<isize>::from(Slice { start: None, stop: $stop.into(), step: None })
     };
     ($start:expr, $stop:expr) => {
-        Slice::<isize>::from(
-            Slice { start: $start.into(), stop: $stop.into(), step: None }
-        )
+        Slice::<isize>::from(Slice { start: $start.into(), stop: $stop.into(), step: None })
     };
     ($start:expr, $stop:expr, $step:expr) => {
-        Slice::<isize>::from(
-            Slice { start: $start.into(), stop: $stop.into(), step: $step.into() }
-        )
+        Slice::<isize>::from(Slice { start: $start.into(), stop: $stop.into(), step: $step.into() })
     };
 }
 

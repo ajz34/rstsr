@@ -5,9 +5,14 @@ use crate::cuda_backend::error::CudaError;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
-    /* #region Layout Errors */
-    #[error("Index out of bound: index {index:?}, shape {shape:?}")]
-    IndexOutOfBound { index: Vec<usize>, shape: Vec<usize> },
+    #[error("Index out of bound: index {index:}, shape {shape:}")]
+    IndexOutOfBound { index: isize, shape: isize },
+
+    #[error("Value out of range: value {value:?}, min {min:?}, max {max:?}")]
+    ValueOutOfRange { value: isize, min: isize, max: isize },
+
+    #[error("Invalid integer: value {value:?}, msg {msg:?}")]
+    InvalidInteger { value: isize, msg: String },
 
     /* #region Wrapped Errors */
     #[cfg(feature = "cuda")]
@@ -16,6 +21,9 @@ pub enum Error {
 
     #[error(transparent)]
     TryFromIntError(#[from] core::num::TryFromIntError),
+
+    #[error("Error with message: {0:?}")]
+    Msg(String),
     /* #endregion */
 }
 
