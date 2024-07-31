@@ -1,4 +1,4 @@
-use super::cpu_backend::device::CpuDevice;
+use crate::cpu_backend::device::CpuDevice;
 use crate::Result;
 
 pub trait Device: Clone {
@@ -38,6 +38,9 @@ where
     D: Device + DeviceWithDType<T>,
 {
     fn zeros_impl(&self, len: usize) -> Result<Storage<T, D>>;
+    fn ones_impl(&self, len: usize) -> Result<Storage<T, D>>;
+    fn arange_impl(&self, len: usize) -> Result<Storage<T, D>>;
+    unsafe fn empty_impl(&self, len: usize) -> Result<Storage<T, D>>;
     fn from_cpu_vec_owned(&self, vec: Vec<T>) -> Result<Storage<T, D>>;
     fn from_cpu_vec(&self, vec: &Vec<T>) -> Result<Storage<T, D>>;
 }

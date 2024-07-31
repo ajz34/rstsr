@@ -5,8 +5,7 @@ pub use error::{Error, Result};
 
 pub mod layout;
 
-pub mod data;
-pub mod device;
+pub mod storage;
 
 pub mod tensor;
 

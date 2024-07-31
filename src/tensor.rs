@@ -1,5 +1,5 @@
-use crate::data::Data;
 use crate::layout::{Dimension, Layout};
+use crate::storage::Data;
 
 pub struct TensorBase<S, D>
 where

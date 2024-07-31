@@ -1,4 +1,4 @@
-use crate::device::{Device, DeviceWithDType, Storage, TraitDeviceToStorage, TraitStorage};
+use crate::storage::{Device, DeviceWithDType, Storage, TraitDeviceToStorage, TraitStorage};
 use crate::Result;
 use core::fmt::Debug;
 use num::Num;
@@ -46,6 +46,29 @@ where
 {
     fn zeros_impl(&self, len: usize) -> Result<Storage<T, CpuDevice>> {
         let rawvec = vec![T::zero(); len];
+        Ok(Storage::<T, CpuDevice> { rawvec, device: self.clone() })
+    }
+
+    fn ones_impl(&self, len: usize) -> Result<Storage<T, CpuDevice>> {
+        let rawvec = vec![T::one(); len];
+        Ok(Storage::<T, CpuDevice> { rawvec, device: self.clone() })
+    }
+
+    fn arange_impl(&self, len: usize) -> Result<Storage<T, CpuDevice>> {
+        let mut rawvec = vec![];
+        let mut v = T::zero();
+        for _ in 0..len {
+            rawvec.push(v.clone());
+            v = v + T::one();
+        }
+        Ok(Storage::<T, CpuDevice> { rawvec, device: self.clone() })
+    }
+
+    unsafe fn empty_impl(&self, len: usize) -> Result<Storage<T, CpuDevice>> {
+        let mut rawvec: Vec<T> = Vec::with_capacity(len);
+        unsafe {
+            rawvec.set_len(len);
+        }
         Ok(Storage::<T, CpuDevice> { rawvec, device: self.clone() })
     }
 
