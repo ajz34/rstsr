@@ -1,7 +1,7 @@
 use crate::device::{Device, DeviceWithDType, Storage, TraitDeviceToStorage, TraitStorage};
 use crate::Result;
 use core::fmt::Debug;
-use num_traits::Num;
+use num::Num;
 
 #[derive(Clone, Debug)]
 pub struct CpuDevice;

@@ -2,7 +2,6 @@ use std::fmt::Debug;
 
 #[cfg(feature = "cuda")]
 use crate::cuda_backend::error::CudaError;
-use crate::layout::Shape;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {

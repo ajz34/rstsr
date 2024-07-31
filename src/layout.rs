@@ -354,10 +354,7 @@ impl<const N: usize> LayoutTrait for Layout<Ix<N>> {
             pos += self.stride[i] * index[i] as isize;
         }
         if pos < 0 {
-            return Err(Error::IndexOutOfBound {
-                index: index.into(),
-                shape: self.shape.into(),
-            });
+            return Err(Error::IndexOutOfBound { index: index.into(), shape: self.shape.into() });
         }
         return Ok(pos as usize);
     }
@@ -450,18 +447,12 @@ impl LayoutTrait for Layout<IxDyn> {
         let mut pos = self.offset as isize;
         for i in 0..self.shape.rank() {
             if index[i] >= self.shape[i] {
-                return Err(Error::IndexOutOfBound {
-                    index,
-                    shape: self.shape.clone(),
-                });
+                return Err(Error::IndexOutOfBound { index, shape: self.shape.clone() });
             }
             pos += self.stride[i] * index[i] as isize;
         }
         if pos < 0 {
-            return Err(Error::IndexOutOfBound {
-                index,
-                shape: self.shape.clone(),
-            });
+            return Err(Error::IndexOutOfBound { index, shape: self.shape.clone() });
         }
         return Ok(pos as usize);
     }
