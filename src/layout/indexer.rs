@@ -1,5 +1,4 @@
-use crate::layout::{Dimension, IxD, Layout, LayoutTrait};
-use crate::slice::SliceI;
+use super::*;
 use crate::{Error, Result};
 
 #[derive(Debug, Clone)]
@@ -109,6 +108,36 @@ pub trait IndexerPreserve: LayoutTrait + Sized {
     }
 }
 
+pub trait IndexerDynamic: LayoutTrait + Sized {
+    /// Select dimension at index. Number of dimension will decrease by 1.
+    fn select_at_dim(&self, dim: usize, index: usize) -> Layout<IxD> {
+        // dimension check
+        if dim >= self.ndim() {
+            panic!("Index out of bound: index {}, shape {}", dim, self.ndim());
+        }
+
+        // get essential information
+        let shape = self.shape_ref();
+        let stride = self.stride_ref();
+        let mut offset = self.offset() as isize;
+        let mut shape_new: Vec<usize> = vec![];
+        let mut stride_new: Vec<isize> = vec![];
+
+        // change everything
+        for (i, (&d, &s)) in shape.as_ref().iter().zip(stride.as_ref().iter()).enumerate() {
+            if i == dim {
+                offset += s * index as isize;
+            } else {
+                shape_new.push(d);
+                stride_new.push(s);
+            }
+        }
+
+        let offset = offset as usize;
+        return Layout::new(shape_new, stride_new, offset);
+    }
+}
+
 impl<D> IndexerPreserve for Layout<D>
 where
     Self: LayoutTrait,
@@ -116,7 +145,9 @@ where
 {
 }
 
-pub trait IndexerDynamic: LayoutTrait {
-    /// Select dimension at index. Number of dimension will decrease by 1.
-    fn select_at_dim(&self, dim: usize, index: usize) -> Layout<IxD>;
+impl<D> IndexerDynamic for Layout<D>
+where
+    Self: LayoutTrait,
+    D: Dimension + Sized,
+{
 }

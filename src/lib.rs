@@ -3,9 +3,7 @@
 pub mod error;
 pub use error::{Error, Result};
 
-pub mod indexer;
 pub mod layout;
-pub mod slice;
 
 pub mod data;
 pub mod device;

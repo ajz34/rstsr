@@ -232,7 +232,7 @@ pub trait LayoutTrait {
     fn offset(&self) -> usize;
 
     /// Number of dimensions of tensor.
-    fn rank(&self) -> usize {
+    fn ndim(&self) -> usize {
         self.shape_ref().rank()
     }
 
@@ -312,7 +312,7 @@ pub trait LayoutTrait {
     /// Index of tensor by list of indexes to dimensions.
     fn try_index(&self, index: Self::Shape) -> Result<usize> {
         let mut pos = self.offset() as isize;
-        for i in 0..self.rank() {
+        for i in 0..self.ndim() {
             if index.as_ref()[i] >= self.shape_ref().as_ref()[i] {
                 return Err(Error::IndexOutOfBound {
                     index: index.as_ref()[i] as isize,
@@ -347,16 +347,10 @@ pub trait LayoutTrait {
     /// - Index greater than shape
     unsafe fn index_uncheck(&self, index: Self::Shape) -> usize {
         let mut pos = self.offset() as isize;
-        for i in 0..self.rank() {
+        for i in 0..self.ndim() {
             pos += self.stride_ref().as_ref()[i] * index.as_ref()[i] as isize;
         }
         return pos as usize;
-    }
-
-    /// Number of dimensions of tensor. Alias (numpy convention) to
-    /// [LayoutTrait::rank].
-    fn ndim(&self) -> usize {
-        self.rank()
     }
 }
 
@@ -565,7 +559,7 @@ mod test {
         assert_eq!(layout.shape(), [1, 2, 3]);
         assert_eq!(layout.stride(), [6, 3, 1]);
         assert_eq!(layout.offset(), 0);
-        assert_eq!(layout.rank(), 3);
+        assert_eq!(layout.ndim(), 3);
         assert_eq!(layout.size(), 6);
         assert_eq!(layout.is_f_prefer(), false);
         assert_eq!(layout.is_c_prefer(), true);
@@ -582,7 +576,7 @@ mod test {
         assert_eq!(layout.shape(), vec![1, 2, 3]);
         assert_eq!(layout.stride(), vec![6, 3, 1]);
         assert_eq!(layout.offset(), 0);
-        assert_eq!(layout.rank(), 3);
+        assert_eq!(layout.ndim(), 3);
         assert_eq!(layout.size(), 6);
         assert_eq!(layout.is_f_prefer(), false);
         assert_eq!(layout.is_c_prefer(), true);
