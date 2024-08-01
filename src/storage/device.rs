@@ -1,7 +1,7 @@
 use crate::cpu_backend::device::CpuDevice;
 use crate::Result;
 
-pub trait DeviceAPI: Clone {
+pub trait DeviceBaseAPI: Clone {
     fn same_device(&self, other: &Self) -> bool;
 }
 
@@ -37,7 +37,7 @@ where
 pub trait DeviceToStorageAPI<T>
 where
     T: Clone,
-    Self: DeviceAPI + DeviceWithDTypeAPI<T>,
+    Self: DeviceBaseAPI + DeviceWithDTypeAPI<T>,
 {
     fn zeros_impl(&self, len: usize) -> Result<Storage<T, Self>>;
     fn ones_impl(&self, len: usize) -> Result<Storage<T, Self>>;
@@ -47,10 +47,10 @@ where
     fn from_cpu_vec(&self, vec: &Vec<T>) -> Result<Storage<T, Self>>;
 }
 
-pub trait DeviceWithStorageAPI<T>
+pub trait DeviceAPI<T>
 where
     T: Clone,
-    Self: DeviceAPI + DeviceWithDTypeAPI<T> + DeviceToStorageAPI<T>,
+    Self: DeviceBaseAPI + DeviceWithDTypeAPI<T>,
 {
 }
 

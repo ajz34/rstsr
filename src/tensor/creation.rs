@@ -1,12 +1,12 @@
 use crate::layout::{DimAPI, Layout, LayoutAPI};
-use crate::storage::{DataOwned, DeviceAPI, DeviceWithStorageAPI, Storage};
+use crate::storage::{DataOwned, DeviceAPI, DeviceToStorageAPI, Storage};
 use crate::{Tensor, TensorBase};
 
 pub trait TensorCreationAPI<T, D, B>
 where
     T: Clone,
     D: DimAPI,
-    B: DeviceWithStorageAPI<T>,
+    B: DeviceAPI<T>,
 {
     fn zeros(layout: Layout<D>, device: B) -> TensorBase<DataOwned<Storage<T, B>>, D>;
 }
@@ -15,8 +15,7 @@ impl<T, D, B> TensorCreationAPI<T, D, B> for Tensor<T, D, B>
 where
     T: Clone,
     D: DimAPI,
-    B: DeviceAPI,
-    B: DeviceWithStorageAPI<T>,
+    B: DeviceAPI<T> + DeviceToStorageAPI<T>,
     Layout<D>: LayoutAPI,
 {
     fn zeros(layout: Layout<D>, device: B) -> Tensor<T, D, B> {

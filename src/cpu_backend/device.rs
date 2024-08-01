@@ -1,5 +1,5 @@
 use crate::storage::{
-    DeviceAPI, DeviceToStorageAPI, DeviceWithDTypeAPI, DeviceWithStorageAPI, Storage, StorageAPI,
+    DeviceAPI, DeviceBaseAPI, DeviceToStorageAPI, DeviceWithDTypeAPI, Storage, StorageAPI,
 };
 use crate::Result;
 use core::fmt::Debug;
@@ -8,7 +8,7 @@ use num::Num;
 #[derive(Clone, Debug)]
 pub struct CpuDevice;
 
-impl DeviceAPI for CpuDevice {
+impl DeviceBaseAPI for CpuDevice {
     fn same_device(&self, _other: &Self) -> bool {
         true
     }
@@ -84,7 +84,7 @@ where
     }
 }
 
-impl<T> DeviceWithStorageAPI<T> for CpuDevice where T: Clone + Num {}
+impl<T> DeviceAPI<T> for CpuDevice where T: Clone + Num {}
 
 #[cfg(test)]
 mod tests {
