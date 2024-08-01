@@ -12,6 +12,7 @@ where
     type RawVec;
 }
 
+#[derive(Debug, Clone)]
 pub struct Storage<T, D = CpuDevice>
 where
     T: Clone,

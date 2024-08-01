@@ -2,6 +2,7 @@ use crate::{Error, Result};
 
 /* #region Struct Definitions */
 
+#[derive(Debug, Clone)]
 pub struct Dim<I>
 where
     I: AsMut<[usize]>,
@@ -9,6 +10,7 @@ where
     _phantom: std::marker::PhantomData<I>,
 }
 
+#[derive(Debug, Clone)]
 pub struct Layout<D>
 where
     D: Dimension,
@@ -23,9 +25,9 @@ where
 /* #region Dimension */
 
 pub trait Dimension {
-    type Index: AsMut<[usize]>;
-    type Shape: AsMut<[usize]>;
-    type Stride: AsMut<[isize]>;
+    type Index: AsMut<[usize]> + core::fmt::Debug + Clone;
+    type Shape: AsMut<[usize]> + core::fmt::Debug + Clone;
+    type Stride: AsMut<[isize]> + core::fmt::Debug + Clone;
 }
 
 impl<const N: usize> Dimension for Dim<[usize; N]> {
@@ -64,9 +66,12 @@ pub trait Shape: AsMut<[usize]> {
     /// Total number of elements in tensor.
     fn size(&self) -> usize;
     /// Stride for a f-contiguous tensor using this shape.
-    fn stride_f_contig(&self) -> impl AsMut<[isize]>;
+    fn stride_f_contig(&self) -> impl Stride;
     /// Stride for a c-contiguous tensor using this shape.
-    fn stride_c_contig(&self) -> impl AsMut<[isize]>;
+    fn stride_c_contig(&self) -> impl Stride;
+    /// Stride for contiguous tensor using this shape.
+    /// Whether c-contiguous or f-contiguous will depends on cargo feature `c_prefer`.
+    fn stride_config(&self) -> impl Stride;
 }
 
 impl<const N: usize> Shape for [usize; N] {
@@ -96,6 +101,13 @@ impl<const N: usize> Shape for [usize; N] {
         }
         stride
     }
+
+    fn stride_config(&self) -> [isize; N] {
+        match crate::C_PREFER {
+            true => self.stride_c_contig(),
+            false => self.stride_f_contig(),
+        }
+    }
 }
 
 impl Shape for Vec<usize> {
@@ -124,6 +136,13 @@ impl Shape for Vec<usize> {
             stride[i] = stride[i + 1] * self[i + 1] as isize;
         }
         stride
+    }
+
+    fn stride_config(&self) -> Vec<isize> {
+        match crate::C_PREFER {
+            true => self.stride_c_contig(),
+            false => self.stride_f_contig(),
+        }
     }
 }
 
@@ -216,7 +235,7 @@ impl Stride for Vec<isize> {
 
 /* #region Layout */
 
-pub trait LayoutTrait {
+pub trait LayoutTrait: Sized {
     type Shape: Shape + AsRef<[usize]>;
     type Stride: Stride + AsRef<[isize]>;
 
@@ -308,6 +327,14 @@ pub trait LayoutTrait {
     /// Generate new layout by providing shape and offset; stride fits into
     /// f-contiguous.
     fn new_f_contig(shape: Self::Shape, offset: usize) -> Self;
+
+    /// Generate new layout by providing shape and offset; Whether c-contiguous or f-contiguous depends on cargo feature `c_prefer`.
+    fn new_contig(shape: Self::Shape, offset: usize) -> Self {
+        match crate::C_PREFER {
+            true => Self::new_c_contig(shape, offset),
+            false => Self::new_f_contig(shape, offset),
+        }
+    }
 
     /// Index of tensor by list of indexes to dimensions.
     fn try_index(&self, index: Self::Shape) -> Result<usize> {
@@ -465,6 +492,46 @@ impl<const N: usize> TryFrom<Layout<IxD>> for Layout<Ix<N>> {
 
 /* #endregion */
 
+/* #region Shape to Layout */
+
+pub trait ShapeToLayout {
+    type Layout: LayoutTrait;
+
+    fn new_c_contig(&self, offset: usize) -> Self::Layout;
+    fn new_f_contig(&self, offset: usize) -> Self::Layout;
+    fn new_contig(&self, offset: usize) -> Self::Layout;
+}
+
+impl<const N: usize> ShapeToLayout for [usize; N] {
+    type Layout = Layout<Ix<N>>;
+
+    fn new_c_contig(&self, offset: usize) -> Self::Layout {
+        Self::Layout::new_c_contig(self.clone(), offset)
+    }
+    fn new_f_contig(&self, offset: usize) -> Self::Layout {
+        Self::Layout::new_f_contig(self.clone(), offset)
+    }
+    fn new_contig(&self, offset: usize) -> Self::Layout {
+        Self::Layout::new_contig(self.clone(), offset)
+    }
+}
+
+impl ShapeToLayout for Vec<usize> {
+    type Layout = Layout<IxD>;
+
+    fn new_c_contig(&self, offset: usize) -> Self::Layout {
+        Self::Layout::new_c_contig(self.clone(), offset)
+    }
+    fn new_f_contig(&self, offset: usize) -> Self::Layout {
+        Self::Layout::new_f_contig(self.clone(), offset)
+    }
+    fn new_contig(&self, offset: usize) -> Self::Layout {
+        Self::Layout::new_contig(self.clone(), offset)
+    }
+}
+
+/* #endregion */
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -592,5 +659,8 @@ mod test {
         let layout = Layout::<Ix<4>> { shape: [8, 10, 0, 15], stride: [3, 4, 0, 7], offset: 0 };
         println!("{:?}", layout.is_c_contig());
         println!("{:?}", layout.is_f_contig());
+
+        let layout = [8, 10, 3, 15].new_contig(0);
+        println!("{:?}", layout);
     }
 }

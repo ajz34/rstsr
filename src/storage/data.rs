@@ -1,32 +1,41 @@
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct DataOwned<S> {
     data: S,
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct DataRef<'a, S> {
     data: &'a S,
 }
 
+#[derive(Debug)]
 pub struct DataRefMut<'a, S> {
     data: &'a mut S,
 }
 
+#[derive(Debug)]
 pub enum DataMutable<'a, S> {
     Owned(DataOwned<S>),
     RefMut(DataRefMut<'a, S>),
     ToBeCloned(DataRef<'a, S>, DataOwned<S>),
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub enum DataCow<'a, S> {
     Owned(DataOwned<S>),
     Ref(DataRef<'a, S>),
 }
 
+#[derive(Debug)]
 pub enum DataReference<'a, S> {
     Ref(DataRef<'a, S>),
     RefMut(DataRefMut<'a, S>),
+}
+
+impl<S> From<S> for DataOwned<S> {
+    fn from(data: S) -> Self {
+        Self { data }
+    }
 }
 
 pub trait Data {
