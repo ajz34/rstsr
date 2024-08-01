@@ -1,4 +1,4 @@
-use crate::storage::{Device, DeviceWithDType, Storage, TraitDeviceToStorage, TraitStorage};
+use crate::storage::{Device, DeviceAPI, DeviceToStorageAPI, DeviceWithDTypeAPI, Storage, StorageAPI};
 use crate::Result;
 use core::fmt::Debug;
 use num::Num;
@@ -12,14 +12,20 @@ impl Device for CpuDevice {
     }
 }
 
-impl<T> DeviceWithDType<T> for CpuDevice
+impl<T> DeviceWithDTypeAPI<T> for CpuDevice
 where
     T: Clone,
 {
     type RawVec = Vec<T>;
 }
 
-impl<T> TraitStorage<T, CpuDevice> for Storage<T, CpuDevice>
+impl<T> DeviceAPI<T> for CpuDevice
+where
+    T: Clone,
+{
+}
+
+impl<T> StorageAPI<T, CpuDevice> for Storage<T, CpuDevice>
 where
     T: Clone,
 {
@@ -40,7 +46,7 @@ where
     }
 }
 
-impl<T> TraitDeviceToStorage<T, CpuDevice> for CpuDevice
+impl<T> DeviceToStorageAPI<T, CpuDevice> for CpuDevice
 where
     T: Clone + Num,
 {

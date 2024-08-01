@@ -5,45 +5,51 @@ pub trait Device: Clone {
     fn same_device(&self, other: &Self) -> bool;
 }
 
-pub trait DeviceWithDType<T>
+pub trait DeviceWithDTypeAPI<T>
 where
     T: Clone,
 {
     type RawVec;
 }
 
+pub trait DeviceAPI<T>: Device + DeviceWithDTypeAPI<T>
+where 
+    T: Clone
+{}
+
 #[derive(Debug, Clone)]
-pub struct Storage<T, D = CpuDevice>
+pub struct Storage<T, B = CpuDevice>
 where
     T: Clone,
-    D: Device + DeviceWithDType<T>,
+    B: DeviceAPI<T>,
 {
-    pub(crate) rawvec: D::RawVec,
-    pub(crate) device: D,
+    pub(crate) rawvec: B::RawVec,
+    pub(crate) device: B,
 }
 
-pub trait TraitStorage<T, D>
+pub trait StorageAPI<T, B>
 where
     T: Clone,
-    D: Device + DeviceWithDType<T>,
+    B: DeviceAPI<T>,
+    Self: Sized
 {
-    fn device(&self) -> D;
-    fn to_rawvec(&self) -> D::RawVec;
-    fn into_rawvec(self) -> D::RawVec;
-    fn new(vector: D::RawVec, device: D) -> Self;
+    fn device(&self) -> B;
+    fn to_rawvec(&self) -> B::RawVec;
+    fn into_rawvec(self) -> B::RawVec;
+    fn new(vector: B::RawVec, device: B) -> Self;
 }
 
-pub trait TraitDeviceToStorage<T, D>
+pub trait DeviceToStorageAPI<T, B>
 where
     T: Clone,
-    D: Device + DeviceWithDType<T>,
+    B: DeviceAPI<T>,
 {
-    fn zeros_impl(&self, len: usize) -> Result<Storage<T, D>>;
-    fn ones_impl(&self, len: usize) -> Result<Storage<T, D>>;
-    fn arange_impl(&self, len: usize) -> Result<Storage<T, D>>;
-    unsafe fn empty_impl(&self, len: usize) -> Result<Storage<T, D>>;
-    fn from_cpu_vec_owned(&self, vec: Vec<T>) -> Result<Storage<T, D>>;
-    fn from_cpu_vec(&self, vec: &Vec<T>) -> Result<Storage<T, D>>;
+    fn zeros_impl(&self, len: usize) -> Result<Storage<T, B>>;
+    fn ones_impl(&self, len: usize) -> Result<Storage<T, B>>;
+    fn arange_impl(&self, len: usize) -> Result<Storage<T, B>>;
+    unsafe fn empty_impl(&self, len: usize) -> Result<Storage<T, B>>;
+    fn from_cpu_vec_owned(&self, vec: Vec<T>) -> Result<Storage<T, B>>;
+    fn from_cpu_vec(&self, vec: &Vec<T>) -> Result<Storage<T, B>>;
 }
 
 /// Unique identifier for cuda devices.

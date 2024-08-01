@@ -17,7 +17,7 @@ pub enum Indexer {
     Eclipse,
 }
 
-pub trait IndexerPreserve: LayoutTrait + Sized {
+pub trait IndexerPreserve: LayoutAPI + Sized {
     /// Narrowing tensor by slicing at a specific dimension. Number of dimension
     /// will not change after slicing.
     fn slice_at_dim(&self, dim: usize, slice: SliceI) -> Result<Self> {
@@ -108,7 +108,7 @@ pub trait IndexerPreserve: LayoutTrait + Sized {
     }
 }
 
-pub trait IndexerDynamic: LayoutTrait + Sized {
+pub trait IndexerDynamic: LayoutAPI + Sized {
     /// Select dimension at index. Number of dimension will decrease by 1.
     fn select_at_dim(&self, dim: usize, index: usize) -> Layout<IxD> {
         // dimension check
@@ -140,14 +140,14 @@ pub trait IndexerDynamic: LayoutTrait + Sized {
 
 impl<D> IndexerPreserve for Layout<D>
 where
-    Self: LayoutTrait,
-    D: Dimension + Sized,
+    Self: LayoutAPI,
+    D: DimAPI + Sized,
 {
 }
 
 impl<D> IndexerDynamic for Layout<D>
 where
-    Self: LayoutTrait,
-    D: Dimension + Sized,
+    Self: LayoutAPI,
+    D: DimAPI + Sized,
 {
 }

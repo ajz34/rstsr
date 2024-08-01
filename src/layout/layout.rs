@@ -13,7 +13,7 @@ where
 #[derive(Debug, Clone)]
 pub struct Layout<D>
 where
-    D: Dimension,
+    D: DimAPI,
 {
     pub(crate) shape: D::Shape,
     pub(crate) stride: D::Stride,
@@ -24,19 +24,19 @@ where
 
 /* #region Dimension */
 
-pub trait Dimension {
+pub trait DimAPI {
     type Index: AsMut<[usize]> + core::fmt::Debug + Clone;
     type Shape: AsMut<[usize]> + core::fmt::Debug + Clone;
     type Stride: AsMut<[isize]> + core::fmt::Debug + Clone;
 }
 
-impl<const N: usize> Dimension for Dim<[usize; N]> {
+impl<const N: usize> DimAPI for Dim<[usize; N]> {
     type Index = [usize; N];
     type Shape = [usize; N];
     type Stride = [isize; N];
 }
 
-impl Dimension for Dim<Vec<usize>> {
+impl DimAPI for Dim<Vec<usize>> {
     type Index = Vec<usize>;
     type Shape = Vec<usize>;
     type Stride = Vec<isize>;
@@ -60,21 +60,21 @@ pub type IxDyn = IxD;
 
 /* #region Shape */
 
-pub trait Shape: AsMut<[usize]> {
+pub trait ShapeAPI: AsMut<[usize]> {
     /// Number of dimensions of the shape.
     fn rank(&self) -> usize;
     /// Total number of elements in tensor.
     fn size(&self) -> usize;
     /// Stride for a f-contiguous tensor using this shape.
-    fn stride_f_contig(&self) -> impl Stride;
+    fn stride_f_contig(&self) -> impl StrideAPI;
     /// Stride for a c-contiguous tensor using this shape.
-    fn stride_c_contig(&self) -> impl Stride;
+    fn stride_c_contig(&self) -> impl StrideAPI;
     /// Stride for contiguous tensor using this shape.
     /// Whether c-contiguous or f-contiguous will depends on cargo feature `c_prefer`.
-    fn stride_config(&self) -> impl Stride;
+    fn stride_config(&self) -> impl StrideAPI;
 }
 
-impl<const N: usize> Shape for [usize; N] {
+impl<const N: usize> ShapeAPI for [usize; N] {
     fn rank(&self) -> usize {
         self.len()
     }
@@ -110,7 +110,7 @@ impl<const N: usize> Shape for [usize; N] {
     }
 }
 
-impl Shape for Vec<usize> {
+impl ShapeAPI for Vec<usize> {
     fn rank(&self) -> usize {
         self.len()
     }
@@ -150,7 +150,7 @@ impl Shape for Vec<usize> {
 
 /* #region Strides */
 
-pub trait Stride: AsMut<[isize]> {
+pub trait StrideAPI: AsMut<[isize]> {
     /// Number of dimensions of the shape.
     fn rank(&self) -> usize;
     /// Check if the strides are f-preferred.
@@ -159,7 +159,7 @@ pub trait Stride: AsMut<[isize]> {
     fn is_c_prefer(&self) -> bool;
 }
 
-impl<const N: usize> Stride for [isize; N] {
+impl<const N: usize> StrideAPI for [isize; N] {
     fn rank(&self) -> usize {
         self.len()
     }
@@ -195,7 +195,7 @@ impl<const N: usize> Stride for [isize; N] {
     }
 }
 
-impl Stride for Vec<isize> {
+impl StrideAPI for Vec<isize> {
     fn rank(&self) -> usize {
         self.len()
     }
@@ -235,9 +235,9 @@ impl Stride for Vec<isize> {
 
 /* #region Layout */
 
-pub trait LayoutTrait: Sized {
-    type Shape: Shape + AsRef<[usize]>;
-    type Stride: Stride + AsRef<[isize]>;
+pub trait LayoutAPI: Sized {
+    type Shape: ShapeAPI + AsRef<[usize]>;
+    type Stride: StrideAPI + AsRef<[isize]>;
 
     /// Shape of tensor. Getter function.
     fn shape(&self) -> Self::Shape;
@@ -381,7 +381,7 @@ pub trait LayoutTrait: Sized {
     }
 }
 
-impl<const N: usize> LayoutTrait for Layout<Ix<N>> {
+impl<const N: usize> LayoutAPI for Layout<Ix<N>> {
     type Shape = [usize; N];
     type Stride = [isize; N];
 
@@ -420,7 +420,7 @@ impl<const N: usize> LayoutTrait for Layout<Ix<N>> {
     }
 }
 
-impl LayoutTrait for Layout<IxD> {
+impl LayoutAPI for Layout<IxD> {
     type Shape = Vec<usize>;
     type Stride = Vec<isize>;
 
@@ -494,15 +494,15 @@ impl<const N: usize> TryFrom<Layout<IxD>> for Layout<Ix<N>> {
 
 /* #region Shape to Layout */
 
-pub trait ShapeToLayout {
-    type Layout: LayoutTrait;
+pub trait ShapeToLayoutAPI {
+    type Layout: LayoutAPI;
 
     fn new_c_contig(&self, offset: usize) -> Self::Layout;
     fn new_f_contig(&self, offset: usize) -> Self::Layout;
     fn new_contig(&self, offset: usize) -> Self::Layout;
 }
 
-impl<const N: usize> ShapeToLayout for [usize; N] {
+impl<const N: usize> ShapeToLayoutAPI for [usize; N] {
     type Layout = Layout<Ix<N>>;
 
     fn new_c_contig(&self, offset: usize) -> Self::Layout {
@@ -516,7 +516,7 @@ impl<const N: usize> ShapeToLayout for [usize; N] {
     }
 }
 
-impl ShapeToLayout for Vec<usize> {
+impl ShapeToLayoutAPI for Vec<usize> {
     type Layout = Layout<IxD>;
 
     fn new_c_contig(&self, offset: usize) -> Self::Layout {

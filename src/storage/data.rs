@@ -1,5 +1,8 @@
 #[derive(Debug, Clone)]
-pub struct DataOwned<S> {
+pub struct DataOwned<S>
+where 
+    S: Sized
+{
     data: S,
 }
 
@@ -38,18 +41,18 @@ impl<S> From<S> for DataOwned<S> {
     }
 }
 
-pub trait Data {
+pub trait DataAPI {
     type Data;
     fn as_ref(&self) -> DataRef<Self::Data>;
     fn into_owned(self) -> DataOwned<Self::Data>;
 }
 
-pub trait DataMut {
+pub trait DataMutAPI {
     type Data;
     fn as_ref_mut(&mut self) -> DataRefMut<Self::Data>;
 }
 
-impl<S> Data for DataOwned<S> {
+impl<S> DataAPI for DataOwned<S> {
     type Data = S;
     fn as_ref(&self) -> DataRef<Self::Data> {
         DataRef { data: &self.data }
@@ -59,7 +62,7 @@ impl<S> Data for DataOwned<S> {
     }
 }
 
-impl<'a, S> Data for DataRef<'a, S>
+impl<'a, S> DataAPI for DataRef<'a, S>
 where
     S: Clone,
 {
@@ -72,7 +75,7 @@ where
     }
 }
 
-impl<'a, S> Data for DataRefMut<'a, S>
+impl<'a, S> DataAPI for DataRefMut<'a, S>
 where
     S: Clone,
 {
@@ -85,14 +88,14 @@ where
     }
 }
 
-impl<S> DataMut for DataOwned<S> {
+impl<S> DataMutAPI for DataOwned<S> {
     type Data = S;
     fn as_ref_mut(&mut self) -> DataRefMut<Self::Data> {
         DataRefMut { data: &mut self.data }
     }
 }
 
-impl<'a, S> DataMut for DataRefMut<'a, S> {
+impl<'a, S> DataMutAPI for DataRefMut<'a, S> {
     type Data = S;
     fn as_ref_mut(&mut self) -> DataRefMut<'_, Self::Data> {
         DataRefMut { data: &mut self.data }

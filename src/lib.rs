@@ -15,7 +15,7 @@ pub mod storage;
 
 pub mod tensorbase;
 pub mod tensor;
-pub use tensorbase::TensorBase;
+pub use tensorbase::{TensorBase, Tensor};
 
 pub mod cpu_backend;
 
