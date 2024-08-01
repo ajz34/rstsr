@@ -5,7 +5,7 @@ use crate::{Error, Result};
 #[derive(Debug, Clone)]
 pub struct Dim<I>
 where
-    I: AsMut<[usize]>,
+    I: ShapeAPI,
 {
     _phantom: std::marker::PhantomData<I>,
 }
@@ -16,7 +16,7 @@ where
     D: DimAPI,
 {
     pub(crate) shape: D::Shape,
-    pub(crate) stride: D::Stride,
+    pub(crate) stride: <D::Shape as ShapeAPI>::Stride,
     pub(crate) offset: usize,
 }
 
@@ -25,21 +25,15 @@ where
 /* #region Dimension */
 
 pub trait DimAPI {
-    type Index: AsMut<[usize]> + core::fmt::Debug + Clone;
-    type Shape: AsMut<[usize]> + core::fmt::Debug + Clone;
-    type Stride: AsMut<[isize]> + core::fmt::Debug + Clone;
+    type Shape: ShapeAPI;
 }
 
 impl<const N: usize> DimAPI for Dim<[usize; N]> {
-    type Index = [usize; N];
     type Shape = [usize; N];
-    type Stride = [isize; N];
 }
 
 impl DimAPI for Dim<Vec<usize>> {
-    type Index = Vec<usize>;
     type Shape = Vec<usize>;
-    type Stride = Vec<isize>;
 }
 
 pub type Ix<const N: usize> = Dim<[usize; N]>;
@@ -60,21 +54,24 @@ pub type IxDyn = IxD;
 
 /* #region Shape */
 
-pub trait ShapeAPI: AsMut<[usize]> {
+pub trait ShapeAPI: AsMut<[usize]> + AsRef<[usize]> + core::fmt::Debug + Clone {
+    type Stride: StrideAPI;
     /// Number of dimensions of the shape.
     fn rank(&self) -> usize;
     /// Total number of elements in tensor.
     fn size(&self) -> usize;
     /// Stride for a f-contiguous tensor using this shape.
-    fn stride_f_contig(&self) -> impl StrideAPI;
+    fn stride_f_contig(&self) -> Self::Stride;
     /// Stride for a c-contiguous tensor using this shape.
-    fn stride_c_contig(&self) -> impl StrideAPI;
+    fn stride_c_contig(&self) -> Self::Stride;
     /// Stride for contiguous tensor using this shape.
     /// Whether c-contiguous or f-contiguous will depends on cargo feature `c_prefer`.
-    fn stride_config(&self) -> impl StrideAPI;
+    fn stride_config(&self) -> Self::Stride;
 }
 
 impl<const N: usize> ShapeAPI for [usize; N] {
+    type Stride = [isize; N];
+
     fn rank(&self) -> usize {
         self.len()
     }
@@ -111,6 +108,8 @@ impl<const N: usize> ShapeAPI for [usize; N] {
 }
 
 impl ShapeAPI for Vec<usize> {
+    type Stride = Vec<isize>;
+
     fn rank(&self) -> usize {
         self.len()
     }
@@ -150,7 +149,7 @@ impl ShapeAPI for Vec<usize> {
 
 /* #region Strides */
 
-pub trait StrideAPI: AsMut<[isize]> {
+pub trait StrideAPI: AsMut<[isize]> + AsRef<[isize]> + core::fmt::Debug + Clone {
     /// Number of dimensions of the shape.
     fn rank(&self) -> usize;
     /// Check if the strides are f-preferred.
@@ -236,8 +235,8 @@ impl StrideAPI for Vec<isize> {
 /* #region Layout */
 
 pub trait LayoutAPI: Sized {
-    type Shape: ShapeAPI + AsRef<[usize]>;
-    type Stride: StrideAPI + AsRef<[isize]>;
+    type Shape: ShapeAPI;
+    type Stride: StrideAPI;
 
     /// Shape of tensor. Getter function.
     fn shape(&self) -> Self::Shape;
@@ -381,50 +380,53 @@ pub trait LayoutAPI: Sized {
     }
 }
 
-impl<const N: usize> LayoutAPI for Layout<Ix<N>> {
-    type Shape = [usize; N];
-    type Stride = [isize; N];
+// impl<const N: usize> LayoutAPI for Layout<Ix<N>> {
+//     type Shape = [usize; N];
+//     type Stride = [isize; N];
 
-    fn shape(&self) -> [usize; N] {
-        self.shape
-    }
+//     fn shape(&self) -> [usize; N] {
+//         self.shape
+//     }
 
-    fn shape_ref(&self) -> &Self::Shape {
-        &self.shape
-    }
+//     fn shape_ref(&self) -> &Self::Shape {
+//         &self.shape
+//     }
 
-    fn stride(&self) -> [isize; N] {
-        self.stride
-    }
+//     fn stride(&self) -> [isize; N] {
+//         self.stride
+//     }
 
-    fn stride_ref(&self) -> &Self::Stride {
-        &self.stride
-    }
+//     fn stride_ref(&self) -> &Self::Stride {
+//         &self.stride
+//     }
 
-    fn offset(&self) -> usize {
-        self.offset
-    }
+//     fn offset(&self) -> usize {
+//         self.offset
+//     }
 
-    fn new(shape: [usize; N], stride: [isize; N], offset: usize) -> Self {
-        Layout { shape, stride, offset }
-    }
+//     fn new(shape: [usize; N], stride: [isize; N], offset: usize) -> Self {
+//         Layout { shape, stride, offset }
+//     }
 
-    fn new_c_contig(shape: [usize; N], offset: usize) -> Self {
-        let stride = shape.stride_c_contig();
-        Layout { shape, stride, offset }
-    }
+//     fn new_c_contig(shape: [usize; N], offset: usize) -> Self {
+//         let stride = shape.stride_c_contig();
+//         Layout { shape, stride, offset }
+//     }
 
-    fn new_f_contig(shape: [usize; N], offset: usize) -> Self {
-        let stride = shape.stride_f_contig();
-        Layout { shape, stride, offset }
-    }
-}
+//     fn new_f_contig(shape: [usize; N], offset: usize) -> Self {
+//         let stride = shape.stride_f_contig();
+//         Layout { shape, stride, offset }
+//     }
+// }
 
-impl LayoutAPI for Layout<IxD> {
-    type Shape = Vec<usize>;
-    type Stride = Vec<isize>;
+impl<D> LayoutAPI for Layout<D>
+where
+    D: DimAPI,
+{
+    type Shape = D::Shape;
+    type Stride = <D::Shape as ShapeAPI>::Stride;
 
-    fn shape(&self) -> Vec<usize> {
+    fn shape(&self) -> Self::Shape {
         self.shape.clone()
     }
 
@@ -432,7 +434,7 @@ impl LayoutAPI for Layout<IxD> {
         &self.shape
     }
 
-    fn stride(&self) -> Vec<isize> {
+    fn stride(&self) -> Self::Stride {
         self.stride.clone()
     }
 
@@ -444,23 +446,62 @@ impl LayoutAPI for Layout<IxD> {
         self.offset
     }
 
-    fn new(shape: Vec<usize>, stride: Vec<isize>, offset: usize) -> Self {
-        if shape.len() != stride.len() {
-            panic!("Shape and stride length mismatch, shape {:?}, stride {:?}", shape, stride);
-        }
+    fn new(shape: Self::Shape, stride: Self::Stride, offset: usize) -> Self {
         Layout { shape, stride, offset }
     }
 
-    fn new_c_contig(shape: Vec<usize>, offset: usize) -> Self {
+    fn new_c_contig(shape: Self::Shape, offset: usize) -> Self {
         let stride = shape.stride_c_contig();
         Layout { shape, stride, offset }
     }
 
-    fn new_f_contig(shape: Vec<usize>, offset: usize) -> Self {
+    fn new_f_contig(shape: Self::Shape, offset: usize) -> Self {
         let stride = shape.stride_f_contig();
         Layout { shape, stride, offset }
     }
 }
+
+// impl LayoutAPI for Layout<IxD> {
+//     type Shape = Vec<usize>;
+//     type Stride = Vec<isize>;
+
+//     fn shape(&self) -> Vec<usize> {
+//         self.shape.clone()
+//     }
+
+//     fn shape_ref(&self) -> &Self::Shape {
+//         &self.shape
+//     }
+
+//     fn stride(&self) -> Vec<isize> {
+//         self.stride.clone()
+//     }
+
+//     fn stride_ref(&self) -> &Self::Stride {
+//         &self.stride
+//     }
+
+//     fn offset(&self) -> usize {
+//         self.offset
+//     }
+
+//     fn new(shape: Vec<usize>, stride: Vec<isize>, offset: usize) -> Self {
+//         if shape.len() != stride.len() {
+//             panic!("Shape and stride length mismatch, shape {:?}, stride {:?}", shape, stride);
+//         }
+//         Layout { shape, stride, offset }
+//     }
+
+//     fn new_c_contig(shape: Vec<usize>, offset: usize) -> Self {
+//         let stride = shape.stride_c_contig();
+//         Layout { shape, stride, offset }
+//     }
+
+//     fn new_f_contig(shape: Vec<usize>, offset: usize) -> Self {
+//         let stride = shape.stride_f_contig();
+//         Layout { shape, stride, offset }
+//     }
+// }
 
 /* #endregion Layout */
 

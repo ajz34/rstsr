@@ -1,4 +1,4 @@
-use crate::storage::{Device, DeviceAPI, DeviceToStorageAPI, DeviceWithDTypeAPI, Storage, StorageAPI};
+use crate::storage::{DeviceBasicAPI, DeviceWithDTypeAPI, DeviceToStorageAPI, DeviceAPI, Storage, StorageAPI};
 use crate::Result;
 use core::fmt::Debug;
 use num::Num;
@@ -6,7 +6,7 @@ use num::Num;
 #[derive(Clone, Debug)]
 pub struct CpuDevice;
 
-impl Device for CpuDevice {
+impl DeviceBasicAPI for CpuDevice {
     fn same_device(&self, _other: &Self) -> bool {
         true
     }
@@ -17,12 +17,6 @@ where
     T: Clone,
 {
     type RawVec = Vec<T>;
-}
-
-impl<T> DeviceAPI<T> for CpuDevice
-where
-    T: Clone,
-{
 }
 
 impl<T> StorageAPI<T, CpuDevice> for Storage<T, CpuDevice>
@@ -46,7 +40,7 @@ where
     }
 }
 
-impl<T> DeviceToStorageAPI<T, CpuDevice> for CpuDevice
+impl<T> DeviceToStorageAPI<T> for CpuDevice
 where
     T: Clone + Num,
 {
@@ -86,6 +80,12 @@ where
     fn from_cpu_vec_owned(&self, vec: Vec<T>) -> Result<Storage<T, CpuDevice>> {
         Ok(Storage::<T, CpuDevice> { rawvec: vec, device: self.clone() })
     }
+}
+
+impl<T> DeviceAPI<T> for CpuDevice
+where
+    T: Clone + Num,
+{
 }
 
 #[cfg(test)]

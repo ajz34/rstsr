@@ -1,7 +1,7 @@
 use crate::cpu_backend::device::CpuDevice;
 use crate::Result;
 
-pub trait Device: Clone {
+pub trait DeviceBasicAPI: Clone {
     fn same_device(&self, other: &Self) -> bool;
 }
 
@@ -12,16 +12,11 @@ where
     type RawVec;
 }
 
-pub trait DeviceAPI<T>: Device + DeviceWithDTypeAPI<T>
-where 
-    T: Clone
-{}
-
 #[derive(Debug, Clone)]
 pub struct Storage<T, B = CpuDevice>
 where
     T: Clone,
-    B: DeviceAPI<T>,
+    B: DeviceWithDTypeAPI<T>,
 {
     pub(crate) rawvec: B::RawVec,
     pub(crate) device: B,
@@ -30,7 +25,7 @@ where
 pub trait StorageAPI<T, B>
 where
     T: Clone,
-    B: DeviceAPI<T>,
+    B: DeviceWithDTypeAPI<T>,
     Self: Sized
 {
     fn device(&self) -> B;
@@ -39,18 +34,24 @@ where
     fn new(vector: B::RawVec, device: B) -> Self;
 }
 
-pub trait DeviceToStorageAPI<T, B>
+pub trait DeviceToStorageAPI<T>
 where
     T: Clone,
-    B: DeviceAPI<T>,
+    Self: DeviceBasicAPI + DeviceWithDTypeAPI<T>,
 {
-    fn zeros_impl(&self, len: usize) -> Result<Storage<T, B>>;
-    fn ones_impl(&self, len: usize) -> Result<Storage<T, B>>;
-    fn arange_impl(&self, len: usize) -> Result<Storage<T, B>>;
-    unsafe fn empty_impl(&self, len: usize) -> Result<Storage<T, B>>;
-    fn from_cpu_vec_owned(&self, vec: Vec<T>) -> Result<Storage<T, B>>;
-    fn from_cpu_vec(&self, vec: &Vec<T>) -> Result<Storage<T, B>>;
+    fn zeros_impl(&self, len: usize) -> Result<Storage<T, Self>>;
+    fn ones_impl(&self, len: usize) -> Result<Storage<T, Self>>;
+    fn arange_impl(&self, len: usize) -> Result<Storage<T, Self>>;
+    unsafe fn empty_impl(&self, len: usize) -> Result<Storage<T, Self>>;
+    fn from_cpu_vec_owned(&self, vec: Vec<T>) -> Result<Storage<T, Self>>;
+    fn from_cpu_vec(&self, vec: &Vec<T>) -> Result<Storage<T, Self>>;
 }
+
+pub trait DeviceAPI<T>
+where 
+    T: Clone,
+    Self: DeviceBasicAPI + DeviceWithDTypeAPI<T> + DeviceToStorageAPI<T>,
+{}
 
 /// Unique identifier for cuda devices.
 ///

@@ -1,6 +1,6 @@
 use crate::{TensorBase, Tensor};
 use crate::layout::{Layout, DimAPI, LayoutAPI};
-use crate::storage::{DataOwned, DeviceAPI, Storage, DeviceToStorageAPI};
+use crate::storage::{DataOwned, DeviceAPI, Storage};
 
 pub trait TensorCreationAPI<T, D, B>
 where 
@@ -15,8 +15,7 @@ impl<T, D, B> TensorCreationAPI<T, D, B> for Tensor<T, D, B>
 where 
     T: Clone,
     D: DimAPI,
-    Layout<D>: LayoutAPI,
-    B: DeviceAPI<T> + DeviceToStorageAPI<T, B>
+    B: DeviceAPI<T>
 {
     fn zeros(layout: Layout<D>, device: B) -> Tensor<T, D, B> {
         let data = device.zeros_impl(layout.size()).unwrap();
