@@ -531,10 +531,14 @@ impl LayoutContigAPI for Layout<IxD> {
 
 /* #region Dimension Conversion */
 
-impl<const N: usize> From<Layout<Ix<N>>> for Layout<IxD> {
-    fn from(layout: Layout<Ix<N>>) -> Self {
+impl<const N: usize> TryFrom<Layout<Ix<N>>> for Layout<IxD> {
+    type Error = Error;
+
+    fn try_from(layout: Layout<Ix<N>>) -> Result<Self> {
         let Layout { shape: Shape(shape), stride: Stride(stride), offset } = layout;
-        Layout { shape: Shape(shape.to_vec()), stride: Stride(stride.to_vec()), offset }
+        let layout =
+            Layout { shape: Shape(shape.to_vec()), stride: Stride(stride.to_vec()), offset };
+        Ok(layout)
     }
 }
 
@@ -596,6 +600,12 @@ impl IxToLayoutAPI for IxD {
     }
     fn new_contig(&self, offset: usize) -> Self::Layout {
         Self::Layout::new_contig(Shape(self.clone()), offset)
+    }
+}
+
+impl<const N: usize> From<Ix<N>> for Layout<Ix<N>> {
+    fn from(shape: Ix<N>) -> Self {
+        shape.new_contig(0)
     }
 }
 

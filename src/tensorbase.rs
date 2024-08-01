@@ -17,7 +17,7 @@ where
     S: DataAPI,
     D: DimAPI,
 {
-    pub fn new(data: S, layout: Layout<D>) -> Self {
+    pub unsafe fn new(data: S, layout: Layout<D>) -> Self {
         Self { data, layout }
     }
 

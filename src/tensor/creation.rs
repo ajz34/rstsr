@@ -8,7 +8,7 @@ where
     D: DimAPI,
     B: DeviceAPI<T>,
 {
-    fn zeros(layout: Layout<D>, device: B) -> TensorBase<DataOwned<Storage<T, B>>, D>;
+    fn zeros(layout: impl Into<Layout<D>>, device: B) -> TensorBase<DataOwned<Storage<T, B>>, D>;
 }
 
 impl<T, D, B> TensorCreationAPI<T, D, B> for Tensor<T, D, B>
@@ -18,9 +18,10 @@ where
     B: DeviceAPI<T> + DeviceToStorageAPI<T>,
     Layout<D>: LayoutAPI,
 {
-    fn zeros(layout: Layout<D>, device: B) -> Tensor<T, D, B> {
+    fn zeros(layout: impl Into<Layout<D>>, device: B) -> Tensor<T, D, B> {
+        let layout = layout.into();
         let data = device.zeros_impl(layout.size()).unwrap();
-        Tensor::new(data.into(), layout)
+        unsafe { Tensor::new(data.into(), layout) }
     }
 }
 
@@ -32,7 +33,9 @@ mod test {
     fn playground() {
         use crate::cpu_backend::device::CpuDevice;
         use crate::layout::*;
-        let a = Tensor::<f64, _, _>::zeros([1, 2].new_c_contig(0), CpuDevice);
+        let a = Tensor::<f64, _, _>::zeros([2, 2], CpuDevice);
+        println!("{a:6.3?}");
+        let a = Tensor::<f64, _, _>::zeros([2, 2].new_f_contig(0), CpuDevice);
         println!("{a:6.3?}");
     }
 }
