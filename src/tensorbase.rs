@@ -13,9 +13,9 @@ where
 }
 
 impl<S, D> TensorBase<S, D>
-where 
+where
     S: DataAPI,
-    D: DimAPI
+    D: DimAPI,
 {
     pub fn new(data: S, layout: Layout<D>) -> Self {
         Self { data, layout }
@@ -39,7 +39,10 @@ mod test {
     #[test]
     fn playground() {
         use crate::layout::*;
-        let a = Tensor::<f64, Ix<2>> { data: Storage { rawvec: vec![1.12345, 2.0], device: CpuDevice }.into(), layout: [1, 2].new_c_contig(0) };
+        let a = Tensor::<f64, Ix<2>> {
+            data: Storage { rawvec: vec![1.12345, 2.0], device: CpuDevice }.into(),
+            layout: [1, 2].new_c_contig(0),
+        };
         println!("{a:6.3?}");
     }
 }

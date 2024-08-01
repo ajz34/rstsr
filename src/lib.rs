@@ -13,9 +13,9 @@ pub mod layout;
 
 pub mod storage;
 
-pub mod tensorbase;
 pub mod tensor;
-pub use tensorbase::{TensorBase, Tensor};
+pub mod tensorbase;
+pub use tensorbase::{Tensor, TensorBase};
 
 pub mod cpu_backend;
 

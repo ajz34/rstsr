@@ -1,7 +1,7 @@
 #[derive(Debug, Clone)]
 pub struct DataOwned<S>
-where 
-    S: Sized
+where
+    S: Sized,
 {
     data: S,
 }

@@ -1,7 +1,7 @@
 use crate::cpu_backend::device::CpuDevice;
 use crate::Result;
 
-pub trait DeviceBasicAPI: Clone {
+pub trait DeviceAPI: Clone {
     fn same_device(&self, other: &Self) -> bool;
 }
 
@@ -26,7 +26,7 @@ pub trait StorageAPI<T, B>
 where
     T: Clone,
     B: DeviceWithDTypeAPI<T>,
-    Self: Sized
+    Self: Sized,
 {
     fn device(&self) -> B;
     fn to_rawvec(&self) -> B::RawVec;
@@ -37,7 +37,7 @@ where
 pub trait DeviceToStorageAPI<T>
 where
     T: Clone,
-    Self: DeviceBasicAPI + DeviceWithDTypeAPI<T>,
+    Self: DeviceAPI + DeviceWithDTypeAPI<T>,
 {
     fn zeros_impl(&self, len: usize) -> Result<Storage<T, Self>>;
     fn ones_impl(&self, len: usize) -> Result<Storage<T, Self>>;
@@ -47,11 +47,12 @@ where
     fn from_cpu_vec(&self, vec: &Vec<T>) -> Result<Storage<T, Self>>;
 }
 
-pub trait DeviceAPI<T>
-where 
+pub trait DeviceWithStorageAPI<T>
+where
     T: Clone,
-    Self: DeviceBasicAPI + DeviceWithDTypeAPI<T> + DeviceToStorageAPI<T>,
-{}
+    Self: DeviceAPI + DeviceWithDTypeAPI<T> + DeviceToStorageAPI<T>,
+{
+}
 
 /// Unique identifier for cuda devices.
 ///

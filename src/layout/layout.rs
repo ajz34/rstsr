@@ -65,7 +65,8 @@ pub trait ShapeAPI: AsMut<[usize]> + AsRef<[usize]> + core::fmt::Debug + Clone {
     /// Stride for a c-contiguous tensor using this shape.
     fn stride_c_contig(&self) -> Self::Stride;
     /// Stride for contiguous tensor using this shape.
-    /// Whether c-contiguous or f-contiguous will depends on cargo feature `c_prefer`.
+    /// Whether c-contiguous or f-contiguous will depends on cargo feature
+    /// `c_prefer`.
     fn stride_config(&self) -> Self::Stride;
 }
 
@@ -327,7 +328,8 @@ pub trait LayoutAPI: Sized {
     /// f-contiguous.
     fn new_f_contig(shape: Self::Shape, offset: usize) -> Self;
 
-    /// Generate new layout by providing shape and offset; Whether c-contiguous or f-contiguous depends on cargo feature `c_prefer`.
+    /// Generate new layout by providing shape and offset; Whether c-contiguous
+    /// or f-contiguous depends on cargo feature `c_prefer`.
     fn new_contig(shape: Self::Shape, offset: usize) -> Self {
         match crate::C_PREFER {
             true => Self::new_c_contig(shape, offset),
@@ -487,8 +489,8 @@ where
 
 //     fn new(shape: Vec<usize>, stride: Vec<isize>, offset: usize) -> Self {
 //         if shape.len() != stride.len() {
-//             panic!("Shape and stride length mismatch, shape {:?}, stride {:?}", shape, stride);
-//         }
+//             panic!("Shape and stride length mismatch, shape {:?}, stride
+// {:?}", shape, stride);         }
 //         Layout { shape, stride, offset }
 //     }
 
