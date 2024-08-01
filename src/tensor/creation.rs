@@ -17,6 +17,7 @@ where
     D: DimAPI,
     B: DeviceAPI,
     B: DeviceWithStorageAPI<T>,
+    Layout<D>: LayoutAPI,
 {
     fn zeros(layout: Layout<D>, device: B) -> Tensor<T, D, B> {
         let data = device.zeros_impl(layout.size()).unwrap();

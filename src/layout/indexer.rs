@@ -1,3 +1,4 @@
+use super::layout::*;
 use super::*;
 use crate::{Error, Result};
 
@@ -17,9 +18,22 @@ pub enum Indexer {
     Eclipse,
 }
 
-pub trait IndexerPreserve: LayoutAPI + Sized {
+pub trait IndexerPreserve: Sized {
     /// Narrowing tensor by slicing at a specific dimension. Number of dimension
     /// will not change after slicing.
+    fn slice_at_dim(&self, dim: usize, slice: SliceI) -> Result<Self>;
+
+    /// Narrowing tensor by slicing at multiple dimensions. Number of dimension
+    /// will not change after slicing. Number of slices should be the same to
+    /// the number of dimensions.
+    fn slice_by_slices(&self, slices: &[SliceI]) -> Result<Self>;
+}
+
+impl<D> IndexerPreserve for Layout<D>
+where
+    D: DimAPI,
+    Self: LayoutAPI,
+{
     fn slice_at_dim(&self, dim: usize, slice: SliceI) -> Result<Self> {
         // dimension check
         if dim >= self.ndim() {
@@ -31,8 +45,8 @@ pub trait IndexerPreserve: LayoutAPI + Sized {
         }
 
         // get essential information
-        let mut shape = self.shape();
-        let mut stride = self.stride();
+        let Shape(mut shape) = self.shape();
+        let Stride(mut stride) = self.stride();
         let shape_mut = shape.as_mut();
         let stride_mut = stride.as_mut();
 
@@ -55,12 +69,9 @@ pub trait IndexerPreserve: LayoutAPI + Sized {
         let offset = (self.offset() as isize + shape_mut[dim] as isize * start) as usize;
         shape_mut[dim] = ((stop - start + step - 1) / step).max(0) as usize;
         stride_mut[dim] = stride_mut[dim] * step;
-        return Ok(Self::new(shape, stride, offset));
+        return Ok(Self::new(Shape(shape), Stride(stride), offset));
     }
 
-    /// Narrowing tensor by slicing at multiple dimensions. Number of dimension
-    /// will not change after slicing. Number of slices should be the same to
-    /// the number of dimensions.
     fn slice_by_slices(&self, slices: &[SliceI]) -> Result<Self> {
         // dimension check
         if slices.len() != self.ndim() {
@@ -73,8 +84,8 @@ pub trait IndexerPreserve: LayoutAPI + Sized {
 
         // get essential information
         let mut offset = self.offset() as isize;
-        let mut shape = self.shape();
-        let mut stride = self.stride();
+        let Shape(mut shape) = self.shape();
+        let Stride(mut stride) = self.stride();
         let shape_mut = shape.as_mut();
         let stride_mut = stride.as_mut();
 
@@ -104,11 +115,20 @@ pub trait IndexerPreserve: LayoutAPI + Sized {
         }
 
         let offset = offset as usize;
-        return Ok(Self::new(shape, stride, offset));
+        return Ok(Self::new(Shape(shape), Stride(stride), offset));
     }
 }
 
-pub trait IndexerDynamic: LayoutAPI + Sized {
+pub trait IndexerDynamic {
+    /// Select dimension at index. Number of dimension will decrease by 1.
+    fn select_at_dim(&self, dim: usize, index: usize) -> Layout<IxD>;
+}
+
+impl<D> IndexerDynamic for Layout<D>
+where
+    D: DimAPI,
+    Self: LayoutAPI,
+{
     /// Select dimension at index. Number of dimension will decrease by 1.
     fn select_at_dim(&self, dim: usize, index: usize) -> Layout<IxD> {
         // dimension check
@@ -117,8 +137,8 @@ pub trait IndexerDynamic: LayoutAPI + Sized {
         }
 
         // get essential information
-        let shape = self.shape_ref();
-        let stride = self.stride_ref();
+        let Shape(shape) = self.shape_ref();
+        let Stride(stride) = self.stride_ref();
         let mut offset = self.offset() as isize;
         let mut shape_new: Vec<usize> = vec![];
         let mut stride_new: Vec<isize> = vec![];
@@ -134,20 +154,6 @@ pub trait IndexerDynamic: LayoutAPI + Sized {
         }
 
         let offset = offset as usize;
-        return Layout::new(shape_new, stride_new, offset);
+        return Layout::<IxD>::new(Shape(shape_new), Stride(stride_new), offset);
     }
-}
-
-impl<D> IndexerPreserve for Layout<D>
-where
-    Self: LayoutAPI,
-    D: DimAPI + Sized,
-{
-}
-
-impl<D> IndexerDynamic for Layout<D>
-where
-    Self: LayoutAPI,
-    D: DimAPI + Sized,
-{
 }
