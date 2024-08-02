@@ -14,6 +14,9 @@ pub enum Error {
     #[error("Invalid integer: value {value:?}, msg {msg:?}")]
     InvalidInteger { value: isize, msg: String },
 
+    #[error("Value not match: got {got:?}, expect {expect:?}")]
+    USizeNotMatch { got: usize, expect: usize },
+
     /* #region Wrapped Errors */
     #[cfg(feature = "cuda")]
     #[error(transparent)]

@@ -22,16 +22,17 @@ where
     pub(crate) device: B,
 }
 
-pub trait StorageAPI<T, B>
-where
-    T: Clone,
-    B: DeviceWithDTypeAPI<T>,
-    Self: Sized,
-{
-    fn device(&self) -> B;
-    fn to_rawvec(&self) -> B::RawVec;
-    fn into_rawvec(self) -> B::RawVec;
-    fn new(vector: B::RawVec, device: B) -> Self;
+pub trait StorageAPI {
+    type DType: Clone;
+    type Backend: DeviceWithDTypeAPI<Self::DType>;
+    fn device(&self) -> Self::Backend;
+    fn to_rawvec(&self) -> <Self::Backend as DeviceWithDTypeAPI<Self::DType>>::RawVec;
+    fn into_rawvec(self) -> <Self::Backend as DeviceWithDTypeAPI<Self::DType>>::RawVec;
+    fn new(
+        vector: <Self::Backend as DeviceWithDTypeAPI<Self::DType>>::RawVec,
+        device: Self::Backend,
+    ) -> Self;
+    fn len(&self) -> usize;
 }
 
 pub trait DeviceToStorageAPI<T>

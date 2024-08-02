@@ -43,6 +43,7 @@ impl<S> From<S> for DataOwned<S> {
 
 pub trait DataAPI {
     type Data;
+    fn as_data(&self) -> &Self::Data;
     fn as_ref(&self) -> DataRef<Self::Data>;
     fn into_owned(self) -> DataOwned<Self::Data>;
 }
@@ -54,6 +55,9 @@ pub trait DataMutAPI {
 
 impl<S> DataAPI for DataOwned<S> {
     type Data = S;
+    fn as_data(&self) -> &Self::Data {
+        &self.data
+    }
     fn as_ref(&self) -> DataRef<Self::Data> {
         DataRef { data: &self.data }
     }
@@ -67,6 +71,9 @@ where
     S: Clone,
 {
     type Data = S;
+    fn as_data(&self) -> &Self::Data {
+        self.data
+    }
     fn as_ref(&self) -> DataRef<Self::Data> {
         self.clone()
     }
@@ -80,6 +87,9 @@ where
     S: Clone,
 {
     type Data = S;
+    fn as_data(&self) -> &Self::Data {
+        self.data
+    }
     fn as_ref(&self) -> DataRef<'_, Self::Data> {
         DataRef { data: &self.data }
     }

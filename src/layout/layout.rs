@@ -1,6 +1,5 @@
-use std::ops::{Deref, DerefMut};
-
 use crate::{Error, Result};
+use std::ops::{Deref, DerefMut};
 
 /* #region Dimension Definition and alias */
 
@@ -192,7 +191,7 @@ pub trait ShapeAPI {
     /// Stride for contiguous tensor using this shape.
     /// Whether c-contiguous or f-contiguous will depends on cargo feature
     /// `c_prefer`.
-    fn stride_config(&self) -> Stride<Self::Dim>;
+    fn stride_contig(&self) -> Stride<Self::Dim>;
 }
 
 impl<const N: usize> ShapeAPI for Shape<Ix<N>> {
@@ -225,7 +224,7 @@ impl<const N: usize> ShapeAPI for Shape<Ix<N>> {
         Stride(stride)
     }
 
-    fn stride_config(&self) -> Stride<Ix<N>> {
+    fn stride_contig(&self) -> Stride<Ix<N>> {
         match crate::C_PREFER {
             true => self.stride_c_contig(),
             false => self.stride_f_contig(),
@@ -263,7 +262,7 @@ impl ShapeAPI for Shape<IxD> {
         Stride(stride)
     }
 
-    fn stride_config(&self) -> Stride<IxD> {
+    fn stride_contig(&self) -> Stride<IxD> {
         match crate::C_PREFER {
             true => self.stride_c_contig(),
             false => self.stride_f_contig(),
@@ -355,6 +354,30 @@ pub trait LayoutAPI {
     /// - Negative index
     /// - Index greater than shape
     unsafe fn index_uncheck(&self, index: Shape<Self::Dim>) -> usize;
+
+    /// Index range bounds of current layout. This bound is [min, max), which
+    /// could be feed into range (min..max). If min == max, then this layout
+    /// should not contains any element.
+    ///
+    /// This function will raise error when minimum index is smaller than zero.
+    fn bounds_index(&self) -> Result<(usize, usize)>;
+
+    /// Check if strides is correct.
+    ///
+    /// This will check if all number of elements in dimension of small strides
+    /// is less than larger strides. For example of valid stride:
+    /// ```output
+    /// shape:  (3,    2,  6)  -> sorted ->  ( 3,   6,   2)
+    /// stride: (3, -300, 15)  -> sorted ->  ( 3,  15, 300)
+    /// number of elements:                    9,  90,
+    /// stride of next dimension              15, 300,
+    /// number of elem < stride of next dim?   +,   +,
+    /// ```
+    ///
+    /// # TODO
+    ///
+    /// Correctness of this function is not ensured.
+    fn check_strides(&self) -> Result<()>;
 }
 
 impl<D> LayoutAPI for Layout<D>
@@ -467,6 +490,61 @@ where
         }
         return pos as usize;
     }
+
+    fn bounds_index(&self) -> Result<(usize, usize)> {
+        if self.ndim() == 0 {
+            return Ok((self.offset(), self.offset()));
+        }
+        let n = self.ndim();
+        let shape = self.shape_ref().as_ref();
+        let stride = self.stride_ref().as_ref();
+        let mut min = self.offset() as isize;
+        let mut max = self.offset() as isize;
+
+        for i in 0..n {
+            if shape[i] == 0 {
+                return Ok((self.offset(), self.offset()));
+            }
+            if stride[i] > 0 {
+                max += stride[i] * (shape[i] as isize - 1);
+            } else {
+                min += stride[i] * shape[i] as isize;
+            }
+        }
+        if min < 0 {
+            return Err(Error::IndexOutOfBound { index: min, shape: 0 });
+        } else {
+            return Ok((min as usize, max as usize + 1));
+        }
+    }
+
+    fn check_strides(&self) -> Result<()> {
+        let Self { shape: Shape(shape), stride: Stride(stride), .. } = self;
+        let shape: Vec<usize> = shape.as_ref().into();
+        let stride: Vec<isize> = stride.as_ref().into();
+        if shape.len() != stride.len() {
+            return Err(Error::USizeNotMatch { got: shape.len(), expect: stride.len() });
+        }
+        let n = shape.len();
+        if n <= 1 {
+            return Ok(());
+        }
+
+        let mut indices = (0..n).collect::<Vec<usize>>();
+        indices.sort_by_key(|&i| stride[i].abs());
+        let shape_sorted = indices.iter().map(|&i| shape[i]).collect::<Vec<usize>>();
+        let stride_sorted = indices.iter().map(|&i| stride[i] as usize).collect::<Vec<usize>>();
+
+        for i in 0..n - 1 {
+            if shape_sorted[i] * stride_sorted[i] > stride_sorted[i + 1] {
+                return Err(Error::IndexOutOfBound {
+                    index: (shape_sorted[i] * stride_sorted[i]) as isize,
+                    shape: stride_sorted[i + 1] as isize,
+                });
+            }
+        }
+        return Ok(());
+    }
 }
 
 pub trait LayoutContigAPI {
@@ -565,7 +643,7 @@ impl<const N: usize> TryFrom<Layout<IxD>> for Layout<Ix<N>> {
 
 /* #endregion */
 
-/* #region Shape to Layout */
+/* #region Dim/Shape to Layout */
 
 pub trait IxToLayoutAPI {
     type Layout: LayoutContigAPI;
@@ -609,137 +687,35 @@ impl<const N: usize> From<Ix<N>> for Layout<Ix<N>> {
     }
 }
 
+impl From<IxD> for Layout<IxD> {
+    fn from(shape: IxD) -> Self {
+        shape.new_contig(0)
+    }
+}
+
+impl<const N: usize> From<Ix<N>> for Shape<Ix<N>> {
+    fn from(shape: Ix<N>) -> Self {
+        Shape(shape)
+    }
+}
+
+impl From<IxD> for Shape<IxD> {
+    fn from(shape: IxD) -> Self {
+        Shape(shape)
+    }
+}
+
 /* #endregion */
 
-// #[cfg(test)]
-// mod test {
-//     use super::*;
+#[cfg(test)]
+mod playground {
+    use super::*;
 
-//     #[test]
-//     fn test_layout() {
-//         let layout = Layout::<Ix<3>> { shape: [1, 2, 3], stride: [6, 3, 1],
-// offset: 0 };         assert_eq!(layout.shape, [1, 2, 3]);
-//         assert_eq!(layout.stride, [6, 3, 1]);
-//         assert_eq!(layout.offset, 0);
-//     }
-
-//     #[test]
-//     fn test_shape() {
-//         let shape: [usize; 3] = [4, 2, 3];
-//         assert_eq!(shape.rank(), 3);
-//         assert_eq!(shape.size(), 24);
-//         assert_eq!(shape.stride_f_contig(), [1, 4, 8]);
-//         assert_eq!(shape.stride_c_contig(), [6, 3, 1]);
-//     }
-
-//     #[test]
-//     fn test_shape_zero_dim() {
-//         let shape: [usize; 0] = [];
-//         assert_eq!(shape.rank(), 0);
-//         assert_eq!(shape.size(), 1);
-//         assert_eq!(shape.stride_f_contig(), []);
-//         assert_eq!(shape.stride_c_contig(), []);
-//     }
-
-//     #[test]
-//     fn test_shape_dyn() {
-//         let shape: Vec<usize> = vec![4, 2, 3];
-//         assert_eq!(shape.rank(), 3);
-//         assert_eq!(shape.size(), 24);
-//         assert_eq!(shape.stride_f_contig(), vec![1, 4, 8]);
-//         assert_eq!(shape.stride_c_contig(), vec![6, 3, 1]);
-//     }
-
-//     #[test]
-//     fn test_shape_dyn_zero_dim() {
-//         let shape: Vec<usize> = vec![];
-//         assert_eq!(shape.rank(), 0);
-//         assert_eq!(shape.size(), 1);
-//         assert_eq!(shape.stride_f_contig(), vec![]);
-//         assert_eq!(shape.stride_c_contig(), vec![]);
-//     }
-
-//     #[test]
-//     fn test_stride() {
-//         let stride: [isize; 3] = [6, 3, 1];
-//         assert_eq!(stride.rank(), 3);
-//         assert_eq!(stride.is_f_prefer(), false);
-//         assert_eq!(stride.is_c_prefer(), true);
-//         let stride: [isize; 3] = [1, 4, 8];
-//         assert_eq!(stride.rank(), 3);
-//         assert_eq!(stride.is_f_prefer(), true);
-//         assert_eq!(stride.is_c_prefer(), false);
-//     }
-
-//     #[test]
-//     fn test_stride_zero_dim() {
-//         let stride: [isize; 0] = [];
-//         assert_eq!(stride.rank(), 0);
-//         assert_eq!(stride.is_f_prefer(), true);
-//         assert_eq!(stride.is_c_prefer(), true);
-//     }
-
-//     #[test]
-//     fn test_stride_dyn() {
-//         let stride: Vec<isize> = vec![6, 3, 1];
-//         assert_eq!(stride.rank(), 3);
-//         assert_eq!(stride.is_f_prefer(), false);
-//         assert_eq!(stride.is_c_prefer(), true);
-//         let stride: Vec<isize> = vec![1, 4, 8];
-//         assert_eq!(stride.rank(), 3);
-//         assert_eq!(stride.is_f_prefer(), true);
-//         assert_eq!(stride.is_c_prefer(), false);
-//     }
-
-//     #[test]
-//     fn test_stride_dyn_zero_dim() {
-//         let stride: Vec<isize> = vec![];
-//         assert_eq!(stride.rank(), 0);
-//         assert_eq!(stride.is_f_prefer(), true);
-//         assert_eq!(stride.is_c_prefer(), true);
-//     }
-
-//     #[test]
-//     fn test_layout_trait() {
-//         let layout = Layout::<Ix<3>> { shape: [1, 2, 3], stride: [6, 3, 1],
-// offset: 0 };         assert_eq!(layout.shape(), [1, 2, 3]);
-//         assert_eq!(layout.stride(), [6, 3, 1]);
-//         assert_eq!(layout.offset(), 0);
-//         assert_eq!(layout.ndim(), 3);
-//         assert_eq!(layout.size(), 6);
-//         assert_eq!(layout.is_f_prefer(), false);
-//         assert_eq!(layout.is_c_prefer(), true);
-//         assert_eq!(layout.is_f_contig(), false);
-//         assert_eq!(layout.is_c_contig(), true);
-//         assert_eq!(layout.ndim(), 3);
-//         assert_eq!(layout.index([0, 1, 2]), 5);
-//         assert_eq!(unsafe { layout.index_uncheck([0, 1, 2]) }, 5);
-//     }
-
-//     #[test]
-//     fn test_layout_trait_dyn() {
-//         let layout = Layout::<IxD> { shape: vec![1, 2, 3], stride: vec![6, 3,
-// 1], offset: 0 };         assert_eq!(layout.shape(), vec![1, 2, 3]);
-//         assert_eq!(layout.stride(), vec![6, 3, 1]);
-//         assert_eq!(layout.offset(), 0);
-//         assert_eq!(layout.ndim(), 3);
-//         assert_eq!(layout.size(), 6);
-//         assert_eq!(layout.is_f_prefer(), false);
-//         assert_eq!(layout.is_c_prefer(), true);
-//         assert_eq!(layout.is_f_contig(), false);
-//         assert_eq!(layout.is_c_contig(), true);
-//         assert_eq!(layout.ndim(), 3);
-//         assert_eq!(layout.index(vec![0, 1, 2]), 5);
-//         assert_eq!(unsafe { layout.index_uncheck(vec![0, 1, 2]) }, 5);
-//     }
-
-//     #[test]
-//     fn test_anyway() {
-//         let layout = Layout::<Ix<4>> { shape: [8, 10, 0, 15], stride: [3, 4,
-// 0, 7], offset: 0 };         println!("{:?}", layout.is_c_contig());
-//         println!("{:?}", layout.is_f_contig());
-
-//         let layout = [8, 10, 3, 15].new_contig(0);
-//         println!("{:?}", layout);
-//     }
-// }
+    #[test]
+    fn test0() {
+        let shape: [usize; 3] = [3, 2, 6];
+        let stride: [isize; 3] = [3, -300, 15];
+        let layout = Layout::<Ix3> { shape: Shape(shape), stride: Stride(stride), offset: 917 };
+        let _ = layout.check_strides();
+    }
+}

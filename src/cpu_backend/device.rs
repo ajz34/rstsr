@@ -21,10 +21,13 @@ where
     type RawVec = Vec<T>;
 }
 
-impl<T> StorageAPI<T, CpuDevice> for Storage<T, CpuDevice>
+impl<T> StorageAPI for Storage<T, CpuDevice>
 where
     T: Clone,
 {
+    type DType = T;
+    type Backend = CpuDevice;
+
     fn device(&self) -> CpuDevice {
         self.device.clone()
     }
@@ -39,6 +42,10 @@ where
 
     fn new(vector: Vec<T>, device: CpuDevice) -> Self {
         Self { rawvec: vector, device }
+    }
+
+    fn len(&self) -> usize {
+        self.rawvec.len()
     }
 }
 
