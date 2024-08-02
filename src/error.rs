@@ -5,8 +5,8 @@ use crate::cuda_backend::error::CudaError;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
-    #[error("Index out of bound: index {index:}, shape {shape:}")]
-    IndexOutOfBound { index: isize, shape: isize },
+    #[error("Index out of bound: index {index:}, bound {bound:}")]
+    IndexOutOfBound { index: isize, bound: isize },
 
     #[error("Value out of range: value {value:?}, min {min:?}, max {max:?}")]
     ValueOutOfRange { value: isize, min: isize, max: isize },
