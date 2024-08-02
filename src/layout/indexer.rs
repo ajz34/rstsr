@@ -155,3 +155,123 @@ where
         return Layout::<IxD>::new(Shape(shape_new), Stride(stride_new), offset);
     }
 }
+
+#[macro_export]
+macro_rules! slice {
+    ($stop:expr) => {
+        Slice::<isize>::from(Slice { start: None, stop: $stop.into(), step: None })
+    };
+    ($start:expr, $stop:expr) => {
+        Slice::<isize>::from(Slice { start: $start.into(), stop: $stop.into(), step: None })
+    };
+    ($start:expr, $stop:expr, $step:expr) => {
+        Slice::<isize>::from(Slice { start: $start.into(), stop: $stop.into(), step: $step.into() })
+    };
+}
+
+#[macro_export]
+macro_rules! slice_sugar {
+    /* #region rustic */
+
+    // i..j; k
+    ($start:tt .. $stop:tt ; $step:tt) => {
+        slice!($start, $stop, $step)
+    };
+    // i..; k
+    ($start:tt .. ; $step:tt) => {
+        slice!($start, None, $step)
+    };
+    // ..j; k
+    (.. $stop:tt ; $step:tt) => {
+        slice!(None, $stop, $step)
+    };
+    // i..j
+    ($start:tt .. $stop:tt) => {
+        slice!($start, $stop)
+    };
+    // ..j
+    (.. $stop:tt) => {
+        slice!(None, $stop)
+    };
+    // i..
+    ($start:tt ..) => {
+        slice!($start, None)
+    };
+    // ..; k
+    (.. ; $step:tt) => {
+        slice!(None, None, $step)
+    };
+    // ..
+    (..) => {
+        slice!(None, None)
+    };
+
+    /* #endregion */
+
+    /* #region pythonic */
+
+    // i:j:k
+    ($start:tt : $stop:tt : $step:tt) => {
+        slice!($start, $stop, $step)
+    };
+    // :j:k
+    (: $stop:tt : $step:tt) => {
+        slice!(None, $stop, $step)
+    };
+    // i::k
+    ($start:tt :: $step:tt) => {
+        slice!($start, None, $step)
+    };
+    // i:j
+    ($start:tt : $stop:tt) => {
+        slice!($start, $stop)
+    };
+    // ::k
+    (:: $step:tt) => {
+        slice!(None, None, $step)
+    };
+    // :j
+    (: $stop:tt) => {
+        slice!(None, $stop)
+    };
+    // i:
+    ($start:tt :) => {
+        slice!($start, None)
+    };
+    // :
+    (:) => {
+        slice!(None, None)
+    };
+
+    /* #endregion */
+}
+
+fn playground() {
+    let s = slice_sugar!(::3);
+    println!("{:?}", s);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_slice() {
+        let t = 3 as usize;
+        let s = slice!(1, 2, t);
+        assert_eq!(s.start(), Some(1));
+        assert_eq!(s.stop(), Some(2));
+        assert_eq!(s.step(), Some(3));
+
+        let s = slice_sugar!(3:6:4);
+        assert_eq!(s.start(), Some(3));
+        assert_eq!(s.stop(), Some(6));
+        assert_eq!(s.step(), Some(4));
+    }
+
+    #[test]
+    fn playground() {
+        super::playground()
+    }
+}
+

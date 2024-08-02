@@ -1,13 +1,13 @@
 use num::Num;
 
 use crate::cpu_backend::device::CpuDevice;
-use crate::layout::{DimBaseAPI, DimLayoutAPI, DimLayoutContigAPI, Layout};
+use crate::layout::{DimAPI, Layout};
 use crate::storage::{DeviceAPI, DeviceToStorageAPI, Storage, StorageAPI};
 use crate::{Result, Tensor};
 
 pub trait TensorCreationWithDeviceAPI {
     type DType: Clone;
-    type Dim: DimBaseAPI;
+    type Dim: DimAPI;
     type Device: DeviceAPI<Self::DType>;
 
     fn zeros_with_device(
@@ -25,7 +25,7 @@ pub trait TensorCreationWithDeviceAPI {
 impl<T, D, B> TensorCreationWithDeviceAPI for Tensor<T, D, B>
 where
     T: Clone,
-    D: DimLayoutAPI + DimLayoutContigAPI,
+    D: DimAPI,
     B: DeviceAPI<T> + DeviceToStorageAPI<T>,
     Storage<T, B>: StorageAPI,
 {
@@ -46,14 +46,14 @@ where
         device: B,
     ) -> Result<Tensor<T, D, B>> {
         let layout = layout.into();
-        let data = device.from_cpu_vec_owned(vec.to_vec()).unwrap();
+        let data = device.outof_cpu_vec(vec.to_vec()).unwrap();
         Tensor::new(data.into(), layout)
     }
 }
 
 pub trait TensorCreationCpuAPI {
     type DType: Clone + Num;
-    type Dim: DimBaseAPI;
+    type Dim: DimAPI;
 
     fn zeros(
         layout: impl Into<Layout<Self::Dim>>,
@@ -67,7 +67,7 @@ pub trait TensorCreationCpuAPI {
 impl<D, T> TensorCreationCpuAPI for Tensor<T, D, CpuDevice>
 where
     T: Clone + Num,
-    D: DimLayoutAPI + DimLayoutContigAPI,
+    D: DimAPI,
 {
     type DType = T;
     type Dim = D;
@@ -84,6 +84,7 @@ where
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::layout::*;
 
     #[test]
     fn playground() {

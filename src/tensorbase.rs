@@ -1,12 +1,12 @@
 use crate::cpu_backend::device::CpuDevice;
-use crate::layout::{DimBaseAPI, DimLayoutAPI, Layout};
+use crate::layout::{DimAPI, Layout};
 use crate::storage::{DataAPI, DataOwned, Storage, StorageAPI};
 use crate::{Error, Result};
 
 #[derive(Debug, Clone)]
 pub struct TensorBase<S, D>
 where
-    D: DimBaseAPI,
+    D: DimAPI,
 {
     data: S,
     layout: Layout<D>,
@@ -14,7 +14,7 @@ where
 
 impl<S, D> TensorBase<S, D>
 where
-    D: DimBaseAPI,
+    D: DimAPI,
 {
     /// Initialize tensor object.
     ///
@@ -30,7 +30,7 @@ where
     where
         S: DataAPI,
         S::Data: StorageAPI,
-        D: DimLayoutAPI,
+        D: DimAPI,
     {
         // check stride sanity
         layout.check_strides()?;

@@ -44,8 +44,16 @@ where
     fn ones_impl(&self, len: usize) -> Result<Storage<T, Self>>;
     fn arange_impl(&self, len: usize) -> Result<Storage<T, Self>>;
     unsafe fn empty_impl(&self, len: usize) -> Result<Storage<T, Self>>;
-    fn from_cpu_vec_owned(&self, vec: Vec<T>) -> Result<Storage<T, Self>>;
+    fn outof_cpu_vec(&self, vec: Vec<T>) -> Result<Storage<T, Self>>;
     fn from_cpu_vec(&self, vec: &Vec<T>) -> Result<Storage<T, Self>>;
+}
+
+pub trait DeviceFromStorageAPI<T>
+where
+    T: Clone,
+{
+    fn to_cpu_vec(&self) -> Result<Vec<T>>;
+    fn into_cpu_vec(self) -> Result<Vec<T>>;
 }
 
 pub trait DeviceAPI<T>

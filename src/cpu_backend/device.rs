@@ -1,5 +1,5 @@
 use crate::storage::{
-    DeviceAPI, DeviceBaseAPI, DeviceToStorageAPI, DeviceWithDTypeAPI, Storage, StorageAPI,
+    DeviceAPI, DeviceBaseAPI, DeviceFromStorageAPI, DeviceToStorageAPI, DeviceWithDTypeAPI, Storage, StorageAPI
 };
 use crate::Result;
 use core::fmt::Debug;
@@ -86,8 +86,21 @@ where
         Ok(Storage::<T, CpuDevice> { rawvec, device: self.clone() })
     }
 
-    fn from_cpu_vec_owned(&self, vec: Vec<T>) -> Result<Storage<T, CpuDevice>> {
+    fn outof_cpu_vec(&self, vec: Vec<T>) -> Result<Storage<T, CpuDevice>> {
         Ok(Storage::<T, CpuDevice> { rawvec: vec, device: self.clone() })
+    }
+}
+
+impl<T> DeviceFromStorageAPI<T> for Storage<T, CpuDevice>
+where
+    T: Clone,
+{
+    fn to_cpu_vec(&self) -> Result<Vec<T>> {
+        Ok(self.rawvec.clone())
+    }
+
+    fn into_cpu_vec(self) -> Result<Vec<T>> {
+        Ok(self.rawvec)
     }
 }
 

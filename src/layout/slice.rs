@@ -6,9 +6,9 @@ pub struct Slice<T>
 where
     T: Integer + Clone,
 {
-    start: Option<T>,
-    stop: Option<T>,
-    step: Option<T>,
+    pub(crate) start: Option<T>,
+    pub(crate) stop: Option<T>,
+    pub(crate) step: Option<T>,
 }
 
 /// In most cases, we will use isize for indexing.
@@ -18,8 +18,8 @@ impl<T> Slice<T>
 where
     T: Integer + Clone,
 {
-    pub fn new(start: Option<T>, stop: Option<T>, step: Option<T>) -> Self {
-        Self { start, stop, step }
+    pub fn new(start: impl Into<Option<T>>, stop: impl Into<Option<T>>, step: impl Into<Option<T>>) -> Self {
+        Self { start: start.into(), stop: stop.into(), step: step.into() }
     }
 
     pub fn start(&self) -> Option<T> {
@@ -59,31 +59,5 @@ where
 {
     fn from(range: std::ops::Range<T>) -> Self {
         Self { start: Some(range.start), stop: Some(range.end), step: None }
-    }
-}
-
-#[macro_export]
-macro_rules! slice {
-    ($stop:expr) => {
-        Slice::<isize>::from(Slice { start: None, stop: $stop.into(), step: None })
-    };
-    ($start:expr, $stop:expr) => {
-        Slice::<isize>::from(Slice { start: $start.into(), stop: $stop.into(), step: None })
-    };
-    ($start:expr, $stop:expr, $step:expr) => {
-        Slice::<isize>::from(Slice { start: $start.into(), stop: $stop.into(), step: $step.into() })
-    };
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_slice() {
-        let s = slice!(1, 2, 3);
-        assert_eq!(s.start(), Some(1));
-        assert_eq!(s.stop(), Some(2));
-        assert_eq!(s.step(), Some(3));
     }
 }

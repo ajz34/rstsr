@@ -17,6 +17,8 @@ pub mod tensor;
 pub mod tensorbase;
 pub use tensorbase::{Tensor, TensorBase};
 
+pub mod format;
+
 pub mod cpu_backend;
 
 #[cfg(feature = "cuda")]
