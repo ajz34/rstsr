@@ -3,7 +3,7 @@ authors = ["rest"]
 language = "en"
 multilingual = false
 src = "src"
-title = "rest_tensor2 develop notes"
+title = "rstsr develop notes"
 
 [preprocessor.katex]
 after = ["links"]
