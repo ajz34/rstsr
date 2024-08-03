@@ -4,7 +4,7 @@ use core::fmt::{Display, Write};
 pub static MIN_PRINT: usize = 3;
 pub static MAX_PRINT: usize = 10;
 
-pub struct FnPrintVecWithLayout<'v, 'l, T, D>
+pub struct FnPrintVecWithLayout<'v, 'l, 'f, T, D>
 where
     T: Clone,
     D: DimAPI,
@@ -15,8 +15,7 @@ where
     idx_prev: Vec<usize>,
     max_print: usize,
     min_print: usize,
-    // fmt: core::fmt::Formatter<'f>,
-    fmt: String,
+    fmt: &'f mut (dyn Write + 'f),
 }
 
 pub fn print_vec_with_layout_dfs<T, D>(c: &mut FnPrintVecWithLayout<T, D>)
@@ -58,7 +57,9 @@ where
             let offset = offset as isize
                 - p1_prev as isize * stride[len_prev - 1]
                 - p2_prev as isize * stride[len_prev - 2];
-            if shape[len_prev - 2] < max_print || p2_prev + min_print >= shape[len_prev - 2] || p2_prev < min_print
+            if shape[len_prev - 2] < max_print
+                || p2_prev + min_print >= shape[len_prev - 2]
+                || p2_prev < min_print
             {
                 let p2 = p2_prev + 1;
                 idx_prev.push(p2);
@@ -168,9 +169,10 @@ where
                 return;
             } else {
                 let p1_prev = idx_prev.pop().unwrap();
-                let offset = offset as isize
-                    - p1_prev as isize * stride[len_prev - 1];
-                if shape[len_prev - 1] < max_print || p1_prev + min_print >= shape[len_prev - 1] || p1_prev < min_print
+                let offset = offset as isize - p1_prev as isize * stride[len_prev - 1];
+                if shape[len_prev - 1] < max_print
+                    || p1_prev + min_print >= shape[len_prev - 1]
+                    || p1_prev < min_print
                 {
                     let p1 = p1_prev + 1;
                     idx_prev.push(p1);
@@ -192,20 +194,18 @@ where
     }
 }
 
-pub fn print_vec_with_layout<T, D>(
-    vec: Vec<T>,
-    layout: Layout<D>,
+pub fn print_vec_with_layout<'v, 'l, 'f, T, D>(
+    fmt: &'f mut (dyn Write + 'f),
+    vec: &'v Vec<T>,
+    layout: &'l Layout<D>,
     max_print: usize,
     min_print: usize,
-) -> String
-where
+) where
     T: Clone + Display,
     D: crate::layout::DimAPI,
 {
     let idx_prev = vec![];
     let offset = layout.offset;
-    // let mut fmt = core::fmt::Formatter::new(&mut s);
-    let fmt = String::new();
     let mut config = FnPrintVecWithLayout {
         vec: &vec,
         layout: &layout,
@@ -216,27 +216,32 @@ where
         fmt,
     };
     print_vec_with_layout_dfs(&mut config);
-    config.fmt
 }
 
 #[test]
 fn playground() {
     use crate::layout::*;
 
+    let mut s = String::new();
+
+    s.clear();
     let vec = vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
-    let s = print_vec_with_layout(vec, [].into(), 10, 3);
+    print_vec_with_layout(&mut s, &vec, &[].into(), 10, 3);
     println!("{:}", s);
 
+    s.clear();
     let vec = vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
-    let s = print_vec_with_layout(vec, [3, 0, 4].into(), 10, 3);
+    print_vec_with_layout(&mut s, &vec, &[].into(), 10, 3);
     println!("{:}", s);
 
+    s.clear();
     let vec = vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
-    let s = print_vec_with_layout(vec, [3, 4, 0].into(), 10, 3);
+    print_vec_with_layout(&mut s, &vec, &[].into(), 10, 3);
     println!("{:}", s);
 
+    s.clear();
     let vec = vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
-    let s = print_vec_with_layout(vec, [15].into(), 10, 3);
+    print_vec_with_layout(&mut s, &vec, &[].into(), 10, 3);
     println!("{:}", s);
 
     /* Python code
@@ -244,9 +249,10 @@ fn playground() {
        b = a[4:13].reshape(3, 3)
        c = b.T[::2, ::-1]
     */
+    s.clear();
     let vec = vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
     let layout = Layout::<Ix2>::new(Shape([2, 3]), Stride([2, -3]), 10);
-    let s = print_vec_with_layout(vec, layout, 10, 3);
+    print_vec_with_layout(&mut s, &vec, &layout, 10, 3);
     println!("{:}", s);
 
     /* Python code
@@ -254,9 +260,10 @@ fn playground() {
        b = a[2:14].reshape(3, 4)
        c = b.T[:, ::-1]
     */
+    s.clear();
     let vec = vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
     let layout = Layout::<Ix2>::new(Shape([4, 3]), Stride([1, -4]), 10);
-    let s = print_vec_with_layout(vec, layout, 10, 3);
+    print_vec_with_layout(&mut s, &vec, &layout, 10, 3);
     println!("{:}", s);
 
     /* Python code
@@ -264,13 +271,15 @@ fn playground() {
        b = a[2:14].reshape(3, 4)
        c = b.T[:, ::-1]
     */
+    s.clear();
     let vec = vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
     let layout = Layout::<Ix2>::new(Shape([4, 3]), Stride([1, -4]), 10);
-    let s = print_vec_with_layout(vec, layout, 10, 3);
+    print_vec_with_layout(&mut s, &vec, &layout, 10, 3);
     println!("{:}", s);
 
+    s.clear();
     let vec = (0..1800).collect::<Vec<usize>>();
     let layout = Layout::<Ix3>::new(Shape([15, 12, 10]), Stride([1, 150, 15]), 0);
-    let s = print_vec_with_layout(vec, layout, 8, 3);
+    print_vec_with_layout(&mut s, &vec, &layout, 8, 3);
     println!("{:}", s);
 }
