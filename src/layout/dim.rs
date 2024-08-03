@@ -1,5 +1,5 @@
-use core::fmt::Debug;
 use super::*;
+use core::fmt::Debug;
 
 pub type Ix<const N: usize> = [usize; N];
 pub type Ix0 = Ix<0>;
@@ -30,6 +30,9 @@ impl DimBaseAPI for IxD {
     type Stride = Vec<isize>;
 }
 
-pub trait DimAPI: DimBaseAPI + DimShapeAPI + DimStrideAPI + DimLayoutAPI + DimLayoutContigAPI {}
+pub trait DimAPI:
+    DimBaseAPI + DimShapeAPI + DimStrideAPI + DimLayoutAPI + DimLayoutContigAPI
+{
+}
 impl<const N: usize> DimAPI for Ix<N> {}
 impl DimAPI for IxD {}

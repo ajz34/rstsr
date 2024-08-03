@@ -1,8 +1,6 @@
 use super::*;
 use std::ops::{Deref, DerefMut};
 
-/* #region Shape */
-
 #[derive(Debug, Clone)]
 pub struct Shape<D>(pub D::Shape)
 where
@@ -139,5 +137,3 @@ impl DimShapeAPI for IxD {
         }
     }
 }
-
-/* #endregion */

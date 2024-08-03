@@ -1,5 +1,5 @@
-use crate::{Error, Result};
 use super::*;
+use crate::{Error, Result};
 use core::fmt::Debug;
 use core::fmt::Write;
 
@@ -22,7 +22,7 @@ where
 pub trait DimLayoutAPI: DimBaseAPI {
     /// Shape of tensor. Getter function.
     fn shape(layout: &Layout<Self>) -> Shape<Self>;
-    fn as_shape(layout: &Layout<Self>) -> &Shape<Self>;
+    fn shape_ref(layout: &Layout<Self>) -> &Shape<Self>;
 
     /// Stride of tensor. Getter function.
     fn stride(layout: &Layout<Self>) -> Stride<Self>;
@@ -117,8 +117,8 @@ where
         D::shape(self)
     }
 
-    pub fn as_shape(&self) -> &Shape<D> {
-        D::as_shape(self)
+    pub fn shape_ref(&self) -> &Shape<D> {
+        D::shape_ref(self)
     }
 
     pub fn stride(&self) -> Stride<D> {
@@ -190,7 +190,7 @@ where
         layout.shape.clone()
     }
 
-    fn as_shape(layout: &Layout<D>) -> &Shape<D> {
+    fn shape_ref(layout: &Layout<D>) -> &Shape<D> {
         &layout.shape
     }
 
@@ -309,7 +309,7 @@ where
             if stride[i] > 0 {
                 max += stride[i] * (shape[i] as isize - 1);
             } else {
-                min += stride[i] * shape[i] as isize;
+                min += stride[i] * (shape[i] as isize - 1);
             }
         }
         if min < 0 {
@@ -472,7 +472,7 @@ impl From<IxD> for Layout<IxD> {
 /* #region Format */
 
 impl<D> Debug for Layout<D>
-where 
+where
     D: DimBaseAPI + DimLayoutAPI,
 {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
@@ -484,12 +484,24 @@ where
         let is_c_prefer = self.is_c_prefer();
         let is_f_prefer = self.is_f_prefer();
         let mut contig = String::new();
-        if is_c_contig { write!(contig, "C")?; }
-        if is_c_prefer { write!(contig, "c")?; }
-        if is_f_contig { write!(contig, "F")?; }
-        if is_f_prefer { write!(contig, "f")?; }
-        if contig.is_empty() { write!(contig, "Custom")?; }
-        write!(f, "Layout<{}>, shape: {:?}, stride: {:?}, offset: {}, contiguous: {} }}",
+        if is_c_contig {
+            write!(contig, "C")?;
+        }
+        if is_c_prefer {
+            write!(contig, "c")?;
+        }
+        if is_f_contig {
+            write!(contig, "F")?;
+        }
+        if is_f_prefer {
+            write!(contig, "f")?;
+        }
+        if contig.is_empty() {
+            write!(contig, "Custom")?;
+        }
+        write!(
+            f,
+            "Layout<{}>, shape: {:?}, stride: {:?}, offset: {}, contiguous: {} }}",
             core::any::type_name::<D>(),
             shape,
             stride,

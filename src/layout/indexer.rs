@@ -135,7 +135,7 @@ where
         }
 
         // get essential information
-        let Shape(shape) = self.as_shape();
+        let Shape(shape) = self.shape_ref();
         let Stride(stride) = self.stride_ref();
         let mut offset = self.offset() as isize;
         let mut shape_new: Vec<usize> = vec![];
@@ -172,7 +172,6 @@ macro_rules! slice {
 #[macro_export]
 macro_rules! slice_sugar {
     /* #region rustic */
-
     // i..j; k
     ($start:tt .. $stop:tt ; $step:tt) => {
         slice!($start, $stop, $step)
@@ -209,7 +208,6 @@ macro_rules! slice_sugar {
     /* #endregion */
 
     /* #region pythonic */
-
     // i:j:k
     ($start:tt : $stop:tt : $step:tt) => {
         slice!($start, $stop, $step)
@@ -241,9 +239,7 @@ macro_rules! slice_sugar {
     // :
     (:) => {
         slice!(None, None)
-    };
-
-    /* #endregion */
+    }; /* #endregion */
 }
 
 fn playground() {
@@ -274,4 +270,3 @@ mod tests {
         super::playground()
     }
 }
-

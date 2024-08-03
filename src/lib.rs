@@ -10,6 +10,7 @@ pub mod error;
 pub use error::{Error, Result};
 
 pub mod layout;
+pub use layout::{DimAPI, Layout};
 
 pub mod storage;
 

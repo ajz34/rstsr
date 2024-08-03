@@ -1,5 +1,6 @@
 use crate::storage::{
-    DeviceAPI, DeviceBaseAPI, DeviceFromStorageAPI, DeviceToStorageAPI, DeviceWithDTypeAPI, Storage, StorageAPI
+    DeviceAPI, DeviceBaseAPI, DeviceFromStorageAPI, DeviceToStorageAPI, DeviceWithDTypeAPI,
+    Storage, StorageAPI,
 };
 use crate::Result;
 use core::fmt::Debug;
