@@ -40,7 +40,7 @@ where
     D: DimStrideAPI,
 {
     pub fn ndim(&self) -> usize {
-        D::ndim(self)
+        <D as DimStrideAPI>::ndim(self)
     }
 
     pub fn is_f_prefer(&self) -> bool {

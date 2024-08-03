@@ -3,7 +3,7 @@ use crate::layout::{DimAPI, Layout};
 use crate::storage::{DataAPI, DataOwned, Storage, StorageAPI};
 use crate::{Error, Result};
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct TensorBase<S, D>
 where
     D: DimAPI,
@@ -36,7 +36,7 @@ where
         layout.check_strides()?;
 
         // check pointer exceed
-        let len_data = data.as_data().len();
+        let len_data = data.as_storage().len();
         let (_, idx_max) = layout.bounds_index()?;
         if idx_max < len_data {
             return Err(Error::IndexOutOfBound {

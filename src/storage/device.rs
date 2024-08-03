@@ -1,13 +1,15 @@
 use crate::cpu_backend::device::CpuDevice;
 use crate::Result;
+use core::fmt::Debug;
 
-pub trait DeviceBaseAPI: Clone {
+pub trait DeviceBaseAPI: Clone + Debug {
     fn same_device(&self, other: &Self) -> bool;
 }
 
 pub trait DeviceWithDTypeAPI<T>
 where
     T: Clone,
+    Self: DeviceBaseAPI,
 {
     type RawVec;
 }
@@ -48,7 +50,7 @@ where
     fn from_cpu_vec(&self, vec: &Vec<T>) -> Result<Storage<T, Self>>;
 }
 
-pub trait DeviceFromStorageAPI<T>
+pub trait StorageToCpuAPI<T>
 where
     T: Clone,
 {

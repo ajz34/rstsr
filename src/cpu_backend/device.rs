@@ -1,6 +1,6 @@
 use crate::storage::{
-    DeviceAPI, DeviceBaseAPI, DeviceFromStorageAPI, DeviceToStorageAPI, DeviceWithDTypeAPI,
-    Storage, StorageAPI,
+    DeviceAPI, DeviceBaseAPI, DeviceToStorageAPI, DeviceWithDTypeAPI, Storage, StorageAPI,
+    StorageToCpuAPI,
 };
 use crate::Result;
 use core::fmt::Debug;
@@ -92,7 +92,7 @@ where
     }
 }
 
-impl<T> DeviceFromStorageAPI<T> for Storage<T, CpuDevice>
+impl<T> StorageToCpuAPI<T> for Storage<T, CpuDevice>
 where
     T: Clone,
 {

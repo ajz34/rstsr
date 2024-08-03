@@ -1,24 +1,26 @@
+use crate::storage::{DataAPI, StorageAPI, StorageToCpuAPI};
+use crate::TensorBase;
 use crate::{DimAPI, Layout};
-use core::fmt::{Display, Write};
+use core::fmt::{Debug, Display, Formatter, Write};
 
 pub static MIN_PRINT: usize = 3;
-pub static MAX_PRINT: usize = 10;
+pub static MAX_PRINT: usize = 8;
 
-pub struct FnPrintVecWithLayout<'v, 'l, 'f, T, D>
+pub struct FnPrintVecWithLayout<'v, 'l, 'f1, 'f2, T, D>
 where
     T: Clone,
     D: DimAPI,
 {
-    vec: &'v Vec<T>,
+    vec: &'v [T],
     layout: &'l Layout<D>,
     offset: usize,
     idx_prev: Vec<usize>,
     max_print: usize,
     min_print: usize,
-    fmt: &'f mut (dyn Write + 'f),
+    fmt: &'f1 mut Formatter<'f2>,
 }
 
-pub fn print_vec_with_layout_dfs<T, D>(c: &mut FnPrintVecWithLayout<T, D>)
+pub fn print_vec_with_layout_dfs<T, D>(c: &mut FnPrintVecWithLayout<T, D>) -> core::fmt::Result
 where
     T: Clone + Display,
     D: DimAPI,
@@ -34,8 +36,7 @@ where
 
     // special case
     if ndim == 0 {
-        write!(fmt, "[]").unwrap();
-        return;
+        return write!(fmt, "[]");
     }
 
     if idx_prev.last().is_some_and(|&v| v == shape[len_prev - 1]) {
@@ -43,14 +44,13 @@ where
 
         // special case: zero shape quick return
         if idx_prev.last().is_some_and(|&v| v == 0) {
-            write!(fmt, "[]").unwrap();
-            return;
+            return write!(fmt, "[]");
         }
 
         // pop last index, increase previous index by 1 or skip
         if len_prev == 1 {
             // multiple dimension exit
-            return;
+            return Ok(());
         } else {
             let p1_prev = idx_prev.pop().unwrap();
             let p2_prev = idx_prev.pop().unwrap();
@@ -68,7 +68,7 @@ where
                 c.offset = offset;
                 return print_vec_with_layout_dfs(c);
             } else {
-                write!(fmt, "{}...\n\n", " ".repeat(len_prev - 1)).unwrap();
+                write!(fmt, "{}...\n\n", " ".repeat(len_prev - 1))?;
                 let p2 = shape[len_prev - 2] - min_print;
                 idx_prev.push(p2);
                 let offset = offset + p2 as isize * stride[len_prev - 2];
@@ -92,15 +92,13 @@ where
 
             // special case: zero shape quick return
             if nlast == 0 {
-                write!(fmt, "[]").unwrap();
-                return;
+                return write!(fmt, "[]");
             }
 
             // prefix: "  [[["
             // count zeros from last element as numbers of "["
-            let mut prefix = String::new();
             if idx_prev.is_empty() {
-                write!(prefix, "[").unwrap();
+                write!(fmt, "[")?;
             } else {
                 let mut nbra = 1;
                 for &idx in idx_prev.iter().rev() {
@@ -110,36 +108,37 @@ where
                         break;
                     }
                 }
-                write!(prefix, "{:}", " ".repeat(ndim - nbra)).unwrap();
-                write!(prefix, "{:}", "[".repeat(nbra)).unwrap();
+                write!(fmt, "{:}", " ".repeat(ndim - nbra))?;
+                write!(fmt, "{:}", "[".repeat(nbra))?;
             }
 
             // values: " 1.23 4.56 ... 7.89 10.11"
-            let mut values = String::new();
             if nlast <= max_print.max(2 * min_print + 1) {
                 // all elements in last dimension should be printed
                 for i in 0..nlast {
                     let offset_i = (offset as isize + i as isize * stride_last) as usize;
-                    write!(values, " {:}", vec[offset_i]).unwrap();
+                    write!(fmt, " ")?;
+                    Display::fmt(&vec[offset_i], fmt)?;
                 }
             } else {
                 // only print the first/last min_print elements
                 for i in 0..min_print {
                     let offset_i = (offset as isize + i as isize * stride_last) as usize;
-                    write!(values, " {:}", vec[offset_i]).unwrap();
+                    write!(fmt, " ")?;
+                    Display::fmt(&vec[offset_i], fmt)?;
                 }
-                write!(values, " ...").unwrap();
+                write!(fmt, " ...")?;
                 for i in (nlast - min_print)..nlast {
                     let offset_i = (offset as isize + i as isize * stride_last) as usize;
-                    write!(values, " {:}", vec[offset_i]).unwrap();
+                    write!(fmt, " ")?;
+                    Display::fmt(&vec[offset_i], fmt)?;
                 }
             };
 
             // suffix: "]]]"
             // count (if index = shape) from last element as numbers of "["
-            let mut suffix = String::new();
             if idx_prev.is_empty() {
-                write!(suffix, "]").unwrap();
+                write!(fmt, "]")?;
             } else {
                 let mut nket = 1;
                 for i in (0..idx_prev.len()).rev() {
@@ -149,24 +148,21 @@ where
                         break;
                     }
                 }
-                write!(suffix, "{:}", "]".repeat(nket)).unwrap();
+                write!(fmt, "{:}", "]".repeat(nket))?;
                 if nket != ndim {
                     // last line should not add new-line character
                     if nket > 1 {
-                        write!(suffix, "\n\n").unwrap();
+                        write!(fmt, "\n\n")?;
                     } else {
-                        write!(suffix, "\n").unwrap();
+                        write!(fmt, "\n")?;
                     }
                 }
             }
 
-            // write to display
-            write!(fmt, "{:}{:}{:}", prefix, values, suffix).unwrap();
-
             // pop last index, increase previous index by 1 or skip
             if len_prev == 0 {
                 // one-dimension exit
-                return;
+                return Ok(());
             } else {
                 let p1_prev = idx_prev.pop().unwrap();
                 let offset = offset as isize - p1_prev as isize * stride[len_prev - 1];
@@ -181,7 +177,7 @@ where
                     c.offset = offset;
                     return print_vec_with_layout_dfs(c);
                 } else {
-                    write!(fmt, "{}...\n", " ".repeat(len_prev)).unwrap();
+                    write!(fmt, "{}...\n", " ".repeat(len_prev))?;
                     let p1 = shape[len_prev - 1] - min_print;
                     idx_prev.push(p1);
                     let offset = offset + p1 as isize * stride[len_prev - 1];
@@ -194,92 +190,140 @@ where
     }
 }
 
-pub fn print_vec_with_layout<'v, 'l, 'f, T, D>(
-    fmt: &'f mut (dyn Write + 'f),
-    vec: &'v Vec<T>,
+pub fn print_vec_with_layout<'v, 'l, 'f1, 'f2, T, D>(
+    fmt: &'f1 mut Formatter<'f2>,
+    vec: &'v [T],
     layout: &'l Layout<D>,
     max_print: usize,
     min_print: usize,
-) where
+) -> core::fmt::Result
+where
     T: Clone + Display,
     D: crate::layout::DimAPI,
 {
     let idx_prev = vec![];
     let offset = layout.offset;
-    let mut config = FnPrintVecWithLayout {
-        vec: &vec,
-        layout: &layout,
-        offset,
-        idx_prev,
-        max_print,
-        min_print,
-        fmt,
-    };
-    print_vec_with_layout_dfs(&mut config);
+    let mut config =
+        FnPrintVecWithLayout { vec, layout, offset, idx_prev, max_print, min_print, fmt };
+    print_vec_with_layout_dfs(&mut config)
 }
 
-#[test]
-fn playground() {
-    use crate::layout::*;
+impl<S, D> Display for TensorBase<S, D>
+where
+    S: DataAPI,
+    D: DimAPI,
+    S::Data: StorageAPI + StorageToCpuAPI<<S::Data as StorageAPI>::DType>,
+    <S::Data as StorageAPI>::DType: Clone + Display,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let vec = self.data().as_storage().to_cpu_vec().unwrap();
+        let layout = &self.layout();
+        let max_print = MAX_PRINT;
+        let min_print = MIN_PRINT;
+        print_vec_with_layout(f, &vec, layout, max_print, min_print)
+    }
+}
 
-    let mut s = String::new();
+impl<S, D> Debug for TensorBase<S, D>
+where
+    S: DataAPI,
+    D: DimAPI,
+    S::Data: StorageAPI + StorageToCpuAPI<<S::Data as StorageAPI>::DType>,
+    <S::Data as StorageAPI>::DType: Clone + Display,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "=== Debug Tensor Print ===")?;
+        Display::fmt(self, f)?;
+        writeln!(f)?;
+        Debug::fmt(&self.data().as_storage().device(), f)?;
+        writeln!(f)?;
+        Debug::fmt(&self.layout(), f)?;
+        writeln!(f)?;
+        writeln!(f, "===========================")
+    }
+}
 
-    s.clear();
-    let vec = vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
-    print_vec_with_layout(&mut s, &vec, &[].into(), 10, 3);
-    println!("{:}", s);
+#[cfg(test)]
+mod playground {
+    use super::*;
 
-    s.clear();
-    let vec = vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
-    print_vec_with_layout(&mut s, &vec, &[].into(), 10, 3);
-    println!("{:}", s);
+    struct VL<T, D>(Vec<T>, Layout<D>)
+    where
+        T: Clone + Display,
+        D: DimAPI;
 
-    s.clear();
-    let vec = vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
-    print_vec_with_layout(&mut s, &vec, &[].into(), 10, 3);
-    println!("{:}", s);
+    impl<T, D> Display for VL<T, D>
+    where
+        T: Clone + Display,
+        D: DimAPI,
+    {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            let vec = self.0.as_slice();
+            let layout = &self.1;
+            print_vec_with_layout(f, vec, layout, MAX_PRINT, MIN_PRINT)
+        }
+    }
 
-    s.clear();
-    let vec = vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
-    print_vec_with_layout(&mut s, &vec, &[].into(), 10, 3);
-    println!("{:}", s);
+    #[test]
+    fn playground() {
+        use crate::layout::*;
 
-    /* Python code
-       a = np.arange(15)
-       b = a[4:13].reshape(3, 3)
-       c = b.T[::2, ::-1]
-    */
-    s.clear();
-    let vec = vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
-    let layout = Layout::<Ix2>::new(Shape([2, 3]), Stride([2, -3]), 10);
-    print_vec_with_layout(&mut s, &vec, &layout, 10, 3);
-    println!("{:}", s);
+        let mut s = String::new();
 
-    /* Python code
-       a = np.arange(15)
-       b = a[2:14].reshape(3, 4)
-       c = b.T[:, ::-1]
-    */
-    s.clear();
-    let vec = vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
-    let layout = Layout::<Ix2>::new(Shape([4, 3]), Stride([1, -4]), 10);
-    print_vec_with_layout(&mut s, &vec, &layout, 10, 3);
-    println!("{:}", s);
+        s.clear();
+        let vec = vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
+        let layout: Layout<_> = [].into();
+        println!("{:}", VL(vec, layout));
 
-    /* Python code
-       a = np.arange(15)
-       b = a[2:14].reshape(3, 4)
-       c = b.T[:, ::-1]
-    */
-    s.clear();
-    let vec = vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
-    let layout = Layout::<Ix2>::new(Shape([4, 3]), Stride([1, -4]), 10);
-    print_vec_with_layout(&mut s, &vec, &layout, 10, 3);
-    println!("{:}", s);
+        s.clear();
+        let vec = vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
+        let layout: Layout<_> = [2, 0, 4].into();
+        println!("{:}", VL(vec, layout));
 
-    s.clear();
-    let vec = (0..1800).collect::<Vec<usize>>();
-    let layout = Layout::<Ix3>::new(Shape([15, 12, 10]), Stride([1, 150, 15]), 0);
-    print_vec_with_layout(&mut s, &vec, &layout, 8, 3);
-    println!("{:}", s);
+        s.clear();
+        let vec = vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
+        let layout: Layout<_> = [2, 4, 0].into();
+        println!("{:}", VL(vec, layout));
+        println!("{:}", s);
+
+        s.clear();
+        let vec = vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
+        let layout: Layout<Ix2> = [3, 5].into();
+        println!("{:}", VL(vec, layout));
+
+        /* Python code
+        a = np.arange(15)
+        b = a[4:13].reshape(3, 3)
+        c = b.T[::2, ::-1]
+        */
+        s.clear();
+        let vec = vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
+        let layout = Layout::<Ix2>::new(Shape([2, 3]), Stride([2, -3]), 10);
+        println!("{:}", VL(vec, layout));
+
+        /* Python code
+        a = np.arange(15)
+        b = a[2:14].reshape(3, 4)
+        c = b.T[:, ::-1]
+        */
+        s.clear();
+        let vec = vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
+        let layout = Layout::<Ix2>::new(Shape([4, 3]), Stride([1, -4]), 10);
+        println!("{:}", VL(vec, layout));
+
+        /* Python code
+        a = np.arange(15)
+        b = a[2:14].reshape(3, 4)
+        c = b.T[:, ::-1]
+        */
+        s.clear();
+        let vec = vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
+        let layout = Layout::<Ix2>::new(Shape([4, 3]), Stride([1, -4]), 10);
+        println!("{:}", VL(vec, layout));
+
+        s.clear();
+        let vec = (0..1800).collect::<Vec<usize>>();
+        let layout = Layout::<Ix3>::new(Shape([15, 12, 10]), Stride([1, 150, 15]), 0);
+        println!("{:4}", VL(vec, layout));
+    }
 }

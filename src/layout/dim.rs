@@ -18,16 +18,38 @@ pub type IxDyn = IxD;
 pub trait DimBaseAPI: AsMut<[usize]> + AsRef<[usize]> + Debug + Clone {
     type Shape: AsMut<[usize]> + AsRef<[usize]> + Debug + Clone;
     type Stride: AsMut<[isize]> + AsRef<[isize]> + Debug + Clone;
+
+    /// Number of dimension
+    fn ndim(&self) -> usize;
+
+    /// Dynamic or static dimension
+    fn is_dynamic() -> bool;
 }
 
 impl<const N: usize> DimBaseAPI for Ix<N> {
     type Shape = [usize; N];
     type Stride = [isize; N];
+
+    fn ndim(&self) -> usize {
+        N
+    }
+
+    fn is_dynamic() -> bool {
+        false
+    }
 }
 
 impl DimBaseAPI for IxD {
     type Shape = Vec<usize>;
     type Stride = Vec<isize>;
+
+    fn ndim(&self) -> usize {
+        self.len()
+    }
+
+    fn is_dynamic() -> bool {
+        true
+    }
 }
 
 pub trait DimAPI:

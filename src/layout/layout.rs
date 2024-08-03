@@ -1,7 +1,5 @@
 use super::*;
 use crate::{Error, Result};
-use core::fmt::Debug;
-use core::fmt::Write;
 
 /* #region Struct Definitions */
 
@@ -134,11 +132,11 @@ where
     }
 
     pub fn ndim(&self) -> usize {
-        D::ndim(self)
+        <D as DimLayoutAPI>::ndim(self)
     }
 
     pub fn size(&self) -> usize {
-        D::ndim(self)
+        D::size(self)
     }
 
     pub fn is_f_prefer(&self) -> bool {
@@ -464,51 +462,6 @@ impl From<IxD> for Layout<IxD> {
         let shape: Shape<IxD> = Shape(index);
         let stride: Stride<IxD> = shape.stride_contig();
         Layout { shape, stride, offset: 0 }
-    }
-}
-
-/* #endregion */
-
-/* #region Format */
-
-impl<D> Debug for Layout<D>
-where
-    D: DimBaseAPI + DimLayoutAPI,
-{
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        let shape = self.shape.as_ref();
-        let stride = self.stride.as_ref();
-        let offset = self.offset;
-        let is_c_contig = self.is_c_contig();
-        let is_f_contig = self.is_f_contig();
-        let is_c_prefer = self.is_c_prefer();
-        let is_f_prefer = self.is_f_prefer();
-        let mut contig = String::new();
-        if is_c_contig {
-            write!(contig, "C")?;
-        }
-        if is_c_prefer {
-            write!(contig, "c")?;
-        }
-        if is_f_contig {
-            write!(contig, "F")?;
-        }
-        if is_f_prefer {
-            write!(contig, "f")?;
-        }
-        if contig.is_empty() {
-            write!(contig, "Custom")?;
-        }
-        write!(
-            f,
-            "Layout<{}>, shape: {:?}, stride: {:?}, offset: {}, contiguous: {} }}",
-            core::any::type_name::<D>(),
-            shape,
-            stride,
-            offset,
-            contig,
-        )?;
-        Ok(())
     }
 }
 

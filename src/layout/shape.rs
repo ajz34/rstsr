@@ -46,7 +46,7 @@ where
     D: DimShapeAPI,
 {
     pub fn ndim(&self) -> usize {
-        D::ndim(self)
+        <D as DimShapeAPI>::ndim(self)
     }
 
     pub fn size(&self) -> usize {
