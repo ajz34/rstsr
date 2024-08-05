@@ -1,6 +1,6 @@
 use crate::cpu_backend::device::CpuDevice;
 use crate::layout::{DimAPI, Layout};
-use crate::storage::{DeviceAPI, Storage, StorageAPI, StorageFromDeviceAPI};
+use crate::storage::{DeviceAPI, Storage, StorageAPI, StorageCreationAPI};
 use crate::{Result, Tensor};
 use num::Num;
 
@@ -26,7 +26,7 @@ where
     T: Clone,
     D: DimAPI,
     B: DeviceAPI,
-    Storage<T, B>: StorageAPI<DType = T, Device = B> + StorageFromDeviceAPI,
+    Storage<T, B>: StorageAPI<DType = T, Device = B> + StorageCreationAPI,
 {
     type DType = T;
     type Dim = D;
@@ -35,7 +35,7 @@ where
     fn zeros_with_device(layout: impl Into<Layout<D>>, device: B) -> Result<Tensor<T, D, B>> {
         let layout = layout.into();
         let (_, idx_max) = layout.bounds_index()?;
-        let data: Storage<T, B> = StorageFromDeviceAPI::zeros_impl(&device, idx_max).unwrap();
+        let data: Storage<T, B> = StorageCreationAPI::zeros_impl(&device, idx_max).unwrap();
         Tensor::new(data.into(), layout)
     }
 
@@ -45,8 +45,7 @@ where
         device: B,
     ) -> Result<Tensor<T, D, B>> {
         let layout = layout.into();
-        let data: Storage<T, B> =
-            StorageFromDeviceAPI::outof_cpu_vec(&device, vec.to_vec()).unwrap();
+        let data: Storage<T, B> = StorageCreationAPI::outof_cpu_vec(&device, vec.to_vec()).unwrap();
         Tensor::new(data.into(), layout)
     }
 }
