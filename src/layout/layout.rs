@@ -465,6 +465,19 @@ impl From<IxD> for Layout<IxD> {
     }
 }
 
+impl<D> Layout<D>
+where
+    D: DimBaseAPI,
+{
+    pub fn into_dim<T>(self) -> Result<Layout<T>>
+    where
+        T: DimBaseAPI,
+        Layout<D>: TryInto<Layout<T>, Error = Error>,
+    {
+        return self.try_into();
+    }
+}
+
 /* #endregion */
 
 #[cfg(test)]
