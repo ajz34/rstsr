@@ -65,7 +65,7 @@ impl<const N: usize> DimStrideAPI for Ix<N> {
             return false;
         }
         for i in 1..stride.len() {
-            if !((stride[i] > stride[i - 1]) && (stride[i - 1] > 0) && (stride[i] > 0)) {
+            if !((stride[i] >= stride[i - 1]) && (stride[i - 1] >= 0) && (stride[i] > 0)) {
                 return false;
             }
         }
@@ -80,7 +80,7 @@ impl<const N: usize> DimStrideAPI for Ix<N> {
             return false;
         }
         for i in 1..stride.len() {
-            if !((stride[i] < stride[i - 1]) && (stride[i - 1] > 0) && (stride[i] > 0)) {
+            if !((stride[i] <= stride[i - 1]) && (stride[i - 1] >= 0) && (stride[i] > 0)) {
                 return false;
             }
         }

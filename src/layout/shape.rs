@@ -78,7 +78,7 @@ impl<const N: usize> DimShapeAPI for Ix<N> {
     fn stride_f_contig(shape: &Shape<Ix<N>>) -> Stride<Ix<N>> {
         let mut stride = [1; N];
         for i in 1..N {
-            stride[i] = stride[i - 1] * shape[i - 1] as isize;
+            stride[i] = stride[i - 1] * shape[i - 1].max(1) as isize;
         }
         Stride(stride)
     }
@@ -89,7 +89,7 @@ impl<const N: usize> DimShapeAPI for Ix<N> {
             return Stride(stride);
         }
         for i in (0..N - 1).rev() {
-            stride[i] = stride[i + 1] * shape[i + 1] as isize;
+            stride[i] = stride[i + 1] * shape[i + 1].max(1) as isize;
         }
         Stride(stride)
     }

@@ -57,11 +57,38 @@ macro_rules! impl_from_slice {
 
 impl_from_slice!(usize, u8, i8, u16, i16, u32, i32, u64, i64, u128, i128);
 
-impl<T> From<std::ops::Range<T>> for Slice<T>
+impl<T> From<std::ops::Range<T>> for SliceI
 where
     T: Integer + Clone,
+    Slice<T>: Into<SliceI>,
 {
     fn from(range: std::ops::Range<T>) -> Self {
-        Self { start: Some(range.start), stop: Some(range.end), step: None }
+        Slice::<T> { start: Some(range.start), stop: Some(range.end), step: None }.into()
+    }
+}
+
+impl<T> From<std::ops::RangeFrom<T>> for SliceI
+where
+    T: Integer + Clone,
+    Slice<T>: Into<SliceI>,
+{
+    fn from(range: std::ops::RangeFrom<T>) -> Self {
+        Slice::<T> { start: Some(range.start), stop: None, step: None }.into()
+    }
+}
+
+impl<T> From<std::ops::RangeTo<T>> for SliceI
+where
+    T: Integer + Clone,
+    Slice<T>: Into<SliceI>,
+{
+    fn from(range: std::ops::RangeTo<T>) -> Self {
+        Slice::<T> { start: None, stop: Some(range.end), step: None }.into()
+    }
+}
+
+impl From<std::ops::RangeFull> for SliceI {
+    fn from(_: std::ops::RangeFull) -> Self {
+        SliceI { start: None, stop: None, step: None }
     }
 }
