@@ -212,7 +212,7 @@ impl<S, D> Display for TensorBase<S, D>
 where
     S: DataAPI,
     D: DimAPI,
-    S::Data: StorageAPI + StorageToCpuAPI<<S::Data as StorageAPI>::DType>,
+    S::Data: StorageAPI + StorageToCpuAPI,
     <S::Data as StorageAPI>::DType: Clone + Display,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -228,8 +228,9 @@ impl<S, D> Debug for TensorBase<S, D>
 where
     S: DataAPI,
     D: DimAPI,
-    S::Data: StorageAPI + StorageToCpuAPI<<S::Data as StorageAPI>::DType>,
+    S::Data: StorageAPI + StorageToCpuAPI,
     <S::Data as StorageAPI>::DType: Clone + Display,
+    <S::Data as StorageAPI>::Device: Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "=== Debug Tensor Print ===")?;

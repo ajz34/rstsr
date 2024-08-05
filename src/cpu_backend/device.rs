@@ -1,7 +1,4 @@
-use crate::storage::{
-    DeviceAPI, DeviceBaseAPI, DeviceToStorageAPI, DeviceWithDTypeAPI, Storage, StorageAPI,
-    StorageToCpuAPI,
-};
+use crate::storage::{DeviceAPI, Storage, StorageAPI, StorageFromDeviceAPI, StorageToCpuAPI};
 use crate::Result;
 use core::fmt::Debug;
 use num::Num;
@@ -9,17 +6,10 @@ use num::Num;
 #[derive(Clone, Debug)]
 pub struct CpuDevice;
 
-impl DeviceBaseAPI for CpuDevice {
+impl DeviceAPI for CpuDevice {
     fn same_device(&self, _other: &Self) -> bool {
         true
     }
-}
-
-impl<T> DeviceWithDTypeAPI<T> for CpuDevice
-where
-    T: Clone,
-{
-    type RawVec = Vec<T>;
 }
 
 impl<T> StorageAPI for Storage<T, CpuDevice>
@@ -27,7 +17,8 @@ where
     T: Clone,
 {
     type DType = T;
-    type Backend = CpuDevice;
+    type Device = CpuDevice;
+    type RawVec = Vec<T>;
 
     fn device(&self) -> CpuDevice {
         self.device.clone()
@@ -50,49 +41,49 @@ where
     }
 }
 
-impl<T> DeviceToStorageAPI<T> for CpuDevice
+impl<T> StorageFromDeviceAPI for Storage<T, CpuDevice>
 where
     T: Clone + Num,
 {
-    fn zeros_impl(&self, len: usize) -> Result<Storage<T, CpuDevice>> {
+    fn zeros_impl(device: &CpuDevice, len: usize) -> Result<Storage<T, CpuDevice>> {
         let rawvec = vec![T::zero(); len];
-        Ok(Storage::<T, CpuDevice> { rawvec, device: self.clone() })
+        Ok(Storage::<T, CpuDevice> { rawvec, device: device.clone() })
     }
 
-    fn ones_impl(&self, len: usize) -> Result<Storage<T, CpuDevice>> {
+    fn ones_impl(device: &CpuDevice, len: usize) -> Result<Storage<T, CpuDevice>> {
         let rawvec = vec![T::one(); len];
-        Ok(Storage::<T, CpuDevice> { rawvec, device: self.clone() })
+        Ok(Storage::<T, CpuDevice> { rawvec, device: device.clone() })
     }
 
-    fn arange_impl(&self, len: usize) -> Result<Storage<T, CpuDevice>> {
+    fn arange_impl(device: &CpuDevice, len: usize) -> Result<Storage<T, CpuDevice>> {
         let mut rawvec = vec![];
         let mut v = T::zero();
         for _ in 0..len {
             rawvec.push(v.clone());
             v = v + T::one();
         }
-        Ok(Storage::<T, CpuDevice> { rawvec, device: self.clone() })
+        Ok(Storage::<T, CpuDevice> { rawvec, device: device.clone() })
     }
 
-    unsafe fn empty_impl(&self, len: usize) -> Result<Storage<T, CpuDevice>> {
+    unsafe fn empty_impl(device: &CpuDevice, len: usize) -> Result<Storage<T, CpuDevice>> {
         let mut rawvec: Vec<T> = Vec::with_capacity(len);
         unsafe {
             rawvec.set_len(len);
         }
-        Ok(Storage::<T, CpuDevice> { rawvec, device: self.clone() })
+        Ok(Storage::<T, CpuDevice> { rawvec, device: device.clone() })
     }
 
-    fn from_cpu_vec(&self, vec: &Vec<T>) -> Result<Storage<T, CpuDevice>> {
+    fn from_cpu_vec(device: &CpuDevice, vec: &Vec<T>) -> Result<Storage<T, CpuDevice>> {
         let rawvec = vec.clone();
-        Ok(Storage::<T, CpuDevice> { rawvec, device: self.clone() })
+        Ok(Storage::<T, CpuDevice> { rawvec, device: device.clone() })
     }
 
-    fn outof_cpu_vec(&self, vec: Vec<T>) -> Result<Storage<T, CpuDevice>> {
-        Ok(Storage::<T, CpuDevice> { rawvec: vec, device: self.clone() })
+    fn outof_cpu_vec(device: &CpuDevice, vec: Vec<T>) -> Result<Storage<T, CpuDevice>> {
+        Ok(Storage::<T, CpuDevice> { rawvec: vec, device: device.clone() })
     }
 }
 
-impl<T> StorageToCpuAPI<T> for Storage<T, CpuDevice>
+impl<T> StorageToCpuAPI for Storage<T, CpuDevice>
 where
     T: Clone,
 {
@@ -104,8 +95,6 @@ where
         Ok(self.rawvec)
     }
 }
-
-impl<T> DeviceAPI<T> for CpuDevice where T: Clone + Num {}
 
 #[cfg(test)]
 mod tests {

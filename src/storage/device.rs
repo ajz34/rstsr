@@ -2,67 +2,41 @@ use crate::cpu_backend::device::CpuDevice;
 use crate::Result;
 use core::fmt::Debug;
 
-pub trait DeviceBaseAPI: Clone + Debug {
+pub trait DeviceAPI: Clone + Debug {
     fn same_device(&self, other: &Self) -> bool;
 }
 
-pub trait DeviceWithDTypeAPI<T>
-where
-    T: Clone,
-    Self: DeviceBaseAPI,
-{
-    type RawVec;
-}
-
-#[derive(Debug, Clone)]
 pub struct Storage<T, B = CpuDevice>
 where
-    T: Clone,
-    B: DeviceWithDTypeAPI<T>,
+    Self: StorageAPI<DType = T, Device = B>,
 {
-    pub(crate) rawvec: B::RawVec,
-    pub(crate) device: B,
+    pub(crate) rawvec: <Self as StorageAPI>::RawVec,
+    pub(crate) device: <Self as StorageAPI>::Device,
 }
 
-pub trait StorageAPI {
-    type DType: Clone;
-    type Backend: DeviceWithDTypeAPI<Self::DType>;
-    fn device(&self) -> Self::Backend;
-    fn to_rawvec(&self) -> <Self::Backend as DeviceWithDTypeAPI<Self::DType>>::RawVec;
-    fn into_rawvec(self) -> <Self::Backend as DeviceWithDTypeAPI<Self::DType>>::RawVec;
-    fn new(
-        vector: <Self::Backend as DeviceWithDTypeAPI<Self::DType>>::RawVec,
-        device: Self::Backend,
-    ) -> Self;
+pub trait StorageAPI: Sized {
+    type DType;
+    type Device;
+    type RawVec;
+    fn device(&self) -> Self::Device;
+    fn to_rawvec(&self) -> Self::RawVec;
+    fn into_rawvec(self) -> Self::RawVec;
+    fn new(vector: Self::RawVec, device: Self::Device) -> Self;
     fn len(&self) -> usize;
 }
 
-pub trait DeviceToStorageAPI<T>
-where
-    T: Clone,
-    Self: DeviceBaseAPI + DeviceWithDTypeAPI<T>,
-{
-    fn zeros_impl(&self, len: usize) -> Result<Storage<T, Self>>;
-    fn ones_impl(&self, len: usize) -> Result<Storage<T, Self>>;
-    fn arange_impl(&self, len: usize) -> Result<Storage<T, Self>>;
-    unsafe fn empty_impl(&self, len: usize) -> Result<Storage<T, Self>>;
-    fn outof_cpu_vec(&self, vec: Vec<T>) -> Result<Storage<T, Self>>;
-    fn from_cpu_vec(&self, vec: &Vec<T>) -> Result<Storage<T, Self>>;
+pub trait StorageFromDeviceAPI: StorageAPI {
+    fn zeros_impl(device: &Self::Device, len: usize) -> Result<Self>;
+    fn ones_impl(device: &Self::Device, len: usize) -> Result<Self>;
+    fn arange_impl(device: &Self::Device, len: usize) -> Result<Self>;
+    unsafe fn empty_impl(device: &Self::Device, len: usize) -> Result<Self>;
+    fn outof_cpu_vec(device: &Self::Device, vec: Vec<Self::DType>) -> Result<Self>;
+    fn from_cpu_vec(device: &Self::Device, vec: &Vec<Self::DType>) -> Result<Self>;
 }
 
-pub trait StorageToCpuAPI<T>
-where
-    T: Clone,
-{
-    fn to_cpu_vec(&self) -> Result<Vec<T>>;
-    fn into_cpu_vec(self) -> Result<Vec<T>>;
-}
-
-pub trait DeviceAPI<T>
-where
-    T: Clone,
-    Self: DeviceBaseAPI + DeviceWithDTypeAPI<T>,
-{
+pub trait StorageToCpuAPI: StorageAPI {
+    fn to_cpu_vec(&self) -> Result<Vec<Self::DType>>;
+    fn into_cpu_vec(self) -> Result<Vec<Self::DType>>;
 }
 
 /// Unique identifier for cuda devices.

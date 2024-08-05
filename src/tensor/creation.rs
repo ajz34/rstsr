@@ -1,33 +1,32 @@
-use num::Num;
-
 use crate::cpu_backend::device::CpuDevice;
 use crate::layout::{DimAPI, Layout};
-use crate::storage::{DeviceAPI, DeviceToStorageAPI, Storage, StorageAPI};
+use crate::storage::{DeviceAPI, Storage, StorageAPI, StorageFromDeviceAPI};
 use crate::{Result, Tensor};
+use num::Num;
 
-pub trait TensorCreationWithDeviceAPI {
-    type DType: Clone;
+pub trait TensorCreationWithDeviceAPI: Sized {
+    type DType;
     type Dim: DimAPI;
-    type Device: DeviceAPI<Self::DType>;
+    type Device;
 
     fn zeros_with_device(
         layout: impl Into<Layout<Self::Dim>>,
         device: Self::Device,
-    ) -> Result<Tensor<Self::DType, Self::Dim, Self::Device>>;
+    ) -> Result<Self>;
 
     fn from_shape_with_device(
         layout: impl Into<Layout<Self::Dim>>,
         vec: &[Self::DType],
         device: Self::Device,
-    ) -> Result<Tensor<Self::DType, Self::Dim, Self::Device>>;
+    ) -> Result<Self>;
 }
 
 impl<T, D, B> TensorCreationWithDeviceAPI for Tensor<T, D, B>
 where
     T: Clone,
     D: DimAPI,
-    B: DeviceAPI<T> + DeviceToStorageAPI<T>,
-    Storage<T, B>: StorageAPI,
+    B: DeviceAPI,
+    Storage<T, B>: StorageAPI<DType = T, Device = B> + StorageFromDeviceAPI,
 {
     type DType = T;
     type Dim = D;
@@ -36,7 +35,7 @@ where
     fn zeros_with_device(layout: impl Into<Layout<D>>, device: B) -> Result<Tensor<T, D, B>> {
         let layout = layout.into();
         let (_, idx_max) = layout.bounds_index()?;
-        let data = device.zeros_impl(idx_max).unwrap();
+        let data: Storage<T, B> = StorageFromDeviceAPI::zeros_impl(&device, idx_max).unwrap();
         Tensor::new(data.into(), layout)
     }
 
@@ -46,25 +45,21 @@ where
         device: B,
     ) -> Result<Tensor<T, D, B>> {
         let layout = layout.into();
-        let data = device.outof_cpu_vec(vec.to_vec()).unwrap();
+        let data: Storage<T, B> =
+            StorageFromDeviceAPI::outof_cpu_vec(&device, vec.to_vec()).unwrap();
         Tensor::new(data.into(), layout)
     }
 }
 
-pub trait TensorCreationCpuAPI {
-    type DType: Clone + Num;
+pub trait TensorCreationCpuAPI: Sized {
+    type DType;
     type Dim: DimAPI;
 
-    fn zeros(
-        layout: impl Into<Layout<Self::Dim>>,
-    ) -> Result<Tensor<Self::DType, Self::Dim, CpuDevice>>;
-    fn from_shape(
-        layout: impl Into<Layout<Self::Dim>>,
-        vec: &[Self::DType],
-    ) -> Result<Tensor<Self::DType, Self::Dim, CpuDevice>>;
+    fn zeros(layout: impl Into<Layout<Self::Dim>>) -> Result<Self>;
+    fn from_shape(layout: impl Into<Layout<Self::Dim>>, vec: &[Self::DType]) -> Result<Self>;
 }
 
-impl<D, T> TensorCreationCpuAPI for Tensor<T, D, CpuDevice>
+impl<T, D> TensorCreationCpuAPI for Tensor<T, D, CpuDevice>
 where
     T: Clone + Num,
     D: DimAPI,
