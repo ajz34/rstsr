@@ -6,6 +6,7 @@ pub trait DeviceAPI: Clone + Debug {
     fn same_device(&self, other: &Self) -> bool;
 }
 
+#[derive(Debug, Clone)]
 pub struct Storage<T, B = CpuDevice>
 where
     Self: StorageAPI<DType = T, Device = B>,
@@ -17,7 +18,7 @@ where
 pub trait StorageAPI: Sized {
     type DType;
     type Device;
-    type RawVec;
+    type RawVec: Clone + Debug;
     fn device(&self) -> Self::Device;
     fn to_rawvec(&self) -> Self::RawVec;
     fn into_rawvec(self) -> Self::RawVec;

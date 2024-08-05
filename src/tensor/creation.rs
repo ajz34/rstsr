@@ -2,9 +2,10 @@ use crate::cpu_backend::device::CpuDevice;
 use crate::layout::{DimAPI, Layout};
 use crate::storage::{DeviceAPI, Storage, StorageAPI, StorageCreationAPI};
 use crate::{Result, Tensor};
+use core::fmt::Debug;
 use num::Num;
 
-pub trait TensorCreationWithDeviceAPI: Sized {
+pub trait TensorCreationAPI: Sized {
     type DType;
     type Dim: DimAPI;
     type Device;
@@ -21,7 +22,7 @@ pub trait TensorCreationWithDeviceAPI: Sized {
     ) -> Result<Self>;
 }
 
-impl<T, D, B> TensorCreationWithDeviceAPI for Tensor<T, D, B>
+impl<T, D, B> TensorCreationAPI for Tensor<T, D, B>
 where
     T: Clone,
     D: DimAPI,
@@ -60,7 +61,7 @@ pub trait TensorCreationCpuAPI: Sized {
 
 impl<T, D> TensorCreationCpuAPI for Tensor<T, D, CpuDevice>
 where
-    T: Clone + Num,
+    T: Clone + Num + Debug,
     D: DimAPI,
 {
     type DType = T;

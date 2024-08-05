@@ -13,7 +13,7 @@ impl DeviceAPI for CpuDevice {
 
 impl<T> StorageAPI for Storage<T, CpuDevice>
 where
-    T: Clone,
+    T: Clone + Debug,
 {
     type DType = T;
     type Device = CpuDevice;
@@ -42,7 +42,7 @@ where
 
 impl<T> StorageToCpuAPI for Storage<T, CpuDevice>
 where
-    T: Clone,
+    T: Clone + Debug,
 {
     fn to_cpu_vec(&self) -> Result<Vec<T>> {
         Ok(self.rawvec.clone())
