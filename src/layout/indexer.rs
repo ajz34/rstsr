@@ -152,7 +152,7 @@ pub trait IndexerDynamic: IndexerPreserve {
 
     /// Insert dimension after, with shape 1. Number of dimension will increase
     /// by 1.
-    fn dim_insert(&self, dim: usize) -> Result<Layout<IxD>>;
+    fn dim_insert(&self, dim: isize) -> Result<Layout<IxD>>;
 
     /// Index tensor by a list of indexers.
     fn dim_slice(&self, indexers: &[Indexer]) -> Result<Layout<IxD>>;
@@ -202,11 +202,12 @@ where
         return Ok(Layout::<IxD>::new(Shape(shape_new), Stride(stride_new), offset));
     }
 
-    fn dim_insert(&self, dim: usize) -> Result<Layout<IxD>> {
+    fn dim_insert(&self, dim: isize) -> Result<Layout<IxD>> {
         // dimension check
-        if dim > self.ndim() {
+        if dim > self.ndim() as isize || dim < -(self.ndim() as isize - 1) {
             panic!("Index out of bound: index {}, shape {}", dim, self.ndim());
         }
+        let dim = if dim < 0 { self.ndim() as isize + dim + 1 } else { dim } as usize;
 
         // get essential information
         let is_f_prefer = self.is_f_prefer();
@@ -311,7 +312,7 @@ where
                     layout = layout.dim_select(cur_dim as usize, *index)?;
                 },
                 Indexer::Insert => {
-                    layout = layout.dim_insert(cur_dim as usize)?;
+                    layout = layout.dim_insert(cur_dim)?;
                 },
                 _ => {
                     return Err(Error::Msg("Invalid indexer found.".to_string()));

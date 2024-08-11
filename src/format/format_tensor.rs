@@ -240,6 +240,8 @@ where
         writeln!(f)?;
         Debug::fmt(&self.layout(), f)?;
         writeln!(f)?;
+        let self_type = std::any::type_name::<Self>();
+        writeln!(f, "Type: {}", self_type)?;
         writeln!(f, "===========================")
     }
 }
@@ -248,6 +250,7 @@ where
 mod playground {
     use super::*;
 
+    #[derive(Debug)]
     struct VL<T, D>(Vec<T>, Layout<D>)
     where
         T: Clone + Display,
@@ -274,7 +277,7 @@ mod playground {
         s.clear();
         let vec = vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
         let layout: Layout<_> = [].into();
-        println!("{:}", VL(vec, layout));
+        println!("{:?}", VL(vec, layout));
 
         s.clear();
         let vec = vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];

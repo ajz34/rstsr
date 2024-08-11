@@ -28,6 +28,9 @@ pub enum Error {
     #[error(transparent)]
     TryFromIntError(#[from] core::num::TryFromIntError),
 
+    #[error(transparent)]
+    Infallible(#[from] core::convert::Infallible),
+
     #[error("Error with message: {0:?}")]
     Msg(String),
     /* #endregion */

@@ -39,7 +39,7 @@ where
     /// Evenly spaced values within the half-open interval `[start, stop)` as a
     /// one-dimensional array.
     ///
-    /// ## See also
+    /// # See also
     ///
     /// - [`Tensor::arange_int_with_device`] for simplified arange function,
     ///   where step is of size 1.
@@ -61,7 +61,7 @@ where
     /// Note that `int` here means input parameters is integer, not the output
     /// type.
     ///
-    /// ## See also
+    /// # See also
     ///
     /// - [`Tensor::arange_with_device`] for floating-point numbers and arbitary
     ///   start, stop, step.
@@ -82,7 +82,7 @@ where
     /// where `n = 0` will return an empty array, and `n = 1` will return an
     /// array with starting value.
     ///
-    /// ## See also
+    /// # See also
     ///
     /// - [numpy.linspace](https://numpy.org/doc/stable/reference/generated/numpy.linspace.html)
     /// - [Python array API standard: `linspace`](https://data-apis.org/array-api/2023.12/API_specification/generated/array_api.linspace.html)
@@ -105,11 +105,11 @@ where
 {
     /// Uninitialized tensor having a specified shape.
     ///
-    /// ## Safety
+    /// # Safety
     ///
     /// This function is unsafe because it creates a tensor with uninitialized.
     ///
-    /// ## See also
+    /// # See also
     ///
     /// - [`Tensor::zeros_with_device`] for creating a tensor with zeros.
     /// - [Python array API standard: `empty`](https://data-apis.org/array-api/2023.12/API_specification/generated/array_api.empty.html)
@@ -122,11 +122,11 @@ where
 
     /// Uninitialized tensor with the same shape as an input tensor.
     ///
-    /// ## Safety
+    /// # Safety
     ///
     /// This function is unsafe because it creates a tensor with uninitialized.
     ///
-    /// ## See also
+    /// # See also
     ///
     /// - [`Tensor::empty_with_device`]
     /// - [`Tensor::zeros_with_device`] for creating a tensor with zeros.
@@ -135,15 +135,17 @@ where
         tensor: &TensorBase<impl DataAPI<Data = Storage<T, B>>, D>,
         device: B,
     ) -> Tensor<T, D, B> {
-        let layout = tensor.layout().clone();
-        let (_, idx_max) = layout.bounds_index().unwrap();
+        let shape = tensor.layout().shape();
+        let stride = shape.stride_contig();
+        let layout = Layout::new(shape, stride, 0);
+        let idx_max = layout.size();
         let data: Storage<T, B> = StorageCreationAPI::empty_impl(&device, idx_max).unwrap();
-        Tensor::new(data.into(), layout).unwrap()
+        Tensor::new_unchecked(data.into(), layout)
     }
 
     /// New tensor having a specified shape and filled with given value.
     ///
-    /// ## See also
+    /// # See also
     ///
     /// - [Python array API standard: `full`](https://data-apis.org/array-api/2023.12/API_specification/generated/array_api.full.html)
     pub fn full_with_device(
@@ -161,7 +163,7 @@ where
     /// New tensor filled with given value and having the same shape as an input
     /// tensor.
     ///
-    /// ## See also
+    /// # See also
     ///
     /// - [`Tensor::full_with_device`] for creating a tensor with the same shape
     ///   as an input tensor.
@@ -171,16 +173,18 @@ where
         fill_value: T,
         device: B,
     ) -> Tensor<T, D, B> {
-        let layout = tensor.layout().clone();
-        let (_, idx_max) = layout.bounds_index().unwrap();
+        let shape = tensor.layout().shape();
+        let stride = shape.stride_contig();
+        let layout = Layout::new(shape, stride, 0);
+        let idx_max = layout.size();
         let data: Storage<T, B> =
             StorageCreationAPI::full_impl(&device, idx_max, fill_value).unwrap();
-        Tensor::new(data.into(), layout).unwrap()
+        unsafe { Tensor::new_unchecked(data.into(), layout) }
     }
 
     /// New tensor filled with ones and having a specified shape.
     ///
-    /// ## See also
+    /// # See also
     ///
     /// - [`Tensor::zeros_with_device`] for creating a tensor with zeros.
     /// - [Python array API standard: `ones`](https://data-apis.org/array-api/2023.12/API_specification/generated/array_api.ones.html)
@@ -194,7 +198,7 @@ where
     /// New tensor filled with ones and having the same shape as an input
     /// tensor.
     ///
-    /// ## See also
+    /// # See also
     ///
     /// - [`Tensor::ones_with_device`] for creating a tensor with ones.
     /// - [Python array API standard: `ones_like`](https://data-apis.org/array-api/2023.12/API_specification/generated/array_api.ones_like.html)
@@ -202,15 +206,17 @@ where
         tensor: &TensorBase<impl DataAPI<Data = Storage<T, B>>, D>,
         device: B,
     ) -> Tensor<T, D, B> {
-        let layout = tensor.layout().clone();
-        let (_, idx_max) = layout.bounds_index().unwrap();
+        let shape = tensor.layout().shape();
+        let stride = shape.stride_contig();
+        let layout = Layout::new(shape, stride, 0);
+        let idx_max = layout.size();
         let data: Storage<T, B> = StorageCreationAPI::ones_impl(&device, idx_max).unwrap();
-        Tensor::new(data.into(), layout).unwrap()
+        unsafe { Tensor::new_unchecked(data.into(), layout) }
     }
 
     /// New tensor filled with zeros and having a specified shape.
     ///
-    /// ## See also
+    /// # See also
     ///
     /// - [`Tensor::empty_with_device`] for creating a tensor with
     ///   uninitialized.
@@ -225,7 +231,7 @@ where
     /// New tensor filled with zeros and having the same shape as an input
     /// tensor.
     ///
-    /// ## See also
+    /// # See also
     ///
     /// - [`Tensor::zeros_with_device`] for creating a tensor with zeros.
     /// - [Python array API standard: `zeros_like`](https://data-apis.org/array-api/2023.12/API_specification/generated/array_api.zeros_like.html)
@@ -233,10 +239,12 @@ where
         tensor: &TensorBase<impl DataAPI<Data = Storage<T, B>>, D>,
         device: B,
     ) -> Tensor<T, D, B> {
-        let layout = tensor.layout().clone();
-        let (_, idx_max) = layout.bounds_index().unwrap();
+        let shape = tensor.layout().shape();
+        let stride = shape.stride_contig();
+        let layout = Layout::new(shape, stride, 0);
+        let idx_max = layout.size();
         let data: Storage<T, B> = StorageCreationAPI::zeros_impl(&device, idx_max).unwrap();
-        Tensor::new(data.into(), layout).unwrap()
+        unsafe { Tensor::new_unchecked(data.into(), layout) }
     }
 }
 

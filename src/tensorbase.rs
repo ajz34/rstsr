@@ -1,6 +1,6 @@
 use crate::cpu_backend::device::CpuDevice;
 use crate::layout::{DimAPI, Layout};
-use crate::storage::{DataAPI, DataOwned, Storage, StorageBaseAPI};
+use crate::storage::{DataAPI, DataOwned, DataRef, DataRefMut, Storage, StorageBaseAPI};
 use crate::{Error, Result};
 
 #[derive(Clone)]
@@ -12,6 +12,7 @@ where
     layout: Layout<D>,
 }
 
+/// Basic definitions for tensor object.
 impl<S, D> TensorBase<S, D>
 where
     D: DimAPI,
@@ -55,9 +56,39 @@ where
     pub fn layout(&self) -> &Layout<D> {
         &self.layout
     }
+
+    pub fn shape(&self) -> &[usize] {
+        self.layout().shape_ref().as_ref()
+    }
+
+    pub fn raw_shape(&self) -> D::Shape {
+        self.layout().shape().0
+    }
+
+    pub fn stride(&self) -> &[isize] {
+        self.layout().stride_ref().as_ref()
+    }
+
+    pub fn raw_stride(&self) -> D::Stride {
+        self.layout().stride().0
+    }
+
+    pub fn offset(&self) -> usize {
+        self.layout().offset()
+    }
+
+    pub fn ndim(&self) -> usize {
+        self.layout().ndim()
+    }
+
+    pub fn size(&self) -> usize {
+        self.layout().size()
+    }
 }
 
 pub type Tensor<T, D, B = CpuDevice> = TensorBase<DataOwned<Storage<T, B>>, D>;
+pub type TensorView<'a, T, D, B = CpuDevice> = TensorBase<DataRef<'a, Storage<T, B>>, D>;
+pub type TensorViewMut<'a, T, D, B = CpuDevice> = TensorBase<DataRefMut<'a, Storage<T, B>>, D>;
 
 #[cfg(test)]
 mod test {
