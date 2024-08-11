@@ -44,8 +44,8 @@ where
         Ok(Storage::<T, CpuDevice> { rawvec, device: device.clone() })
     }
 
-    fn from_cpu_vec(device: &CpuDevice, vec: &Vec<T>) -> Result<Storage<T, CpuDevice>> {
-        let rawvec = vec.clone();
+    fn from_cpu_vec(device: &CpuDevice, vec: &[T]) -> Result<Storage<T, CpuDevice>> {
+        let rawvec = vec.to_vec();
         Ok(Storage::<T, CpuDevice> { rawvec, device: device.clone() })
     }
 

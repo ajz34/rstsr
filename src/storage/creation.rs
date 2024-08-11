@@ -10,7 +10,7 @@ pub trait StorageCreationAPI: StorageAPI {
     fn full_impl(device: &Self::Device, len: usize, fill: Self::DType) -> Result<Self>;
     fn arange_int_impl(device: &Self::Device, len: usize) -> Result<Self>;
     fn outof_cpu_vec(device: &Self::Device, vec: Vec<Self::DType>) -> Result<Self>;
-    fn from_cpu_vec(device: &Self::Device, vec: &Vec<Self::DType>) -> Result<Self>;
+    fn from_cpu_vec(device: &Self::Device, vec: &[Self::DType]) -> Result<Self>;
 }
 
 pub trait StorageCreationComplexFloatAPI: StorageCreationAPI

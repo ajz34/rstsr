@@ -281,9 +281,7 @@ where
         let mut pos = layout.offset as isize;
         let index = index.as_ref();
         let stride = layout.stride.as_ref();
-        for i in 0..layout.ndim() {
-            pos += stride[i] * index[i] as isize;
-        }
+        stride.iter().zip(index.iter()).for_each(|(&s, &i)| pos += s * i as isize);
         return pos as usize;
     }
 
