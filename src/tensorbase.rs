@@ -1,6 +1,6 @@
 use crate::cpu_backend::device::CpuDevice;
 use crate::layout::{DimAPI, Layout};
-use crate::storage::{DataAPI, DataOwned, Storage, StorageAPI};
+use crate::storage::{DataAPI, DataOwned, Storage, StorageBaseAPI};
 use crate::{Error, Result};
 
 #[derive(Clone)]
@@ -29,7 +29,7 @@ where
     pub fn new(data: S, layout: Layout<D>) -> Result<Self>
     where
         S: DataAPI,
-        S::Data: StorageAPI,
+        S::Data: StorageBaseAPI,
         D: DimAPI,
     {
         // check stride sanity

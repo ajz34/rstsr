@@ -1,4 +1,4 @@
-use crate::storage::{DataAPI, StorageAPI, StorageToCpuAPI};
+use crate::storage::{DataAPI, StorageBaseAPI, StorageToCpuAPI};
 use crate::TensorBase;
 use crate::{DimAPI, Layout};
 use core::fmt::{Debug, Display, Formatter, Write};
@@ -212,8 +212,8 @@ impl<S, D> Display for TensorBase<S, D>
 where
     S: DataAPI,
     D: DimAPI,
-    S::Data: StorageAPI + StorageToCpuAPI,
-    <S::Data as StorageAPI>::DType: Clone + Display,
+    S::Data: StorageBaseAPI + StorageToCpuAPI,
+    <S::Data as StorageBaseAPI>::DType: Clone + Display,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let vec = self.data().as_storage().to_cpu_vec().unwrap();
@@ -228,9 +228,9 @@ impl<S, D> Debug for TensorBase<S, D>
 where
     S: DataAPI,
     D: DimAPI,
-    S::Data: StorageAPI + StorageToCpuAPI,
-    <S::Data as StorageAPI>::DType: Clone + Display,
-    <S::Data as StorageAPI>::Device: Debug,
+    S::Data: StorageBaseAPI + StorageToCpuAPI,
+    <S::Data as StorageBaseAPI>::DType: Clone + Display,
+    <S::Data as StorageBaseAPI>::Device: Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "=== Debug Tensor Print ===")?;

@@ -14,7 +14,7 @@ pub enum Indexer {
     /// applied.
     Insert,
     /// Expand dimensions. Currently not applied.
-    Eclipse,
+    Ellipsis,
 }
 
 impl<R> From<R> for Indexer
@@ -248,20 +248,20 @@ where
         // counter for indexer
         let mut counter_slice = 0;
         let mut counter_select = 0;
-        let mut idx_eclipse = None;
+        let mut idx_ellipsis = None;
         for (n, indexer) in indexers.iter().enumerate() {
             match indexer {
                 Indexer::Slice(_) => counter_slice += 1,
                 Indexer::Select(_) => counter_select += 1,
-                Indexer::Eclipse => match idx_eclipse {
+                Indexer::Ellipsis => match idx_ellipsis {
                     Some(_) => {
                         return Err(Error::InvalidInteger {
                             value: n as isize,
-                            msg: "Eclipse-type indexer could not exceed 1.".to_string(),
+                            msg: "Ellipsis-type indexer could not exceed 1.".to_string(),
                         });
                     },
                     None => {
-                        idx_eclipse = Some(n);
+                        idx_ellipsis = Some(n);
                     },
                 },
                 _ => {},
@@ -278,18 +278,18 @@ where
             });
         }
 
-        // insert eclipse by slice(:) anyway, default append at last
-        let n_eclipse = self.ndim() - counter_slice - counter_select;
-        if idx_eclipse.is_some() && n_eclipse == 0 {
-            indexers.remove(idx_eclipse.unwrap());
+        // insert Ellipsis by slice(:) anyway, default append at last
+        let n_ellipsis = self.ndim() - counter_slice - counter_select;
+        if idx_ellipsis.is_some() && n_ellipsis == 0 {
+            indexers.remove(idx_ellipsis.unwrap());
         } else {
-            let idx_eclipse = idx_eclipse.unwrap_or(indexers.len());
-            if n_eclipse > 0 {
-                indexers[idx_eclipse] = SliceI { start: None, stop: None, step: None }.into();
-                if n_eclipse > 1 {
-                    for _ in 1..n_eclipse {
+            let idx_ellipsis = idx_ellipsis.unwrap_or(indexers.len());
+            if n_ellipsis > 0 {
+                indexers[idx_ellipsis] = SliceI { start: None, stop: None, step: None }.into();
+                if n_ellipsis > 1 {
+                    for _ in 1..n_ellipsis {
                         indexers.insert(
-                            idx_eclipse,
+                            idx_ellipsis,
                             SliceI { start: None, stop: None, step: None }.into(),
                         );
                     }
@@ -378,7 +378,7 @@ mod tests {
         let l3 = l.dim_insert(1).unwrap();
         println!("{:?}", l3);
 
-        let l4 = l.dim_slice(s![Indexer::Eclipse, 1..3, None, 2]).unwrap();
+        let l4 = l.dim_slice(s![Indexer::Ellipsis, 1..3, None, 2]).unwrap();
         let l4 = l4.into_dim::<Ix3>().unwrap();
         println!("{:?}", l4);
     }

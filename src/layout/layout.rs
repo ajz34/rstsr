@@ -1,3 +1,5 @@
+//! Layout of tensor.
+
 use super::*;
 use crate::{Error, Result};
 

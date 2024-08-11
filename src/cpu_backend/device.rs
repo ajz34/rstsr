@@ -11,7 +11,7 @@ impl DeviceAPI for CpuDevice {
     }
 }
 
-impl<T> StorageAPI for Storage<T, CpuDevice>
+impl<T> StorageBaseAPI for Storage<T, CpuDevice>
 where
     T: Clone + Debug,
 {

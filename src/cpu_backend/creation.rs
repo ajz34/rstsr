@@ -52,23 +52,21 @@ where
     fn outof_cpu_vec(device: &CpuDevice, vec: Vec<T>) -> Result<Storage<T, CpuDevice>> {
         Ok(Storage::<T, CpuDevice> { rawvec: vec, device: device.clone() })
     }
-}
 
-impl<T> StorageCreationComplexFloatAPI for Storage<T, CpuDevice>
-where
-    T: Clone + Debug + ComplexFloat,
-{
     fn linspace_impl(
-        device: &Self::Device,
-        start: Self::DType,
-        end: Self::DType,
+        device: &CpuDevice,
+        start: T,
+        end: T,
         n: usize,
-    ) -> Result<Self> {
-        if n <= 1 {
-            return Err(Error::InvalidInteger {
-                value: n as isize,
-                msg: "linspace requires at least two values.".to_string(),
-            });
+    ) -> Result<Storage<T, CpuDevice>>
+    where
+        T: ComplexFloat,
+    {
+        // handle special cases
+        if n == 0 {
+            return Ok(Storage::<T, CpuDevice> { rawvec: vec![], device: device.clone() });
+        } else if n == 1 {
+            return Ok(Storage::<T, CpuDevice> { rawvec: vec![start], device: device.clone() });
         }
 
         let mut rawvec = vec![];
@@ -80,18 +78,11 @@ where
         }
         Ok(Storage::<T, CpuDevice> { rawvec, device: device.clone() })
     }
-}
 
-impl<T> StorageCreationFloatAPI for Storage<T, CpuDevice>
-where
-    T: Clone + Debug + Float,
-{
-    fn arange_float_impl(
-        device: &CpuDevice,
-        start: T,
-        end: T,
-        step: T,
-    ) -> Result<Storage<T, CpuDevice>> {
+    fn arange_impl(device: &CpuDevice, start: T, end: T, step: T) -> Result<Storage<T, CpuDevice>>
+    where
+        T: Float,
+    {
         if step == T::zero() {
             return Err(Error::InvalidValue { msg: "step must be non-zero.".to_string() });
         }
@@ -102,7 +93,10 @@ where
         }
         let n = ((end - start) / step).ceil().to_usize().unwrap();
 
-        let rawvec = (0..n).map(|i| start + step * T::from(i).unwrap()).collect();
+        let mut rawvec: Vec<T> = (0..n).map(|i| start + step * T::from(i).unwrap()).collect();
+        if rawvec.last().is_some_and(|&v| v == end) {
+            rawvec.pop();
+        }
         Ok(Storage::<T, CpuDevice> { rawvec, device: device.clone() })
     }
 }
@@ -137,7 +131,7 @@ mod test {
         )
         .unwrap();
         println!("{:?}", storage);
-        let storage = Storage::<f32, CpuDevice>::arange_float_impl(&device, 0.0, 1.0, 0.1).unwrap();
+        let storage = Storage::<f32, CpuDevice>::arange_impl(&device, 0.0, 1.0, 0.1).unwrap();
         println!("{:?}", storage);
     }
 }

@@ -9,15 +9,15 @@ pub trait DeviceAPI: Clone + Debug {
 #[derive(Debug, Clone)]
 pub struct Storage<T, B = CpuDevice>
 where
-    Self: StorageAPI<DType = T, Device = B>,
+    Self: StorageBaseAPI,
 {
-    pub(crate) rawvec: <Self as StorageAPI>::RawVec,
-    pub(crate) device: <Self as StorageAPI>::Device,
+    pub(crate) rawvec: <Self as StorageBaseAPI>::RawVec,
+    pub(crate) device: <Self as StorageBaseAPI>::Device,
 }
 
-pub trait StorageAPI: Sized {
+pub trait StorageBaseAPI: Sized {
     type DType;
-    type Device;
+    type Device: Clone + Debug;
     type RawVec: Clone + Debug;
     fn device(&self) -> Self::Device;
     fn to_rawvec(&self) -> Self::RawVec;
@@ -26,7 +26,7 @@ pub trait StorageAPI: Sized {
     fn len(&self) -> usize;
 }
 
-pub trait StorageToCpuAPI: StorageAPI {
+pub trait StorageToCpuAPI: StorageBaseAPI {
     fn to_cpu_vec(&self) -> Result<Vec<Self::DType>>;
     fn into_cpu_vec(self) -> Result<Vec<Self::DType>>;
 }
