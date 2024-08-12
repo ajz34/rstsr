@@ -159,12 +159,23 @@ pub trait DimLayoutAPI: DimBaseAPI + DimStrideAPI + DimShapeAPI {
     /// This function does not check for bounds, including
     /// - Negative index
     /// - Index greater than shape
-    unsafe fn index_uncheck(layout: &Layout<Self>, index: Self) -> usize {
+    unsafe fn index_uncheck_by_ref(layout: &Layout<Self>, index: &Self) -> usize {
         let mut pos = layout.offset as isize;
         let index = index.as_ref();
         let stride = layout.stride.as_ref();
         stride.iter().zip(index.iter()).for_each(|(&s, &i)| pos += s * i as isize);
         return pos as usize;
+    }
+
+    /// Index of tensor by list of indexes to dimensions.
+    ///
+    /// # Safety
+    ///
+    /// This function does not check for bounds, including
+    /// - Negative index
+    /// - Index greater than shape
+    unsafe fn index_uncheck(layout: &Layout<Self>, index: Self) -> usize {
+        Self::index_uncheck_by_ref(layout, &index)
     }
 
     /// Index range bounds of current layout. This bound is [min, max), which
@@ -405,6 +416,17 @@ where
     /// - Index greater than shape
     pub unsafe fn index_uncheck(&self, index: D) -> usize {
         D::index_uncheck(self, index)
+    }
+
+    /// Index of tensor by list of indexes to dimensions.
+    ///
+    /// # Safety
+    ///
+    /// This function does not check for bounds, including
+    /// - Negative index
+    /// - Index greater than shape
+    pub unsafe fn index_uncheck_by_ref(&self, index: &D) -> usize {
+        D::index_uncheck_by_ref(self, index)
     }
 
     /// Index range bounds of current layout. This bound is [min, max), which

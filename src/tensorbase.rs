@@ -61,7 +61,7 @@ where
         self.layout().shape_ref().as_ref()
     }
 
-    pub fn raw_shape(&self) -> D::Shape {
+    pub fn raw_shape(&self) -> D {
         self.layout().shape().0
     }
 

@@ -1,5 +1,6 @@
 use super::*;
 use core::fmt::Debug;
+use std::ops::IndexMut;
 
 /* #region basic definitions */
 
@@ -17,9 +18,10 @@ pub type Ix9 = Ix<9>;
 pub type IxD = Vec<usize>;
 pub type IxDyn = IxD;
 
-pub trait DimBaseAPI: AsMut<[usize]> + AsRef<[usize]> + Debug + Clone {
-    type Shape: AsMut<[usize]> + AsRef<[usize]> + Debug + Clone;
-    type Stride: AsMut<[isize]> + AsRef<[isize]> + Debug + Clone;
+pub trait DimBaseAPI:
+    AsMut<[usize]> + AsRef<[usize]> + IndexMut<usize, Output = usize> + Debug + Clone
+{
+    type Stride: AsMut<[isize]> + AsRef<[isize]> + IndexMut<usize, Output = isize> + Debug + Clone;
 
     /// Number of dimension
     fn ndim(&self) -> usize;
@@ -29,7 +31,6 @@ pub trait DimBaseAPI: AsMut<[usize]> + AsRef<[usize]> + Debug + Clone {
 }
 
 impl<const N: usize> DimBaseAPI for Ix<N> {
-    type Shape = [usize; N];
     type Stride = [isize; N];
 
     fn ndim(&self) -> usize {
@@ -42,7 +43,6 @@ impl<const N: usize> DimBaseAPI for Ix<N> {
 }
 
 impl DimBaseAPI for IxD {
-    type Shape = Vec<usize>;
     type Stride = Vec<isize>;
 
     fn ndim(&self) -> usize {

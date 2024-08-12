@@ -2,7 +2,7 @@ use super::*;
 use std::ops::{Deref, DerefMut};
 
 #[derive(Debug, Clone)]
-pub struct Shape<D>(pub D::Shape)
+pub struct Shape<D>(pub D)
 where
     D: DimBaseAPI;
 
@@ -10,7 +10,7 @@ impl<D> Deref for Shape<D>
 where
     D: DimBaseAPI,
 {
-    type Target = D::Shape;
+    type Target = D;
 
     fn deref(&self) -> &Self::Target {
         &self.0
