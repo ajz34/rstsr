@@ -5,11 +5,19 @@ use crate::{Error, Result};
 
 /* #region Struct Definitions */
 
+/// Layout of tensor.
+///
+/// Layout is a struct that contains shape, stride, and offset of tensor.
+/// - Shape is the size of each dimension of tensor.
+/// - Stride is the number of elements to skip to get to the next element in
+///   each dimension.
+/// - Offset is the starting position of tensor.
 #[derive(Clone)]
 pub struct Layout<D>
 where
     D: DimBaseAPI,
 {
+    // essential definitions to layout
     pub(crate) shape: Shape<D>,
     pub(crate) stride: Stride<D>,
     pub(crate) offset: usize,
@@ -19,29 +27,51 @@ where
 
 /* #region Layout */
 
-pub trait DimLayoutAPI: DimBaseAPI {
+pub trait DimLayoutAPI: DimBaseAPI + DimStrideAPI + DimShapeAPI {
     /// Shape of tensor. Getter function.
-    fn shape(layout: &Layout<Self>) -> Shape<Self>;
-    fn shape_ref(layout: &Layout<Self>) -> &Shape<Self>;
+    fn shape(layout: &Layout<Self>) -> Shape<Self> {
+        layout.shape.clone()
+    }
+
+    /// Shape of tensor as reference. Getter function.
+    fn shape_ref(layout: &Layout<Self>) -> &Shape<Self> {
+        &layout.shape
+    }
 
     /// Stride of tensor. Getter function.
-    fn stride(layout: &Layout<Self>) -> Stride<Self>;
-    fn stride_ref(layout: &Layout<Self>) -> &Stride<Self>;
+    fn stride(layout: &Layout<Self>) -> Stride<Self> {
+        layout.stride.clone()
+    }
+
+    /// Stride of tensor as reference. Getter function.
+    fn stride_ref(layout: &Layout<Self>) -> &Stride<Self> {
+        &layout.stride
+    }
 
     /// Starting offset of tensor. Getter function.
-    fn offset(layout: &Layout<Self>) -> usize;
+    fn offset(layout: &Layout<Self>) -> usize {
+        layout.offset
+    }
 
     /// Number of dimensions of tensor.
-    fn ndim(layout: &Layout<Self>) -> usize;
+    fn ndim(layout: &Layout<Self>) -> usize {
+        layout.shape.as_ref().len()
+    }
 
     /// Total number of elements in tensor.
-    fn size(layout: &Layout<Self>) -> usize;
+    fn size(layout: &Layout<Self>) -> usize {
+        layout.shape.size()
+    }
 
     /// Whether this tensor is f-preferred.
-    fn is_f_prefer(layout: &Layout<Self>) -> bool;
+    fn is_f_prefer(layout: &Layout<Self>) -> bool {
+        layout.stride.is_f_prefer()
+    }
 
     /// Whether this tensor is c-preferred.
-    fn is_c_prefer(layout: &Layout<Self>) -> bool;
+    fn is_c_prefer(layout: &Layout<Self>) -> bool {
+        layout.stride.is_c_prefer()
+    }
 
     /// Whether this tensor is f-contiguous.
     ///
@@ -50,179 +80,7 @@ pub trait DimLayoutAPI: DimBaseAPI {
     ///   not important.
     /// - When length of a dimension is zero, then tensor contains no elements,
     ///   thus f-contiguous.
-    fn is_f_contig(layout: &Layout<Self>) -> bool;
-
-    /// Whether this tensor is c-contiguous.
-    fn is_c_contig(layout: &Layout<Self>) -> bool;
-
-    /// Generate new layout by providing everything.
-    ///
-    /// # Panics
-    ///
-    /// This function panics when
-    /// - Shape and stride length mismatch
-    fn new(shape: Shape<Self>, stride: Stride<Self>, offset: usize) -> Layout<Self>;
-
-    /// Index of tensor by list of indexes to dimensions.
-    fn try_index(layout: &Layout<Self>, index: Self) -> Result<usize>;
-
-    /// Index of tensor by list of indexes to dimensions.
-    ///
-    /// # Panics
-    ///
-    /// This function panics when
-    /// - Negative index
-    /// - Index greater than shape
-    fn index(layout: &Layout<Self>, index: Self) -> usize;
-
-    /// Index of tensor by list of indexes to dimensions.
-    ///
-    /// # Safety
-    ///
-    /// This function does not check for bounds, including
-    /// - Negative index
-    /// - Index greater than shape
-    unsafe fn index_uncheck(layout: &Layout<Self>, index: Self) -> usize;
-
-    /// Index range bounds of current layout. This bound is [min, max), which
-    /// could be feed into range (min..max). If min == max, then this layout
-    /// should not contains any element.
-    ///
-    /// This function will raise error when minimum index is smaller than zero.
-    fn bounds_index(layout: &Layout<Self>) -> Result<(usize, usize)>;
-
-    /// Check if strides is correct.
-    ///
-    /// This will check if all number of elements in dimension of small strides
-    /// is less than larger strides. For example of valid stride:
-    /// ```output
-    /// shape:  (3,    2,  6)  -> sorted ->  ( 3,   6,   2)
-    /// stride: (3, -300, 15)  -> sorted ->  ( 3,  15, 300)
-    /// number of elements:                    9,  90,
-    /// stride of next dimension              15, 300,
-    /// number of elem < stride of next dim?   +,   +,
-    /// ```
-    ///
-    /// # TODO
-    ///
-    /// Correctness of this function is not ensured.
-    fn check_strides(layout: &Layout<Self>) -> Result<()>;
-}
-
-impl<D> Layout<D>
-where
-    D: DimLayoutAPI,
-{
-    pub fn shape(&self) -> Shape<D> {
-        D::shape(self)
-    }
-
-    pub fn shape_ref(&self) -> &Shape<D> {
-        D::shape_ref(self)
-    }
-
-    pub fn stride(&self) -> Stride<D> {
-        D::stride(self)
-    }
-
-    pub fn stride_ref(&self) -> &Stride<D> {
-        D::stride_ref(self)
-    }
-
-    pub fn offset(&self) -> usize {
-        D::offset(self)
-    }
-
-    pub fn ndim(&self) -> usize {
-        <D as DimLayoutAPI>::ndim(self)
-    }
-
-    pub fn size(&self) -> usize {
-        D::size(self)
-    }
-
-    pub fn is_f_prefer(&self) -> bool {
-        D::is_f_prefer(self)
-    }
-
-    pub fn is_c_prefer(&self) -> bool {
-        D::is_c_prefer(self)
-    }
-
-    pub fn is_c_contig(&self) -> bool {
-        D::is_c_contig(self)
-    }
-
-    pub fn is_f_contig(&self) -> bool {
-        D::is_f_contig(self)
-    }
-
-    pub fn new(shape: Shape<D>, stride: Stride<D>, offset: usize) -> Self {
-        D::new(shape, stride, offset)
-    }
-
-    pub fn try_index(&self, index: D) -> Result<usize> {
-        D::try_index(self, index)
-    }
-
-    pub fn index(&self, index: D) -> usize {
-        <D as DimLayoutAPI>::index(self, index)
-    }
-
-    pub unsafe fn index_uncheck(&self, index: D) -> usize {
-        D::index_uncheck(self, index)
-    }
-
-    pub fn bounds_index(&self) -> Result<(usize, usize)> {
-        D::bounds_index(self)
-    }
-
-    pub fn check_strides(&self) -> Result<()> {
-        D::check_strides(self)
-    }
-}
-
-impl<D> DimLayoutAPI for D
-where
-    D: DimBaseAPI + DimStrideAPI + DimShapeAPI,
-{
-    fn shape(layout: &Layout<D>) -> Shape<D> {
-        layout.shape.clone()
-    }
-
-    fn shape_ref(layout: &Layout<D>) -> &Shape<D> {
-        &layout.shape
-    }
-
-    fn stride(layout: &Layout<D>) -> Stride<D> {
-        layout.stride.clone()
-    }
-
-    fn stride_ref(layout: &Layout<D>) -> &Stride<D> {
-        &layout.stride
-    }
-
-    fn offset(layout: &Layout<D>) -> usize {
-        layout.offset
-    }
-
-    fn ndim(layout: &Layout<D>) -> usize {
-        layout.shape.as_ref().len()
-    }
-
-    fn size(layout: &Layout<D>) -> usize {
-        layout.shape.size()
-    }
-
-    fn is_f_prefer(layout: &Layout<D>) -> bool {
-        layout.stride.is_f_prefer()
-    }
-
-    fn is_c_prefer(layout: &Layout<D>) -> bool {
-        layout.stride.is_c_prefer()
-    }
-
-    fn is_f_contig(layout: &Layout<D>) -> bool {
+    fn is_f_contig(layout: &Layout<Self>) -> bool {
         let mut acc = 1;
         let mut contig = true;
         for (&s, &d) in layout.stride.as_ref().iter().zip(layout.shape.as_ref().iter()) {
@@ -236,7 +94,8 @@ where
         return contig;
     }
 
-    fn is_c_contig(layout: &Layout<D>) -> bool {
+    /// Whether this tensor is c-contiguous.
+    fn is_c_contig(layout: &Layout<Self>) -> bool {
         let mut acc = 1;
         let mut contig = true;
         for (&s, &d) in layout.stride.as_ref().iter().zip(layout.shape.as_ref().iter()).rev() {
@@ -250,11 +109,18 @@ where
         return contig;
     }
 
-    fn new(shape: Shape<D>, stride: Stride<D>, offset: usize) -> Layout<D> {
+    /// Generate new layout by providing everything.
+    ///
+    /// # Panics
+    ///
+    /// This function panics when
+    /// - Shape and stride length mismatch
+    fn new(shape: Shape<Self>, stride: Stride<Self>, offset: usize) -> Layout<Self> {
         Layout { shape, stride, offset }
     }
 
-    fn try_index(layout: &Layout<D>, index: D) -> Result<usize> {
+    /// Index of tensor by list of indexes to dimensions.
+    fn try_index(layout: &Layout<Self>, index: Self) -> Result<usize> {
         let mut pos = layout.offset() as isize;
         let index = index.as_ref();
         let shape = layout.shape.as_ref();
@@ -275,11 +141,25 @@ where
         return Ok(pos as usize);
     }
 
-    fn index(layout: &Layout<D>, index: D) -> usize {
+    /// Index of tensor by list of indexes to dimensions.
+    ///
+    /// # Panics
+    ///
+    /// This function panics when
+    /// - Negative index
+    /// - Index greater than shape
+    fn index(layout: &Layout<Self>, index: Self) -> usize {
         layout.try_index(index).unwrap()
     }
 
-    unsafe fn index_uncheck(layout: &Layout<D>, index: D) -> usize {
+    /// Index of tensor by list of indexes to dimensions.
+    ///
+    /// # Safety
+    ///
+    /// This function does not check for bounds, including
+    /// - Negative index
+    /// - Index greater than shape
+    unsafe fn index_uncheck(layout: &Layout<Self>, index: Self) -> usize {
         let mut pos = layout.offset as isize;
         let index = index.as_ref();
         let stride = layout.stride.as_ref();
@@ -287,7 +167,12 @@ where
         return pos as usize;
     }
 
-    fn bounds_index(layout: &Layout<D>) -> Result<(usize, usize)> {
+    /// Index range bounds of current layout. This bound is [min, max), which
+    /// could be feed into range (min..max). If min == max, then this layout
+    /// should not contains any element.
+    ///
+    /// This function will raise error when minimum index is smaller than zero.
+    fn bounds_index(layout: &Layout<Self>) -> Result<(usize, usize)> {
         let offset = layout.offset;
 
         if layout.ndim() == 0 {
@@ -317,7 +202,22 @@ where
         }
     }
 
-    fn check_strides(layout: &Layout<D>) -> Result<()> {
+    /// Check if strides is correct.
+    ///
+    /// This will check if all number of elements in dimension of small strides
+    /// is less than larger strides. For example of valid stride:
+    /// ```output
+    /// shape:  (3,    2,  6)  -> sorted ->  ( 3,   6,   2)
+    /// stride: (3, -300, 15)  -> sorted ->  ( 3,  15, 300)
+    /// number of elements:                    9,  90,
+    /// stride of next dimension              15, 300,
+    /// number of elem < stride of next dim?   +,   +,
+    /// ```
+    ///
+    /// # TODO
+    ///
+    /// Correctness of this function is not ensured.
+    fn check_strides(layout: &Layout<Self>) -> Result<()> {
         let shape = layout.shape.as_ref();
         let stride = layout.stride.as_ref();
         if shape.len() != stride.len() {
@@ -342,6 +242,197 @@ where
             }
         }
         return Ok(());
+    }
+}
+
+impl DimLayoutAPI for Ix<0> {
+    unsafe fn index_uncheck(_layout: &Layout<Self>, _index: Self) -> usize {
+        0
+    }
+}
+
+impl DimLayoutAPI for Ix<1> {
+    unsafe fn index_uncheck(layout: &Layout<Self>, index: Self) -> usize {
+        let index = index.as_ref();
+        let stride = layout.stride.as_ref();
+        (layout.offset as isize + stride[0] * index[0] as isize) as usize
+    }
+}
+
+impl DimLayoutAPI for Ix<2> {
+    unsafe fn index_uncheck(layout: &Layout<Self>, index: Self) -> usize {
+        let index = index.as_ref();
+        let stride = layout.stride.as_ref();
+        (layout.offset as isize + stride[0] * index[0] as isize + stride[1] * index[1] as isize)
+            as usize
+    }
+}
+
+impl DimLayoutAPI for Ix<3> {
+    unsafe fn index_uncheck(layout: &Layout<Self>, index: Self) -> usize {
+        let index = index.as_ref();
+        let stride = layout.stride.as_ref();
+        (layout.offset as isize
+            + stride[0] * index[0] as isize
+            + stride[1] * index[1] as isize
+            + stride[2] * index[2] as isize) as usize
+    }
+}
+
+impl DimLayoutAPI for Ix<4> {
+    unsafe fn index_uncheck(layout: &Layout<Self>, index: Self) -> usize {
+        let index = index.as_ref();
+        let stride = layout.stride.as_ref();
+        (layout.offset as isize
+            + stride[0] * index[0] as isize
+            + stride[1] * index[1] as isize
+            + stride[2] * index[2] as isize
+            + stride[3] * index[3] as isize) as usize
+    }
+}
+
+impl DimLayoutAPI for Ix<5> {}
+impl DimLayoutAPI for Ix<6> {}
+impl DimLayoutAPI for Ix<7> {}
+impl DimLayoutAPI for Ix<8> {}
+impl DimLayoutAPI for Ix<9> {}
+impl DimLayoutAPI for IxD {}
+
+impl<D> Layout<D>
+where
+    D: DimLayoutAPI,
+{
+    /// Shape of tensor. Getter function.
+    pub fn shape(&self) -> Shape<D> {
+        D::shape(self)
+    }
+
+    /// Shape of tensor as reference. Getter function.
+    pub fn shape_ref(&self) -> &Shape<D> {
+        D::shape_ref(self)
+    }
+
+    /// Stride of tensor. Getter function.
+    pub fn stride(&self) -> Stride<D> {
+        D::stride(self)
+    }
+
+    /// Stride of tensor as reference. Getter function.
+    pub fn stride_ref(&self) -> &Stride<D> {
+        D::stride_ref(self)
+    }
+
+    /// Starting offset of tensor. Getter function.
+    pub fn offset(&self) -> usize {
+        D::offset(self)
+    }
+
+    /// Number of dimensions of tensor.
+    pub fn ndim(&self) -> usize {
+        <D as DimLayoutAPI>::ndim(self)
+    }
+
+    /// Total number of elements in tensor.
+    pub fn size(&self) -> usize {
+        <D as DimLayoutAPI>::size(self)
+    }
+
+    /// Whether this tensor is f-preferred.
+    pub fn is_f_prefer(&self) -> bool {
+        <D as DimLayoutAPI>::is_f_prefer(self)
+    }
+
+    /// Whether this tensor is c-preferred.
+    pub fn is_c_prefer(&self) -> bool {
+        <D as DimLayoutAPI>::is_c_prefer(self)
+    }
+
+    /// Whether this tensor is f-contiguous.
+    pub fn is_c_contig(&self) -> bool {
+        D::is_c_contig(self)
+    }
+
+    /// Whether this tensor is c-contiguous.
+    pub fn is_f_contig(&self) -> bool {
+        D::is_f_contig(self)
+    }
+
+    /// Generate new layout by providing everything.
+    ///
+    /// # Panics
+    ///
+    /// - Shape and stride length mismatch
+    /// - Strides is correct (no elements can overlap)
+    /// - Minimum bound is not negative
+    pub fn new(shape: Shape<D>, stride: Stride<D>, offset: usize) -> Self {
+        let layout = D::new(shape, stride, offset);
+        layout.bounds_index().unwrap();
+        layout.check_strides().unwrap();
+        return layout;
+    }
+
+    /// Generate new layout by providing everything, without checking bounds and
+    /// strides.
+    ///
+    /// # Panics
+    ///
+    /// - Shape and stride length mismatch
+    pub fn new_unchecked(shape: Shape<D>, stride: Stride<D>, offset: usize) -> Self {
+        D::new(shape, stride, offset)
+    }
+
+    /// Index of tensor by list of indexes to dimensions.
+    pub fn try_index(&self, index: D) -> Result<usize> {
+        D::try_index(self, index)
+    }
+
+    /// Index of tensor by list of indexes to dimensions.
+    ///
+    /// # Panics
+    ///
+    /// - Negative index
+    /// - Index greater than shape
+    pub fn index(&self, index: D) -> usize {
+        <D as DimLayoutAPI>::index(self, index)
+    }
+
+    /// Index of tensor by list of indexes to dimensions.
+    ///
+    /// # Safety
+    ///
+    /// This function does not check for bounds, including
+    /// - Negative index
+    /// - Index greater than shape
+    pub unsafe fn index_uncheck(&self, index: D) -> usize {
+        D::index_uncheck(self, index)
+    }
+
+    /// Index range bounds of current layout. This bound is [min, max), which
+    /// could be feed into range (min..max). If min == max, then this layout
+    /// should not contains any element.
+    ///
+    /// This function will raise error when minimum index is smaller than zero.
+    pub fn bounds_index(&self) -> Result<(usize, usize)> {
+        D::bounds_index(self)
+    }
+
+    /// Check if strides is correct (no elemenets can overlap).
+    ///
+    /// This will check if all number of elements in dimension of small strides
+    /// is less than larger strides. For example of valid stride:
+    /// ```output
+    /// shape:  (3,    2,  6)  -> sorted ->  ( 3,   6,   2)
+    /// stride: (3, -300, 15)  -> sorted ->  ( 3,  15, 300)
+    /// number of elements:                    9,  90,
+    /// stride of next dimension              15, 300,
+    /// number of elem < stride of next dim?   +,   +,
+    /// ```
+    ///
+    /// # TODO
+    ///
+    /// Correctness of this function is not fully ensured.
+    pub fn check_strides(&self) -> Result<()> {
+        D::check_strides(self)
     }
 }
 
@@ -469,6 +560,10 @@ impl<D> Layout<D>
 where
     D: DimBaseAPI,
 {
+    /// Convert layout to another dimension.
+    ///
+    /// This is mostly used when converting static dimension to dynamic
+    /// dimension or vice versa.
     pub fn into_dim<T>(self) -> Result<Layout<T>>
     where
         T: DimBaseAPI,

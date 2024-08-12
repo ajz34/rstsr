@@ -13,7 +13,7 @@ use crate::layout::{DimAPI, DimLargerOneAPI, DimSmallerOneAPI, IndexerDynamic, I
 use crate::storage::{DataAPI, DataRef, StorageBaseAPI};
 use crate::{Error, TensorBase};
 use core::fmt::Debug;
-use std::num::TryFromIntError;
+use core::num::TryFromIntError;
 
 impl<S, D> TensorBase<S, D>
 where
