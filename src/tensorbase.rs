@@ -8,8 +8,8 @@ pub struct TensorBase<S, D>
 where
     D: DimAPI,
 {
-    data: S,
-    layout: Layout<D>,
+    pub(crate) data: S,
+    pub(crate) layout: Layout<D>,
 }
 
 /// Basic definitions for tensor object.

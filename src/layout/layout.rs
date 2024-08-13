@@ -241,8 +241,8 @@ pub trait DimLayoutAPI: DimBaseAPI + DimStrideAPI + DimShapeAPI {
 
         let mut indices = (0..n).collect::<Vec<usize>>();
         indices.sort_by_key(|&i| stride[i].abs());
-        let shape_sorted = indices.iter().map(|&i| shape[i]).collect::<Vec<usize>>();
-        let stride_sorted = indices.iter().map(|&i| stride[i] as usize).collect::<Vec<usize>>();
+        let shape_sorted = indices.iter().map(|&i| shape[i]).collect::<Vec<_>>();
+        let stride_sorted = indices.iter().map(|&i| stride[i].abs() as usize).collect::<Vec<_>>();
 
         for i in 0..n - 1 {
             if shape_sorted[i] * stride_sorted[i] > stride_sorted[i + 1] {

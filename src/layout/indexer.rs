@@ -52,22 +52,19 @@ impl_from_int_into_indexer!(usize, isize, u8, i8, u16, i16, u32, i32, u64, i64, 
 pub trait IndexerPreserve: Sized {
     /// Narrowing tensor by slicing at a specific dimension. Number of dimension
     /// will not change after slicing.
-    fn dim_narrow(&self, dim: usize, slice: SliceI) -> Result<Self>;
+    fn dim_narrow(&self, dim: isize, slice: SliceI) -> Result<Self>;
 }
 
 impl<D> IndexerPreserve for Layout<D>
 where
     D: DimBaseAPI + DimLayoutAPI,
 {
-    fn dim_narrow(&self, dim: usize, slice: SliceI) -> Result<Self> {
+    fn dim_narrow(&self, dim: isize, slice: SliceI) -> Result<Self> {
         // dimension check
-        if dim >= self.ndim() {
-            return Err(Error::ValueOutOfRange {
-                value: dim as isize,
-                min: 0,
-                max: self.ndim() as isize - 1,
-            });
+        if dim > self.ndim() as isize || dim < -(self.ndim() as isize - 1) {
+            panic!("Index out of bound: index {}, shape {}", dim, self.ndim());
         }
+        let dim = if dim < 0 { self.ndim() as isize + dim + 1 } else { dim } as usize;
 
         // get essential information
         let mut shape = self.shape();
@@ -87,6 +84,11 @@ where
         let step = slice.step().unwrap_or(1);
         if step == 0 {
             return Err(Error::InvalidInteger { value: step, msg: "step cannot be 0".to_string() });
+        }
+
+        // quick return if previous shape is zero
+        if len_prev == 0 {
+            return Ok(self.clone());
         }
 
         if step > 0 {
@@ -117,28 +119,28 @@ where
             return Ok(Self::new(shape, stride, offset));
         } else {
             // step < 0
-            // default start = len_prev and stop = 0
-            let mut start = slice.start().unwrap_or(len_prev);
-            let mut stop = slice.stop().unwrap_or(0);
+            // default start = len_prev - 1 and stop = -1
+            let mut start = slice.start().unwrap_or(len_prev - 1);
+            let mut stop = slice.stop().unwrap_or(-1);
 
             // handle negative slice
             if start < 0 {
                 start = (len_prev + start).max(0);
             }
-            if stop < 0 {
-                stop = (len_prev + stop).max(0);
+            if stop < -1 {
+                stop = (len_prev + stop).max(-1);
             }
 
-            if stop > len_prev || stop > start {
+            if stop > len_prev - 1 || stop > start {
                 // zero size slice caused by inproper start and stop
                 start = 0;
                 stop = 0;
-            } else if start > len_prev {
-                // stop is out of bound, set it to len_prev
-                start = len_prev;
+            } else if start > len_prev - 1 {
+                // start is out of bound, set it to len_prev
+                start = len_prev - 1;
             }
 
-            let offset = (self.offset() as isize + len_prev * start) as usize;
+            let offset = (self.offset() as isize + stride_mut[dim] * start) as usize;
             shape_mut[dim] = ((stop - start - step - 1) / step).max(0) as usize;
             stride_mut[dim] = stride_mut[dim] * step;
             return Ok(Self::new(shape, stride, offset));
@@ -148,7 +150,7 @@ where
 
 pub trait IndexerDynamic: IndexerPreserve {
     /// Select dimension at index. Number of dimension will decrease by 1.
-    fn dim_select(&self, dim: usize, index: isize) -> Result<Layout<IxD>>;
+    fn dim_select(&self, dim: isize, index: isize) -> Result<Layout<IxD>>;
 
     /// Insert dimension after, with shape 1. Number of dimension will increase
     /// by 1.
@@ -162,11 +164,13 @@ impl<D> IndexerDynamic for Layout<D>
 where
     D: DimLayoutAPI,
 {
-    fn dim_select(&self, dim: usize, index: isize) -> Result<Layout<IxD>> {
+    fn dim_select(&self, dim: isize, index: isize) -> Result<Layout<IxD>> {
         // dimension check
-        if dim >= self.ndim() {
+        // dimension check
+        if dim > self.ndim() as isize || dim < -(self.ndim() as isize - 1) {
             panic!("Index out of bound: index {}, shape {}", dim, self.ndim());
         }
+        let dim = if dim < 0 { self.ndim() as isize + dim + 1 } else { dim } as usize;
 
         // get essential information
         let Shape(shape) = self.shape_ref();
@@ -305,11 +309,11 @@ where
             match indexer {
                 Indexer::Slice(slice) => {
                     cur_dim -= 1;
-                    layout = layout.dim_narrow(cur_dim as usize, slice.clone())?;
+                    layout = layout.dim_narrow(cur_dim, slice.clone())?;
                 },
                 Indexer::Select(index) => {
                     cur_dim -= 1;
-                    layout = layout.dim_select(cur_dim as usize, *index)?;
+                    layout = layout.dim_select(cur_dim, *index)?;
                 },
                 Indexer::Insert => {
                     layout = layout.dim_insert(cur_dim)?;

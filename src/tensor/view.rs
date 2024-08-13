@@ -9,9 +9,11 @@
 //! - [ ] permute_dims
 //! - [ ] squeeze
 
-use crate::layout::{DimAPI, DimLargerOneAPI, DimSmallerOneAPI, IndexerDynamic, IxD, Layout};
+use crate::layout::{
+    DimAPI, DimLargerOneAPI, DimSmallerOneAPI, IndexerDynamic, IndexerPreserve, IxD, Layout,
+};
 use crate::storage::{DataAPI, DataRef, StorageBaseAPI};
-use crate::{Error, TensorBase};
+use crate::{layout::Slice, slice, Error, TensorBase};
 use core::fmt::Debug;
 use core::num::TryFromIntError;
 
@@ -37,10 +39,6 @@ where
     ///
     /// * `axis` - The position in the expanded axes where the new axis is
     ///   placed.
-    ///
-    /// # Returns
-    ///
-    /// A view of tensor with more axes than the original tensor.
     ///
     /// # Example
     ///
@@ -70,5 +68,100 @@ where
         let layout = layout.try_into().unwrap(); // safe to unwrap
         let data = self.data().as_ref();
         unsafe { TensorBase::new_unchecked(data, layout) }
+    }
+
+    /// Expand the shape of tensor.
+    ///
+    /// # See also
+    ///
+    /// - [`TensorBase::expand_dims`]
+    pub fn into_expand_dims<I>(self, axis: I) -> TensorBase<S, D::LargerOne>
+    where
+        D: DimLargerOneAPI,
+        Layout<D::LargerOne>: TryFrom<Layout<IxD>, Error = Error>,
+        I: TryInto<isize, Error = TryFromIntError>,
+    {
+        let axis = axis.try_into().unwrap(); // almost safe to unwrap
+        let layout = self.layout().dim_insert(axis).unwrap();
+        let layout = layout.try_into().unwrap(); // safe to unwrap
+        unsafe { TensorBase::new_unchecked(self.data, layout) }
+    }
+
+    /// Reverses the order of elements in an array along the given axis.
+    ///
+    /// The shape of the array must be preserved.
+    ///
+    /// # Arguments
+    ///
+    /// * `axis` - The axis to flip on.
+    ///
+    /// # Panics
+    ///
+    /// - If `axis` is greater than the number of axes in the original tensor.
+    ///
+    /// # See also
+    ///
+    /// - [Python array API standard: `flip`](https://data-apis.org/array-api/2023.12/API_specification/generated/array_api.flip.html)
+    pub fn flip<I>(&self, axis: I) -> TensorBase<DataRef<'_, S::Data>, D>
+    where
+        D: DimAPI,
+        I: TryInto<isize, Error = TryFromIntError>,
+    {
+        let axis = axis.try_into().unwrap(); // almost safe to unwrap
+        let layout = self.layout().dim_narrow(axis, slice!(None, None, -1)).unwrap();
+        let data = self.data().as_ref();
+        unsafe { TensorBase::new_unchecked(data, layout) }
+    }
+
+    /// Reverses the order of elements in an array along the given axis.
+    ///
+    /// # See also
+    ///
+    /// - [`TensorBase::flip`]
+    pub fn into_flip<I>(self, axis: I) -> TensorBase<S, D>
+    where
+        D: DimAPI,
+        I: TryInto<isize, Error = TryFromIntError>,
+    {
+        let axis = axis.try_into().unwrap(); // almost safe to unwrap
+        let layout = self.layout().dim_narrow(axis, slice!(None, None, -1)).unwrap();
+        unsafe { TensorBase::new_unchecked(self.data, layout) }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::layout::*;
+    use crate::Tensor;
+    use crate::{cpu_backend::device::CpuDevice, storage::Storage};
+
+    #[test]
+    fn test_expand_dims() {
+        let a = Tensor::<f64, _>::zeros([4, 9, 8]);
+        let b = a.expand_dims(2);
+        assert_eq!(b.shape(), &[4, 9, 1, 8]);
+    }
+
+    #[test]
+    fn test_flip() {
+        let device = CpuDevice {};
+        let a = Tensor::<f64, _>::new(
+            Storage::<f64, CpuDevice>::new(
+                (0..24).into_iter().map(|v| v as f64).collect::<Vec<_>>(),
+                device.clone(),
+            )
+            .into(),
+            [2, 3, 4].c(),
+        )
+        .unwrap();
+        println!("{:?}", a);
+
+        let b = a.flip(1);
+        println!("{:?}", b);
+        assert_eq!(b.shape(), &[2, 3, 4]);
+        let c = a.flip(2);
+        println!("{:?}", c);
+        assert_eq!(c.shape(), &[2, 3, 4]);
     }
 }
