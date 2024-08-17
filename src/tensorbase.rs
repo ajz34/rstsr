@@ -4,16 +4,16 @@ use crate::storage::{DataAPI, DataOwned, DataRef, DataRefMut, Storage, StorageBa
 use crate::{Error, Result};
 
 #[derive(Clone)]
-pub struct TensorBase<S, D>
+pub struct TensorBase<R, D>
 where
     D: DimAPI,
 {
-    pub(crate) data: S,
+    pub(crate) data: R,
     pub(crate) layout: Layout<D>,
 }
 
 /// Basic definitions for tensor object.
-impl<S, D> TensorBase<S, D>
+impl<R, D> TensorBase<R, D>
 where
     D: DimAPI,
 {
@@ -23,14 +23,14 @@ where
     ///
     /// This function will not check whether data meets the standard of
     /// [Storage<T, B>], or whether layout may exceed pointer bounds of data.
-    pub unsafe fn new_unchecked(data: S, layout: Layout<D>) -> Self {
+    pub unsafe fn new_unchecked(data: R, layout: Layout<D>) -> Self {
         Self { data, layout }
     }
 
-    pub fn new(data: S, layout: Layout<D>) -> Result<Self>
+    pub fn new(data: R, layout: Layout<D>) -> Result<Self>
     where
-        S: DataAPI,
-        S::Data: StorageBaseAPI,
+        R: DataAPI,
+        R::Data: StorageBaseAPI,
         D: DimAPI,
     {
         // check stride sanity
@@ -49,7 +49,7 @@ where
         return Ok(Self { data, layout });
     }
 
-    pub fn data(&self) -> &S {
+    pub fn data(&self) -> &R {
         &self.data
     }
 

@@ -1,4 +1,5 @@
 #![allow(refining_impl_trait)]
+#![doc = include_str!("readme.md")]
 
 /* #region Configuration */
 
