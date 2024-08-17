@@ -84,6 +84,28 @@ macro_rules! rstsr_assert_eq {
             Err(Error::$errtype(s))
         }
     };
+    ($lhs:expr, $rhs:expr, $errtype:ident, $($arg:tt)*) => {
+        if $lhs == $rhs {
+            Ok(())
+        } else {
+            use crate::prelude_dev::*;
+            let mut s = String::new();
+            write!(s, concat!(file!(), ":", line!(), ": ")).unwrap();
+            write!(s, concat!("Error::", stringify!($errtype))).unwrap();
+            write!(s, " : ").unwrap();
+            write!(s, $($arg)*).unwrap();
+            write!(
+                s,
+                " : {:} = {:?} not equal to {:} = {:?}",
+                stringify!($lhs),
+                $lhs,
+                stringify!($rhs),
+                $rhs
+            )
+            .unwrap();
+            Err(Error::$errtype(s))
+        }
+    };
 }
 
 #[macro_export]

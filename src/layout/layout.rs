@@ -274,6 +274,62 @@ where
     }
 }
 
+/// Manuplation of layout.
+impl<D> Layout<D>
+where
+    D: DimBaseAPI,
+{
+    /// Transpose layout by permutation.
+    ///
+    /// # See also
+    ///
+    /// - [`numpy.transpose`](https://numpy.org/doc/stable/reference/generated/numpy.transpose.html)
+    /// - [Python array API: `permute_dims`](https://data-apis.org/array-api/2023.12/API_specification/generated/array_api.permute_dims.html)
+    pub fn transpose(&self, axes: &[isize]) -> Result<Self> {
+        // check axes and cast to usize
+        let n = self.ndim();
+        rstsr_assert_eq!(
+            axes.len(),
+            n,
+            InvalidLayout,
+            "number of elements in axes should be the same to number of dimensions."
+        )?;
+        // no elements in axes can be the same
+        let mut permut_used = vec![false; n];
+        for &p in axes {
+            let p = if p < 0 { p + n as isize } else { p };
+            rstsr_pattern!(p, 0..n as isize, InvalidLayout)?;
+            let p = p as usize;
+            permut_used[p] = true;
+        }
+        rstsr_assert!(
+            permut_used.iter().all(|&b| b),
+            InvalidLayout,
+            "axes should contain all elements from 0 to n-1."
+        )?;
+        let axes = axes.iter().map(|&p| p as usize).collect::<Vec<_>>();
+
+        let shape_old = self.shape.as_ref();
+        let stride_old = self.stride.as_ref();
+        let mut shape_wrap = self.shape.clone();
+        let mut stride_wrap = self.stride.clone();
+        let shape = shape_wrap.as_mut();
+        let stride = stride_wrap.as_mut();
+        for i in 0..self.ndim() {
+            shape[i] = shape_old[axes[i]];
+            stride[i] = stride_old[axes[i]];
+        }
+        Ok(Layout { shape: shape_wrap, stride: stride_wrap, offset: self.offset })
+    }
+
+    /// Transpose layout by permutation.
+    ///
+    /// This is the same function to [`Layout::transpose`]
+    pub fn permute_dims(&self, axes: &[isize]) -> Result<Self> {
+        self.transpose(axes)
+    }
+}
+
 pub trait DimLayoutAPI: DimBaseAPI + DimStrideAPI + DimShapeAPI {
     /// Index of tensor by list of indexes to dimensions.
     ///
@@ -528,5 +584,14 @@ mod playground {
         let layout = Layout::<Ix3> { shape: Shape(shape), stride: Stride(stride), offset: 917 };
         println!("{:?}", layout);
         let _ = layout.check_strides();
+    }
+
+    #[test]
+    fn test1() {
+        let shape: [usize; 3] = [3, 2, 6];
+        let stride: [isize; 3] = [3, -300, 15];
+        let layout = Layout::<Ix3> { shape: Shape(shape), stride: Stride(stride), offset: 917 };
+        let layout = layout.transpose(&[2, 0, 1]).unwrap();
+        println!("{:?}", layout);
     }
 }
