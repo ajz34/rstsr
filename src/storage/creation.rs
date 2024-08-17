@@ -1,7 +1,5 @@
+use crate::prelude_dev::*;
 use num::{complex::ComplexFloat, Float};
-
-use super::StorageBaseAPI;
-use crate::Result;
 
 pub trait StorageCreationAPI: StorageBaseAPI {
     fn arange_impl(

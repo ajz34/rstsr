@@ -1,5 +1,5 @@
-use super::dim::*;
-use std::ops::{Deref, DerefMut};
+use crate::prelude_dev::*;
+use core::ops::{Deref, DerefMut};
 
 #[derive(Debug, Clone)]
 pub struct Stride<D>(pub D::Stride)

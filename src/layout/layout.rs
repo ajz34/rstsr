@@ -1,7 +1,6 @@
 //! Layout of tensor.
 
-use super::*;
-use crate::{Error, Result};
+use crate::prelude_dev::*;
 use itertools::izip;
 
 /* #region Struct Definitions */
@@ -153,14 +152,10 @@ where
         let stride = self.stride.as_ref();
 
         for (&idx, &shp, &strd) in izip!(index.iter(), shape.iter(), stride.iter()) {
-            if idx >= shp {
-                return Err(Error::IndexOutOfBound { index: idx as isize, bound: shp as isize });
-            }
+            rstsr_pattern!(idx, 0..shp, ValueOutOfRange)?;
             pos += strd * idx as isize;
         }
-        if pos < 0 {
-            return Err(Error::IndexOutOfBound { index: pos, bound: 0 });
-        }
+        rstsr_pattern!(pos, 0.., ValueOutOfRange)?;
         return Ok(pos as usize);
     }
 
@@ -204,11 +199,8 @@ where
                 min += stride[i] * (shape[i] as isize - 1);
             }
         }
-        if min < 0 {
-            return Err(Error::IndexOutOfBound { index: min, bound: 0 });
-        } else {
-            return Ok((min as usize, max as usize + 1));
-        }
+        rstsr_pattern!(min, 0.., ValueOutOfRange)?;
+        return Ok((min as usize, max as usize + 1));
     }
 
     /// Check if strides is correct (no elemenets can overlap).
@@ -229,9 +221,7 @@ where
     pub fn check_strides(&self) -> Result<()> {
         let shape = self.shape.as_ref();
         let stride = self.stride.as_ref();
-        if shape.len() != stride.len() {
-            return Err(Error::USizeNotMatch { got: shape.len(), expect: stride.len() });
-        }
+        rstsr_assert_eq!(shape.len(), stride.len(), InvalidLayout)?;
         let n = shape.len();
         if n <= 1 {
             return Ok(());
@@ -243,12 +233,11 @@ where
         let stride_sorted = indices.iter().map(|&i| stride[i].abs() as usize).collect::<Vec<_>>();
 
         for i in 0..n - 1 {
-            if shape_sorted[i] * stride_sorted[i] > stride_sorted[i + 1] {
-                return Err(Error::IndexOutOfBound {
-                    index: (shape_sorted[i] * stride_sorted[i]) as isize,
-                    bound: stride_sorted[i + 1] as isize,
-                });
-            }
+            rstsr_pattern!(
+                shape_sorted[i] * stride_sorted[i],
+                0..stride_sorted[i + 1] + 1,
+                InvalidLayout
+            )?;
         }
         return Ok(());
     }
@@ -482,16 +471,12 @@ impl<const N: usize> TryFrom<Layout<IxD>> for Layout<Ix<N>> {
     fn try_from(layout: Layout<IxD>) -> Result<Self> {
         let Layout { shape: Shape(shape), stride: Stride(stride), offset } = layout;
         Ok(Layout {
-            shape: Shape(
-                shape
-                    .try_into()
-                    .map_err(|_| Error::Msg(format!("Cannot convert IxD to Ix< {:} >", N)))?,
-            ),
-            stride: Stride(
-                stride
-                    .try_into()
-                    .map_err(|_| Error::Msg(format!("Cannot convert IxD to Ix< {:} >", N)))?,
-            ),
+            shape: Shape(shape.try_into().map_err(|_| {
+                Error::InvalidLayout(format!("Cannot convert IxD to Ix< {:} >", N))
+            })?),
+            stride: Stride(stride.try_into().map_err(|_| {
+                Error::InvalidLayout(format!("Cannot convert IxD to Ix< {:} >", N))
+            })?),
             offset,
         })
     }

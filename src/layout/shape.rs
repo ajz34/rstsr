@@ -1,5 +1,5 @@
-use super::*;
-use std::ops::{Deref, DerefMut};
+use crate::prelude_dev::*;
+use core::ops::{Deref, DerefMut};
 
 #[derive(Debug, Clone)]
 pub struct Shape<D>(pub D)

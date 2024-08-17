@@ -1,7 +1,5 @@
 use crate::cpu_backend::device::CpuDevice;
-use crate::layout::{DimAPI, Layout};
-use crate::storage::{DataAPI, DataOwned, DataRef, DataRefMut, Storage, StorageBaseAPI};
-use crate::{Error, Result};
+use crate::prelude_dev::*;
 
 #[derive(Clone)]
 pub struct TensorBase<R, D>
@@ -39,13 +37,7 @@ where
         // check pointer exceed
         let len_data = data.as_storage().len();
         let (_, idx_max) = layout.bounds_index()?;
-        if idx_max < len_data {
-            return Err(Error::IndexOutOfBound {
-                index: idx_max as isize,
-                bound: len_data as isize,
-            });
-        }
-
+        rstsr_pattern!(idx_max, len_data.., ValueOutOfRange)?;
         return Ok(Self { data, layout });
     }
 

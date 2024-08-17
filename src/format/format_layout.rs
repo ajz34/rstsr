@@ -1,5 +1,4 @@
-use crate::layout::{DimBaseAPI, DimLayoutAPI, Layout};
-use core::fmt::{Debug, Write};
+use crate::prelude_dev::*;
 
 impl<D> Debug for Layout<D>
 where

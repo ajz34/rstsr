@@ -1,7 +1,5 @@
 use super::*;
-use crate::storage::*;
-use crate::Error;
-use crate::Result;
+use crate::prelude_dev::*;
 use core::fmt::Debug;
 use num::complex::ComplexFloat;
 use num::Float;
@@ -83,14 +81,8 @@ where
     where
         T: Float,
     {
-        if step == T::zero() {
-            return Err(Error::InvalidValue { msg: "step must be non-zero.".to_string() });
-        }
-        if end < start {
-            return Err(Error::InvalidValue {
-                msg: format!("end {:?} must be greater than start {:?}", end, start),
-            });
-        }
+        rstsr_assert!(step != T::zero(), InvalidValue)?;
+        rstsr_pattern!(end, ..start, ValueOutOfRange)?;
         let n = ((end - start) / step).ceil().to_usize().unwrap();
 
         let mut rawvec: Vec<T> = (0..n).map(|i| start + step * T::from(i).unwrap()).collect();

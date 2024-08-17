@@ -1,6 +1,4 @@
-use crate::storage::*;
-use crate::Result;
-use core::fmt::Debug;
+use crate::prelude_dev::*;
 
 #[derive(Clone, Debug)]
 pub struct CpuDevice;

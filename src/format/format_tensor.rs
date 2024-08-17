@@ -1,7 +1,4 @@
-use crate::storage::{DataAPI, StorageBaseAPI, StorageToCpuAPI};
-use crate::TensorBase;
-use crate::{DimAPI, Layout};
-use core::fmt::{Debug, Display, Formatter, Write};
+use crate::prelude_dev::*;
 
 pub static MIN_PRINT: usize = 3;
 pub static MAX_PRINT: usize = 8;
@@ -17,7 +14,7 @@ where
     idx_prev: Vec<usize>,
     max_print: usize,
     min_print: usize,
-    fmt: &'f1 mut Formatter<'f2>,
+    fmt: &'f1 mut core::fmt::Formatter<'f2>,
 }
 
 pub fn print_vec_with_layout_dfs<T, D>(c: &mut FnPrintVecWithLayout<T, D>) -> core::fmt::Result
@@ -191,7 +188,7 @@ where
 }
 
 pub fn print_vec_with_layout<'v, 'l, 'f1, 'f2, T, D>(
-    fmt: &'f1 mut Formatter<'f2>,
+    fmt: &'f1 mut core::fmt::Formatter<'f2>,
     vec: &'v [T],
     layout: &'l Layout<D>,
     max_print: usize,
@@ -215,7 +212,7 @@ where
     S::Data: StorageBaseAPI + StorageToCpuAPI,
     <S::Data as StorageBaseAPI>::DType: Clone + Display,
 {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         let vec = self.data().as_storage().to_cpu_vec().unwrap();
         let layout = &self.layout();
         let max_print = MAX_PRINT;
@@ -232,7 +229,7 @@ where
     <S::Data as StorageBaseAPI>::DType: Clone + Display,
     <S::Data as StorageBaseAPI>::Device: Debug,
 {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         writeln!(f, "=== Debug Tensor Print ===")?;
         Display::fmt(self, f)?;
         writeln!(f)?;
@@ -240,7 +237,7 @@ where
         writeln!(f)?;
         Debug::fmt(&self.layout(), f)?;
         writeln!(f)?;
-        let self_type = std::any::type_name::<Self>();
+        let self_type = core::any::type_name::<Self>();
         writeln!(f, "Type: {}", self_type)?;
         writeln!(f, "===========================")
     }

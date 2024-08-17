@@ -9,11 +9,7 @@
 //! - [ ] permute_dims
 //! - [ ] squeeze
 
-use crate::layout::{
-    DimAPI, DimLargerOneAPI, DimSmallerOneAPI, IndexerDynamic, IndexerPreserve, IxD, Layout,
-};
-use crate::storage::{DataAPI, DataRef, StorageBaseAPI};
-use crate::{layout::Slice, slice, Error, TensorBase};
+use crate::prelude_dev::*;
 use core::fmt::Debug;
 use core::num::TryFromIntError;
 
@@ -132,7 +128,6 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::layout::*;
     use crate::Tensor;
     use crate::{cpu_backend::device::CpuDevice, storage::Storage};
 

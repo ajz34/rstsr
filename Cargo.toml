@@ -25,6 +25,7 @@ overflow-checks = true
 
 [features]
 default = ["c_prefer"]
+std = []
 c_prefer = []
 cuda = []
 

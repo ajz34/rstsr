@@ -1,4 +1,5 @@
 #![allow(refining_impl_trait)]
+#![cfg_attr(not(test), no_std)]
 #![doc = include_str!("readme.md")]
 
 /* #region Configuration */
@@ -7,8 +8,9 @@ pub static C_PREFER: bool = cfg!(feature = "c_prefer");
 
 /* #endregion */
 
+pub mod prelude_dev;
+
 pub mod error;
-pub use error::{Error, Result};
 
 pub mod layout;
 pub use layout::{DimAPI, Layout};

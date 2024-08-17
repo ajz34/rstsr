@@ -1,6 +1,4 @@
-use super::layout::*;
-use super::*;
-use crate::{Error, Result};
+use crate::prelude_dev::*;
 
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -82,9 +80,7 @@ where
 
         // handle cases of step > 0 and step < 0
         let step = slice.step().unwrap_or(1);
-        if step == 0 {
-            return Err(Error::InvalidInteger { value: step, msg: "step cannot be 0".to_string() });
-        }
+        rstsr_assert!(step != 0, InvalidValue)?;
 
         // quick return if previous shape is zero
         if len_prev == 0 {
@@ -183,18 +179,9 @@ where
         for (i, (&d, &s)) in shape.as_ref().iter().zip(stride.as_ref().iter()).enumerate() {
             if i == dim {
                 // dimension to be selected
-                if index < 0 {
-                    let idx = d as isize + index;
-                    if idx < 0 {
-                        return Err(Error::IndexOutOfBound { index, bound: d as isize });
-                    }
-                    offset += s * idx;
-                } else {
-                    if index >= d as isize {
-                        return Err(Error::IndexOutOfBound { index, bound: d as isize });
-                    }
-                    offset += s * index;
-                }
+                let idx = if index < 0 { d as isize + index } else { index };
+                rstsr_pattern!(idx, 0..d as isize, ValueOutOfRange)?;
+                offset += s * idx;
             } else {
                 // other dimensions
                 shape_new.push(d);
@@ -259,29 +246,15 @@ where
                 Indexer::Slice(_) => counter_slice += 1,
                 Indexer::Select(_) => counter_select += 1,
                 Indexer::Ellipsis => match idx_ellipsis {
-                    Some(_) => {
-                        return Err(Error::InvalidInteger {
-                            value: n as isize,
-                            msg: "Ellipsis-type indexer could not exceed 1.".to_string(),
-                        });
-                    },
-                    None => {
-                        idx_ellipsis = Some(n);
-                    },
+                    Some(_) => rstsr_raise!(InvalidValue, "Only one ellipsis indexer allowed.")?,
+                    None => idx_ellipsis = Some(n),
                 },
                 _ => {},
             }
         }
 
         // check if slice-type and select-type indexer exceed the number of dimensions
-        if counter_slice + counter_select > self.ndim() {
-            return Err(Error::InvalidInteger {
-                value: (counter_slice + counter_select) as isize,
-                msg:
-                    "Slice-type and Select-type indexer could not exceed the number of dimensions."
-                        .to_string(),
-            });
-        }
+        rstsr_pattern!(counter_slice + counter_select, 0..=self.ndim(), ValueOutOfRange)?;
 
         // insert Ellipsis by slice(:) anyway, default append at last
         let n_ellipsis = self.ndim() - counter_slice - counter_select;
@@ -318,16 +291,12 @@ where
                 Indexer::Insert => {
                     layout = layout.dim_insert(cur_dim)?;
                 },
-                _ => {
-                    return Err(Error::Msg("Invalid indexer found.".to_string()));
-                },
+                _ => rstsr_raise!(InvalidValue, "Invalid indexer found : {:?}", indexer)?,
             }
         }
 
         // this program should be designed that cur_dim is zero at the end
-        if cur_dim != 0 {
-            return Err(Error::Msg("Internal program error in indexer.".to_string()));
-        }
+        rstsr_assert!(cur_dim == 0, Miscellaneous, "Internal program error in indexer.")?;
 
         return Ok(layout);
     }

@@ -1,6 +1,5 @@
 use crate::cpu_backend::device::CpuDevice;
-use crate::Result;
-use core::fmt::Debug;
+use crate::prelude_dev::*;
 
 pub trait DeviceAPI: Clone + Debug {
     fn same_device(&self, other: &Self) -> bool;
@@ -41,7 +40,7 @@ impl DeviceId {
     #[allow(unused)]
     pub(crate) fn new() -> Self {
         // https://users.rust-lang.org/t/idiomatic-rust-way-to-generate-unique-id/33805
-        use std::sync::atomic;
+        use core::sync::atomic;
         static COUNTER: atomic::AtomicUsize = atomic::AtomicUsize::new(1);
         Self(COUNTER.fetch_add(1, atomic::Ordering::Relaxed))
     }

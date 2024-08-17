@@ -1,39 +1,158 @@
-use std::fmt::Debug;
+#[cfg(feature = "std")]
+extern crate std;
+
+use crate::prelude_dev::*;
+use core::convert::Infallible;
 
 #[cfg(feature = "cuda")]
 use crate::cuda_backend::error::CudaError;
 
-#[derive(thiserror::Error, Debug)]
+#[non_exhaustive]
+#[derive(Debug)]
 pub enum Error {
-    #[error("Index out of bound: index {index:}, bound {bound:}")]
-    IndexOutOfBound { index: isize, bound: isize },
+    ValueOutOfRange(String),
+    InvalidValue(String),
+    InvalidLayout(String),
+    RuntimeError(String),
 
-    #[error("Value out of range: value {value:?}, min {min:?}, max {max:?}")]
-    ValueOutOfRange { value: isize, min: isize, max: isize },
+    TryFromIntError(String),
+    Infallible(String),
 
-    #[error("Invalid integer: value {value:?}, msg {msg:?}")]
-    InvalidInteger { value: isize, msg: String },
-
-    #[error("Invalid value: msg {msg:?}")]
-    InvalidValue { msg: String },
-
-    #[error("Value not match: got {got:?}, expect {expect:?}")]
-    USizeNotMatch { got: usize, expect: usize },
-
-    /* #region Wrapped Errors */
-    #[cfg(feature = "cuda")]
-    #[error(transparent)]
-    Cuda(#[from] CudaError),
-
-    #[error(transparent)]
-    TryFromIntError(#[from] core::num::TryFromIntError),
-
-    #[error(transparent)]
-    Infallible(#[from] core::convert::Infallible),
-
-    #[error("Error with message: {0:?}")]
-    Msg(String),
-    /* #endregion */
+    Miscellaneous(String),
 }
 
-pub type Result<T> = std::result::Result<T, Error>;
+#[cfg(feature = "std")]
+impl std::error::Error for Error {}
+
+pub type Result<T> = core::result::Result<T, Error>;
+
+impl From<Infallible> for Error {
+    fn from(_: Infallible) -> Self {
+        Error::Infallible("Infallible".to_string())
+    }
+}
+
+#[macro_export]
+macro_rules! rstsr_assert {
+    ($cond:expr, $errtype:ident) => {
+        if $cond {
+            Ok(())
+        } else {
+            use crate::prelude_dev::*;
+            let mut s = String::new();
+            write!(s, concat!(file!(), ":", line!(), ": ")).unwrap();
+            write!(s, concat!("Error::", stringify!($errtype))).unwrap();
+            write!(s, " : {:}", stringify!($cond)).unwrap();
+            Err(Error::$errtype(s))
+        }
+    };
+    ($cond:expr, $errtype:ident, $($arg:tt)*) => {{
+        if $cond {
+            Ok(())
+        } else {
+            use crate::prelude_dev::*;
+            let mut s = String::new();
+            write!(s, concat!(file!(), ":", line!(), ": ")).unwrap();
+            write!(s, concat!("Error::", stringify!($errtype))).unwrap();
+            write!(s, " : ").unwrap();
+            write!(s, $($arg)*).unwrap();
+            write!(s, " : {:}", stringify!($cond)).unwrap();
+            Err(Error::$errtype(s))
+        }
+    }};
+}
+
+#[macro_export]
+macro_rules! rstsr_assert_eq {
+    ($lhs:expr, $rhs:expr, $errtype:ident) => {
+        if $lhs == $rhs {
+            Ok(())
+        } else {
+            use crate::prelude_dev::*;
+            let mut s = String::new();
+            write!(s, concat!(file!(), ":", line!(), ": ")).unwrap();
+            write!(s, concat!("Error::", stringify!($errtype))).unwrap();
+            write!(
+                s,
+                " : {:} = {:?} not equal to {:} = {:?}",
+                stringify!($lhs),
+                $lhs,
+                stringify!($rhs),
+                $rhs
+            )
+            .unwrap();
+            Err(Error::$errtype(s))
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! rstsr_invalid {
+    ($word:expr) => {{
+        use core::fmt::Write;
+        let mut s = String::new();
+        write!(s, concat!(file!(), ":", line!(), ": "));
+        write!(s, "Error::InvalidValue");
+        write!(s, " : {:?} = {:?}", stringify!($word), $word).unwrap();
+        Err(Error::InvalidValue(s))
+    }};
+}
+
+#[macro_export]
+macro_rules! rstsr_raise {
+    ($errtype:ident, $($arg:tt)*) => {{
+        use crate::prelude_dev::*;
+        let mut s = String::new();
+        write!(s, concat!(file!(), ":", line!(), ": ")).unwrap();
+        write!(s, concat!("Error::", stringify!($errtype))).unwrap();
+        write!(s, " : ").unwrap();
+        write!(s, $($arg)*).unwrap();
+        Err(Error::$errtype(s))
+    }};
+}
+
+#[macro_export]
+macro_rules! rstsr_pattern {
+    ($value:expr, $pattern:expr, $errtype:ident) => {
+        if ($pattern).contains(&($value)) {
+            Ok(())
+        } else {
+            use crate::prelude_dev::*;
+            let mut s = String::new();
+            write!(s, concat!(file!(), ":", line!(), ": ")).unwrap();
+            write!(s, concat!("Error::", stringify!($errtype))).unwrap();
+            write!(
+                s,
+                " : {:?} = {:?} not match to pattern {:} = {:?}",
+                stringify!($value),
+                $value,
+                stringify!($pattern),
+                $pattern
+            )
+            .unwrap();
+            Err(Error::$errtype(s))
+        }
+    };
+    ($value:expr, $pattern:expr, $errtype:ident, $($arg:tt)*) => {
+        if ($pattern).contains(&($value)) {
+            Ok(())
+        } else {
+            use crate::prelude_dev::*;
+            let mut s = String::new();
+            write!(s, concat!(file!(), ":", line!(), ": ")).unwrap();
+            write!(s, concat!("Error::", stringify!($errtype))).unwrap();
+            write!(s, " : ").unwrap();
+            write!(s, $($arg)*).unwrap();
+            write!(
+                s,
+                " : {:?} = {:?} not match to pattern {:} = {:?}",
+                stringify!($value),
+                $value,
+                stringify!($pattern),
+                $pattern
+            )
+            .unwrap();
+            Err(Error::$errtype(s))
+        }
+    };
+}
