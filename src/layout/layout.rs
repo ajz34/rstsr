@@ -88,12 +88,40 @@ where
 
     /// Whether this tensor is f-preferred.
     pub fn is_f_prefer(&self) -> bool {
-        self.stride.is_f_prefer()
+        let stride = self.stride.as_ref();
+        let shape = self.shape.as_ref();
+        let mut last = 0;
+        for (&s, &d) in stride.iter().zip(shape.iter()) {
+            match d {
+                0 | 1 => continue,
+                _ => {
+                    if s.abs() < last {
+                        return false;
+                    }
+                    last = s.abs();
+                }
+            }
+        }
+        return true;
     }
 
     /// Whether this tensor is c-preferred.
     pub fn is_c_prefer(&self) -> bool {
-        self.stride.is_c_prefer()
+        let stride = self.stride.as_ref();
+        let shape = self.shape.as_ref();
+        let mut last = 0;
+        for (&s, &d) in stride.iter().zip(shape.iter()) {
+            match d {
+                0 | 1 => continue,
+                _ => {
+                    if s.abs() > last {
+                        return false;
+                    }
+                    last = s.abs();
+                }
+            }
+        }
+        return true;
     }
 
     /// Whether this tensor is f-contiguous.
@@ -215,6 +243,11 @@ where
     /// number of elem < stride of next dim?   +,   +,
     /// ```
     ///
+    /// Special cases
+    /// - if length of tensor is zero, then strides will always be correct.
+    /// - if certain dimension is one, then check for this stride will be
+    ///   ignored.
+    ///
     /// # TODO
     ///
     /// Correctness of this function is not fully ensured.
@@ -227,12 +260,12 @@ where
             return Ok(());
         }
 
-        let mut indices = (0..n).collect::<Vec<usize>>();
-        indices.sort_by_key(|&i| stride[i].abs());
-        let shape_sorted = indices.iter().map(|&i| shape[i]).collect::<Vec<_>>();
-        let stride_sorted = indices.iter().map(|&i| stride[i].abs() as usize).collect::<Vec<_>>();
+        let mut indices = (0..n).filter(|&k| shape[k] > 1).collect::<Vec<_>>();
+        indices.sort_by_key(|&k| stride[k].abs());
+        let shape_sorted = indices.iter().map(|&k| shape[k]).collect::<Vec<_>>();
+        let stride_sorted = indices.iter().map(|&k| stride[k].abs() as usize).collect::<Vec<_>>();
 
-        for i in 0..n - 1 {
+        for i in 0..indices.len() {
             rstsr_pattern!(
                 shape_sorted[i] * stride_sorted[i],
                 0..stride_sorted[i + 1] + 1,
@@ -438,18 +471,31 @@ where
     }
 }
 
-pub trait DimLayoutContigAPI: DimBaseAPI {
+pub trait DimLayoutContigAPI: DimBaseAPI + DimShapeAPI {
     /// Generate new layout by providing shape and offset; stride fits into
     /// c-contiguous.
-    fn new_c_contig(&self, offset: usize) -> Layout<Self>;
+    fn new_c_contig(&self, offset: usize) -> Layout<Self> {
+        let shape = Shape::<Self>(self.clone());
+        let stride = shape.stride_c_contig();
+        Layout { shape, stride, offset }
+    }
 
     /// Generate new layout by providing shape and offset; stride fits into
     /// f-contiguous.
-    fn new_f_contig(&self, offset: usize) -> Layout<Self>;
+    fn new_f_contig(&self, offset: usize) -> Layout<Self> {
+        let shape = Shape::<Self>(self.clone());
+        let stride = shape.stride_f_contig();
+        Layout { shape, stride, offset }
+    }
 
     /// Generate new layout by providing shape and offset; Whether c-contiguous
     /// or f-contiguous depends on cargo feature `c_prefer`.
-    fn new_contig(&self, offset: usize) -> Layout<Self>;
+    fn new_contig(&self, offset: usize) -> Layout<Self> {
+        match crate::C_PREFER {
+            true => self.new_c_contig(offset),
+            false => self.new_f_contig(offset),
+        }
+    }
 
     /// Simplified function to generate c-contiguous layout. See also
     /// [DimLayoutContigAPI::new_c_contig].
@@ -464,47 +510,8 @@ pub trait DimLayoutContigAPI: DimBaseAPI {
     }
 }
 
-impl<const N: usize> DimLayoutContigAPI for Ix<N> {
-    fn new_c_contig(&self, offset: usize) -> Layout<Ix<N>> {
-        let shape = Shape::<Self>(*self);
-        let stride = shape.stride_c_contig();
-        Layout { shape, stride, offset }
-    }
-
-    fn new_f_contig(&self, offset: usize) -> Layout<Ix<N>> {
-        let shape = Shape::<Self>(*self);
-        let stride = shape.stride_f_contig();
-        Layout { shape, stride, offset }
-    }
-
-    fn new_contig(&self, offset: usize) -> Layout<Ix<N>> {
-        match crate::C_PREFER {
-            true => self.new_c_contig(offset),
-            false => self.new_f_contig(offset),
-        }
-    }
-}
-
-impl DimLayoutContigAPI for IxD {
-    fn new_c_contig(&self, offset: usize) -> Layout<IxD> {
-        let shape = Shape::<Self>(self.clone());
-        let stride = shape.stride_c_contig();
-        Layout { shape, stride, offset }
-    }
-
-    fn new_f_contig(&self, offset: usize) -> Layout<IxD> {
-        let shape = Shape::<Self>(self.clone());
-        let stride = shape.stride_f_contig();
-        Layout { shape, stride, offset }
-    }
-
-    fn new_contig(&self, offset: usize) -> Layout<IxD> {
-        match crate::C_PREFER {
-            true => self.new_c_contig(offset),
-            false => self.new_f_contig(offset),
-        }
-    }
-}
+impl<const N: usize> DimLayoutContigAPI for Ix<N> {}
+impl DimLayoutContigAPI for IxD {}
 
 /* #endregion Layout */
 

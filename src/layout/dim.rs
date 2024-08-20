@@ -3,6 +3,7 @@ use core::ops::IndexMut;
 
 /* #region basic definitions */
 
+/// Fixed size dimension.
 pub type Ix<const N: usize> = [usize; N];
 pub type Ix0 = Ix<0>;
 pub type Ix1 = Ix<1>;
@@ -15,6 +16,8 @@ pub type Ix7 = Ix<7>;
 pub type Ix8 = Ix<8>;
 pub type Ix9 = Ix<9>;
 pub type IxD = Vec<usize>;
+
+/// Dynamic size dimension.
 pub type IxDyn = IxD;
 
 pub trait DimBaseAPI:
@@ -75,11 +78,13 @@ impl DimAPI for IxD {}
 /* #region dimension relative eq */
 
 // Trait for defining smaller dimension by one.
+#[doc(hidden)]
 pub trait DimSmallerOneAPI: DimAPI {
     type SmallerOne: DimAPI;
 }
 
 // Trait for defining larger dimension by one.
+#[doc(hidden)]
 pub trait DimLargerOneAPI: DimAPI {
     type LargerOne: DimAPI;
 }
@@ -119,6 +124,7 @@ impl_dim_larger_one!((0, 1), (1, 2), (2, 3), (3, 4), (4, 5), (5, 6), (6, 7), (7,
 /// Trait for comparing two dimensions.
 ///
 /// This trait is used to broadcast two tensors.
+#[doc(hidden)]
 pub trait DimMaxAPI<D2>
 where
     D2: DimBaseAPI,
