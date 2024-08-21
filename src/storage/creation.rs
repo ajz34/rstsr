@@ -13,6 +13,9 @@ pub trait StorageCreationAPI: StorageBaseAPI {
     fn arange_int_impl(device: &Self::Device, len: usize) -> Result<Self>;
     fn zeros_impl(device: &Self::Device, len: usize) -> Result<Self>;
     fn ones_impl(device: &Self::Device, len: usize) -> Result<Self>;
+    /// # Safety
+    ///
+    /// This function is unsafe because it does not initialize the memory.
     unsafe fn empty_impl(device: &Self::Device, len: usize) -> Result<Self>;
     fn full_impl(device: &Self::Device, len: usize, fill: Self::DType) -> Result<Self>;
     fn outof_cpu_vec(device: &Self::Device, vec: Vec<Self::DType>) -> Result<Self>;

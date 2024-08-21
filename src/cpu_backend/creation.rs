@@ -19,6 +19,7 @@ where
         Ok(Storage::<T, CpuDevice> { rawvec, device: device.clone() })
     }
 
+    #[allow(clippy::uninit_vec)]
     unsafe fn empty_impl(device: &CpuDevice, len: usize) -> Result<Storage<T, CpuDevice>> {
         let mut rawvec: Vec<T> = Vec::with_capacity(len);
         unsafe {
@@ -69,10 +70,10 @@ where
 
         let mut rawvec = vec![];
         let step = (end - start) / T::from(n - 1).unwrap();
-        let mut v = start.clone();
+        let mut v = start;
         for _ in 0..n {
-            rawvec.push(v.clone());
-            v = v + step.clone();
+            rawvec.push(v);
+            v = v + step;
         }
         Ok(Storage::<T, CpuDevice> { rawvec, device: device.clone() })
     }
@@ -109,7 +110,7 @@ mod test {
         println!("{:?}", storage);
         let storage = unsafe { Storage::<f32, CpuDevice>::empty_impl(&device, 10).unwrap() };
         println!("{:?}", storage);
-        let storage = Storage::<f32, CpuDevice>::from_cpu_vec(&device, &vec![1.0; 10]).unwrap();
+        let storage = Storage::<f32, CpuDevice>::from_cpu_vec(&device, &[1.0; 10]).unwrap();
         println!("{:?}", storage);
         let storage = Storage::<f32, CpuDevice>::outof_cpu_vec(&device, vec![1.0; 10]).unwrap();
         println!("{:?}", storage);

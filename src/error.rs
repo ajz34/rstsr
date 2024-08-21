@@ -18,6 +18,8 @@ pub enum Error {
     TryFromIntError(String),
     Infallible(String),
 
+    DeviceError(String),
+
     Miscellaneous(String),
 }
 
@@ -38,7 +40,7 @@ macro_rules! rstsr_assert {
         if $cond {
             Ok(())
         } else {
-            use crate::prelude_dev::*;
+            use $crate::prelude_dev::*;
             let mut s = String::new();
             write!(s, concat!(file!(), ":", line!(), ": ")).unwrap();
             write!(s, concat!("Error::", stringify!($errtype))).unwrap();
@@ -50,7 +52,7 @@ macro_rules! rstsr_assert {
         if $cond {
             Ok(())
         } else {
-            use crate::prelude_dev::*;
+            use $crate::prelude_dev::*;
             let mut s = String::new();
             write!(s, concat!(file!(), ":", line!(), ": ")).unwrap();
             write!(s, concat!("Error::", stringify!($errtype))).unwrap();
@@ -68,7 +70,7 @@ macro_rules! rstsr_assert_eq {
         if $lhs == $rhs {
             Ok(())
         } else {
-            use crate::prelude_dev::*;
+            use $crate::prelude_dev::*;
             let mut s = String::new();
             write!(s, concat!(file!(), ":", line!(), ": ")).unwrap();
             write!(s, concat!("Error::", stringify!($errtype))).unwrap();
@@ -88,7 +90,7 @@ macro_rules! rstsr_assert_eq {
         if $lhs == $rhs {
             Ok(())
         } else {
-            use crate::prelude_dev::*;
+            use $crate::prelude_dev::*;
             let mut s = String::new();
             write!(s, concat!(file!(), ":", line!(), ": ")).unwrap();
             write!(s, concat!("Error::", stringify!($errtype))).unwrap();
@@ -123,7 +125,7 @@ macro_rules! rstsr_invalid {
 #[macro_export]
 macro_rules! rstsr_raise {
     ($errtype:ident, $($arg:tt)*) => {{
-        use crate::prelude_dev::*;
+        use $crate::prelude_dev::*;
         let mut s = String::new();
         write!(s, concat!(file!(), ":", line!(), ": ")).unwrap();
         write!(s, concat!("Error::", stringify!($errtype))).unwrap();
@@ -139,7 +141,7 @@ macro_rules! rstsr_pattern {
         if ($pattern).contains(&($value)) {
             Ok(())
         } else {
-            use crate::prelude_dev::*;
+            use $crate::prelude_dev::*;
             let mut s = String::new();
             write!(s, concat!(file!(), ":", line!(), ": ")).unwrap();
             write!(s, concat!("Error::", stringify!($errtype))).unwrap();
@@ -159,7 +161,7 @@ macro_rules! rstsr_pattern {
         if ($pattern).contains(&($value)) {
             Ok(())
         } else {
-            use crate::prelude_dev::*;
+            use $crate::prelude_dev::*;
             let mut s = String::new();
             write!(s, concat!(file!(), ":", line!(), ": ")).unwrap();
             write!(s, concat!("Error::", stringify!($errtype))).unwrap();

@@ -143,7 +143,7 @@ mod tests {
         let device = CpuDevice {};
         let a = Tensor::<f64, _>::new(
             Storage::<f64, CpuDevice>::new(
-                (0..24).into_iter().map(|v| v as f64).collect::<Vec<_>>(),
+                (0..24).map(|v| v as f64).collect::<Vec<_>>(),
                 device.clone(),
             )
             .into(),

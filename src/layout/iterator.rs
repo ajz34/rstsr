@@ -190,11 +190,9 @@ where
     type Item = usize;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.index.is_none() {
-            return None;
-        }
+        self.index.as_ref()?;
         let index = self.index.as_ref().unwrap();
-        let offset = unsafe { self.layout.index_uncheck_by_ref(&index) };
+        let offset = unsafe { self.layout.index_uncheck_by_ref(index) };
         self.next_index();
         return Some(offset);
     }
@@ -391,11 +389,9 @@ where
     type Item = usize;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.index.is_none() {
-            return None;
-        }
+        self.index.as_ref()?;
         let index = self.index.as_ref().unwrap();
-        let offset = unsafe { self.layout.index_uncheck_by_ref(&index) };
+        let offset = unsafe { self.layout.index_uncheck_by_ref(index) };
         self.next_index();
         return Some(offset);
     }

@@ -1,4 +1,5 @@
 #![allow(refining_impl_trait)]
+#![allow(clippy::needless_return)]
 #![cfg_attr(not(test), no_std)]
 #![doc = include_str!("readme.md")]
 

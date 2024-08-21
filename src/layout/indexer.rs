@@ -111,7 +111,7 @@ where
 
             let offset = (self.offset() as isize + stride_mut[dim] * start) as usize;
             shape_mut[dim] = ((stop - start + step - 1) / step).max(0) as usize;
-            stride_mut[dim] = stride_mut[dim] * step;
+            stride_mut[dim] *= step;
             return Ok(Self::new(shape, stride, offset));
         } else {
             // step < 0
@@ -138,7 +138,7 @@ where
 
             let offset = (self.offset() as isize + stride_mut[dim] * start) as usize;
             shape_mut[dim] = ((stop - start - step - 1) / step).max(0) as usize;
-            stride_mut[dim] = stride_mut[dim] * step;
+            stride_mut[dim] *= step;
             return Ok(Self::new(shape, stride, offset));
         }
     }
@@ -214,14 +214,12 @@ where
                 shape.insert(dim, 1);
                 stride.insert(dim, stride[dim - 1]);
             }
+        } else if dim == self.ndim() {
+            shape.push(1);
+            stride.push(1);
         } else {
-            if dim == self.ndim() {
-                shape.push(1);
-                stride.push(1);
-            } else {
-                shape.insert(dim, 1);
-                stride.insert(dim, stride[dim]);
-            }
+            shape.insert(dim, 1);
+            stride.insert(dim, stride[dim]);
         }
 
         return Ok(Layout::<IxD>::new(Shape(shape), Stride(stride), offset));
@@ -258,19 +256,19 @@ where
 
         // insert Ellipsis by slice(:) anyway, default append at last
         let n_ellipsis = self.ndim() - counter_slice - counter_select;
-        if idx_ellipsis.is_some() && n_ellipsis == 0 {
-            indexers.remove(idx_ellipsis.unwrap());
+        if n_ellipsis == 0 {
+            if let Some(idx) = idx_ellipsis {
+                indexers.remove(idx);
+            }
         } else {
             let idx_ellipsis = idx_ellipsis.unwrap_or(indexers.len());
-            if n_ellipsis > 0 {
-                indexers[idx_ellipsis] = SliceI { start: None, stop: None, step: None }.into();
-                if n_ellipsis > 1 {
-                    for _ in 1..n_ellipsis {
-                        indexers.insert(
-                            idx_ellipsis,
-                            SliceI { start: None, stop: None, step: None }.into(),
-                        );
-                    }
+            indexers[idx_ellipsis] = SliceI { start: None, stop: None, step: None }.into();
+            if n_ellipsis > 1 {
+                for _ in 1..n_ellipsis {
+                    indexers.insert(
+                        idx_ellipsis,
+                        SliceI { start: None, stop: None, step: None }.into(),
+                    );
                 }
             }
         }
@@ -282,7 +280,7 @@ where
             match indexer {
                 Indexer::Slice(slice) => {
                     cur_dim -= 1;
-                    layout = layout.dim_narrow(cur_dim, slice.clone())?;
+                    layout = layout.dim_narrow(cur_dim, *slice)?;
                 },
                 Indexer::Select(index) => {
                     cur_dim -= 1;
@@ -330,7 +328,7 @@ mod tests {
 
     #[test]
     fn test_slice() {
-        let t = 3 as usize;
+        let t = 3_usize;
         let s = slice!(1, 2, t);
         assert_eq!(s.start(), Some(1));
         assert_eq!(s.stop(), Some(2));

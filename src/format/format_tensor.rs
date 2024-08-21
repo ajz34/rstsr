@@ -23,10 +23,10 @@ where
     D: DimAPI,
 {
     let FnPrintVecWithLayout { vec, layout, offset, idx_prev, max_print, min_print, fmt } = c;
-    let max_print = max_print.clone();
-    let min_print = min_print.clone();
+    let max_print = *max_print;
+    let min_print = *min_print;
     let ndim = layout.ndim();
-    let offset = offset.clone();
+    let offset = *offset;
     let len_prev = idx_prev.len();
     let shape = layout.shape_ref().as_ref();
     let stride = layout.stride_ref().as_ref();
@@ -84,8 +84,8 @@ where
             // last line
 
             // number of last dimension
-            let nlast = shape.last().unwrap().clone();
-            let stride_last = stride.last().unwrap().clone();
+            let nlast = *shape.last().unwrap();
+            let stride_last = *stride.last().unwrap();
 
             // special case: zero shape quick return
             if nlast == 0 {
@@ -149,9 +149,9 @@ where
                 if nket != ndim {
                     // last line should not add new-line character
                     if nket > 1 {
-                        write!(fmt, "\n\n")?;
+                        writeln!(fmt, "\n")?;
                     } else {
-                        write!(fmt, "\n")?;
+                        writeln!(fmt)?;
                     }
                 }
             }
@@ -174,7 +174,7 @@ where
                     c.offset = offset;
                     return print_vec_with_layout_dfs(c);
                 } else {
-                    write!(fmt, "{}...\n", " ".repeat(len_prev))?;
+                    writeln!(fmt, "{}...", " ".repeat(len_prev))?;
                     let p1 = shape[len_prev - 1] - min_print;
                     idx_prev.push(p1);
                     let offset = offset + p1 as isize * stride[len_prev - 1];
@@ -187,10 +187,10 @@ where
     }
 }
 
-pub fn print_vec_with_layout<'v, 'l, 'f1, 'f2, T, D>(
-    fmt: &'f1 mut core::fmt::Formatter<'f2>,
-    vec: &'v [T],
-    layout: &'l Layout<D>,
+pub fn print_vec_with_layout<T, D>(
+    fmt: &mut core::fmt::Formatter<'_>,
+    vec: &[T],
+    layout: &Layout<D>,
     max_print: usize,
     min_print: usize,
 ) -> core::fmt::Result

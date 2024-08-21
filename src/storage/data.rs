@@ -97,7 +97,7 @@ where
         self.storage
     }
     fn as_ref(&self) -> DataRef<'_, Self::Data> {
-        DataRef { storage: &self.storage }
+        DataRef { storage: self.storage }
     }
     fn into_owned(self) -> DataOwned<Self::Data> {
         DataOwned { storage: self.storage.clone() }
@@ -114,7 +114,7 @@ impl<S> DataMutAPI for DataOwned<S> {
 impl<'a, S> DataMutAPI for DataRefMut<'a, S> {
     type Data = S;
     fn as_ref_mut(&mut self) -> DataRefMut<'_, Self::Data> {
-        DataRefMut { storage: &mut self.storage }
+        DataRefMut { storage: self.storage }
     }
 }
 

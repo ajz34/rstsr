@@ -23,6 +23,9 @@ pub trait StorageBaseAPI: Sized {
     fn into_rawvec(self) -> Self::RawVec;
     fn new(vector: Self::RawVec, device: Self::Device) -> Self;
     fn len(&self) -> usize;
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
 }
 
 pub trait StorageToCpuAPI: StorageBaseAPI {

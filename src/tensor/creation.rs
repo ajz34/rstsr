@@ -296,6 +296,10 @@ where
     /// Uninitialized tensor having a specified shape.
     ///
     /// This function is CPU versioin of [`Tensor::empty_with_device`].
+    ///
+    /// # Safety
+    ///
+    /// This function is unsafe because it creates a tensor with uninitialized.
     pub unsafe fn empty(layout: impl Into<Layout<D>>) -> Tensor<T, D, CpuDevice> {
         Tensor::<T, D, CpuDevice>::empty_with_device(layout, CpuDevice)
     }
@@ -303,6 +307,10 @@ where
     /// Uninitialized tensor with the same shape as an input tensor.
     ///
     /// This function is CPU versioin of [`Tensor::empty_like_with_device`].
+    ///
+    /// # Safety
+    ///
+    /// This function is unsafe because it creates a tensor with uninitialized.
     pub unsafe fn empty_like(
         tensor: &TensorBase<impl DataAPI<Data = Storage<T, CpuDevice>>, D>,
     ) -> Tensor<T, D, CpuDevice> {
@@ -381,7 +389,7 @@ mod test {
         println!("{a:6.3?}");
         let a = unsafe { Tensor::empty_like(&a) };
         println!("{a:6.3?}");
-        let a = Tensor::<f64, _>::full([2, 2].f(), 3.14);
+        let a = Tensor::<f64, _>::full([2, 2].f(), 3.16);
         println!("{a:6.3?}");
         let a = Tensor::<f64, _>::full_like(&a, 2.71);
         println!("{a:6.3?}");
