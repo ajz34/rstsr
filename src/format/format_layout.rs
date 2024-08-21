@@ -2,7 +2,7 @@ use crate::prelude_dev::*;
 
 impl<D> Debug for Layout<D>
 where
-    D: DimBaseAPI + DimLayoutAPI,
+    D: DimBaseAPI + DimIndexUncheckAPI,
 {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         let shape = self.shape.as_ref();

@@ -55,7 +55,7 @@ pub trait IndexerPreserve: Sized {
 
 impl<D> IndexerPreserve for Layout<D>
 where
-    D: DimBaseAPI + DimLayoutAPI,
+    D: DimBaseAPI + DimIndexUncheckAPI,
 {
     fn dim_narrow(&self, dim: isize, slice: SliceI) -> Result<Self> {
         // dimension check
@@ -158,7 +158,7 @@ pub trait IndexerDynamic: IndexerPreserve {
 
 impl<D> IndexerDynamic for Layout<D>
 where
-    D: DimLayoutAPI,
+    D: DimIndexUncheckAPI,
 {
     fn dim_select(&self, dim: isize, index: isize) -> Result<Layout<IxD>> {
         // dimension check

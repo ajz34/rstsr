@@ -99,7 +99,7 @@ where
                         return false;
                     }
                     last = s.abs();
-                }
+                },
             }
         }
         return true;
@@ -118,7 +118,7 @@ where
                         return false;
                     }
                     last = s.abs();
-                }
+                },
             }
         }
         return true;
@@ -363,7 +363,7 @@ where
     }
 }
 
-pub trait DimLayoutAPI: DimBaseAPI + DimStrideAPI + DimShapeAPI {
+pub trait DimIndexUncheckAPI: DimBaseAPI + DimStrideAPI + DimShapeAPI {
     /// Index of tensor by list of indexes to dimensions.
     ///
     /// # Safety
@@ -371,13 +371,7 @@ pub trait DimLayoutAPI: DimBaseAPI + DimStrideAPI + DimShapeAPI {
     /// This function does not check for bounds, including
     /// - Negative index
     /// - Index greater than shape
-    unsafe fn index_uncheck_by_ref(layout: &Layout<Self>, index: &Self) -> usize {
-        let mut pos = layout.offset as isize;
-        let index = index.as_ref();
-        let stride = layout.stride.as_ref();
-        stride.iter().zip(index.iter()).for_each(|(&s, &i)| pos += s * i as isize);
-        return pos as usize;
-    }
+    unsafe fn index_uncheck_by_ref(layout: &Layout<Self>, index: &Self) -> usize;
 
     /// Index of tensor by list of indexes to dimensions.
     ///
@@ -386,67 +380,61 @@ pub trait DimLayoutAPI: DimBaseAPI + DimStrideAPI + DimShapeAPI {
     /// This function does not check for bounds, including
     /// - Negative index
     /// - Index greater than shape
+    #[inline]
     unsafe fn index_uncheck(layout: &Layout<Self>, index: Self) -> usize {
         Self::index_uncheck_by_ref(layout, &index)
     }
 }
 
-impl DimLayoutAPI for Ix<0> {
-    unsafe fn index_uncheck(_layout: &Layout<Self>, _index: Self) -> usize {
-        0
-    }
-}
-
-impl DimLayoutAPI for Ix<1> {
-    unsafe fn index_uncheck(layout: &Layout<Self>, index: Self) -> usize {
+impl<const N: usize> DimIndexUncheckAPI for Ix<N> {
+    #[inline]
+    unsafe fn index_uncheck_by_ref(layout: &Layout<Self>, index: &Self) -> usize {
         let index = index.as_ref();
         let stride = layout.stride.as_ref();
-        (layout.offset as isize + stride[0] * index[0] as isize) as usize
+        match N {
+            0 => 0,
+            1 => (layout.offset as isize + stride[0] * index[0] as isize) as usize,
+            2 => {
+                (layout.offset as isize
+                    + stride[0] * index[0] as isize
+                    + stride[1] * index[1] as isize) as usize
+            },
+            3 => {
+                (layout.offset as isize
+                    + stride[0] * index[0] as isize
+                    + stride[1] * index[1] as isize
+                    + stride[2] * index[2] as isize) as usize
+            },
+            4 => {
+                (layout.offset as isize
+                    + stride[0] * index[0] as isize
+                    + stride[1] * index[1] as isize
+                    + stride[2] * index[2] as isize
+                    + stride[3] * index[3] as isize) as usize
+            },
+            _ => {
+                let mut pos = layout.offset as isize;
+                stride.iter().zip(index.iter()).for_each(|(&s, &i)| pos += s * i as isize);
+                pos as usize
+            },
+        }
     }
 }
 
-impl DimLayoutAPI for Ix<2> {
-    unsafe fn index_uncheck(layout: &Layout<Self>, index: Self) -> usize {
-        let index = index.as_ref();
-        let stride = layout.stride.as_ref();
-        (layout.offset as isize + stride[0] * index[0] as isize + stride[1] * index[1] as isize)
-            as usize
+impl DimIndexUncheckAPI for IxD {
+    #[inline]
+    unsafe fn index_uncheck_by_ref(layout: &Layout<Self>, index: &Self) -> usize {
+        let mut pos = layout.offset as isize;
+        let index: &[usize] = index.as_ref();
+        let stride: &[isize] = layout.stride.as_ref();
+        stride.iter().zip(index.iter()).for_each(|(&s, &i)| pos += s * i as isize);
+        return pos as usize;
     }
 }
-
-impl DimLayoutAPI for Ix<3> {
-    unsafe fn index_uncheck(layout: &Layout<Self>, index: Self) -> usize {
-        let index = index.as_ref();
-        let stride = layout.stride.as_ref();
-        (layout.offset as isize
-            + stride[0] * index[0] as isize
-            + stride[1] * index[1] as isize
-            + stride[2] * index[2] as isize) as usize
-    }
-}
-
-impl DimLayoutAPI for Ix<4> {
-    unsafe fn index_uncheck(layout: &Layout<Self>, index: Self) -> usize {
-        let index = index.as_ref();
-        let stride = layout.stride.as_ref();
-        (layout.offset as isize
-            + stride[0] * index[0] as isize
-            + stride[1] * index[1] as isize
-            + stride[2] * index[2] as isize
-            + stride[3] * index[3] as isize) as usize
-    }
-}
-
-impl DimLayoutAPI for Ix<5> {}
-impl DimLayoutAPI for Ix<6> {}
-impl DimLayoutAPI for Ix<7> {}
-impl DimLayoutAPI for Ix<8> {}
-impl DimLayoutAPI for Ix<9> {}
-impl DimLayoutAPI for IxD {}
 
 impl<D> Layout<D>
 where
-    D: DimLayoutAPI,
+    D: DimIndexUncheckAPI,
 {
     /// Index of tensor by list of indexes to dimensions.
     ///

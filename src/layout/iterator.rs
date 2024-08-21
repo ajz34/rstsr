@@ -90,8 +90,11 @@ pub trait IterLayoutRowMajorAPI: IterLayoutBaseAPI {
 
 impl IterLayoutRowMajorAPI for IterLayoutRowMajor<Ix0> {
     fn next_index(&mut self) -> Option<&Self::D> {
-        self.index = None;
-        return None;
+        let (_, index, _) = self.combined_getter();
+        if index.is_none() {
+            return None;
+        }
+        return Some(&[]);
     }
 }
 
@@ -288,8 +291,11 @@ pub trait IterLayoutColMajorAPI: IterLayoutBaseAPI {
 
 impl IterLayoutColMajorAPI for IterLayoutColMajor<Ix0> {
     fn next_index(&mut self) -> Option<&Self::D> {
-        self.index = None;
-        return None;
+        let (_, index, _) = self.combined_getter();
+        if index.is_none() {
+            return None;
+        }
+        return Some(&[]);
     }
 }
 

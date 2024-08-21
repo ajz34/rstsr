@@ -57,20 +57,13 @@ impl DimBaseAPI for IxD {
 }
 
 pub trait DimAPI:
-    DimBaseAPI + DimShapeAPI + DimStrideAPI + DimLayoutAPI + DimLayoutContigAPI
+    DimBaseAPI + DimShapeAPI + DimStrideAPI + DimIndexUncheckAPI + DimLayoutContigAPI
 {
 }
 
 // currently, we make specialization to Ix<N>, so we can only implement finite N
 // for now.
-macro_rules! impl_dim_api {
-    ($($N:literal),*) => {
-        $(
-            impl DimAPI for Ix<$N> {}
-        )*
-    };
-}
-impl_dim_api!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9);
+impl<const N: usize> DimAPI for Ix<N> {}
 impl DimAPI for IxD {}
 
 /* #endregion */

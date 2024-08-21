@@ -116,9 +116,9 @@ where
     }
 
     /// Stride for contiguous tensor using this shape.
-    /// 
+    ///
     /// # Cargo feature dependent
-    /// 
+    ///
     /// Whether c-contiguous or f-contiguous will depends on cargo feature
     /// `c_prefer`.
     pub fn stride_contig(&self) -> Stride<D> {
