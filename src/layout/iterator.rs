@@ -58,22 +58,137 @@ where
 pub trait IterLayoutRowMajorAPI: IterLayoutBaseAPI {
     /// Get the next index, but note that this operation shall handle index
     /// iterator in-place.
-    fn next_index(&mut self) -> Option<&Self::D> {
+    fn next_index(&mut self) -> Option<&Self::D>;
+}
+
+impl<const N: usize> IterLayoutRowMajorAPI for IterLayoutRowMajor<Ix<N>> {
+    #[inline]
+    fn next_index(&mut self) -> Option<&Ix<N>> {
         let (layout, index, offset) = self.combined_getter();
         if index.is_none() {
             return None;
         }
         let index_in = index.as_mut().unwrap();
+        let shape = layout.shape_ref().as_ref();
+        let stride = layout.stride_ref().as_ref();
+        match N {
+            0 => {
+                *index = None;
+                return None;
+            },
+            1 => {
+                index_in[0] += 1;
+                *offset = (*offset as isize + stride[0]) as usize;
+                if index_in[0] == shape[0] {
+                    *index = None;
+                    return None;
+                }
+                return Some(index.as_mut().unwrap());
+            },
+            2 => {
+                index_in[1] += 1;
+                *offset = (*offset as isize + stride[1]) as usize;
+                if index_in[1] == shape[1] {
+                    index_in[1] = 0;
+                    *offset = (*offset as isize - shape[1] as isize * stride[1]) as usize;
+                    index_in[0] += 1;
+                    *offset = (*offset as isize + stride[0]) as usize;
+                    if index_in[0] == shape[0] {
+                        *index = None;
+                        return None;
+                    }
+                }
+                return Some(index.as_mut().unwrap());
+            },
+            3 => {
+                index_in[2] += 1;
+                *offset = (*offset as isize + stride[2]) as usize;
+                if index_in[2] == shape[2] {
+                    index_in[2] = 0;
+                    *offset = (*offset as isize - shape[2] as isize * stride[2]) as usize;
+                    index_in[1] += 1;
+                    *offset = (*offset as isize + stride[1]) as usize;
+                    if index_in[1] == shape[1] {
+                        index_in[1] = 0;
+                        *offset = (*offset as isize - shape[1] as isize * stride[1]) as usize;
+                        index_in[0] += 1;
+                        *offset = (*offset as isize + stride[0]) as usize;
+                        if index_in[0] == shape[0] {
+                            *index = None;
+                            return None;
+                        }
+                    }
+                }
+                return Some(index.as_mut().unwrap());
+            },
+            4 => {
+                index_in[3] += 1;
+                *offset = (*offset as isize + stride[3]) as usize;
+                if index_in[3] == shape[3] {
+                    index_in[3] = 0;
+                    *offset = (*offset as isize - shape[3] as isize * stride[3]) as usize;
+                    index_in[2] += 1;
+                    *offset = (*offset as isize + stride[2]) as usize;
+                    if index_in[2] == shape[2] {
+                        index_in[2] = 0;
+                        *offset = (*offset as isize - shape[2] as isize * stride[2]) as usize;
+                        index_in[1] += 1;
+                        *offset = (*offset as isize + stride[1]) as usize;
+                        if index_in[1] == shape[1] {
+                            index_in[1] = 0;
+                            *offset = (*offset as isize - shape[1] as isize * stride[1]) as usize;
+                            index_in[0] += 1;
+                            *offset = (*offset as isize + stride[0]) as usize;
+                            if index_in[0] == shape[0] {
+                                *index = None;
+                                return None;
+                            }
+                        }
+                    }
+                }
+                return Some(index.as_mut().unwrap());
+            },
+            _ => {
+                let mut done = false;
+                for (d, t, idx) in izip!(shape, stride, index_in).rev() {
+                    *idx += 1;
+                    *offset = (*offset as isize + t) as usize;
+                    if idx == d {
+                        *idx = 0;
+                        *offset = (*offset as isize - *d as isize * t) as usize;
+                    } else {
+                        done = true;
+                        break;
+                    }
+                }
+                if done {
+                    return Some(index.as_mut().unwrap());
+                } else {
+                    *index = None;
+                    return None;
+                }
+            },
+        }
+    }
+}
+
+impl IterLayoutRowMajorAPI for IterLayoutRowMajor<IxD> {
+    #[inline]
+    fn next_index(&mut self) -> Option<&IxD> {
+        let (layout, index, offset) = self.combined_getter();
+        if index.is_none() {
+            return None;
+        }
+        let index_in = index.as_mut().unwrap();
+        let shape: &[usize] = layout.shape_ref().as_ref();
+        let stride: &[isize] = layout.stride_ref().as_ref();
         let mut done = false;
-        for (shape, idx, stride) in
-            izip!(layout.shape_ref().as_ref(), index_in.as_mut(), layout.stride_ref().as_ref())
-                .rev()
-        {
+        for (d, t, idx) in izip!(shape, stride, index_in).rev() {
             *idx += 1;
-            *offset = (*offset as isize + stride) as usize;
-            if idx == shape {
+            *offset = (*offset as isize + t) as usize;
+            if idx == d {
                 *idx = 0;
-                *offset = (*offset as isize - *shape as isize * stride) as usize;
+                *offset = (*offset as isize - *d as isize * t) as usize;
             } else {
                 done = true;
                 break;
@@ -88,100 +203,6 @@ pub trait IterLayoutRowMajorAPI: IterLayoutBaseAPI {
     }
 }
 
-impl IterLayoutRowMajorAPI for IterLayoutRowMajor<Ix0> {
-    fn next_index(&mut self) -> Option<&Self::D> {
-        let (_, index, _) = self.combined_getter();
-        if index.is_none() {
-            return None;
-        }
-        return Some(&[]);
-    }
-}
-
-impl IterLayoutRowMajorAPI for IterLayoutRowMajor<Ix1> {
-    fn next_index(&mut self) -> Option<&Self::D> {
-        let (layout, index, offset) = self.combined_getter();
-        if index.is_none() {
-            return None;
-        }
-        let index_in = index.as_mut().unwrap();
-        let shape = layout.shape_ref().as_ref();
-        let stride = layout.stride_ref().as_ref();
-        index_in[0] += 1;
-        *offset = (*offset as isize + stride[0]) as usize;
-        if index_in[0] == shape[0] {
-            *index = None;
-            return None;
-        } else {
-            return Some(index.as_mut().unwrap());
-        }
-    }
-}
-
-impl IterLayoutRowMajorAPI for IterLayoutRowMajor<Ix2> {
-    fn next_index(&mut self) -> Option<&Self::D> {
-        let (layout, index, offset) = self.combined_getter();
-        if index.is_none() {
-            return None;
-        }
-        let index_in = index.as_mut().unwrap();
-        let shape = layout.shape_ref().as_ref();
-        let stride = layout.stride_ref().as_ref();
-        index_in[1] += 1;
-        *offset = (*offset as isize + stride[1]) as usize;
-        if index_in[1] == shape[1] {
-            index_in[1] = 0;
-            *offset = (*offset as isize - shape[1] as isize * stride[1]) as usize;
-            index_in[0] += 1;
-            *offset = (*offset as isize + stride[0]) as usize;
-            if index_in[0] == shape[0] {
-                *index = None;
-                return None;
-            }
-        }
-        return Some(index.as_mut().unwrap());
-    }
-}
-
-impl IterLayoutRowMajorAPI for IterLayoutRowMajor<Ix3> {
-    fn next_index(&mut self) -> Option<&Self::D> {
-        let (layout, index, offset) = self.combined_getter();
-        if index.is_none() {
-            return None;
-        }
-        let index_in = index.as_mut().unwrap();
-        let shape = layout.shape_ref().as_ref();
-        let stride = layout.stride_ref().as_ref();
-        index_in[2] += 1;
-        *offset = (*offset as isize + stride[2]) as usize;
-        if index_in[2] == shape[2] {
-            index_in[2] = 0;
-            *offset = (*offset as isize - shape[2] as isize * stride[2]) as usize;
-            index_in[1] += 1;
-            *offset = (*offset as isize + stride[1]) as usize;
-            if index_in[1] == shape[1] {
-                index_in[1] = 0;
-                *offset = (*offset as isize - shape[1] as isize * stride[1]) as usize;
-                index_in[0] += 1;
-                *offset = (*offset as isize + stride[0]) as usize;
-                if index_in[0] == shape[0] {
-                    *index = None;
-                    return None;
-                }
-            }
-        }
-        return Some(index.as_mut().unwrap());
-    }
-}
-
-impl IterLayoutRowMajorAPI for IterLayoutRowMajor<Ix4> {}
-impl IterLayoutRowMajorAPI for IterLayoutRowMajor<Ix5> {}
-impl IterLayoutRowMajorAPI for IterLayoutRowMajor<Ix6> {}
-impl IterLayoutRowMajorAPI for IterLayoutRowMajor<Ix7> {}
-impl IterLayoutRowMajorAPI for IterLayoutRowMajor<Ix8> {}
-impl IterLayoutRowMajorAPI for IterLayoutRowMajor<Ix9> {}
-impl IterLayoutRowMajorAPI for IterLayoutRowMajor<IxD> {}
-
 impl<D> Iterator for IterLayoutRowMajor<D>
 where
     D: DimAPI,
@@ -191,8 +212,7 @@ where
 
     fn next(&mut self) -> Option<Self::Item> {
         self.index.as_ref()?;
-        let index = self.index.as_ref().unwrap();
-        let offset = unsafe { self.layout.index_uncheck_by_ref(index) };
+        let offset = self.offset;
         self.next_index();
         return Some(offset);
     }
@@ -203,8 +223,17 @@ fn test_iter_layout_row_major() {
     let layout = [2, 3, 4].c();
     let iter = IterLayoutRowMajor::new(&layout);
     assert_eq!(iter.collect::<Vec<_>>(), (0..24).collect::<Vec<_>>());
+    let layout = vec![2, 3, 4].c();
+    let iter = IterLayoutRowMajor::new(&layout);
+    assert_eq!(iter.collect::<Vec<_>>(), (0..24).collect::<Vec<_>>());
     // np.arange(24).reshape(4, 3, 2).transpose(2, 1, 0).flatten()
     let layout = [2, 3, 4].f();
+    let iter = IterLayoutRowMajor::new(&layout);
+    assert_eq!(
+        iter.collect::<Vec<_>>(),
+        [0, 6, 12, 18, 2, 8, 14, 20, 4, 10, 16, 22, 1, 7, 13, 19, 3, 9, 15, 21, 5, 11, 17, 23]
+    );
+    let layout = vec![2, 3, 4].f();
     let iter = IterLayoutRowMajor::new(&layout);
     assert_eq!(
         iter.collect::<Vec<_>>(),
@@ -258,21 +287,137 @@ where
 pub trait IterLayoutColMajorAPI: IterLayoutBaseAPI {
     /// Get the next index, but note that this operation shall handle index
     /// iterator in-place.
+    fn next_index(&mut self) -> Option<&Self::D>;
+}
+
+impl<const N: usize> IterLayoutColMajorAPI for IterLayoutColMajor<Ix<N>> {
+    #[inline]
+    fn next_index(&mut self) -> Option<&Ix<N>> {
+        let (layout, index, offset) = self.combined_getter();
+        if index.is_none() {
+            return None;
+        }
+        let index_in = index.as_mut().unwrap();
+        let shape = layout.shape_ref().as_ref();
+        let stride = layout.stride_ref().as_ref();
+        match N {
+            0 => {
+                *index = None;
+                return None;
+            },
+            1 => {
+                index_in[0] += 1;
+                *offset = (*offset as isize + stride[0]) as usize;
+                if index_in[0] == shape[0] {
+                    *index = None;
+                    return None;
+                }
+                return Some(index.as_mut().unwrap());
+            },
+            2 => {
+                index_in[0] += 1;
+                *offset = (*offset as isize + stride[0]) as usize;
+                if index_in[0] == shape[0] {
+                    index_in[0] = 0;
+                    *offset = (*offset as isize - shape[0] as isize * stride[0]) as usize;
+                    index_in[1] += 1;
+                    *offset = (*offset as isize + stride[1]) as usize;
+                    if index_in[1] == shape[1] {
+                        *index = None;
+                        return None;
+                    }
+                }
+                return Some(index.as_mut().unwrap());
+            },
+            3 => {
+                index_in[0] += 1;
+                *offset = (*offset as isize + stride[0]) as usize;
+                if index_in[0] == shape[0] {
+                    index_in[0] = 0;
+                    *offset = (*offset as isize - shape[0] as isize * stride[0]) as usize;
+                    index_in[1] += 1;
+                    *offset = (*offset as isize + stride[1]) as usize;
+                    if index_in[1] == shape[1] {
+                        index_in[1] = 0;
+                        *offset = (*offset as isize - shape[1] as isize * stride[1]) as usize;
+                        index_in[2] += 1;
+                        *offset = (*offset as isize + stride[2]) as usize;
+                        if index_in[2] == shape[2] {
+                            *index = None;
+                            return None;
+                        }
+                    }
+                }
+                return Some(index.as_mut().unwrap());
+            },
+            4 => {
+                index_in[0] += 1;
+                *offset = (*offset as isize + stride[0]) as usize;
+                if index_in[0] == shape[0] {
+                    index_in[0] = 0;
+                    *offset = (*offset as isize - shape[0] as isize * stride[0]) as usize;
+                    index_in[1] += 1;
+                    *offset = (*offset as isize + stride[1]) as usize;
+                    if index_in[1] == shape[1] {
+                        index_in[1] = 0;
+                        *offset = (*offset as isize - shape[1] as isize * stride[1]) as usize;
+                        index_in[2] += 1;
+                        *offset = (*offset as isize + stride[2]) as usize;
+                        if index_in[2] == shape[2] {
+                            index_in[2] = 0;
+                            *offset = (*offset as isize - shape[2] as isize * stride[2]) as usize;
+                            index_in[3] += 1;
+                            *offset = (*offset as isize + stride[3]) as usize;
+                            if index_in[3] == shape[3] {
+                                *index = None;
+                                return None;
+                            }
+                        }
+                    }
+                }
+                return Some(index.as_mut().unwrap());
+            },
+            _ => {
+                let mut done = false;
+                for (d, t, idx) in izip!(shape, stride, index_in.as_mut(),) {
+                    *idx += 1;
+                    *offset = (*offset as isize + t) as usize;
+                    if idx == d {
+                        *idx = 0;
+                        *offset = (*offset as isize - *d as isize * t) as usize;
+                    } else {
+                        done = true;
+                        break;
+                    }
+                }
+                if done {
+                    return Some(index.as_mut().unwrap());
+                } else {
+                    *index = None;
+                    return None;
+                }
+            },
+        }
+    }
+}
+
+impl IterLayoutColMajorAPI for IterLayoutColMajor<IxD> {
+    #[inline]
     fn next_index(&mut self) -> Option<&Self::D> {
         let (layout, index, offset) = self.combined_getter();
         if index.is_none() {
             return None;
         }
         let index_in = index.as_mut().unwrap();
+        let shape: &[usize] = layout.shape_ref().as_ref();
+        let stride: &[isize] = layout.stride_ref().as_ref();
         let mut done = false;
-        for (shape, idx, stride) in
-            izip!(layout.shape_ref().as_ref(), index_in.as_mut(), layout.stride_ref().as_ref())
-        {
+        for (d, t, idx) in izip!(shape, stride, index_in) {
             *idx += 1;
-            *offset = (*offset as isize + stride) as usize;
-            if idx == shape {
+            *offset = (*offset as isize + t) as usize;
+            if idx == d {
                 *idx = 0;
-                *offset = (*offset as isize - *shape as isize * stride) as usize;
+                *offset = (*offset as isize - *d as isize * t) as usize;
             } else {
                 done = true;
                 break;
@@ -287,100 +432,6 @@ pub trait IterLayoutColMajorAPI: IterLayoutBaseAPI {
     }
 }
 
-impl IterLayoutColMajorAPI for IterLayoutColMajor<Ix0> {
-    fn next_index(&mut self) -> Option<&Self::D> {
-        let (_, index, _) = self.combined_getter();
-        if index.is_none() {
-            return None;
-        }
-        return Some(&[]);
-    }
-}
-
-impl IterLayoutColMajorAPI for IterLayoutColMajor<Ix1> {
-    fn next_index(&mut self) -> Option<&Self::D> {
-        let (layout, index, offset) = self.combined_getter();
-        if index.is_none() {
-            return None;
-        }
-        let index_in = index.as_mut().unwrap();
-        let shape = layout.shape_ref().as_ref();
-        let stride = layout.stride_ref().as_ref();
-        index_in[0] += 1;
-        *offset = (*offset as isize + stride[0]) as usize;
-        if index_in[0] == shape[0] {
-            *index = None;
-            return None;
-        } else {
-            return Some(index.as_mut().unwrap());
-        }
-    }
-}
-
-impl IterLayoutColMajorAPI for IterLayoutColMajor<Ix2> {
-    fn next_index(&mut self) -> Option<&Self::D> {
-        let (layout, index, offset) = self.combined_getter();
-        if index.is_none() {
-            return None;
-        }
-        let index_in = index.as_mut().unwrap();
-        let shape = layout.shape_ref().as_ref();
-        let stride = layout.stride_ref().as_ref();
-        index_in[0] += 1;
-        *offset = (*offset as isize + stride[0]) as usize;
-        if index_in[0] == shape[0] {
-            index_in[0] = 0;
-            *offset = (*offset as isize - shape[0] as isize * stride[0]) as usize;
-            index_in[1] += 1;
-            *offset = (*offset as isize + stride[1]) as usize;
-            if index_in[1] == shape[1] {
-                *index = None;
-                return None;
-            }
-        }
-        return Some(index.as_mut().unwrap());
-    }
-}
-
-impl IterLayoutColMajorAPI for IterLayoutColMajor<Ix3> {
-    fn next_index(&mut self) -> Option<&Self::D> {
-        let (layout, index, offset) = self.combined_getter();
-        if index.is_none() {
-            return None;
-        }
-        let index_in = index.as_mut().unwrap();
-        let shape = layout.shape_ref().as_ref();
-        let stride = layout.stride_ref().as_ref();
-        index_in[0] += 1;
-        *offset = (*offset as isize + stride[0]) as usize;
-        if index_in[0] == shape[0] {
-            index_in[0] = 0;
-            *offset = (*offset as isize - shape[0] as isize * stride[0]) as usize;
-            index_in[1] += 1;
-            *offset = (*offset as isize + stride[1]) as usize;
-            if index_in[1] == shape[1] {
-                index_in[1] = 0;
-                *offset = (*offset as isize - shape[1] as isize * stride[1]) as usize;
-                index_in[2] += 1;
-                *offset = (*offset as isize + stride[2]) as usize;
-                if index_in[2] == shape[2] {
-                    *index = None;
-                    return None;
-                }
-            }
-        }
-        return Some(index.as_mut().unwrap());
-    }
-}
-
-impl IterLayoutColMajorAPI for IterLayoutColMajor<Ix4> {}
-impl IterLayoutColMajorAPI for IterLayoutColMajor<Ix5> {}
-impl IterLayoutColMajorAPI for IterLayoutColMajor<Ix6> {}
-impl IterLayoutColMajorAPI for IterLayoutColMajor<Ix7> {}
-impl IterLayoutColMajorAPI for IterLayoutColMajor<Ix8> {}
-impl IterLayoutColMajorAPI for IterLayoutColMajor<Ix9> {}
-impl IterLayoutColMajorAPI for IterLayoutColMajor<IxD> {}
-
 impl<D> Iterator for IterLayoutColMajor<D>
 where
     D: DimAPI,
@@ -390,8 +441,7 @@ where
 
     fn next(&mut self) -> Option<Self::Item> {
         self.index.as_ref()?;
-        let index = self.index.as_ref().unwrap();
-        let offset = unsafe { self.layout.index_uncheck_by_ref(index) };
+        let offset = self.offset;
         self.next_index();
         return Some(offset);
     }
@@ -402,8 +452,17 @@ fn test_iter_layout_col_major() {
     let layout = [2, 3, 4].f();
     let iter = IterLayoutColMajor::new(&layout);
     assert_eq!(iter.collect::<Vec<_>>(), (0..24).collect::<Vec<_>>());
+    let layout = vec![2, 3, 4].f();
+    let iter = IterLayoutColMajor::new(&layout);
+    assert_eq!(iter.collect::<Vec<_>>(), (0..24).collect::<Vec<_>>());
     // np.arange(24).reshape(2, 3, 4).transpose(2, 1, 0).flatten()
     let layout = [2, 3, 4].c();
+    let iter = IterLayoutColMajor::new(&layout);
+    assert_eq!(
+        iter.collect::<Vec<_>>(),
+        [0, 12, 4, 16, 8, 20, 1, 13, 5, 17, 9, 21, 2, 14, 6, 18, 10, 22, 3, 15, 7, 19, 11, 23]
+    );
+    let layout = vec![2, 3, 4].c();
     let iter = IterLayoutColMajor::new(&layout);
     assert_eq!(
         iter.collect::<Vec<_>>(),
