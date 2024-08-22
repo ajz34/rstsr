@@ -9,19 +9,18 @@ thiserror = { version = "1.0" }
 itertools = { version = "0.13" }
 
 [dev-dependencies]
-rest_tensors = { path = "../rest_tensors", version = "*" }
+# rest_tensors = { path = "../rest_tensors", version = "*" }
 anyhow = { version = "1.0" }
 rand = { version = "0.8" }
 itertools = { version = "0.13" }
 approx = { version = "0.5" }
 # cudarc = { version = "0.11", default-features = false, features = ["cublas", "cuda-version-from-build-system"], optional = true }
-candle-core = { version = "0.6", features = [] }
+# candle-core = { version = "0.6", features = [] }
 # burn-core = { version = "0.12", features = ["ndarray"] }
-ndarray = { version = "0.15" }
+# ndarray = { version = "0.15" }
 
 [profile.dev]
 opt-level = 3
-overflow-checks = true
 
 [features]
 default = ["c_prefer"]

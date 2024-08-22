@@ -8,7 +8,14 @@ pub use core::fmt::{Debug, Display, Write};
 
 pub use crate::error::{Error, Result};
 pub use crate::layout::*;
-pub use crate::storage::*;
+
+pub use crate::storage::creation::*;
+pub use crate::storage::data::*;
+pub use crate::storage::device::*;
+
+pub use crate::tensor::creation::*;
+pub use crate::tensor::layout_manuplication::*;
+
 pub use crate::{Tensor, TensorBase};
 
 pub use crate::slice;

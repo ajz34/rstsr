@@ -33,6 +33,10 @@ where
         &self.data
     }
 
+    pub fn data_mut(&mut self) -> &mut R {
+        &mut self.data
+    }
+
     pub fn layout(&self) -> &Layout<D> {
         &self.layout
     }
