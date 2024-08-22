@@ -3,53 +3,50 @@ use crate::prelude_dev::*;
 #[derive(Clone, Debug)]
 pub struct CpuDevice;
 
-impl DeviceAPI for CpuDevice {
+impl DeviceBaseAPI for CpuDevice {
     fn same_device(&self, _other: &Self) -> bool {
         true
     }
 }
 
-impl<T> StorageBaseAPI for Storage<T, CpuDevice>
-where
-    T: Clone + Debug,
-{
-    type DType = T;
-    type Device = CpuDevice;
+impl<T> DeviceRawVecAPI<T> for CpuDevice {
     type RawVec = Vec<T>;
-
-    fn device(&self) -> CpuDevice {
-        self.device.clone()
-    }
-
-    fn to_rawvec(&self) -> Vec<T> {
-        self.rawvec.clone()
-    }
-
-    fn into_rawvec(self) -> Vec<T> {
-        self.rawvec
-    }
-
-    fn new(vector: Vec<T>, device: CpuDevice) -> Self {
-        Self { rawvec: vector, device }
-    }
-
-    fn len(&self) -> usize {
-        self.rawvec.len()
-    }
 }
 
-impl<T> StorageToCpuAPI for Storage<T, CpuDevice>
+impl<T> DeviceStorageAPI<T> for CpuDevice
 where
-    T: Clone + Debug,
+    T: Clone,
 {
-    fn to_cpu_vec(&self) -> Result<Vec<T>> {
-        Ok(self.rawvec.clone())
+    fn device(storage: &Storage<T, CpuDevice>) -> CpuDevice {
+        storage.device.clone()
     }
 
-    fn into_cpu_vec(self) -> Result<Vec<T>> {
-        Ok(self.rawvec)
+    fn to_rawvec(storage: &Storage<T, CpuDevice>) -> Vec<T> {
+        storage.rawvec.clone()
+    }
+
+    fn into_rawvec(storage: Storage<T, CpuDevice>) -> Vec<T> {
+        storage.rawvec
+    }
+
+    fn new(vector: Vec<T>, device: CpuDevice) -> Storage<T, CpuDevice> {
+        Storage::<T, CpuDevice> { rawvec: vector, device }
+    }
+
+    fn len(storage: &Storage<T, CpuDevice>) -> usize {
+        storage.rawvec.len()
+    }
+
+    fn to_cpu_vec(storage: &Storage<T, CpuDevice>) -> Result<Vec<T>> {
+        Ok(storage.rawvec.clone())
+    }
+
+    fn into_cpu_vec(storage: Storage<T, CpuDevice>) -> Result<Vec<T>> {
+        Ok(storage.rawvec)
     }
 }
+
+impl<T> DeviceAPI<T> for CpuDevice where T: Clone {}
 
 #[cfg(test)]
 mod tests {

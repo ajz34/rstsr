@@ -1,6 +1,8 @@
 use crate::cpu_backend::device::CpuDevice;
 use crate::prelude_dev::*;
 
+pub trait TensorBaseAPI {}
+
 #[derive(Clone)]
 pub struct TensorBase<R, D>
 where
@@ -9,6 +11,8 @@ where
     pub(crate) data: R,
     pub(crate) layout: Layout<D>,
 }
+
+impl<R, D> TensorBaseAPI for TensorBase<R, D> where D: DimAPI {}
 
 /// Basic definitions for tensor object.
 impl<R, D> TensorBase<R, D>
@@ -23,22 +27,6 @@ where
     /// [Storage<T, B>], or whether layout may exceed pointer bounds of data.
     pub unsafe fn new_unchecked(data: R, layout: Layout<D>) -> Self {
         Self { data, layout }
-    }
-
-    pub fn new(data: R, layout: Layout<D>) -> Result<Self>
-    where
-        R: DataAPI,
-        R::Data: StorageBaseAPI,
-        D: DimAPI,
-    {
-        // check stride sanity
-        layout.check_strides()?;
-
-        // check pointer exceed
-        let len_data = data.as_storage().len();
-        let (_, idx_max) = layout.bounds_index()?;
-        rstsr_pattern!(idx_max, len_data.., ValueOutOfRange)?;
-        return Ok(Self { data, layout });
     }
 
     pub fn data(&self) -> &R {
@@ -75,6 +63,24 @@ where
 
     pub fn size(&self) -> usize {
         self.layout().size()
+    }
+}
+
+impl<T, D, B, R> TensorBase<R, D>
+where
+    D: DimAPI,
+    B: DeviceAPI<T>,
+    R: DataAPI<Data = Storage<T, B>>,
+{
+    pub fn new(data: R, layout: Layout<D>) -> Result<Self> {
+        // check stride sanity
+        layout.check_strides()?;
+
+        // check pointer exceed
+        let len_data = data.as_storage().len();
+        let (_, idx_max) = layout.bounds_index()?;
+        rstsr_pattern!(idx_max, len_data.., ValueOutOfRange)?;
+        return Ok(Self { data, layout });
     }
 }
 

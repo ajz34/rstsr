@@ -1,37 +1,74 @@
 use crate::cpu_backend::device::CpuDevice;
 use crate::prelude_dev::*;
 
-pub trait DeviceAPI: Clone + Debug {
+pub trait DeviceBaseAPI: Clone + Debug {
     fn same_device(&self, other: &Self) -> bool;
+}
+
+pub trait DeviceRawVecAPI<T>: DeviceBaseAPI {
+    type RawVec;
 }
 
 #[derive(Debug, Clone)]
 pub struct Storage<T, B = CpuDevice>
 where
-    Self: StorageBaseAPI,
+    B: DeviceRawVecAPI<T>,
 {
-    pub(crate) rawvec: <Self as StorageBaseAPI>::RawVec,
-    pub(crate) device: <Self as StorageBaseAPI>::Device,
+    pub(crate) rawvec: B::RawVec,
+    pub(crate) device: B,
 }
 
-pub trait StorageBaseAPI: Sized {
-    type DType;
-    type Device: Clone + Debug;
-    type RawVec: Clone + Debug;
-    fn device(&self) -> Self::Device;
-    fn to_rawvec(&self) -> Self::RawVec;
-    fn into_rawvec(self) -> Self::RawVec;
-    fn new(vector: Self::RawVec, device: Self::Device) -> Self;
-    fn len(&self) -> usize;
-    fn is_empty(&self) -> bool {
-        self.len() == 0
+pub trait DeviceStorageAPI<T>: DeviceRawVecAPI<T> {
+    fn device(storage: &Storage<T, Self>) -> Self;
+    fn to_rawvec(storage: &Storage<T, Self>) -> Self::RawVec;
+    fn into_rawvec(storage: Storage<T, Self>) -> Self::RawVec;
+    fn new(vector: Self::RawVec, device: Self) -> Storage<T, Self>;
+    fn len(storage: &Storage<T, Self>) -> usize;
+    fn is_empty(storage: &Storage<T, Self>) -> bool {
+        storage.len() == 0
+    }
+    fn to_cpu_vec(storage: &Storage<T, Self>) -> Result<Vec<T>>;
+    fn into_cpu_vec(storage: Storage<T, Self>) -> Result<Vec<T>>;
+}
+
+impl<T, B> Storage<T, B>
+where
+    B: DeviceStorageAPI<T>,
+{
+    pub fn device(&self) -> B {
+        B::device(self)
+    }
+
+    pub fn to_rawvec(&self) -> B::RawVec {
+        B::to_rawvec(self)
+    }
+
+    pub fn into_rawvec(self) -> B::RawVec {
+        B::into_rawvec(self)
+    }
+
+    pub fn new(vector: B::RawVec, device: B) -> Self {
+        Self { rawvec: vector, device }
+    }
+
+    pub fn len(&self) -> usize {
+        B::len(self)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        B::is_empty(self)
+    }
+
+    pub fn to_cpu_vec(&self) -> Result<Vec<T>> {
+        B::to_cpu_vec(self)
+    }
+
+    pub fn into_cpu_vec(self) -> Result<Vec<T>> {
+        B::into_cpu_vec(self)
     }
 }
 
-pub trait StorageToCpuAPI: StorageBaseAPI {
-    fn to_cpu_vec(&self) -> Result<Vec<Self::DType>>;
-    fn into_cpu_vec(self) -> Result<Vec<Self::DType>>;
-}
+pub trait DeviceAPI<T>: DeviceBaseAPI + DeviceRawVecAPI<T> + DeviceStorageAPI<T> {}
 
 /// Unique identifier for cuda devices.
 ///

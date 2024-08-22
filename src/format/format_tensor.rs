@@ -205,12 +205,12 @@ where
     print_vec_with_layout_dfs(&mut config)
 }
 
-impl<S, D> Display for TensorBase<S, D>
+impl<S, T, B, D> Display for TensorBase<S, D>
 where
-    S: DataAPI,
+    T: Clone + Display,
+    B: DeviceAPI<T>,
     D: DimAPI,
-    S::Data: StorageBaseAPI + StorageToCpuAPI,
-    <S::Data as StorageBaseAPI>::DType: Clone + Display,
+    S: DataAPI<Data = Storage<T, B>>,
 {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         let vec = self.data().as_storage().to_cpu_vec().unwrap();
@@ -221,13 +221,12 @@ where
     }
 }
 
-impl<S, D> Debug for TensorBase<S, D>
+impl<S, T, B, D> Debug for TensorBase<S, D>
 where
-    S: DataAPI,
+    T: Clone + Display + Debug,
+    B: DeviceAPI<T>,
     D: DimAPI,
-    S::Data: StorageBaseAPI + StorageToCpuAPI,
-    <S::Data as StorageBaseAPI>::DType: Clone + Display,
-    <S::Data as StorageBaseAPI>::Device: Debug,
+    S: DataAPI<Data = Storage<T, B>>,
 {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         writeln!(f, "=== Debug Tensor Print ===")?;

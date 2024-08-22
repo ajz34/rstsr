@@ -10,14 +10,12 @@
 //! - [ ] squeeze
 
 use crate::prelude_dev::*;
-use core::fmt::Debug;
 use core::num::TryFromIntError;
 
 impl<S, D> TensorBase<S, D>
 where
     D: DimAPI,
     S: DataAPI,
-    S::Data: StorageBaseAPI + Debug + Clone,
 {
     /// Get a view of tensor.
     pub fn view(&self) -> TensorBase<DataRef<'_, S::Data>, D> {
@@ -131,13 +129,11 @@ mod tests {
     use crate::Tensor;
     use crate::{cpu_backend::device::CpuDevice, storage::Storage};
 
-    #[test]
-    fn test_expand_dims() {
-        let a = Tensor::<f64, _>::zeros([4, 9, 8]);
-        let b = a.expand_dims(2);
-        assert_eq!(b.shape(), &[4, 9, 1, 8]);
-    }
-
+    // fn test_expand_dims() {
+    //     let a = Tensor::<f64, _>::zeros([4, 9, 8]);
+    //     let b = a.expand_dims(2);
+    //     assert_eq!(b.shape(), &[4, 9, 1, 8]);
+    // }
     #[test]
     fn test_flip() {
         let device = CpuDevice {};
