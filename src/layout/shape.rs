@@ -198,6 +198,15 @@ impl DimShapeAPI for IxD {
     }
 }
 
+impl<D> From<D> for Shape<D>
+where
+    D: DimBaseAPI,
+{
+    fn from(value: D) -> Self {
+        Shape(value)
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;

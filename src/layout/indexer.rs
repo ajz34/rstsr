@@ -48,21 +48,19 @@ macro_rules! impl_from_int_into_indexer {
 impl_from_int_into_indexer!(usize, isize, u8, i8, u16, i16, u32, i32, u64, i64, u128, i128);
 
 pub trait IndexerPreserve: Sized {
-    /// Narrowing tensor by slicing at a specific dimension. Number of dimension
-    /// will not change after slicing.
-    fn dim_narrow(&self, dim: isize, slice: SliceI) -> Result<Self>;
+    /// Narrowing tensor by slicing at a specific axis.
+    fn dim_narrow(&self, axis: isize, slice: SliceI) -> Result<Self>;
 }
 
 impl<D> IndexerPreserve for Layout<D>
 where
     D: DimBaseAPI + DimIndexUncheckAPI,
 {
-    fn dim_narrow(&self, dim: isize, slice: SliceI) -> Result<Self> {
+    fn dim_narrow(&self, axis: isize, slice: SliceI) -> Result<Self> {
         // dimension check
-        if dim > self.ndim() as isize || dim < -(self.ndim() as isize - 1) {
-            panic!("Index out of bound: index {}, shape {}", dim, self.ndim());
-        }
-        let dim = if dim < 0 { self.ndim() as isize + dim + 1 } else { dim } as usize;
+        let axis = if axis < 0 { self.ndim() as isize + axis } else { axis };
+        rstsr_pattern!(axis, 0..self.ndim() as isize, ValueOutOfRange)?;
+        let axis = axis as usize;
 
         // get essential information
         let mut shape = self.shape();
@@ -76,7 +74,7 @@ where
         }
 
         // previous shape length
-        let len_prev = shape_mut[dim] as isize;
+        let len_prev = shape_mut[axis] as isize;
 
         // handle cases of step > 0 and step < 0
         let step = slice.step().unwrap_or(1);
@@ -109,9 +107,9 @@ where
                 stop = len_prev;
             }
 
-            let offset = (self.offset() as isize + stride_mut[dim] * start) as usize;
-            shape_mut[dim] = ((stop - start + step - 1) / step).max(0) as usize;
-            stride_mut[dim] *= step;
+            let offset = (self.offset() as isize + stride_mut[axis] * start) as usize;
+            shape_mut[axis] = ((stop - start + step - 1) / step).max(0) as usize;
+            stride_mut[axis] *= step;
             return Ok(Self::new(shape, stride, offset));
         } else {
             // step < 0
@@ -136,9 +134,9 @@ where
                 start = len_prev - 1;
             }
 
-            let offset = (self.offset() as isize + stride_mut[dim] * start) as usize;
-            shape_mut[dim] = ((stop - start - step - 1) / step).max(0) as usize;
-            stride_mut[dim] *= step;
+            let offset = (self.offset() as isize + stride_mut[axis] * start) as usize;
+            shape_mut[axis] = ((stop - start - step - 1) / step).max(0) as usize;
+            stride_mut[axis] *= step;
             return Ok(Self::new(shape, stride, offset));
         }
     }
@@ -146,27 +144,28 @@ where
 
 pub trait IndexerDynamic: IndexerPreserve {
     /// Select dimension at index. Number of dimension will decrease by 1.
-    fn dim_select(&self, dim: isize, index: isize) -> Result<Layout<IxD>>;
+    fn dim_select(&self, axis: isize, index: isize) -> Result<Layout<IxD>>;
 
     /// Insert dimension after, with shape 1. Number of dimension will increase
     /// by 1.
-    fn dim_insert(&self, dim: isize) -> Result<Layout<IxD>>;
+    fn dim_insert(&self, axis: isize) -> Result<Layout<IxD>>;
 
     /// Index tensor by a list of indexers.
     fn dim_slice(&self, indexers: &[Indexer]) -> Result<Layout<IxD>>;
+
+    /// Eliminate dimension at index. Number of dimension will decrease by 1.
+    fn dim_eliminate(&self, axis: isize) -> Result<Layout<IxD>>;
 }
 
 impl<D> IndexerDynamic for Layout<D>
 where
     D: DimIndexUncheckAPI,
 {
-    fn dim_select(&self, dim: isize, index: isize) -> Result<Layout<IxD>> {
+    fn dim_select(&self, axis: isize, index: isize) -> Result<Layout<IxD>> {
         // dimension check
-        // dimension check
-        if dim > self.ndim() as isize || dim < -(self.ndim() as isize - 1) {
-            panic!("Index out of bound: index {}, shape {}", dim, self.ndim());
-        }
-        let dim = if dim < 0 { self.ndim() as isize + dim + 1 } else { dim } as usize;
+        let axis = if axis < 0 { self.ndim() as isize + axis } else { axis };
+        rstsr_pattern!(axis, 0..self.ndim() as isize, ValueOutOfRange)?;
+        let axis = axis as usize;
 
         // get essential information
         let Shape(shape) = self.shape_ref();
@@ -177,7 +176,7 @@ where
 
         // change everything
         for (i, (&d, &s)) in shape.as_ref().iter().zip(stride.as_ref().iter()).enumerate() {
-            if i == dim {
+            if i == axis {
                 // dimension to be selected
                 let idx = if index < 0 { d as isize + index } else { index };
                 rstsr_pattern!(idx, 0..d as isize, ValueOutOfRange)?;
@@ -193,12 +192,11 @@ where
         return Ok(Layout::<IxD>::new(Shape(shape_new), Stride(stride_new), offset));
     }
 
-    fn dim_insert(&self, dim: isize) -> Result<Layout<IxD>> {
+    fn dim_insert(&self, axis: isize) -> Result<Layout<IxD>> {
         // dimension check
-        if dim > self.ndim() as isize || dim < -(self.ndim() as isize - 1) {
-            panic!("Index out of bound: index {}, shape {}", dim, self.ndim());
-        }
-        let dim = if dim < 0 { self.ndim() as isize + dim + 1 } else { dim } as usize;
+        let axis = if axis < 0 { self.ndim() as isize + axis } else { axis };
+        rstsr_pattern!(axis, 0..self.ndim() as isize, ValueOutOfRange)?;
+        let axis = axis as usize;
 
         // get essential information
         let is_f_prefer = self.is_f_prefer();
@@ -207,19 +205,19 @@ where
         let offset = self.offset();
 
         if is_f_prefer {
-            if dim == 0 {
+            if axis == 0 {
                 shape.insert(0, 1);
                 stride.insert(0, 1);
             } else {
-                shape.insert(dim, 1);
-                stride.insert(dim, stride[dim - 1]);
+                shape.insert(axis, 1);
+                stride.insert(axis, stride[axis - 1]);
             }
-        } else if dim == self.ndim() {
+        } else if axis == self.ndim() {
             shape.push(1);
             stride.push(1);
         } else {
-            shape.insert(dim, 1);
-            stride.insert(dim, stride[dim]);
+            shape.insert(axis, 1);
+            stride.insert(axis, stride[axis]);
         }
 
         return Ok(Layout::<IxD>::new(Shape(shape), Stride(stride), offset));
@@ -297,6 +295,27 @@ where
         rstsr_assert!(cur_dim == 0, Miscellaneous, "Internal program error in indexer.")?;
 
         return Ok(layout);
+    }
+
+    fn dim_eliminate(&self, axis: isize) -> Result<Layout<IxD>> {
+        // dimension check
+        let axis = if axis < 0 { self.ndim() as isize + axis } else { axis };
+        rstsr_pattern!(axis, 0..self.ndim() as isize, ValueOutOfRange)?;
+        let axis = axis as usize;
+
+        // get essential information
+        let mut shape = self.shape_ref().as_ref().to_vec();
+        let mut stride = self.stride_ref().as_ref().to_vec();
+        let offset = self.offset();
+
+        if shape[axis] != 1 {
+            rstsr_raise!(InvalidValue, "Dimension to be eliminated is not 1.")?;
+        }
+
+        shape.remove(axis);
+        stride.remove(axis);
+
+        return Ok(Layout::<IxD>::new(Shape(shape), Stride(stride), offset));
     }
 }
 

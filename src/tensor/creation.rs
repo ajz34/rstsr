@@ -164,22 +164,6 @@ where
     empty_like(tensor, &CpuDevice {})
 }
 
-impl<R, T, D, B> TensorBase<R, D>
-where
-    R: DataAPI<Data = Storage<T, B>>,
-    D: DimAPI,
-    B: DeviceAPI<T> + DeviceCreationAnyAPI<T>,
-{
-    /// Uninitialized tensor with the same shape as an input tensor.
-    ///
-    /// # Safety
-    ///
-    /// This function is unsafe because it creates a tensor withuninitialized.
-    pub unsafe fn empty_like(&self) -> Tensor<T, D, B> {
-        empty_like(self, &self.data().as_storage().device())
-    }
-}
-
 /* #endregion */
 
 /* #region full */
@@ -247,23 +231,6 @@ where
     D: DimAPI,
 {
     full_like(tensor, fill, &CpuDevice {})
-}
-
-impl<R, T, D, B> TensorBase<R, D>
-where
-    R: DataAPI<Data = Storage<T, B>>,
-    D: DimAPI,
-    B: DeviceAPI<T> + DeviceCreationAnyAPI<T>,
-{
-    /// New tensor filled with given value and having the same shape as an input
-    /// tensor.
-    ///
-    /// # See also
-    ///
-    /// - [Python array API standard: `full_like`](https://data-apis.org/array-api/2023.12/API_specification/generated/array_api.full_like.html)
-    pub fn full_like(&self, fill: T) -> Tensor<T, D, B> {
-        full_like(self, fill, &self.data().as_storage().device())
-    }
 }
 
 /* #endregion */
@@ -379,24 +346,6 @@ where
     ones_like(tensor, &CpuDevice {})
 }
 
-impl<R, T, D, B> TensorBase<R, D>
-where
-    R: DataAPI<Data = Storage<T, B>>,
-    T: Num,
-    D: DimAPI,
-    B: DeviceAPI<T> + DeviceCreationNumAPI<T>,
-{
-    /// New tensor filled with ones and having the same shape as an input
-    /// tensor.
-    ///
-    /// # See also
-    ///
-    /// - [Python array API standard: `ones_like`](https://data-apis.org/array-api/2023.12/API_specification/generated/array_api.ones_like.html)
-    pub fn ones_like(&self) -> Tensor<T, D, B> {
-        ones_like(self, &self.data().as_storage().device())
-    }
-}
-
 /* #endregion */
 
 /* #region zeros */
@@ -468,25 +417,68 @@ where
     zeros_like(tensor, &CpuDevice {})
 }
 
+/* #endregion */
+
+/// Methods for array creation.
 impl<R, T, D, B> TensorBase<R, D>
 where
     R: DataAPI<Data = Storage<T, B>>,
-    T: Num,
     D: DimAPI,
-    B: DeviceAPI<T> + DeviceCreationNumAPI<T>,
+    B: DeviceAPI<T>,
 {
+    /// Uninitialized tensor with the same shape as an input tensor.
+    ///
+    /// # Safety
+    ///
+    /// This function is unsafe because it creates a tensor withuninitialized.
+    pub unsafe fn empty_like(&self) -> Tensor<T, D, B>
+    where
+        B: DeviceCreationAnyAPI<T>,
+    {
+        empty_like(self, &self.data().as_storage().device())
+    }
+
+    /// New tensor filled with given value and having the same shape as an input
+    /// tensor.
+    ///
+    /// # See also
+    ///
+    /// - [Python array API standard: `full_like`](https://data-apis.org/array-api/2023.12/API_specification/generated/array_api.full_like.html)
+    pub fn full_like(&self, fill: T) -> Tensor<T, D, B>
+    where
+        B: DeviceCreationAnyAPI<T>,
+    {
+        full_like(self, fill, &self.data().as_storage().device())
+    }
+
+    /// New tensor filled with ones and having the same shape as an input
+    /// tensor.
+    ///
+    /// # See also
+    ///
+    /// - [Python array API standard: `ones_like`](https://data-apis.org/array-api/2023.12/API_specification/generated/array_api.ones_like.html)
+    pub fn ones_like(&self) -> Tensor<T, D, B>
+    where
+        T: Num,
+        B: DeviceCreationNumAPI<T>,
+    {
+        ones_like(self, &self.data().as_storage().device())
+    }
+
     /// New tensor filled with zeros and having the same shape as an input
     /// tensor.
     ///
     /// # See also
     ///
     /// - [Python array API standard: `zeros_like`](https://data-apis.org/array-api/2023.12/API_specification/generated/array_api.zeros_like.html)
-    pub fn zeros_like(&self) -> Tensor<T, D, B> {
+    pub fn zeros_like(&self) -> Tensor<T, D, B>
+    where
+        T: Num,
+        B: DeviceCreationNumAPI<T>,
+    {
         zeros_like(self, &self.data().as_storage().device())
     }
 }
-
-/* #endregion */
 
 #[cfg(test)]
 mod test {

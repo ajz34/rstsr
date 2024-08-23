@@ -314,11 +314,30 @@ where
 {
     /// Transpose layout by permutation.
     ///
+    /// - The input axes should be the same length as the number of dimensions
+    ///   in.
+    /// - Otherwise, providing empty axes will return the reversed layout.
+    ///
     /// # See also
     ///
     /// - [`numpy.transpose`](https://numpy.org/doc/stable/reference/generated/numpy.transpose.html)
     /// - [Python array API: `permute_dims`](https://data-apis.org/array-api/2023.12/API_specification/generated/array_api.permute_dims.html)
     pub fn transpose(&self, axes: &[isize]) -> Result<Self> {
+        // backdoor: if axes is empty, this will transpose all dimensions
+        if axes.is_empty() {
+            let shape_old = self.shape.as_ref();
+            let stride_old = self.stride.as_ref();
+            let mut shape_wrap = self.shape.clone();
+            let mut stride_wrap = self.stride.clone();
+            let shape = shape_wrap.as_mut();
+            let stride = stride_wrap.as_mut();
+            for i in 0..self.ndim() {
+                shape[i] = shape_old[self.ndim() - i - 1];
+                stride[i] = stride_old[self.ndim() - i - 1];
+            }
+            return Ok(Layout { shape: shape_wrap, stride: stride_wrap, offset: self.offset });
+        }
+
         // check axes and cast to usize
         let n = self.ndim();
         rstsr_assert_eq!(
@@ -360,6 +379,25 @@ where
     /// This is the same function to [`Layout::transpose`]
     pub fn permute_dims(&self, axes: &[isize]) -> Result<Self> {
         self.transpose(axes)
+    }
+
+    /// Swap axes of layout.
+    pub fn swapaxes(&self, axis1: isize, axis2: isize) -> Result<Self> {
+        let axis1 = if axis1 < 0 { self.ndim() as isize + axis1 } else { axis1 };
+        rstsr_pattern!(axis1, 0..self.ndim() as isize, ValueOutOfRange)?;
+        let axis1 = axis1 as usize;
+
+        let axis2 = if axis2 < 0 { self.ndim() as isize + axis2 } else { axis2 };
+        rstsr_pattern!(axis2, 0..self.ndim() as isize, ValueOutOfRange)?;
+        let axis2 = axis2 as usize;
+
+        let mut shape_wrap = self.shape.clone();
+        let mut stride_wrap = self.stride.clone();
+        let shape = shape_wrap.as_mut();
+        let stride = stride_wrap.as_mut();
+        shape.swap(axis1, axis2);
+        stride.swap(axis1, axis2);
+        Ok(Layout { shape: shape_wrap, stride: stride_wrap, offset: self.offset })
     }
 }
 
