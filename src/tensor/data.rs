@@ -36,12 +36,14 @@ pub enum DataReference<'a, S> {
 }
 
 impl<S> From<S> for DataOwned<S> {
+    #[inline]
     fn from(data: S) -> Self {
         Self { storage: data }
     }
 }
 
 impl<S> DataOwned<S> {
+    #[inline]
     pub fn into_storage(self) -> S {
         self.storage
     }
@@ -56,17 +58,21 @@ pub trait DataAPI {
 
 pub trait DataMutAPI {
     type Data;
+    fn as_storage_mut(&mut self) -> &mut Self::Data;
     fn as_ref_mut(&mut self) -> DataRefMut<Self::Data>;
 }
 
 impl<S> DataAPI for DataOwned<S> {
     type Data = S;
+    #[inline]
     fn as_storage(&self) -> &Self::Data {
         &self.storage
     }
+    #[inline]
     fn as_ref(&self) -> DataRef<Self::Data> {
         DataRef { storage: &self.storage }
     }
+    #[inline]
     fn into_owned(self) -> DataOwned<Self::Data> {
         self
     }
@@ -77,12 +83,15 @@ where
     S: Clone,
 {
     type Data = S;
+    #[inline]
     fn as_storage(&self) -> &Self::Data {
         self.storage
     }
+    #[inline]
     fn as_ref(&self) -> DataRef<Self::Data> {
         self.clone()
     }
+    #[inline]
     fn into_owned(self) -> DataOwned<Self::Data> {
         DataOwned { storage: self.storage.clone() }
     }
@@ -93,12 +102,15 @@ where
     S: Clone,
 {
     type Data = S;
+    #[inline]
     fn as_storage(&self) -> &Self::Data {
         self.storage
     }
+    #[inline]
     fn as_ref(&self) -> DataRef<'_, Self::Data> {
         DataRef { storage: self.storage }
     }
+    #[inline]
     fn into_owned(self) -> DataOwned<Self::Data> {
         DataOwned { storage: self.storage.clone() }
     }
@@ -106,6 +118,11 @@ where
 
 impl<S> DataMutAPI for DataOwned<S> {
     type Data = S;
+    #[inline]
+    fn as_storage_mut(&mut self) -> &mut Self::Data {
+        &mut self.storage
+    }
+    #[inline]
     fn as_ref_mut(&mut self) -> DataRefMut<Self::Data> {
         DataRefMut { storage: &mut self.storage }
     }
@@ -113,6 +130,11 @@ impl<S> DataMutAPI for DataOwned<S> {
 
 impl<'a, S> DataMutAPI for DataRefMut<'a, S> {
     type Data = S;
+    #[inline]
+    fn as_storage_mut(&mut self) -> &mut Self::Data {
+        self.storage
+    }
+    #[inline]
     fn as_ref_mut(&mut self) -> DataRefMut<'_, Self::Data> {
         DataRefMut { storage: self.storage }
     }

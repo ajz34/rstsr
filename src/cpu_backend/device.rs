@@ -44,6 +44,26 @@ where
     fn into_cpu_vec(storage: Storage<T, CpuDevice>) -> Result<Vec<T>> {
         Ok(storage.rawvec)
     }
+
+    #[inline]
+    fn get_index(storage: &Storage<T, CpuDevice>, index: usize) -> T {
+        storage.rawvec[index].clone()
+    }
+
+    #[inline]
+    fn get_index_ptr(storage: &Storage<T, CpuDevice>, index: usize) -> *const T {
+        &storage.rawvec[index] as *const T
+    }
+
+    #[inline]
+    fn get_index_mut_ptr(storage: &mut Storage<T, CpuDevice>, index: usize) -> *mut T {
+        &mut storage.rawvec[index] as *mut T
+    }
+
+    #[inline]
+    fn set_index(storage: &mut Storage<T, Self>, index: usize, value: T) {
+        storage.rawvec[index] = value;
+    }
 }
 
 impl<T> DeviceAPI<T> for CpuDevice where T: Clone {}

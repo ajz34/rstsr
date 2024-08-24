@@ -5,7 +5,20 @@
 
 /* #region Configuration */
 
-pub static C_PREFER: bool = cfg!(feature = "c_prefer");
+pub enum Order {
+    C,
+    F,
+}
+
+impl Default for Order {
+    fn default() -> Self {
+        if cfg!(feature = "c_prefer") {
+            Order::C
+        } else {
+            Order::F
+        }
+    }
+}
 
 /* #endregion */
 

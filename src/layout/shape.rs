@@ -155,9 +155,9 @@ impl<const N: usize> DimShapeAPI for Ix<N> {
     }
 
     fn stride_contig(shape: &Shape<Ix<N>>) -> Stride<Ix<N>> {
-        match crate::C_PREFER {
-            true => Self::stride_c_contig(shape),
-            false => Self::stride_f_contig(shape),
+        match Order::default() {
+            Order::C => Self::stride_c_contig(shape),
+            Order::F => Self::stride_f_contig(shape),
         }
     }
 }
@@ -191,9 +191,9 @@ impl DimShapeAPI for IxD {
     }
 
     fn stride_contig(shape: &Shape<IxD>) -> Stride<IxD> {
-        match crate::C_PREFER {
-            true => Self::stride_c_contig(shape),
-            false => Self::stride_f_contig(shape),
+        match Order::default() {
+            Order::C => Self::stride_c_contig(shape),
+            Order::F => Self::stride_f_contig(shape),
         }
     }
 }

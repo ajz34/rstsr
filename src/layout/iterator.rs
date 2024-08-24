@@ -3,15 +3,13 @@ use itertools::izip;
 
 /// Basic layout iteration trait. Any layout iteration struct should implement
 /// this trait.
-pub trait IterLayoutBaseAPI {
+pub trait LayoutIterBaseAPI {
     /// Dimension type that actually be indexed
-    type D: DimAPI;
-    /// Dimension type for iterator constructor
-    type Din: DimAPI;
+    type Dim: DimAPI;
     /// Iterator constructor
-    fn new(layout: &Layout<Self::Din>) -> Self;
+    fn new(layout: &Layout<Self::Dim>) -> Self;
     /// Combined getter for layout, index, offset
-    fn combined_getter(&mut self) -> (&Layout<Self::D>, &mut Option<Self::D>, &mut usize);
+    fn combined_getter(&mut self) -> (&Layout<Self::Dim>, &mut Option<Self::Dim>, &mut usize);
 }
 
 /* #region row-major */
@@ -29,15 +27,17 @@ where
     offset: usize,
 }
 
-impl<D> IterLayoutBaseAPI for IterLayoutRowMajor<D>
+impl<D> LayoutIterBaseAPI for IterLayoutRowMajor<D>
 where
     D: DimAPI,
 {
-    type D = D;
-    type Din = D;
+    type Dim = D;
 
     fn new(layout: &Layout<D>) -> Self {
         let layout = layout.clone();
+        if layout.size() == 0 {
+            return Self { layout, index: None, offset: 0 };
+        }
         if layout.ndim() == 0 {
             return Self { layout, index: None, offset: 0 };
         }
@@ -55,13 +55,13 @@ where
 
 /// Trait for layout iteration, generates next index from previous for row-major
 /// case.
-pub trait IterLayoutRowMajorAPI: IterLayoutBaseAPI {
+pub trait LayoutIteratorAPI: LayoutIterBaseAPI {
     /// Get the next index, but note that this operation shall handle index
     /// iterator in-place.
-    fn next_index(&mut self) -> Option<&Self::D>;
+    fn next_index(&mut self) -> Option<&Self::Dim>;
 }
 
-impl<const N: usize> IterLayoutRowMajorAPI for IterLayoutRowMajor<Ix<N>> {
+impl<const N: usize> LayoutIteratorAPI for IterLayoutRowMajor<Ix<N>> {
     #[inline]
     fn next_index(&mut self) -> Option<&Ix<N>> {
         let (layout, index, offset) = self.combined_getter();
@@ -172,7 +172,7 @@ impl<const N: usize> IterLayoutRowMajorAPI for IterLayoutRowMajor<Ix<N>> {
     }
 }
 
-impl IterLayoutRowMajorAPI for IterLayoutRowMajor<IxD> {
+impl LayoutIteratorAPI for IterLayoutRowMajor<IxD> {
     #[inline]
     fn next_index(&mut self) -> Option<&IxD> {
         let (layout, index, offset) = self.combined_getter();
@@ -206,7 +206,7 @@ impl IterLayoutRowMajorAPI for IterLayoutRowMajor<IxD> {
 impl<D> Iterator for IterLayoutRowMajor<D>
 where
     D: DimAPI,
-    Self: IterLayoutRowMajorAPI,
+    Self: LayoutIteratorAPI,
 {
     type Item = usize;
 
@@ -216,6 +216,35 @@ where
         self.next_index();
         return Some(offset);
     }
+}
+
+impl<D> ExactSizeIterator for IterLayoutRowMajor<D>
+where
+    D: DimAPI,
+    Self: LayoutIteratorAPI,
+{
+    fn len(&self) -> usize {
+        self.layout.size()
+    }
+}
+
+pub trait LayoutIterAPI:
+    LayoutIterBaseAPI + LayoutIteratorAPI + Iterator<Item = usize> + ExactSizeIterator
+{
+}
+
+impl<D> LayoutIterAPI for IterLayoutRowMajor<D>
+where
+    D: DimAPI,
+    Self: LayoutIteratorAPI,
+{
+}
+
+impl<D> LayoutIterAPI for IterLayoutColMajor<D>
+where
+    D: DimAPI,
+    Self: LayoutIteratorAPI,
+{
 }
 
 #[test]
@@ -258,15 +287,17 @@ where
     offset: usize,
 }
 
-impl<D> IterLayoutBaseAPI for IterLayoutColMajor<D>
+impl<D> LayoutIterBaseAPI for IterLayoutColMajor<D>
 where
     D: DimAPI,
 {
-    type D = D;
-    type Din = D;
+    type Dim = D;
 
     fn new(layout: &Layout<D>) -> Self {
         let layout = layout.clone();
+        if layout.size() == 0 {
+            return Self { layout, index: None, offset: 0 };
+        }
         if layout.ndim() == 0 {
             return Self { layout, index: None, offset: 0 };
         }
@@ -282,15 +313,7 @@ where
     }
 }
 
-/// Trait for layout iteration, generates next index from previous for col-major
-/// case.
-pub trait IterLayoutColMajorAPI: IterLayoutBaseAPI {
-    /// Get the next index, but note that this operation shall handle index
-    /// iterator in-place.
-    fn next_index(&mut self) -> Option<&Self::D>;
-}
-
-impl<const N: usize> IterLayoutColMajorAPI for IterLayoutColMajor<Ix<N>> {
+impl<const N: usize> LayoutIteratorAPI for IterLayoutColMajor<Ix<N>> {
     #[inline]
     fn next_index(&mut self) -> Option<&Ix<N>> {
         let (layout, index, offset) = self.combined_getter();
@@ -401,9 +424,9 @@ impl<const N: usize> IterLayoutColMajorAPI for IterLayoutColMajor<Ix<N>> {
     }
 }
 
-impl IterLayoutColMajorAPI for IterLayoutColMajor<IxD> {
+impl LayoutIteratorAPI for IterLayoutColMajor<IxD> {
     #[inline]
-    fn next_index(&mut self) -> Option<&Self::D> {
+    fn next_index(&mut self) -> Option<&Self::Dim> {
         let (layout, index, offset) = self.combined_getter();
         if index.is_none() {
             return None;
@@ -435,7 +458,7 @@ impl IterLayoutColMajorAPI for IterLayoutColMajor<IxD> {
 impl<D> Iterator for IterLayoutColMajor<D>
 where
     D: DimAPI,
-    Self: IterLayoutColMajorAPI,
+    Self: LayoutIteratorAPI,
 {
     type Item = usize;
 
@@ -444,6 +467,16 @@ where
         let offset = self.offset;
         self.next_index();
         return Some(offset);
+    }
+}
+
+impl<D> ExactSizeIterator for IterLayoutColMajor<D>
+where
+    D: DimAPI,
+    Self: LayoutIteratorAPI,
+{
+    fn len(&self) -> usize {
+        self.layout.size()
     }
 }
 

@@ -29,10 +29,12 @@ where
         Self { data, layout }
     }
 
+    #[inline]
     pub fn data(&self) -> &R {
         &self.data
     }
 
+    #[inline]
     pub fn data_mut(&mut self) -> &mut R {
         &mut self.data
     }
@@ -41,30 +43,37 @@ where
         &self.layout
     }
 
+    #[inline]
     pub fn shape(&self) -> &[usize] {
         self.layout().shape_ref().as_ref()
     }
 
+    #[inline]
     pub fn raw_shape(&self) -> D {
         self.layout().shape().0
     }
 
+    #[inline]
     pub fn stride(&self) -> &[isize] {
         self.layout().stride_ref().as_ref()
     }
 
+    #[inline]
     pub fn raw_stride(&self) -> D::Stride {
         self.layout().stride().0
     }
 
+    #[inline]
     pub fn offset(&self) -> usize {
         self.layout().offset()
     }
 
+    #[inline]
     pub fn ndim(&self) -> usize {
         self.layout().ndim()
     }
 
+    #[inline]
     pub fn size(&self) -> usize {
         self.layout().size()
     }

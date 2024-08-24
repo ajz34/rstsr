@@ -29,6 +29,10 @@ pub trait DeviceStorageAPI<T>: DeviceRawVecAPI<T> {
     }
     fn to_cpu_vec(storage: &Storage<T, Self>) -> Result<Vec<T>>;
     fn into_cpu_vec(storage: Storage<T, Self>) -> Result<Vec<T>>;
+    fn get_index(storage: &Storage<T, Self>, index: usize) -> T;
+    fn get_index_ptr(storage: &Storage<T, Self>, index: usize) -> *const T;
+    fn get_index_mut_ptr(storage: &mut Storage<T, Self>, index: usize) -> *mut T;
+    fn set_index(storage: &mut Storage<T, Self>, index: usize, value: T);
 }
 
 impl<T, B> Storage<T, B>
@@ -65,6 +69,26 @@ where
 
     pub fn into_cpu_vec(self) -> Result<Vec<T>> {
         B::into_cpu_vec(self)
+    }
+
+    #[inline]
+    pub fn get_index(&self, index: usize) -> T {
+        B::get_index(self, index)
+    }
+
+    #[inline]
+    pub fn get_index_ptr(&self, index: usize) -> *const T {
+        B::get_index_ptr(self, index)
+    }
+
+    #[inline]
+    pub fn get_index_mut_ptr(&mut self, index: usize) -> *mut T {
+        B::get_index_mut_ptr(self, index)
+    }
+
+    #[inline]
+    pub fn set_index(&mut self, index: usize, value: T) {
+        B::set_index(self, index, value)
     }
 }
 

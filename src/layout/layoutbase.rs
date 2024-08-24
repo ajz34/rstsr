@@ -314,30 +314,11 @@ where
 {
     /// Transpose layout by permutation.
     ///
-    /// - The input axes should be the same length as the number of dimensions
-    ///   in.
-    /// - Otherwise, providing empty axes will return the reversed layout.
-    ///
     /// # See also
     ///
     /// - [`numpy.transpose`](https://numpy.org/doc/stable/reference/generated/numpy.transpose.html)
     /// - [Python array API: `permute_dims`](https://data-apis.org/array-api/2023.12/API_specification/generated/array_api.permute_dims.html)
     pub fn transpose(&self, axes: &[isize]) -> Result<Self> {
-        // backdoor: if axes is empty, this will transpose all dimensions
-        if axes.is_empty() {
-            let shape_old = self.shape.as_ref();
-            let stride_old = self.stride.as_ref();
-            let mut shape_wrap = self.shape.clone();
-            let mut stride_wrap = self.stride.clone();
-            let shape = shape_wrap.as_mut();
-            let stride = stride_wrap.as_mut();
-            for i in 0..self.ndim() {
-                shape[i] = shape_old[self.ndim() - i - 1];
-                stride[i] = stride_old[self.ndim() - i - 1];
-            }
-            return Ok(Layout { shape: shape_wrap, stride: stride_wrap, offset: self.offset });
-        }
-
         // check axes and cast to usize
         let n = self.ndim();
         rstsr_assert_eq!(
@@ -379,6 +360,21 @@ where
     /// This is the same function to [`Layout::transpose`]
     pub fn permute_dims(&self, axes: &[isize]) -> Result<Self> {
         self.transpose(axes)
+    }
+
+    /// Reverse axes of layout.
+    pub fn reverse_axes(&self) -> Self {
+        let shape_old = self.shape.as_ref();
+        let stride_old = self.stride.as_ref();
+        let mut shape_wrap = self.shape.clone();
+        let mut stride_wrap = self.stride.clone();
+        let shape = shape_wrap.as_mut();
+        let stride = stride_wrap.as_mut();
+        for i in 0..self.ndim() {
+            shape[i] = shape_old[self.ndim() - i - 1];
+            stride[i] = stride_old[self.ndim() - i - 1];
+        }
+        return Layout { shape: shape_wrap, stride: stride_wrap, offset: self.offset };
     }
 
     /// Swap axes of layout.
@@ -517,9 +513,9 @@ pub trait DimLayoutContigAPI: DimBaseAPI + DimShapeAPI {
     /// Generate new layout by providing shape and offset; Whether c-contiguous
     /// or f-contiguous depends on cargo feature `c_prefer`.
     fn new_contig(&self, offset: usize) -> Layout<Self> {
-        match crate::C_PREFER {
-            true => self.new_c_contig(offset),
-            false => self.new_f_contig(offset),
+        match Order::default() {
+            Order::C => self.new_c_contig(offset),
+            Order::F => self.new_f_contig(offset),
         }
     }
 

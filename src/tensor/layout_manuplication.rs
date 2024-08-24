@@ -9,7 +9,7 @@
 //! - [x] permute_dims [`transpose`], [`permute_dims`], [`swapaxes`]
 //! - [x] squeeze [`squeeze`]
 
-use crate::{prelude_dev::*, C_PREFER};
+use crate::prelude_dev::*;
 use core::num::TryFromIntError;
 
 /// View of reshaped tensor.
@@ -49,9 +49,9 @@ where
     rstsr_assert_eq!(layout.size(), shape.size(), InvalidLayout, "Number of elements not same.")?;
 
     let new_layout = match (is_c_contig, is_f_contig) {
-        (true, true) => match C_PREFER {
-            true => shape.new_c_contig(layout.offset),
-            false => shape.new_f_contig(layout.offset),
+        (true, true) => match Order::default() {
+            Order::C => shape.new_c_contig(layout.offset),
+            Order::F => shape.new_f_contig(layout.offset),
         },
         (true, false) => shape.new_c_contig(layout.offset),
         (false, true) => shape.new_f_contig(layout.offset),
@@ -187,6 +187,27 @@ where
     I: TryInto<isize, Error = TryFromIntError> + Copy,
 {
     into_transpose(tensor, axes)
+}
+
+/// Reverse the order of elements in an array along the given axis.
+pub fn reverse_axes<R, D>(tensor: &TensorBase<R, D>) -> TensorBase<DataRef<'_, R::Data>, D>
+where
+    R: DataAPI,
+    R::Data: Clone,
+    D: DimAPI,
+{
+    into_reverse_axes(tensor.view())
+}
+
+/// Reverse the order of elements in an array along the given axis. See also
+/// [`reverse_axes`].
+pub fn into_reverse_axes<R, D>(tensor: TensorBase<R, D>) -> TensorBase<R, D>
+where
+    R: DataAPI,
+    D: DimAPI,
+{
+    let layout = tensor.layout().reverse_axes();
+    unsafe { TensorBase::new_unchecked(tensor.data, layout) }
 }
 
 /// Interchange two axes of an array.
@@ -387,6 +408,24 @@ where
         I: TryInto<isize, Error = TryFromIntError> + Copy,
     {
         into_permute_dims(self, axes)
+    }
+
+    /// Reverse the order of elements in an array along the given axis. See
+    /// also [`reverse_axes`].
+    pub fn reverse_axes(&self) -> TensorBase<DataRef<'_, R::Data>, D>
+    where
+        R::Data: Clone,
+    {
+        reverse_axes(self)
+    }
+
+    /// Reverse the order of elements in an array along the given axis. See
+    /// also [`reverse_axes`].
+    pub fn into_reverse_axes(self) -> TensorBase<R, D>
+    where
+        R::Data: Clone,
+    {
+        into_reverse_axes(self)
     }
 
     /// Interchange two axes of an array. See also [`swapaxes`].
