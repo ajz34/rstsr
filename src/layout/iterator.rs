@@ -594,6 +594,102 @@ where
 
 /* #endregion */
 
+/* #region enum of iterator */
+
+pub enum IterLayoutEnum<D>
+where
+    D: DimAPI,
+{
+    RowMajor(IterLayoutRowMajor<D>),
+    ColMajor(IterLayoutColMajor<D>),
+    MemNonStrided(IterLayoutMemNonStrided<D>),
+    GreedyMajor(IterLayoutGreedyMajor<D>),
+}
+
+impl<D> LayoutIterBaseAPI for IterLayoutEnum<D>
+where
+    D: DimAPI,
+{
+    type Dim = D;
+
+    fn new(layout: &Layout<D>) -> Result<Self> {
+        // this implementation generates the most efficient iterator, but not the
+        // standard layout.
+        let layout = layout.clone();
+        let iter_mem_non_strided = IterLayoutMemNonStrided::new(&layout);
+        if let Ok(it) = iter_mem_non_strided {
+            return Ok(Self::MemNonStrided(it));
+        } else if layout.is_c_prefer() {
+            return Ok(Self::RowMajor(IterLayoutRowMajor::new(&layout)?));
+        } else if layout.is_f_prefer() {
+            return Ok(Self::ColMajor(IterLayoutColMajor::new(&layout)?));
+        } else {
+            return Ok(Self::GreedyMajor(IterLayoutGreedyMajor::new(&layout)?));
+        }
+    }
+}
+
+impl<D> LayoutIteratorAPI for IterLayoutEnum<D>
+where
+    D: DimAPI,
+    IterLayoutRowMajor<D>: LayoutIteratorAPI,
+    IterLayoutColMajor<D>: LayoutIteratorAPI,
+    IterLayoutMemNonStrided<D>: LayoutIteratorAPI,
+    IterLayoutGreedyMajor<D>: LayoutIteratorAPI,
+{
+    fn next_index(&mut self) {
+        match self {
+            Self::RowMajor(it) => it.next_index(),
+            Self::ColMajor(it) => it.next_index(),
+            Self::MemNonStrided(it) => it.next_index(),
+            Self::GreedyMajor(it) => it.next_index(),
+        }
+    }
+}
+
+impl<D> Iterator for IterLayoutEnum<D>
+where
+    D: DimAPI,
+    Self: LayoutIteratorAPI,
+    IterLayoutRowMajor<D>: LayoutIteratorAPI,
+    IterLayoutColMajor<D>: LayoutIteratorAPI,
+    IterLayoutMemNonStrided<D>: LayoutIteratorAPI,
+    IterLayoutGreedyMajor<D>: LayoutIteratorAPI,
+{
+    type Item = usize;
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            Self::RowMajor(it) => it.next(),
+            Self::ColMajor(it) => it.next(),
+            Self::MemNonStrided(it) => it.next(),
+            Self::GreedyMajor(it) => it.next(),
+        }
+    }
+}
+
+impl<D> ExactSizeIterator for IterLayoutEnum<D>
+where
+    D: DimAPI,
+    Self: LayoutIteratorAPI,
+    IterLayoutRowMajor<D>: LayoutIteratorAPI,
+    IterLayoutColMajor<D>: LayoutIteratorAPI,
+    IterLayoutMemNonStrided<D>: LayoutIteratorAPI,
+    IterLayoutGreedyMajor<D>: LayoutIteratorAPI,
+{
+    fn len(&self) -> usize {
+        match self {
+            Self::RowMajor(it) => it.len(),
+            Self::ColMajor(it) => it.len(),
+            Self::MemNonStrided(it) => it.len(),
+            Self::GreedyMajor(it) => it.len(),
+        }
+    }
+}
+
+/* #endregion */
+
 pub trait LayoutIterAPI:
     LayoutIterBaseAPI + LayoutIteratorAPI + Iterator<Item = usize> + ExactSizeIterator
 {
@@ -620,5 +716,16 @@ where
     D: DimAPI,
     Self: LayoutIteratorAPI,
     IterLayoutColMajor<D>: LayoutIteratorAPI,
+{
+}
+
+impl<D> LayoutIterAPI for IterLayoutEnum<D>
+where
+    D: DimAPI,
+    Self: LayoutIteratorAPI,
+    IterLayoutRowMajor<D>: LayoutIteratorAPI,
+    IterLayoutColMajor<D>: LayoutIteratorAPI,
+    IterLayoutMemNonStrided<D>: LayoutIteratorAPI,
+    IterLayoutGreedyMajor<D>: LayoutIteratorAPI,
 {
 }
