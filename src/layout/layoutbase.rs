@@ -256,6 +256,13 @@ where
         let stride = self.stride.as_ref();
         rstsr_assert_eq!(shape.len(), stride.len(), InvalidLayout)?;
         let n = shape.len();
+
+        // unconditionally ok if no elements (length of tensor is zero)
+        if self.size() == 0 {
+            return Ok(());
+        }
+
+        // unconditionally ok if 0-/1-dimension
         if n <= 1 {
             return Ok(());
         }
@@ -266,9 +273,10 @@ where
         let stride_sorted = indices.iter().map(|&k| stride[k].unsigned_abs()).collect::<Vec<_>>();
 
         for i in 0..indices.len() - 1 {
+            // following function also checks that stride could not be zero
             rstsr_pattern!(
                 shape_sorted[i] * stride_sorted[i],
-                0..stride_sorted[i + 1] + 1,
+                1..stride_sorted[i + 1] + 1,
                 InvalidLayout
             )?;
         }
