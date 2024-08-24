@@ -15,9 +15,7 @@ pub use crate::layout::*;
 pub use crate::storage::creation::*;
 pub use crate::storage::device::*;
 
-pub use crate::tensor::creation::*;
 pub use crate::tensor::data::*;
-pub use crate::tensor::layout_manuplication::*;
 
 pub use crate::{Order, Tensor, TensorBase};
 

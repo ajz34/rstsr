@@ -22,6 +22,7 @@ where
 {
     fn zeros_impl(&self, len: usize) -> Result<Storage<T, Self>>;
     fn ones_impl(&self, len: usize) -> Result<Storage<T, Self>>;
+    fn arange_int_impl(&self, len: usize) -> Result<Storage<T, Self>>;
 }
 
 pub trait DeviceCreationComplexFloatAPI<T>
@@ -38,5 +39,4 @@ where
     Self: DeviceRawVecAPI<T>,
 {
     fn arange_impl(&self, start: T, end: T, step: T) -> Result<Storage<T, Self>>;
-    fn arange_int_impl(&self, len: usize) -> Result<Storage<T, Self>>;
 }

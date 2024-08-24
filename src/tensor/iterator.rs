@@ -220,7 +220,7 @@ mod test {
 
     #[test]
     fn test_iter_ref_c_prefer() {
-        let tensor = arange_cpu(2.5, 3.2, 0.1);
+        let tensor = Tensor::arange_cpu(2.5, 3.2, 0.1);
 
         let mut iter = tensor.iter_ref_c_prefer();
         assert_eq!(iter.len(), 7);
@@ -229,7 +229,7 @@ mod test {
         assert_eq!(iter.next(), Some(&2.7));
         println!("{:?}", iter.collect::<Vec<_>>());
 
-        let tensor = linspace_cpu(0.0, 15.0, 16);
+        let tensor = Tensor::linspace_cpu(0.0, 15.0, 16);
         let tensor = tensor.to_shape_assume_contig([4, 4]).unwrap();
         let mut iter = tensor.iter_ref_c_prefer();
         assert_eq!(iter.len(), 16);
@@ -238,7 +238,7 @@ mod test {
         assert_eq!(iter.next(), Some(&2.0));
         println!("{:?}", iter.collect::<Vec<_>>());
 
-        let tensor = linspace_cpu(0.0, 15.0, 16);
+        let tensor = Tensor::linspace_cpu(0.0, 15.0, 16);
         let tensor = tensor.to_shape_assume_contig([4, 4]).unwrap();
         let tensor = tensor.transpose(&[1, 0]).unwrap();
         let mut iter = tensor.iter_ref_c_prefer();

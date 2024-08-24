@@ -6,10 +6,10 @@ pub trait DeviceBaseAPI: Clone + Debug {
 }
 
 pub trait DeviceRawVecAPI<T>: DeviceBaseAPI {
-    type RawVec;
+    type RawVec: Clone;
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Storage<T, B = CpuDevice>
 where
     B: DeviceRawVecAPI<T>,
@@ -18,10 +18,16 @@ where
     pub(crate) device: B,
 }
 
+impl<T, B> Clone for Storage<T, B>
+where
+    B: DeviceRawVecAPI<T>,
+{
+    fn clone(&self) -> Self {
+        Self { rawvec: self.rawvec.clone(), device: self.device.clone() }
+    }
+}
+
 pub trait DeviceStorageAPI<T>: DeviceRawVecAPI<T> {
-    fn device(storage: &Storage<T, Self>) -> Self;
-    fn to_rawvec(storage: &Storage<T, Self>) -> Self::RawVec;
-    fn into_rawvec(storage: Storage<T, Self>) -> Self::RawVec;
     fn new(vector: Self::RawVec, device: Self) -> Storage<T, Self>;
     fn len(storage: &Storage<T, Self>) -> usize;
     fn is_empty(storage: &Storage<T, Self>) -> bool {
@@ -39,16 +45,24 @@ impl<T, B> Storage<T, B>
 where
     B: DeviceStorageAPI<T>,
 {
-    pub fn device(&self) -> B {
-        B::device(self)
+    pub fn device(&self) -> &B {
+        &self.device
+    }
+
+    pub fn rawvec(&self) -> &B::RawVec {
+        &self.rawvec
+    }
+
+    pub fn rawvec_mut(&mut self) -> &mut B::RawVec {
+        &mut self.rawvec
     }
 
     pub fn to_rawvec(&self) -> B::RawVec {
-        B::to_rawvec(self)
+        self.rawvec.clone()
     }
 
     pub fn into_rawvec(self) -> B::RawVec {
-        B::into_rawvec(self)
+        self.rawvec
     }
 
     pub fn new(vector: B::RawVec, device: B) -> Self {

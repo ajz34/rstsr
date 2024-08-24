@@ -30,7 +30,7 @@ where
 pub fn into_owned_keep_layout<R, D>(tensor: TensorBase<R, D>) -> TensorBase<DataOwned<R::Data>, D>
 where
     R: DataAPI,
-    R::Data: Clone,
+
     D: DimAPI,
 {
     let TensorBase { data, layout } = tensor;
@@ -63,7 +63,6 @@ where
     pub fn into_owned_keep_layout(self) -> TensorBase<DataOwned<R::Data>, D>
     where
         R: DataAPI,
-        R::Data: Clone,
     {
         into_owned_keep_layout(self)
     }

@@ -50,7 +50,7 @@ impl<S> DataOwned<S> {
 }
 
 pub trait DataAPI {
-    type Data;
+    type Data: Clone;
     fn as_storage(&self) -> &Self::Data;
     fn as_ref(&self) -> DataRef<Self::Data>;
     fn into_owned(self) -> DataOwned<Self::Data>;
@@ -62,7 +62,10 @@ pub trait DataMutAPI {
     fn as_ref_mut(&mut self) -> DataRefMut<Self::Data>;
 }
 
-impl<S> DataAPI for DataOwned<S> {
+impl<S> DataAPI for DataOwned<S>
+where
+    S: Clone,
+{
     type Data = S;
     #[inline]
     fn as_storage(&self) -> &Self::Data {

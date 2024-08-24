@@ -51,6 +51,16 @@ where
         let rawvec = vec![T::one(); len];
         Ok(Storage::<T, CpuDevice> { rawvec, device: self.clone() })
     }
+
+    fn arange_int_impl(&self, len: usize) -> Result<Storage<T, CpuDevice>> {
+        let mut rawvec = vec![];
+        let mut v = T::zero();
+        for _ in 0..len {
+            rawvec.push(v.clone());
+            v = v + T::one();
+        }
+        Ok(Storage::<T, CpuDevice> { rawvec, device: self.clone() })
+    }
 }
 
 impl<T> DeviceCreationComplexFloatAPI<T> for CpuDevice
@@ -85,16 +95,6 @@ where
     T: Float + Clone + Debug,
     CpuDevice: DeviceRawVecAPI<T, RawVec = Vec<T>>,
 {
-    fn arange_int_impl(&self, len: usize) -> Result<Storage<T, CpuDevice>> {
-        let mut rawvec = vec![];
-        let mut v = T::zero();
-        for _ in 0..len {
-            rawvec.push(v);
-            v = v + T::one();
-        }
-        Ok(Storage::<T, CpuDevice> { rawvec, device: self.clone() })
-    }
-
     fn arange_impl(&self, start: T, end: T, step: T) -> Result<Storage<T, CpuDevice>> {
         rstsr_assert!(step != T::zero(), InvalidValue)?;
         let n = ((end - start) / step).ceil();

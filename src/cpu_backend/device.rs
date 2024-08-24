@@ -9,7 +9,10 @@ impl DeviceBaseAPI for CpuDevice {
     }
 }
 
-impl<T> DeviceRawVecAPI<T> for CpuDevice {
+impl<T> DeviceRawVecAPI<T> for CpuDevice
+where
+    T: Clone,
+{
     type RawVec = Vec<T>;
 }
 
@@ -17,18 +20,6 @@ impl<T> DeviceStorageAPI<T> for CpuDevice
 where
     T: Clone,
 {
-    fn device(storage: &Storage<T, CpuDevice>) -> CpuDevice {
-        storage.device.clone()
-    }
-
-    fn to_rawvec(storage: &Storage<T, CpuDevice>) -> Vec<T> {
-        storage.rawvec.clone()
-    }
-
-    fn into_rawvec(storage: Storage<T, CpuDevice>) -> Vec<T> {
-        storage.rawvec
-    }
-
     fn new(vector: Vec<T>, device: CpuDevice) -> Storage<T, CpuDevice> {
         Storage::<T, CpuDevice> { rawvec: vector, device }
     }

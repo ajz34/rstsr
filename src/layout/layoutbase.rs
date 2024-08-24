@@ -110,11 +110,11 @@ where
         let stride = self.stride.as_ref();
         let shape = self.shape.as_ref();
         let mut last = 0;
-        for (&s, &d) in stride.iter().zip(shape.iter()) {
+        for (&s, &d) in stride.iter().zip(shape.iter()).rev() {
             match d {
                 0 | 1 => continue,
                 _ => {
-                    if s.abs() > last {
+                    if s.abs() < last {
                         return false;
                     }
                     last = s.abs();
