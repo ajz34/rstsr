@@ -5,6 +5,7 @@
 
 /* #region Configuration */
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Order {
     C,
     F,

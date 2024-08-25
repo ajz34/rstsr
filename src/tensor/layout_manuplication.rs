@@ -1,6 +1,6 @@
-//! This module handles view and ownership of tensor data.
+//! This module handles tensor data manipulation.
 //!
-//! Functions defined in this module shall not explicitly copy any value.
+//! Functions that shall not explicitly copy any value:
 //!
 //! Some functions in Python array API will be implemented here:
 //! - [x] expand_dims [`Tensor::expand_dims`]
@@ -9,6 +9,10 @@
 //! - [x] permute_dims [`Tensor::transpose`], [`Tensor::permute_dims`],
 //!   [`Tensor::swapaxes`]
 //! - [x] squeeze [`Tensor::squeeze`]
+//!
+//! Functions that will/may explicitly copy value:
+//!
+//! - [x] reshape [`Tensor::reshape`], [`Tensor::to_shape`]
 
 use crate::prelude_dev::*;
 use core::num::TryFromIntError;
@@ -246,7 +250,7 @@ where
     }
 }
 
-/// Methods for tensor shape change.
+/// Methods for tensor shape change without data clone.
 impl<R, D> TensorBase<R, D>
 where
     R: DataAPI,
@@ -263,8 +267,6 @@ where
         shape: impl Into<Shape<D2>>,
     ) -> Result<TensorBase<DataRef<'_, R::Data>, D2>>
     where
-        R: DataAPI,
-        D: DimAPI,
         D2: DimAPI,
     {
         self.view().into_shape_assume_contig(shape)
@@ -280,8 +282,6 @@ where
         shape: impl Into<Shape<D2>>,
     ) -> Result<TensorBase<R, D2>>
     where
-        R: DataAPI,
-        D: DimAPI,
         D2: DimAPI,
     {
         let layout = self.layout();
@@ -314,8 +314,6 @@ where
     /// dimension or vice versa.
     pub fn to_dim<D2>(&self) -> Result<TensorBase<DataRef<'_, R::Data>, D2>>
     where
-        R: DataAPI,
-        D: DimAPI,
         D2: DimAPI,
         Layout<D>: TryInto<Layout<D2>, Error = Error>,
     {
@@ -334,6 +332,59 @@ where
     {
         let layout = self.layout().clone().into_dim::<D2>()?;
         unsafe { Ok(TensorBase::new_unchecked(self.data, layout)) }
+    }
+}
+
+/// Methods for tensor shape change with possible data clone.
+impl<R, T, D, B> TensorBase<R, D>
+where
+    R: DataAPI<Data = Storage<T, B>>,
+    D: DimAPI,
+    B: DeviceAPI<T> + DeviceCreationAnyAPI<T>,
+{
+    /// Reshapes an array.
+    ///
+    /// Values of data may not be changed, but explicit copy of data may occur
+    /// depending on whether layout is c/f-contiguous.
+    ///
+    /// # See also
+    ///
+    /// - [Python array API standard: `reshape`](https://data-apis.org/array-api/2023.12/API_specification/generated/array_api.reshape.html)
+    pub fn reshape<D2>(&self, shape: impl Into<Shape<D2>>) -> TensorBase<DataCow<'_, R::Data>, D2>
+    where
+        D2: DimAPI,
+        B: OpAssignAPI<T, D2, D>,
+    {
+        self.to_shape(shape)
+    }
+
+    /// Reshapes an array.
+    ///
+    /// # See also
+    ///
+    /// [`Tensor::reshape`]
+    pub fn to_shape<D2>(&self, shape: impl Into<Shape<D2>>) -> TensorBase<DataCow<'_, R::Data>, D2>
+    where
+        D2: DimAPI,
+        B: OpAssignAPI<T, D2, D>,
+    {
+        let shape: Shape<D2> = shape.into();
+        rstsr_assert_eq!(self.size(), shape.size(), InvalidLayout).unwrap();
+        let result = self.to_shape_assume_contig(shape.clone());
+        if let Ok(result) = result {
+            // contiguous, no data cloned
+            let layout = result.layout().clone();
+            let data = result.data.into();
+            return TensorBase { data, layout };
+        } else {
+            // non-contiguous, clone data if necessary
+            let device = self.data.storage().device();
+            let layout_new = shape.new_contig(0);
+            let mut storage_new = unsafe { device.empty_impl(layout_new.size()).unwrap() };
+            device.assign(&mut storage_new, &layout_new, self.storage(), self.layout()).unwrap();
+            let data_new = DataCow::Owned(storage_new.into());
+            TensorBase { data: data_new, layout: layout_new }
+        }
     }
 }
 
@@ -375,5 +426,15 @@ mod tests {
         let c = a.flip(2);
         println!("{:?}", c);
         assert_eq!(c.shape(), &[2, 3, 4]);
+    }
+
+    #[test]
+    fn test_to_shape() {
+        let a = Tensor::<f64, _>::linspace_cpu(0.0, 15.0, 16);
+        let mut a = a.to_shape([4, 4]);
+        a.layout = Layout::new(Shape([2, 2]), Stride([2, 4]), 0);
+        println!("{:?}", a);
+        let b = a.to_shape([2, 2]);
+        println!("{:?}", b);
     }
 }

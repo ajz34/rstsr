@@ -1,43 +1,5 @@
 use crate::prelude_dev::*;
 
-/// Get a view of tensor.
-pub fn view<R, D>(tensor: &TensorBase<R, D>) -> TensorBase<DataRef<'_, R::Data>, D>
-where
-    R: DataAPI,
-    D: DimAPI,
-{
-    let data = tensor.data().as_ref();
-    let layout = tensor.layout().clone();
-    unsafe { TensorBase::new_unchecked(data, layout) }
-}
-
-/// Get a mutable view of tensor.
-pub fn view_mut<R, D>(tensor: &mut TensorBase<R, D>) -> TensorBase<DataRefMut<'_, R::Data>, D>
-where
-    R: DataMutAPI,
-    D: DimAPI,
-{
-    let layout = tensor.layout().clone();
-    let data = tensor.data_mut().as_ref_mut();
-    unsafe { TensorBase::new_unchecked(data, layout) }
-}
-
-/// Convert tensor into owned tensor.
-///
-/// Data is either moved or cloned.
-/// Layout is not involved; i.e. all underlying data is moved or cloned without
-/// changing layout.
-pub fn into_owned_keep_layout<R, D>(tensor: TensorBase<R, D>) -> TensorBase<DataOwned<R::Data>, D>
-where
-    R: DataAPI,
-
-    D: DimAPI,
-{
-    let TensorBase { data, layout } = tensor;
-    let data = data.into_owned();
-    unsafe { TensorBase::new_unchecked(data, layout) }
-}
-
 /// Methods for tensor ownership conversion.
 impl<R, D> TensorBase<R, D>
 where
@@ -48,7 +10,9 @@ where
     where
         R: DataAPI,
     {
-        view(self)
+        let data = self.data().as_ref();
+        let layout = self.layout().clone();
+        unsafe { TensorBase::new_unchecked(data, layout) }
     }
 
     /// Get a mutable view of tensor.
@@ -56,14 +20,50 @@ where
     where
         R: DataMutAPI,
     {
-        view_mut(self)
+        let layout = self.layout().clone();
+        let data = self.data_mut().as_ref_mut();
+        unsafe { TensorBase::new_unchecked(data, layout) }
     }
 
     /// Convert tensor into owned tensor.
+    ///
+    /// Data is either moved or cloned.
+    /// Layout is not involved; i.e. all underlying data is moved or cloned
+    /// without changing layout.
     pub fn into_owned_keep_layout(self) -> TensorBase<DataOwned<R::Data>, D>
     where
         R: DataAPI,
     {
-        into_owned_keep_layout(self)
+        let TensorBase { data, layout } = self;
+        let data = data.into_owned();
+        unsafe { TensorBase::new_unchecked(data, layout) }
     }
 }
+
+/* #region DataCow */
+
+impl<S, D> From<TensorBase<DataOwned<S>, D>> for TensorBase<DataCow<'_, S>, D>
+where
+    D: DimAPI,
+{
+    #[inline]
+    fn from(tensor: TensorBase<DataOwned<S>, D>) -> Self {
+        let TensorBase { data, layout } = tensor;
+        let data = DataCow::from(data);
+        unsafe { TensorBase::new_unchecked(data, layout) }
+    }
+}
+
+impl<'a, S, D> From<TensorBase<DataRef<'a, S>, D>> for TensorBase<DataCow<'a, S>, D>
+where
+    D: DimAPI,
+{
+    #[inline]
+    fn from(tensor: TensorBase<DataRef<'a, S>, D>) -> Self {
+        let TensorBase { data, layout } = tensor;
+        let data = DataCow::from(data);
+        unsafe { TensorBase::new_unchecked(data, layout) }
+    }
+}
+
+/* #endregion */

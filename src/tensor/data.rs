@@ -51,7 +51,7 @@ impl<S> DataOwned<S> {
 
 pub trait DataAPI {
     type Data: Clone;
-    fn as_storage(&self) -> &Self::Data;
+    fn storage(&self) -> &Self::Data;
     fn as_ref(&self) -> DataRef<Self::Data>;
     fn into_owned(self) -> DataOwned<Self::Data>;
 }
@@ -62,13 +62,15 @@ pub trait DataMutAPI {
     fn as_ref_mut(&mut self) -> DataRefMut<Self::Data>;
 }
 
+/* #region impl DataAPI */
+
 impl<S> DataAPI for DataOwned<S>
 where
     S: Clone,
 {
     type Data = S;
     #[inline]
-    fn as_storage(&self) -> &Self::Data {
+    fn storage(&self) -> &Self::Data {
         &self.storage
     }
     #[inline]
@@ -87,7 +89,7 @@ where
 {
     type Data = S;
     #[inline]
-    fn as_storage(&self) -> &Self::Data {
+    fn storage(&self) -> &Self::Data {
         self.storage
     }
     #[inline]
@@ -106,7 +108,7 @@ where
 {
     type Data = S;
     #[inline]
-    fn as_storage(&self) -> &Self::Data {
+    fn storage(&self) -> &Self::Data {
         self.storage
     }
     #[inline]
@@ -118,6 +120,38 @@ where
         DataOwned { storage: self.storage.clone() }
     }
 }
+
+impl<'a, S> DataAPI for DataCow<'a, S>
+where
+    S: Clone,
+{
+    type Data = S;
+    #[inline]
+    fn storage(&self) -> &Self::Data {
+        match self {
+            DataCow::Owned(data) => data.storage(),
+            DataCow::Ref(data) => data.storage(),
+        }
+    }
+    #[inline]
+    fn as_ref(&self) -> DataRef<Self::Data> {
+        match self {
+            DataCow::Owned(data) => data.as_ref(),
+            DataCow::Ref(data) => data.as_ref(),
+        }
+    }
+    #[inline]
+    fn into_owned(self) -> DataOwned<Self::Data> {
+        match self {
+            DataCow::Owned(data) => data,
+            DataCow::Ref(data) => data.into_owned(),
+        }
+    }
+}
+
+/* #endregion */
+
+/* #region impl DataMutAPI */
 
 impl<S> DataMutAPI for DataOwned<S> {
     type Data = S;
@@ -142,6 +176,26 @@ impl<'a, S> DataMutAPI for DataRefMut<'a, S> {
         DataRefMut { storage: self.storage }
     }
 }
+
+/* #endregion */
+
+/* #region DataCow */
+
+impl<S> From<DataOwned<S>> for DataCow<'_, S> {
+    #[inline]
+    fn from(data: DataOwned<S>) -> Self {
+        DataCow::Owned(data)
+    }
+}
+
+impl<'a, S> From<DataRef<'a, S>> for DataCow<'a, S> {
+    #[inline]
+    fn from(data: DataRef<'a, S>) -> Self {
+        DataCow::Ref(data)
+    }
+}
+
+/* #endregion */
 
 #[cfg(test)]
 mod test {

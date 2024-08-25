@@ -95,10 +95,15 @@ where
             match d {
                 0 | 1 => continue,
                 _ => {
-                    if s.abs() < last {
+                    if s < last {
+                        // latter strides must larger than previous strides
                         return false;
                     }
-                    last = s.abs();
+                    if last == 0 && s != 1 {
+                        // first stride must be 1
+                        return false;
+                    }
+                    last = s;
                 },
             }
         }
@@ -114,10 +119,15 @@ where
             match d {
                 0 | 1 => continue,
                 _ => {
-                    if s.abs() < last {
+                    if s < last {
+                        // previous strides must larger than latter strides
                         return false;
                     }
-                    last = s.abs();
+                    if last == 0 && s != 1 {
+                        // last stride must be 1
+                        return false;
+                    }
+                    last = s;
                 },
             }
         }

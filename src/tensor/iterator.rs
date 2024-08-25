@@ -50,7 +50,7 @@ where
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         let index = self.layout_iterator.next()?;
-        let ptr = self.tensor.data().as_storage().get_index_ptr(index);
+        let ptr = self.tensor.data().storage().get_index_ptr(index);
         unsafe { Some(&*ptr) }
     }
 }

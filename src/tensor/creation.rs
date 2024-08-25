@@ -162,7 +162,7 @@ where
         let shape = self.layout().shape();
         let layout = shape.new_contig(0);
         let idx_max = layout.size();
-        let device = self.data().as_storage().device();
+        let device = self.data().storage().device();
         let data: Storage<T, _> = device.empty_impl(idx_max).unwrap();
         unsafe { Tensor::new_unchecked(data.into(), layout) }
     }
@@ -225,7 +225,7 @@ where
         let shape = self.layout().shape();
         let layout = shape.new_contig(0);
         let idx_max = layout.size();
-        let device = self.data().as_storage().device();
+        let device = self.data().storage().device();
         let data: Storage<T, _> = device.full_impl(idx_max, fill).unwrap();
         unsafe { Tensor::new_unchecked(data.into(), layout) }
     }
@@ -335,7 +335,7 @@ where
         let shape = self.layout().shape();
         let layout = shape.new_contig(0);
         let idx_max = layout.size();
-        let device = self.data().as_storage().device();
+        let device = self.data().storage().device();
         let data: Storage<T, B> = B::ones_impl(device, idx_max).unwrap();
         unsafe { Tensor::new_unchecked(data.into(), layout) }
     }
@@ -400,7 +400,7 @@ where
         let shape = self.layout().shape();
         let layout = shape.new_contig(0);
         let idx_max = layout.size();
-        let device = self.data().as_storage().device();
+        let device = self.data().storage().device();
         let data: Storage<T, _> = B::zeros_impl(device, idx_max).unwrap();
         unsafe { Tensor::new_unchecked(data.into(), layout) }
     }

@@ -703,6 +703,33 @@ impl<D, const CHG: bool> IterLayoutBaseAPI<D> for IterLayoutEnum<D, CHG> where
 {
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum IterLayoutType {
+    C,
+    F,
+    MemNonStrided,
+    GreedyMajor,
+}
+
+pub fn iter_layout_by_type<D>(
+    ty: IterLayoutType,
+    layout: &Layout<D>,
+) -> Result<IterLayoutEnum<D, true>>
+where
+    D: DimDevAPI + DimIterLayoutAPI<IterLayoutC<D>> + DimIterLayoutAPI<IterLayoutF<D>>,
+{
+    match ty {
+        IterLayoutType::C => Ok(IterLayoutEnum::C(IterLayoutC::new_it(layout)?)),
+        IterLayoutType::F => Ok(IterLayoutEnum::F(IterLayoutF::new_it(layout)?)),
+        IterLayoutType::MemNonStrided => {
+            Ok(IterLayoutEnum::MemNonStrided(IterLayoutMemNonStrided::new_it(layout)?))
+        },
+        IterLayoutType::GreedyMajor => {
+            Ok(IterLayoutEnum::GreedyMajor(IterLayoutGreedy::new_it(layout)?))
+        },
+    }
+}
+
 /* #endregion */
 
 pub trait IterLayoutAPI<D>:

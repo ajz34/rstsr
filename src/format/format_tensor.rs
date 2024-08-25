@@ -213,7 +213,7 @@ where
     S: DataAPI<Data = Storage<T, B>>,
 {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        let vec = self.data().as_storage().to_cpu_vec().unwrap();
+        let vec = self.data().storage().to_cpu_vec().unwrap();
         let layout = &self.layout();
         let max_print = MAX_PRINT;
         let min_print = MIN_PRINT;
@@ -232,7 +232,7 @@ where
         writeln!(f, "=== Debug Tensor Print ===")?;
         Display::fmt(self, f)?;
         writeln!(f)?;
-        Debug::fmt(&self.data().as_storage().device(), f)?;
+        Debug::fmt(&self.data().storage().device(), f)?;
         writeln!(f)?;
         Debug::fmt(&self.layout(), f)?;
         writeln!(f)?;

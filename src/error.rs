@@ -121,8 +121,8 @@ macro_rules! rstsr_invalid {
     ($word:expr) => {{
         use core::fmt::Write;
         let mut s = String::new();
-        write!(s, concat!(file!(), ":", line!(), ": "));
-        write!(s, "Error::InvalidValue");
+        write!(s, concat!(file!(), ":", line!(), ": ")).unwrap();
+        write!(s, "Error::InvalidValue").unwrap();
         write!(s, " : {:?} = {:?}", stringify!($word), $word).unwrap();
         Err(Error::InvalidValue(s))
     }};

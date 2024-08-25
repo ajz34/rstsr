@@ -90,16 +90,28 @@ where
         layout.check_strides()?;
 
         // check pointer exceed
-        let len_data = data.as_storage().len();
+        let len_data = data.storage().len();
         let (_, idx_max) = layout.bounds_index()?;
         rstsr_pattern!(idx_max, len_data.., ValueOutOfRange)?;
         return Ok(Self { data, layout });
+    }
+
+    pub fn device<'a>(&'a self) -> &'a B
+    where
+        T: 'a,
+    {
+        self.data().storage().device()
+    }
+
+    pub fn storage(&self) -> &Storage<T, B> {
+        self.data().storage()
     }
 }
 
 pub type Tensor<T, D, B = CpuDevice> = TensorBase<DataOwned<Storage<T, B>>, D>;
 pub type TensorView<'a, T, D, B = CpuDevice> = TensorBase<DataRef<'a, Storage<T, B>>, D>;
 pub type TensorViewMut<'a, T, D, B = CpuDevice> = TensorBase<DataRefMut<'a, Storage<T, B>>, D>;
+pub type TensorCow<'a, T, D, B = CpuDevice> = TensorBase<DataCow<'a, Storage<T, B>>, D>;
 
 #[cfg(test)]
 mod test {
