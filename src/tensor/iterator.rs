@@ -16,7 +16,6 @@ pub struct TensorLayoutIteratorMut<'t, 'a, R, D, It>
 where
     R: DataMutAPI,
     D: DimAPI,
-    It: LayoutIterAPI<Dim = D>,
 {
     pub(crate) tensor: &'t mut TensorBase<R, D>,
     pub(crate) layout_iterator: It,
@@ -29,11 +28,11 @@ where
 
 impl<'t, R, D, It> TensorLayoutIteratorRef<'t, '_, R, D, It>
 where
-    D: DimAPI,
-    It: LayoutIterAPI<Dim = D>,
+    D: DimAPI + DimIterLayoutAPI<It>,
+    It: IterLayoutAPI<D>,
 {
     pub fn new(tensor: &'t TensorBase<R, D>) -> Result<Self> {
-        let layout_iterator = It::new(tensor.layout())?;
+        let layout_iterator = It::new_it(tensor.layout())?;
         Ok(Self { tensor, layout_iterator, _phantom: PhantomData })
     }
 }
@@ -41,9 +40,9 @@ where
 impl<'t, 'a, R, T, D, B, It> Iterator for TensorLayoutIteratorRef<'t, 'a, R, D, It>
 where
     R: DataAPI<Data = Storage<T, B>>,
-    D: DimAPI,
+    D: DimAPI + DimIterLayoutAPI<It>,
     B: DeviceStorageAPI<T>,
-    It: LayoutIterAPI<Dim = D>,
+    It: IterLayoutAPI<D>,
     T: 'a,
 {
     type Item = &'a T;
@@ -58,8 +57,8 @@ where
 
 impl<R, D, It> ExactSizeIterator for TensorLayoutIteratorRef<'_, '_, R, D, It>
 where
-    D: DimAPI,
-    It: LayoutIterAPI<Dim = D>,
+    D: DimAPI + DimIterLayoutAPI<It>,
+    It: IterLayoutAPI<D>,
     Self: Iterator,
 {
     #[inline]
@@ -75,11 +74,11 @@ where
 impl<'t, R, D, It> TensorLayoutIteratorMut<'t, '_, R, D, It>
 where
     R: DataMutAPI,
-    D: DimAPI,
-    It: LayoutIterAPI<Dim = D>,
+    D: DimAPI + DimIterLayoutAPI<It>,
+    It: IterLayoutAPI<D>,
 {
     pub fn new(tensor: &'t mut TensorBase<R, D>) -> Result<Self> {
-        let layout_iterator = It::new(tensor.layout())?;
+        let layout_iterator = It::new_it(tensor.layout())?;
         Ok(Self { tensor, layout_iterator, _phantom: PhantomData })
     }
 }
@@ -87,9 +86,10 @@ where
 impl<'t, 'a, R, T, D, B, It> Iterator for TensorLayoutIteratorMut<'t, 'a, R, D, It>
 where
     R: DataMutAPI<Data = Storage<T, B>>,
-    D: DimAPI,
+    D: DimAPI + DimIterLayoutAPI<It>,
     B: DeviceStorageAPI<T>,
-    It: LayoutIterAPI<Dim = D>,
+    It: IterLayoutAPI<D>,
+
     T: 'a,
 {
     type Item = &'a mut T;
@@ -105,8 +105,8 @@ where
 impl<R, D, It> ExactSizeIterator for TensorLayoutIteratorMut<'_, '_, R, D, It>
 where
     R: DataMutAPI,
-    D: DimAPI,
-    It: LayoutIterAPI<Dim = D>,
+    D: DimAPI + DimIterLayoutAPI<It>,
+    It: IterLayoutAPI<D>,
     Self: Iterator,
 {
     #[inline]
@@ -126,7 +126,8 @@ where
 {
     pub fn iter_ref_inner<It>(&self) -> Result<TensorLayoutIteratorRef<'_, '_, R, D, It>>
     where
-        It: LayoutIterAPI<Dim = D>,
+        D: DimIterLayoutAPI<It>,
+        It: IterLayoutAPI<D>,
     {
         TensorLayoutIteratorRef::new(self)
     }
@@ -134,51 +135,37 @@ where
     pub fn iter_mut_inner<It>(&mut self) -> Result<TensorLayoutIteratorMut<'_, '_, R, D, It>>
     where
         R: DataMutAPI,
-        It: LayoutIterAPI<Dim = D>,
+        D: DimIterLayoutAPI<It>,
+        It: IterLayoutAPI<D>,
     {
         TensorLayoutIteratorMut::new(self)
     }
 
-    pub fn iter_ref_c_prefer(&self) -> TensorLayoutIteratorRef<'_, '_, R, D, IterLayoutRowMajor<D>>
-    where
-        IterLayoutRowMajor<D>: LayoutIterAPI<Dim = D>,
-    {
+    pub fn iter_ref_c_prefer(&self) -> TensorLayoutIteratorRef<'_, '_, R, D, IterLayoutC<D>> {
         self.iter_ref_inner().unwrap() // safe to unwrap
     }
 
-    pub fn iter_mut_c_prefer(
-        &mut self,
-    ) -> TensorLayoutIteratorMut<'_, '_, R, D, IterLayoutRowMajor<D>>
+    pub fn iter_mut_c_prefer(&mut self) -> TensorLayoutIteratorMut<'_, '_, R, D, IterLayoutC<D>>
     where
         R: DataMutAPI,
-        IterLayoutRowMajor<D>: LayoutIterAPI<Dim = D>,
     {
         self.iter_mut_inner().unwrap() // safe to unwrap
     }
 
-    pub fn iter_ref_f_prefer(&self) -> TensorLayoutIteratorRef<'_, '_, R, D, IterLayoutColMajor<D>>
-    where
-        IterLayoutColMajor<D>: LayoutIterAPI<Dim = D>,
-    {
+    pub fn iter_ref_f_prefer(&self) -> TensorLayoutIteratorRef<'_, '_, R, D, IterLayoutF<D>> {
         self.iter_ref_inner().unwrap() // safe to unwrap
     }
 
-    pub fn iter_mut_f_prefer(
-        &mut self,
-    ) -> TensorLayoutIteratorMut<'_, '_, R, D, IterLayoutColMajor<D>>
+    pub fn iter_mut_f_prefer(&mut self) -> TensorLayoutIteratorMut<'_, '_, R, D, IterLayoutF<D>>
     where
         R: DataMutAPI,
-        IterLayoutColMajor<D>: LayoutIterAPI<Dim = D>,
     {
         self.iter_mut_inner().unwrap() // safe to unwrap
     }
 
     pub fn iter_ref_mem_non_strided(
         &self,
-    ) -> Result<TensorLayoutIteratorRef<'_, '_, R, D, IterLayoutMemNonStrided<D>>>
-    where
-        IterLayoutMemNonStrided<D>: LayoutIterAPI<Dim = D>,
-    {
+    ) -> Result<TensorLayoutIteratorRef<'_, '_, R, D, IterLayoutMemNonStrided<D>>> {
         self.iter_ref_inner() // not safe to unwrap
     }
 
@@ -187,34 +174,24 @@ where
     ) -> Result<TensorLayoutIteratorMut<'_, '_, R, D, IterLayoutMemNonStrided<D>>>
     where
         R: DataMutAPI,
-        IterLayoutMemNonStrided<D>: LayoutIterAPI<Dim = D>,
     {
         self.iter_mut_inner() // not safe to unwrap
     }
 
-    pub fn iter_ref_greedy(&self) -> TensorLayoutIteratorRef<'_, '_, R, D, IterLayoutGreedyMajor<D>>
-    where
-        IterLayoutGreedyMajor<D>: LayoutIterAPI<Dim = D>,
-    {
+    pub fn iter_ref_greedy(&self) -> TensorLayoutIteratorRef<'_, '_, R, D, IterLayoutGreedy<D>> {
         self.iter_ref_inner().unwrap() // safe to unwrap
     }
 
-    pub fn iter_mut_greedy(
-        &mut self,
-    ) -> TensorLayoutIteratorMut<'_, '_, R, D, IterLayoutGreedyMajor<D>>
+    pub fn iter_mut_greedy(&mut self) -> TensorLayoutIteratorMut<'_, '_, R, D, IterLayoutGreedy<D>>
     where
         R: DataMutAPI,
-        IterLayoutGreedyMajor<D>: LayoutIterAPI<Dim = D>,
     {
         self.iter_mut_inner().unwrap() // safe to unwrap
     }
 
     pub fn iter_ref_arbitary(
         &self,
-    ) -> TensorLayoutIteratorRef<'_, '_, R, D, IterLayoutEnum<D, true>>
-    where
-        IterLayoutEnum<D, true>: LayoutIterAPI<Dim = D>,
-    {
+    ) -> TensorLayoutIteratorRef<'_, '_, R, D, IterLayoutEnum<D, true>> {
         self.iter_ref_inner().unwrap() // safe to unwrap
     }
 
@@ -223,18 +200,14 @@ where
     ) -> TensorLayoutIteratorMut<'_, '_, R, D, IterLayoutEnum<D, true>>
     where
         R: DataMutAPI,
-        IterLayoutEnum<D, true>: LayoutIterAPI<Dim = D>,
     {
         self.iter_mut_inner().unwrap() // safe to unwrap
     }
 
-    pub fn iter_ref(&self) -> TensorLayoutIteratorRef<'_, '_, R, D, IterLayoutEnum<D, true>>
-    where
-        IterLayoutEnum<D, true>: LayoutIterAPI<Dim = D>,
-    {
+    pub fn iter_ref(&self) -> TensorLayoutIteratorRef<'_, '_, R, D, IterLayoutEnum<D, true>> {
         let layout_iterator = match Order::default() {
-            Order::C => IterLayoutEnum::RowMajor(IterLayoutRowMajor::new(self.layout()).unwrap()),
-            Order::F => IterLayoutEnum::ColMajor(IterLayoutColMajor::new(self.layout()).unwrap()),
+            Order::C => IterLayoutEnum::C(IterLayoutC::new_it(self.layout()).unwrap()),
+            Order::F => IterLayoutEnum::F(IterLayoutF::new_it(self.layout()).unwrap()),
         };
         TensorLayoutIteratorRef::<R, D, IterLayoutEnum<D, true>> {
             tensor: self,
@@ -246,11 +219,10 @@ where
     pub fn iter_mut(&mut self) -> TensorLayoutIteratorMut<'_, '_, R, D, IterLayoutEnum<D, true>>
     where
         R: DataMutAPI,
-        IterLayoutEnum<D, true>: LayoutIterAPI<Dim = D>,
     {
         let layout_iterator = match Order::default() {
-            Order::C => IterLayoutEnum::RowMajor(IterLayoutRowMajor::new(self.layout()).unwrap()),
-            Order::F => IterLayoutEnum::ColMajor(IterLayoutColMajor::new(self.layout()).unwrap()),
+            Order::C => IterLayoutEnum::C(IterLayoutC::new_it(self.layout()).unwrap()),
+            Order::F => IterLayoutEnum::F(IterLayoutF::new_it(self.layout()).unwrap()),
         };
         TensorLayoutIteratorMut::<R, D, IterLayoutEnum<D, true>> {
             tensor: self,

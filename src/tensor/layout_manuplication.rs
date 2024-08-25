@@ -17,7 +17,8 @@ use core::num::TryFromIntError;
 impl<R, D> TensorBase<R, D>
 where
     R: DataAPI,
-    D: DimLargerOneAPI,
+    D: DimAPI + DimLargerOneAPI,
+    D::LargerOne: DimAPI,
     Layout<D::LargerOne>: TryFrom<Layout<IxD>, Error = Error>,
 {
     /// Expand the shape of tensor.
@@ -213,7 +214,8 @@ where
 impl<R, D> TensorBase<R, D>
 where
     R: DataAPI,
-    D: DimSmallerOneAPI,
+    D: DimAPI + DimSmallerOneAPI,
+    D::SmallerOne: DimAPI,
     Layout<D::SmallerOne>: TryFrom<Layout<IxD>, Error = Error>,
 {
     /// Removes singleton dimensions (axes).

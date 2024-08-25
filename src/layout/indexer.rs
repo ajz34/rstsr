@@ -54,7 +54,7 @@ pub trait IndexerPreserve: Sized {
 
 impl<D> IndexerPreserve for Layout<D>
 where
-    D: DimAPI,
+    D: DimDevAPI,
 {
     fn dim_narrow(&self, axis: isize, slice: SliceI) -> Result<Self> {
         // dimension check
@@ -159,7 +159,7 @@ pub trait IndexerDynamic: IndexerPreserve {
 
 impl<D> IndexerDynamic for Layout<D>
 where
-    D: DimAPI,
+    D: DimDevAPI,
 {
     fn dim_select(&self, axis: isize, index: isize) -> Result<Layout<IxD>> {
         // dimension check
@@ -195,7 +195,7 @@ where
     fn dim_insert(&self, axis: isize) -> Result<Layout<IxD>> {
         // dimension check
         let axis = if axis < 0 { self.ndim() as isize + axis } else { axis };
-        rstsr_pattern!(axis, 0..self.ndim() as isize, ValueOutOfRange)?;
+        rstsr_pattern!(axis, 0..(self.ndim() + 1) as isize, ValueOutOfRange)?;
         let axis = axis as usize;
 
         // get essential information
@@ -248,6 +248,9 @@ where
                 _ => {},
             }
         }
+        extern crate std;
+        use std::println;
+        println!(">>> DEBUG: counter_slice, {counter_slice}, counter_select, {counter_select}");
 
         // check if slice-type and select-type indexer exceed the number of dimensions
         rstsr_pattern!(counter_slice + counter_select, 0..=self.ndim(), ValueOutOfRange)?;
@@ -322,7 +325,7 @@ where
 /// Utility functions for iteration.
 impl<D> Layout<D>
 where
-    D: DimAPI,
+    D: DimDevAPI,
 {
     /// This function will return a f-prefer layout that make minimal memory
     /// accessing efforts (pointers will not frequently back-and-forth).

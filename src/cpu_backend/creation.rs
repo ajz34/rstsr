@@ -1,4 +1,3 @@
-use super::device::*;
 use crate::prelude_dev::*;
 use num::{complex::ComplexFloat, Float, Num};
 

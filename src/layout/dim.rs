@@ -56,30 +56,20 @@ impl DimBaseAPI for IxD {
     }
 }
 
-pub trait DimAPI:
-    DimBaseAPI + DimShapeAPI + DimStrideAPI + DimIndexUncheckAPI + DimLayoutContigAPI
-{
-}
-
-// currently, we make specialization to Ix<N>, so we can only implement finite N
-// for now.
-impl<const N: usize> DimAPI for Ix<N> {}
-impl DimAPI for IxD {}
-
 /* #endregion */
 
 /* #region dimension relative eq */
 
 // Trait for defining smaller dimension by one.
 #[doc(hidden)]
-pub trait DimSmallerOneAPI: DimAPI {
-    type SmallerOne: DimAPI;
+pub trait DimSmallerOneAPI: DimBaseAPI {
+    type SmallerOne: DimBaseAPI;
 }
 
 // Trait for defining larger dimension by one.
 #[doc(hidden)]
-pub trait DimLargerOneAPI: DimAPI {
-    type LargerOne: DimAPI;
+pub trait DimLargerOneAPI: DimBaseAPI {
+    type LargerOne: DimBaseAPI;
 }
 
 impl DimSmallerOneAPI for IxD {

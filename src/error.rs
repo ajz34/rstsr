@@ -23,6 +23,12 @@ pub enum Error {
     Miscellaneous(String),
 }
 
+impl core::fmt::Display for Error {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        Debug::fmt(self, f)
+    }
+}
+
 #[cfg(feature = "std")]
 impl std::error::Error for Error {}
 
