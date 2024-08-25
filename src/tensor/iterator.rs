@@ -209,46 +209,50 @@ where
         self.iter_mut_inner().unwrap() // safe to unwrap
     }
 
-    pub fn iter_ref_arbitary(&self) -> TensorLayoutIteratorRef<'_, '_, R, D, IterLayoutEnum<D>>
+    pub fn iter_ref_arbitary(
+        &self,
+    ) -> TensorLayoutIteratorRef<'_, '_, R, D, IterLayoutEnum<D, true>>
     where
-        IterLayoutEnum<D>: LayoutIterAPI<Dim = D>,
+        IterLayoutEnum<D, true>: LayoutIterAPI<Dim = D>,
     {
         self.iter_ref_inner().unwrap() // safe to unwrap
     }
 
-    pub fn iter_mut_arbitary(&mut self) -> TensorLayoutIteratorMut<'_, '_, R, D, IterLayoutEnum<D>>
+    pub fn iter_mut_arbitary(
+        &mut self,
+    ) -> TensorLayoutIteratorMut<'_, '_, R, D, IterLayoutEnum<D, true>>
     where
         R: DataMutAPI,
-        IterLayoutEnum<D>: LayoutIterAPI<Dim = D>,
+        IterLayoutEnum<D, true>: LayoutIterAPI<Dim = D>,
     {
         self.iter_mut_inner().unwrap() // safe to unwrap
     }
 
-    pub fn iter_ref(&self) -> TensorLayoutIteratorRef<'_, '_, R, D, IterLayoutEnum<D>>
+    pub fn iter_ref(&self) -> TensorLayoutIteratorRef<'_, '_, R, D, IterLayoutEnum<D, true>>
     where
-        IterLayoutEnum<D>: LayoutIterAPI<Dim = D>,
+        IterLayoutEnum<D, true>: LayoutIterAPI<Dim = D>,
     {
         let layout_iterator = match Order::default() {
             Order::C => IterLayoutEnum::RowMajor(IterLayoutRowMajor::new(self.layout()).unwrap()),
             Order::F => IterLayoutEnum::ColMajor(IterLayoutColMajor::new(self.layout()).unwrap()),
         };
-        TensorLayoutIteratorRef::<R, D, IterLayoutEnum<D>> {
+        TensorLayoutIteratorRef::<R, D, IterLayoutEnum<D, true>> {
             tensor: self,
             layout_iterator,
             _phantom: PhantomData,
         }
     }
 
-    pub fn iter_mut(&mut self) -> TensorLayoutIteratorMut<'_, '_, R, D, IterLayoutEnum<D>>
+    pub fn iter_mut(&mut self) -> TensorLayoutIteratorMut<'_, '_, R, D, IterLayoutEnum<D, true>>
     where
         R: DataMutAPI,
-        IterLayoutEnum<D>: LayoutIterAPI<Dim = D>,
+        IterLayoutEnum<D, true>: LayoutIterAPI<Dim = D>,
     {
         let layout_iterator = match Order::default() {
             Order::C => IterLayoutEnum::RowMajor(IterLayoutRowMajor::new(self.layout()).unwrap()),
             Order::F => IterLayoutEnum::ColMajor(IterLayoutColMajor::new(self.layout()).unwrap()),
         };
-        TensorLayoutIteratorMut::<R, D, IterLayoutEnum<D>> {
+        TensorLayoutIteratorMut::<R, D, IterLayoutEnum<D, true>> {
             tensor: self,
             layout_iterator,
             _phantom: PhantomData,

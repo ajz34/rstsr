@@ -3,11 +3,12 @@
 //! Functions defined in this module shall not explicitly copy any value.
 //!
 //! Some functions in Python array API will be implemented here:
-//! - [x] expand_dims [`expand_dims`]
-//! - [x] flip [`flip`]
+//! - [x] expand_dims [`Tensor::expand_dims`]
+//! - [x] flip [`Tensor::flip`]
 //! - [ ] moveaxis
-//! - [x] permute_dims [`transpose`], [`permute_dims`], [`swapaxes`]
-//! - [x] squeeze [`squeeze`]
+//! - [x] permute_dims [`Tensor::transpose`], [`Tensor::permute_dims`],
+//!   [`Tensor::swapaxes`]
+//! - [x] squeeze [`Tensor::squeeze`]
 
 use crate::prelude_dev::*;
 use core::num::TryFromIntError;

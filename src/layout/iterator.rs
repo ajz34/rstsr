@@ -596,7 +596,7 @@ where
 
 /* #region enum of iterator */
 
-pub enum IterLayoutEnum<D>
+pub enum IterLayoutEnum<D, const CHG: bool>
 where
     D: DimAPI,
 {
@@ -606,7 +606,7 @@ where
     GreedyMajor(IterLayoutGreedyMajor<D>),
 }
 
-impl<D> LayoutIterBaseAPI for IterLayoutEnum<D>
+impl<D, const CHG: bool> LayoutIterBaseAPI for IterLayoutEnum<D, CHG>
 where
     D: DimAPI,
 {
@@ -616,20 +616,38 @@ where
         // this implementation generates the most efficient iterator, but not the
         // standard layout.
         let layout = layout.clone();
-        let iter_mem_non_strided = IterLayoutMemNonStrided::new(&layout);
-        if let Ok(it) = iter_mem_non_strided {
-            return Ok(Self::MemNonStrided(it));
-        } else if layout.is_c_prefer() {
-            return Ok(Self::RowMajor(IterLayoutRowMajor::new(&layout)?));
-        } else if layout.is_f_prefer() {
-            return Ok(Self::ColMajor(IterLayoutColMajor::new(&layout)?));
-        } else {
-            return Ok(Self::GreedyMajor(IterLayoutGreedyMajor::new(&layout)?));
+        match CHG {
+            false => match (layout.is_c_prefer(), layout.is_f_prefer()) {
+                (true, false) => Ok(Self::RowMajor(IterLayoutRowMajor::new(&layout)?)),
+                (false, true) => Ok(Self::ColMajor(IterLayoutColMajor::new(&layout)?)),
+                (_, _) => match Order::default() {
+                    Order::C => Ok(Self::RowMajor(IterLayoutRowMajor::new(&layout)?)),
+                    Order::F => Ok(Self::ColMajor(IterLayoutColMajor::new(&layout)?)),
+                },
+            },
+            true => {
+                let iter_mem_non_strided = IterLayoutMemNonStrided::new(&layout);
+                if let Ok(it) = iter_mem_non_strided {
+                    Ok(Self::MemNonStrided(it))
+                } else {
+                    match (layout.is_c_prefer(), layout.is_f_prefer()) {
+                        (true, false) => Ok(Self::RowMajor(IterLayoutRowMajor::new(&layout)?)),
+                        (false, true) => Ok(Self::ColMajor(IterLayoutColMajor::new(&layout)?)),
+                        (true, true) => match Order::default() {
+                            Order::C => Ok(Self::RowMajor(IterLayoutRowMajor::new(&layout)?)),
+                            Order::F => Ok(Self::ColMajor(IterLayoutColMajor::new(&layout)?)),
+                        },
+                        (false, false) => {
+                            Ok(Self::GreedyMajor(IterLayoutGreedyMajor::new(&layout)?))
+                        },
+                    }
+                }
+            },
         }
     }
 }
 
-impl<D> LayoutIteratorAPI for IterLayoutEnum<D>
+impl<D, const CHG: bool> LayoutIteratorAPI for IterLayoutEnum<D, CHG>
 where
     D: DimAPI,
     IterLayoutRowMajor<D>: LayoutIteratorAPI,
@@ -647,7 +665,7 @@ where
     }
 }
 
-impl<D> Iterator for IterLayoutEnum<D>
+impl<D, const CHG: bool> Iterator for IterLayoutEnum<D, CHG>
 where
     D: DimAPI,
     Self: LayoutIteratorAPI,
@@ -669,7 +687,7 @@ where
     }
 }
 
-impl<D> ExactSizeIterator for IterLayoutEnum<D>
+impl<D, const CHG: bool> ExactSizeIterator for IterLayoutEnum<D, CHG>
 where
     D: DimAPI,
     Self: LayoutIteratorAPI,
@@ -719,7 +737,7 @@ where
 {
 }
 
-impl<D> LayoutIterAPI for IterLayoutEnum<D>
+impl<D, const CHG: bool> LayoutIterAPI for IterLayoutEnum<D, CHG>
 where
     D: DimAPI,
     Self: LayoutIteratorAPI,
