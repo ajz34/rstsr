@@ -6,7 +6,7 @@ where
     D2: DimAPI,
     Self: DeviceAPI<T>,
 {
-    fn assign(
+    fn assign_arbitary_layout(
         &self,
         a: &mut Storage<T, Self>,
         la: &Layout<D1>,

@@ -621,7 +621,7 @@ where
 /* #endregion */
 
 #[cfg(test)]
-mod playground {
+mod test {
     use super::*;
 
     #[test]

@@ -39,7 +39,7 @@ where
     ///
     /// ```
     /// use rstsr::Tensor;
-    /// let a = Tensor::<f64, _>::zeros([4, 9, 8]);
+    /// let a = Tensor::<f64, _>::zeros_cpu([4, 9, 8]);
     /// let b = a.expand_dims(2);
     /// assert_eq!(b.shape(), &[4, 9, 1, 8]);
     /// ```
@@ -381,7 +381,14 @@ where
             let device = self.data.storage().device();
             let layout_new = shape.new_contig(0);
             let mut storage_new = unsafe { device.empty_impl(layout_new.size()).unwrap() };
-            device.assign(&mut storage_new, &layout_new, self.storage(), self.layout()).unwrap();
+            device
+                .assign_arbitary_layout(
+                    &mut storage_new,
+                    &layout_new,
+                    self.storage(),
+                    self.layout(),
+                )
+                .unwrap();
             let data_new = DataCow::Owned(storage_new.into());
             TensorBase { data: data_new, layout: layout_new }
         }

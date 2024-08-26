@@ -42,7 +42,7 @@ where
     D1: DimAPI,
     D2: DimAPI,
 {
-    fn assign(
+    fn assign_arbitary_layout(
         &self,
         a: &mut Storage<T, CpuDevice>,
         la: &Layout<D1>,
