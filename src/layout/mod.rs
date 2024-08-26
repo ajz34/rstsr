@@ -1,3 +1,4 @@
+pub mod broadcast;
 pub mod dim;
 pub mod indexer;
 pub mod iterator;
@@ -6,6 +7,7 @@ pub mod shape;
 pub mod slice;
 pub mod stride;
 
+pub use broadcast::*;
 pub use dim::*;
 pub use indexer::*;
 pub use iterator::*;

@@ -529,7 +529,7 @@ impl DimLayoutContigAPI for IxD {}
 impl<const N: usize> TryFrom<Layout<Ix<N>>> for Layout<IxD> {
     type Error = Error;
 
-    fn try_from(layout: Layout<Ix<N>>) -> Result<Self> {
+    fn try_from(layout: Layout<Ix<N>>) -> Result<Layout<IxD>> {
         let Layout { shape, stride, offset, size } = layout;
         let layout = Layout { shape: shape.to_vec(), stride: stride.to_vec(), offset, size };
         Ok(layout)
@@ -539,7 +539,7 @@ impl<const N: usize> TryFrom<Layout<Ix<N>>> for Layout<IxD> {
 impl<const N: usize> TryFrom<Layout<IxD>> for Layout<Ix<N>> {
     type Error = Error;
 
-    fn try_from(layout: Layout<IxD>) -> Result<Self> {
+    fn try_from(layout: Layout<IxD>) -> Result<Layout<Ix<N>>> {
         let Layout { shape, stride, offset, size } = layout;
         Ok(Layout {
             shape: shape

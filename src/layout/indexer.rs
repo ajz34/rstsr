@@ -245,9 +245,6 @@ where
                 _ => {},
             }
         }
-        extern crate std;
-        use std::println;
-        println!(">>> DEBUG: counter_slice, {counter_slice}, counter_select, {counter_select}");
 
         // check if slice-type and select-type indexer exceed the number of dimensions
         rstsr_pattern!(counter_slice + counter_select, 0..=self.ndim(), ValueOutOfRange)?;
