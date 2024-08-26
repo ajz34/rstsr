@@ -53,7 +53,7 @@ where
         if layout.size() == 0 {
             return Ok(It::<D> { layout, index: None, offset });
         }
-        let mut last_index = layout.shape().0.clone();
+        let mut last_index = layout.shape().clone();
         for i in 0..layout.ndim() {
             last_index[i] = 0;
         }
@@ -69,8 +69,8 @@ impl<const N: usize> DimIterLayoutAPI<IterLayoutC<Ix<N>>> for Ix<N> {
             return;
         };
         let index_in = index.as_mut().unwrap();
-        let shape = layout.shape_ref().as_ref();
-        let stride = layout.stride_ref().as_ref();
+        let shape = layout.shape().as_ref();
+        let stride = layout.stride().as_ref();
         match N {
             0 => {
                 *index = None;
@@ -168,8 +168,8 @@ impl DimIterLayoutAPI<IterLayoutC<IxD>> for IxD {
             return;
         }
         let index_in = index.as_mut().unwrap();
-        let shape: &[usize] = layout.shape_ref().as_ref();
-        let stride: &[isize] = layout.stride_ref().as_ref();
+        let shape: &[usize] = layout.shape().as_ref();
+        let stride: &[isize] = layout.stride().as_ref();
         let mut done = false;
         for (d, t, idx) in izip!(shape, stride, index_in).rev() {
             *idx += 1;
@@ -265,7 +265,7 @@ where
         if layout.size() == 0 {
             return Ok(It::<D> { layout, index: None, offset });
         }
-        let mut last_index = layout.shape().0.clone();
+        let mut last_index = layout.shape().clone();
         for i in 0..layout.ndim() {
             last_index[i] = 0;
         }
@@ -281,8 +281,8 @@ impl<const N: usize> DimIterLayoutAPI<IterLayoutF<Ix<N>>> for Ix<N> {
             return;
         }
         let index_in = index.as_mut().unwrap();
-        let shape = layout.shape_ref().as_ref();
-        let stride = layout.stride_ref().as_ref();
+        let shape = layout.shape().as_ref();
+        let stride = layout.stride().as_ref();
         match N {
             0 => {
                 *index = None;
@@ -380,8 +380,8 @@ impl DimIterLayoutAPI<IterLayoutF<IxD>> for IxD {
             return;
         }
         let index_in = index.as_mut().unwrap();
-        let shape: &[usize] = layout.shape_ref().as_ref();
-        let stride: &[isize] = layout.stride_ref().as_ref();
+        let shape: &[usize] = layout.shape().as_ref();
+        let stride: &[isize] = layout.stride().as_ref();
         let mut done = false;
         for (d, t, idx) in izip!(shape, stride, index_in) {
             *idx += 1;

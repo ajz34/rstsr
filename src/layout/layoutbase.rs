@@ -1,6 +1,6 @@
 //! Layout of tensor.
-
 use crate::prelude_dev::*;
+use core::convert::Infallible;
 use itertools::izip;
 
 /* #region Struct Definitions */
@@ -19,9 +19,10 @@ where
     D: DimBaseAPI,
 {
     // essential definitions to layout
-    pub(crate) shape: Shape<D>,
-    pub(crate) stride: Stride<D>,
+    pub(crate) shape: D,
+    pub(crate) stride: D::Stride,
     pub(crate) offset: usize,
+    size: usize,
 }
 
 /* #endregion */
@@ -34,43 +35,25 @@ where
     D: DimBaseAPI,
 {
     /// Shape of tensor. Getter function.
-    pub fn shape(&self) -> Shape<D> {
-        self.shape.clone()
-    }
-
-    /// Shape of tensor as reference. Getter function.
-    pub fn shape_ref(&self) -> &Shape<D> {
+    #[inline]
+    pub fn shape(&self) -> &D {
         &self.shape
     }
 
-    /// Shape of tensor as `[usize; N]` for fixed dim, or `Vec<usize>` for
-    /// duynamic dim.
-    pub fn shape_as_array(&self) -> D {
-        self.shape.0.clone()
-    }
-
     /// Stride of tensor. Getter function.
-    pub fn stride(&self) -> Stride<D> {
-        self.stride.clone()
-    }
-
-    /// Stride of tensor as reference. Getter function.
-    pub fn stride_ref(&self) -> &Stride<D> {
+    #[inline]
+    pub fn stride(&self) -> &D::Stride {
         &self.stride
     }
 
-    /// Stride of tensor as `[isize; N]` for fixed dim, or `Vec<isize>` for
-    /// duynamic dim.
-    pub fn stride_as_array(&self) -> D::Stride {
-        self.stride.0.clone()
-    }
-
     /// Starting offset of tensor. Getter function.
+    #[inline]
     pub fn offset(&self) -> usize {
         self.offset
     }
 
     /// Number of dimensions of tensor.
+    #[inline]
     pub fn ndim(&self) -> usize {
         self.shape.ndim()
     }
@@ -82,29 +65,36 @@ where
     D: DimBaseAPI + DimShapeAPI + DimStrideAPI,
 {
     /// Total number of elements in tensor.
+    ///
+    /// # Note
+    ///
+    /// This function uses cached size, instead of evaluating from shape.
+    #[inline]
     pub fn size(&self) -> usize {
-        self.shape.size()
+        self.size
     }
 
     /// Whether this tensor is f-preferred.
     pub fn is_f_prefer(&self) -> bool {
+        // always true for 0-dimension or 0-size tensor
+        if self.ndim() == 0 || self.size() == 0 {
+            return true;
+        }
+
         let stride = self.stride.as_ref();
         let shape = self.shape.as_ref();
         let mut last = 0;
         for (&s, &d) in stride.iter().zip(shape.iter()) {
-            match d {
-                0 | 1 => continue,
-                _ => {
-                    if s < last {
-                        // latter strides must larger than previous strides
-                        return false;
-                    }
-                    if last == 0 && s != 1 {
-                        // first stride must be 1
-                        return false;
-                    }
-                    last = s;
-                },
+            if d != 1 {
+                if s < last {
+                    // latter strides must larger than previous strides
+                    return false;
+                }
+                if last == 0 && s != 1 {
+                    // first stride must be 1
+                    return false;
+                }
+                last = s;
             }
         }
         return true;
@@ -112,23 +102,25 @@ where
 
     /// Whether this tensor is c-preferred.
     pub fn is_c_prefer(&self) -> bool {
+        // always true for 0-dimension or 0-size tensor
+        if self.ndim() == 0 || self.size() == 0 {
+            return true;
+        }
+
         let stride = self.stride.as_ref();
         let shape = self.shape.as_ref();
         let mut last = 0;
         for (&s, &d) in stride.iter().zip(shape.iter()).rev() {
-            match d {
-                0 | 1 => continue,
-                _ => {
-                    if s < last {
-                        // previous strides must larger than latter strides
-                        return false;
-                    }
-                    if last == 0 && s != 1 {
-                        // last stride must be 1
-                        return false;
-                    }
-                    last = s;
-                },
+            if d != 1 {
+                if s < last {
+                    // previous strides must larger than latter strides
+                    return false;
+                }
+                if last == 0 && s != 1 {
+                    // last stride must be 1
+                    return false;
+                }
+                last = s;
             }
         }
         return true;
@@ -142,19 +134,21 @@ where
     /// - When length of a dimension is zero, then tensor contains no elements,
     ///   thus f-contiguous.
     pub fn is_f_contig(&self) -> bool {
+        // always true for 0-dimension or 0-size tensor
+        if self.ndim() == 0 || self.size() == 0 {
+            return true;
+        }
+
         let stride = self.stride.as_ref();
         let shape = self.shape.as_ref();
         let mut acc = 1;
-        let mut contig = true;
         for (&s, &d) in stride.iter().zip(shape.iter()) {
-            if d == 0 {
-                return true;
-            } else if s != acc {
-                contig = false;
+            if d != 1 && s != acc {
+                return false;
             }
             acc *= d as isize;
         }
-        return contig;
+        return true;
     }
 
     /// Whether this tensor is c-contiguous.
@@ -165,33 +159,36 @@ where
     /// - When length of a dimension is zero, then tensor contains no elements,
     ///   thus c-contiguous.
     pub fn is_c_contig(&self) -> bool {
+        // always true for 0-dimension or 0-size tensor
+        if self.ndim() == 0 || self.size() == 0 {
+            return true;
+        }
+
         let stride = self.stride.as_ref();
         let shape = self.shape.as_ref();
         let mut acc = 1;
-        let mut contig = true;
         for (&s, &d) in stride.iter().zip(shape.iter()).rev() {
-            if d == 0 {
-                return true;
-            } else if s != acc {
-                contig = false;
+            if d != 1 && s != acc {
+                return false;
             }
             acc *= d as isize;
         }
-        return contig;
+        return true;
     }
 
     /// Index of tensor by list of indexes to dimensions.
     ///
     /// This function does not optimized for performance.
-    pub fn try_index(&self, index: D) -> Result<usize> {
+    pub fn try_index(&self, index: D::Stride) -> Result<usize> {
         let mut pos = self.offset() as isize;
         let index = index.as_ref();
         let shape = self.shape.as_ref();
         let stride = self.stride.as_ref();
 
         for (&idx, &shp, &strd) in izip!(index.iter(), shape.iter(), stride.iter()) {
-            rstsr_pattern!(idx, 0..shp, ValueOutOfRange)?;
-            pos += strd * idx as isize;
+            let idx = if idx < 0 { idx + shp as isize } else { idx };
+            rstsr_pattern!(idx, 0..(shp as isize), ValueOutOfRange)?;
+            pos += strd * idx;
         }
         rstsr_pattern!(pos, 0.., ValueOutOfRange)?;
         return Ok(pos as usize);
@@ -199,13 +196,13 @@ where
 
     /// Index of tensor by list of indexes to dimensions.
     ///
-    /// This function does not optimized for performance.
+    /// This function does not optimized for performance. Negative index
+    /// allowed.
     ///
     /// # Panics
     ///
-    /// - Negative index
     /// - Index greater than shape
-    pub fn index(&self, index: D) -> usize {
+    pub fn index(&self, index: D::Stride) -> usize {
         self.try_index(index).unwrap()
     }
 
@@ -221,7 +218,7 @@ where
         let stride = self.stride.as_ref();
 
         if n == 0 {
-            return Ok((offset, offset));
+            return Ok((offset, offset + 1));
         }
 
         let mut min = offset as isize;
@@ -268,12 +265,8 @@ where
         let n = shape.len();
 
         // unconditionally ok if no elements (length of tensor is zero)
-        if self.size() == 0 {
-            return Ok(());
-        }
-
-        // unconditionally ok if 0-/1-dimension
-        if n <= 1 {
+        // unconditionally ok if 0-dimension
+        if self.size() == 0 || n == 0 {
             return Ok(());
         }
 
@@ -287,7 +280,8 @@ where
             rstsr_pattern!(
                 shape_sorted[i] * stride_sorted[i],
                 1..stride_sorted[i + 1] + 1,
-                InvalidLayout
+                InvalidLayout,
+                "Either stride be zero, or stride too small that elements in tensor can be overlapped."
             )?;
         }
         return Ok(());
@@ -307,8 +301,9 @@ where
     /// - Shape and stride length mismatch
     /// - Strides is correct (no elements can overlap)
     /// - Minimum bound is not negative
-    pub fn new(shape: Shape<D>, stride: Stride<D>, offset: usize) -> Self {
-        let layout = Layout { shape, stride, offset };
+    #[inline]
+    pub fn new(shape: D, stride: D::Stride, offset: usize) -> Self {
+        let layout = unsafe { Layout::new_unchecked(shape, stride, offset) };
         layout.bounds_index().unwrap();
         layout.check_strides().unwrap();
         return layout;
@@ -320,15 +315,17 @@ where
     /// # Safety
     ///
     /// This function does not check whether layout is valid.
-    pub unsafe fn new_unchecked(shape: Shape<D>, stride: Stride<D>, offset: usize) -> Self {
-        Layout { shape, stride, offset }
+    #[inline]
+    pub unsafe fn new_unchecked(shape: D, stride: D::Stride, offset: usize) -> Self {
+        let size = shape.shape_size();
+        Layout { shape, stride, offset, size }
     }
 }
 
 /// Manuplation of layout.
 impl<D> Layout<D>
 where
-    D: DimBaseAPI,
+    D: DimBaseAPI + DimShapeAPI + DimStrideAPI,
 {
     /// Transpose layout by permutation.
     ///
@@ -358,19 +355,20 @@ where
             InvalidLayout,
             "axes should contain all elements from 0 to n-1."
         )?;
-        let axes = axes.iter().map(|&p| p as usize).collect::<Vec<_>>();
+        let axes = axes
+            .iter()
+            .map(|&p| if p < 0 { p + n as isize } else { p } as usize)
+            .collect::<Vec<_>>();
 
-        let shape_old = self.shape.as_ref();
-        let stride_old = self.stride.as_ref();
-        let mut shape_wrap = self.shape.clone();
-        let mut stride_wrap = self.stride.clone();
-        let shape = shape_wrap.as_mut();
-        let stride = stride_wrap.as_mut();
+        let shape_old = self.shape();
+        let stride_old = self.stride();
+        let mut shape = self.shape().clone();
+        let mut stride = self.stride().clone();
         for i in 0..self.ndim() {
             shape[i] = shape_old[axes[i]];
             stride[i] = stride_old[axes[i]];
         }
-        Ok(Layout { shape: shape_wrap, stride: stride_wrap, offset: self.offset })
+        return unsafe { Ok(Layout::new_unchecked(shape, stride, self.offset)) };
     }
 
     /// Transpose layout by permutation.
@@ -382,17 +380,15 @@ where
 
     /// Reverse axes of layout.
     pub fn reverse_axes(&self) -> Self {
-        let shape_old = self.shape.as_ref();
-        let stride_old = self.stride.as_ref();
-        let mut shape_wrap = self.shape.clone();
-        let mut stride_wrap = self.stride.clone();
-        let shape = shape_wrap.as_mut();
-        let stride = stride_wrap.as_mut();
+        let shape_old = self.shape();
+        let stride_old = self.stride();
+        let mut shape = self.shape().clone();
+        let mut stride = self.stride().clone();
         for i in 0..self.ndim() {
             shape[i] = shape_old[self.ndim() - i - 1];
             stride[i] = stride_old[self.ndim() - i - 1];
         }
-        return Layout { shape: shape_wrap, stride: stride_wrap, offset: self.offset };
+        return unsafe { Layout::new_unchecked(shape, stride, self.offset) };
     }
 
     /// Swap axes of layout.
@@ -405,13 +401,11 @@ where
         rstsr_pattern!(axis2, 0..self.ndim() as isize, ValueOutOfRange)?;
         let axis2 = axis2 as usize;
 
-        let mut shape_wrap = self.shape.clone();
-        let mut stride_wrap = self.stride.clone();
-        let shape = shape_wrap.as_mut();
-        let stride = stride_wrap.as_mut();
-        shape.swap(axis1, axis2);
-        stride.swap(axis1, axis2);
-        Ok(Layout { shape: shape_wrap, stride: stride_wrap, offset: self.offset })
+        let mut shape = self.shape().clone();
+        let mut stride = self.stride().clone();
+        shape.as_mut().swap(axis1, axis2);
+        stride.as_mut().swap(axis1, axis2);
+        return unsafe { Ok(Layout::new_unchecked(shape, stride, self.offset)) };
     }
 }
 
@@ -423,28 +417,15 @@ pub trait DimIndexUncheckAPI: DimBaseAPI + DimStrideAPI + DimShapeAPI {
     /// This function does not check for bounds, including
     /// - Negative index
     /// - Index greater than shape
-    unsafe fn index_uncheck_by_ref(layout: &Layout<Self>, index: &Self) -> usize;
-
-    /// Index of tensor by list of indexes to dimensions.
-    ///
-    /// # Safety
-    ///
-    /// This function does not check for bounds, including
-    /// - Negative index
-    /// - Index greater than shape
-    #[inline]
-    unsafe fn index_uncheck(layout: &Layout<Self>, index: Self) -> usize {
-        Self::index_uncheck_by_ref(layout, &index)
-    }
+    unsafe fn index_uncheck(layout: &Layout<Self>, index: &[usize]) -> usize;
 }
 
 impl<const N: usize> DimIndexUncheckAPI for Ix<N> {
     #[inline]
-    unsafe fn index_uncheck_by_ref(layout: &Layout<Self>, index: &Self) -> usize {
-        let index = index.as_ref();
+    unsafe fn index_uncheck(layout: &Layout<Self>, index: &[usize]) -> usize {
         let stride = layout.stride.as_ref();
         match N {
-            0 => 0,
+            0 => layout.offset,
             1 => (layout.offset as isize + stride[0] * index[0] as isize) as usize,
             2 => {
                 (layout.offset as isize
@@ -475,9 +456,8 @@ impl<const N: usize> DimIndexUncheckAPI for Ix<N> {
 
 impl DimIndexUncheckAPI for IxD {
     #[inline]
-    unsafe fn index_uncheck_by_ref(layout: &Layout<Self>, index: &Self) -> usize {
+    unsafe fn index_uncheck(layout: &Layout<Self>, index: &[usize]) -> usize {
         let mut pos = layout.offset as isize;
-        let index: &[usize] = index.as_ref();
         let stride: &[isize] = layout.stride.as_ref();
         stride.iter().zip(index.iter()).for_each(|(&s, &i)| pos += s * i as isize);
         return pos as usize;
@@ -495,42 +475,31 @@ where
     /// This function does not check for bounds, including
     /// - Negative index
     /// - Index greater than shape
-    pub unsafe fn index_uncheck(&self, index: D) -> usize {
+    pub unsafe fn index_uncheck(&self, index: &[usize]) -> usize {
         D::index_uncheck(self, index)
-    }
-
-    /// Index of tensor by list of indexes to dimensions.
-    ///
-    /// # Safety
-    ///
-    /// This function does not check for bounds, including
-    /// - Negative index
-    /// - Index greater than shape
-    pub unsafe fn index_uncheck_by_ref(&self, index: &D) -> usize {
-        D::index_uncheck_by_ref(self, index)
     }
 }
 
-pub trait DimLayoutContigAPI: DimBaseAPI + DimShapeAPI {
+pub trait DimLayoutContigAPI: DimBaseAPI + DimShapeAPI + DimStrideAPI {
     /// Generate new layout by providing shape and offset; stride fits into
     /// c-contiguous.
-    fn new_c_contig(&self, offset: usize) -> Layout<Self> {
-        let shape = Shape::<Self>(self.clone());
+    fn new_c_contig(&self, offset: Option<usize>) -> Layout<Self> {
+        let shape = self.clone();
         let stride = shape.stride_c_contig();
-        Layout { shape, stride, offset }
+        unsafe { Layout::new_unchecked(shape, stride, offset.unwrap_or(0)) }
     }
 
     /// Generate new layout by providing shape and offset; stride fits into
     /// f-contiguous.
-    fn new_f_contig(&self, offset: usize) -> Layout<Self> {
-        let shape = Shape::<Self>(self.clone());
+    fn new_f_contig(&self, offset: Option<usize>) -> Layout<Self> {
+        let shape = self.clone();
         let stride = shape.stride_f_contig();
-        Layout { shape, stride, offset }
+        unsafe { Layout::new_unchecked(shape, stride, offset.unwrap_or(0)) }
     }
 
     /// Generate new layout by providing shape and offset; Whether c-contiguous
     /// or f-contiguous depends on cargo feature `c_prefer`.
-    fn new_contig(&self, offset: usize) -> Layout<Self> {
+    fn new_contig(&self, offset: Option<usize>) -> Layout<Self> {
         match Order::default() {
             Order::C => self.new_c_contig(offset),
             Order::F => self.new_f_contig(offset),
@@ -540,13 +509,13 @@ pub trait DimLayoutContigAPI: DimBaseAPI + DimShapeAPI {
     /// Simplified function to generate c-contiguous layout. See also
     /// [DimLayoutContigAPI::new_c_contig].
     fn c(&self) -> Layout<Self> {
-        self.new_c_contig(0)
+        self.new_c_contig(None)
     }
 
     /// Simplified function to generate f-contiguous layout. See also
     /// [DimLayoutContigAPI::new_f_contig].
     fn f(&self) -> Layout<Self> {
-        self.new_f_contig(0)
+        self.new_f_contig(None)
     }
 }
 
@@ -561,9 +530,8 @@ impl<const N: usize> TryFrom<Layout<Ix<N>>> for Layout<IxD> {
     type Error = Error;
 
     fn try_from(layout: Layout<Ix<N>>) -> Result<Self> {
-        let Layout { shape: Shape(shape), stride: Stride(stride), offset } = layout;
-        let layout =
-            Layout { shape: Shape(shape.to_vec()), stride: Stride(stride.to_vec()), offset };
+        let Layout { shape, stride, offset, size } = layout;
+        let layout = Layout { shape: shape.to_vec(), stride: stride.to_vec(), offset, size };
         Ok(layout)
     }
 }
@@ -572,49 +540,48 @@ impl<const N: usize> TryFrom<Layout<IxD>> for Layout<Ix<N>> {
     type Error = Error;
 
     fn try_from(layout: Layout<IxD>) -> Result<Self> {
-        let Layout { shape: Shape(shape), stride: Stride(stride), offset } = layout;
+        let Layout { shape, stride, offset, size } = layout;
         Ok(Layout {
-            shape: Shape(shape.try_into().map_err(|_| {
-                Error::InvalidLayout(format!("Cannot convert IxD to Ix< {:} >", N))
-            })?),
-            stride: Stride(stride.try_into().map_err(|_| {
-                Error::InvalidLayout(format!("Cannot convert IxD to Ix< {:} >", N))
-            })?),
+            shape: shape
+                .try_into()
+                .map_err(|_| Error::InvalidLayout(format!("Cannot convert IxD to Ix< {:} >", N)))?,
+            stride: stride
+                .try_into()
+                .map_err(|_| Error::InvalidLayout(format!("Cannot convert IxD to Ix< {:} >", N)))?,
             offset,
+            size,
         })
     }
 }
 
+pub trait LayoutConvertAPI<E>: Sized
+where
+    E: Into<Error>,
+{
+    fn into_dim<D2>(self) -> Result<Layout<D2>>
+    where
+        D2: DimBaseAPI,
+        Self: TryInto<Layout<D2>, Error = E>,
+    {
+        self.try_into().map_err(Into::into)
+    }
+}
+
+impl<D> LayoutConvertAPI<Error> for Layout<D> where D: DimAPI {}
+impl<D> LayoutConvertAPI<Infallible> for Layout<D> where D: DimAPI {}
+
 impl<const N: usize> From<Ix<N>> for Layout<Ix<N>> {
-    fn from(index: Ix<N>) -> Self {
-        let shape: Shape<Ix<N>> = Shape(index);
-        let stride: Stride<Ix<N>> = shape.stride_contig();
-        Layout { shape, stride, offset: 0 }
+    fn from(shape: Ix<N>) -> Self {
+        let stride = shape.stride_contig();
+        Layout { shape, stride, offset: 0, size: shape.shape_size() }
     }
 }
 
 impl From<IxD> for Layout<IxD> {
-    fn from(index: IxD) -> Self {
-        let shape: Shape<IxD> = Shape(index);
-        let stride: Stride<IxD> = shape.stride_contig();
-        Layout { shape, stride, offset: 0 }
-    }
-}
-
-impl<D> Layout<D>
-where
-    D: DimBaseAPI,
-{
-    /// Convert layout to another dimension.
-    ///
-    /// This is mostly used when converting static dimension to dynamic
-    /// dimension or vice versa.
-    pub fn into_dim<T>(self) -> Result<Layout<T>>
-    where
-        T: DimBaseAPI,
-        Layout<D>: TryInto<Layout<T>, Error = Error>,
-    {
-        return self.try_into();
+    fn from(shape: IxD) -> Self {
+        let size = shape.shape_size();
+        let stride = shape.stride_contig();
+        Layout { shape, stride, offset: 0, size }
     }
 }
 
@@ -622,23 +589,286 @@ where
 
 #[cfg(test)]
 mod test {
+    use std::panic::catch_unwind;
+
     use super::*;
 
     #[test]
-    fn test0() {
-        let shape: [usize; 3] = [3, 2, 6];
-        let stride: [isize; 3] = [3, -300, 15];
-        let layout = Layout::<Ix3> { shape: Shape(shape), stride: Stride(stride), offset: 917 };
-        println!("{:?}", layout);
-        let _ = layout.check_strides();
+    fn test_layout_new() {
+        // a successful layout new
+        let shape = [3, 2, 6];
+        let stride = [3, -300, 15];
+        let layout = Layout::new(shape, stride, 917);
+        assert_eq!(layout.shape(), &[3, 2, 6]);
+        assert_eq!(layout.stride(), &[3, -300, 15]);
+        assert_eq!(layout.offset(), 917);
+        assert_eq!(layout.ndim(), 3);
+        // unsuccessful layout new (offset underflow)
+        let shape = [3, 2, 6];
+        let stride = [3, -300, 15];
+        let r = catch_unwind(|| Layout::new(shape, stride, 0));
+        assert!(r.is_err());
+        // unsuccessful layout new (zero stride for non-0/1 shape)
+        let shape = [3, 2, 6];
+        let stride = [3, -300, 0];
+        let r = catch_unwind(|| Layout::new(shape, stride, 1000));
+        assert!(r.is_err());
+        // unsuccessful layout new (stride too small)
+        let shape = [3, 2, 6];
+        let stride = [3, 4, 7];
+        let r = catch_unwind(|| Layout::new(shape, stride, 1000));
+        assert!(r.is_err());
+        // successful layout new (zero dim)
+        let shape = [];
+        let stride = [];
+        let r = catch_unwind(|| Layout::new(shape, stride, 1000));
+        assert!(r.is_ok());
+        // successful layout new (stride 0 for 1-shape)
+        let shape = [3, 1, 5];
+        let stride = [1, 0, 15];
+        let r = catch_unwind(|| Layout::new(shape, stride, 1));
+        assert!(r.is_ok());
+        // successful layout new (stride 0 for 1-shape)
+        let shape = [3, 1, 5];
+        let stride = [1, 0, 15];
+        let r = catch_unwind(|| Layout::new(shape, stride, 1));
+        assert!(r.is_ok());
+        // successful layout new (zero-size tensor)
+        let shape = [3, 0, 5];
+        let stride = [-1, -2, -3];
+        let r = catch_unwind(|| Layout::new(shape, stride, 1));
+        assert!(r.is_ok());
+        // anyway, if one need custom layout, use new_unchecked
+        let shape = [3, 2, 6];
+        let stride = [3, -300, 0];
+        let r = catch_unwind(|| unsafe { Layout::new_unchecked(shape, stride, 1000) });
+        assert!(r.is_ok());
     }
 
     #[test]
-    fn test1() {
-        let shape: [usize; 3] = [3, 2, 6];
-        let stride: [isize; 3] = [3, -300, 15];
-        let layout = Layout::<Ix3> { shape: Shape(shape), stride: Stride(stride), offset: 917 };
-        let layout = layout.transpose(&[2, 0, 1]).unwrap();
+    fn test_is_f_prefer() {
+        // general case
+        let shape = [3, 5, 7];
+        let layout = Layout::new(shape, [1, 10, 100], 0);
+        assert!(layout.is_f_prefer());
+        let layout = Layout::new(shape, [1, 3, 15], 0);
+        assert!(layout.is_f_prefer());
+        let layout = Layout::new(shape, [1, 3, -15], 1000);
+        assert!(!layout.is_f_prefer());
+        let layout = Layout::new(shape, [1, 21, 3], 0);
+        assert!(!layout.is_f_prefer());
+        let layout = Layout::new(shape, [35, 7, 1], 0);
+        assert!(!layout.is_f_prefer());
+        let layout = Layout::new(shape, [2, 6, 30], 0);
+        assert!(!layout.is_f_prefer());
+        // zero dimension
+        let layout = Layout::new([], [], 0);
+        assert!(layout.is_f_prefer());
+        // zero size
+        let layout = Layout::new([2, 0, 4], [1, 10, 100], 0);
+        assert!(layout.is_f_prefer());
+        // shape with 1
+        let layout = Layout::new([2, 1, 4], [1, 1, 2], 0);
+        assert!(layout.is_f_prefer());
+    }
+
+    #[test]
+    fn test_is_c_prefer() {
+        // general case
+        let shape = [3, 5, 7];
+        let layout = Layout::new(shape, [100, 10, 1], 0);
+        assert!(layout.is_c_prefer());
+        let layout = Layout::new(shape, [35, 7, 1], 0);
+        assert!(layout.is_c_prefer());
+        let layout = Layout::new(shape, [-35, 7, 1], 1000);
+        assert!(!layout.is_c_prefer());
+        let layout = Layout::new(shape, [7, 21, 1], 0);
+        assert!(!layout.is_c_prefer());
+        let layout = Layout::new(shape, [1, 3, 15], 0);
+        assert!(!layout.is_c_prefer());
+        let layout = Layout::new(shape, [70, 14, 2], 0);
+        assert!(!layout.is_c_prefer());
+        // zero dimension
+        let layout = Layout::new([], [], 0);
+        assert!(layout.is_c_prefer());
+        // zero size
+        let layout = Layout::new([2, 0, 4], [1, 10, 100], 0);
+        assert!(layout.is_c_prefer());
+        // shape with 1
+        let layout = Layout::new([2, 1, 4], [4, 1, 1], 0);
+        assert!(layout.is_c_prefer());
+    }
+
+    #[test]
+    fn test_is_f_contig() {
+        // general case
+        let shape = [3, 5, 7];
+        let layout = Layout::new(shape, [1, 3, 15], 0);
+        assert!(layout.is_f_contig());
+        let layout = Layout::new(shape, [1, 4, 20], 0);
+        assert!(!layout.is_f_contig());
+        // zero dimension
+        let layout = Layout::new([], [], 0);
+        assert!(layout.is_f_contig());
+        // zero size
+        let layout = Layout::new([2, 0, 4], [1, 10, 100], 0);
+        assert!(layout.is_f_contig());
+        // shape with 1
+        let layout = Layout::new([2, 1, 4], [1, 1, 2], 0);
+        assert!(layout.is_f_contig());
+    }
+
+    #[test]
+    fn test_is_c_contig() {
+        // general case
+        let shape = [3, 5, 7];
+        let layout = Layout::new(shape, [35, 7, 1], 0);
+        assert!(layout.is_c_contig());
+        let layout = Layout::new(shape, [36, 7, 1], 0);
+        assert!(!layout.is_c_contig());
+        // zero dimension
+        let layout = Layout::new([], [], 0);
+        assert!(layout.is_c_contig());
+        // zero size
+        let layout = Layout::new([2, 0, 4], [1, 10, 100], 0);
+        assert!(layout.is_c_contig());
+        // shape with 1
+        let layout = Layout::new([2, 1, 4], [4, 1, 1], 0);
+        assert!(layout.is_c_contig());
+    }
+
+    #[test]
+    fn test_index() {
+        // a = np.arange(9 * 12 * 15)
+        //       .reshape(9, 12, 15)[4:2:-1, 4:10, 2:10:3]
+        //       .transpose(2, 0, 1)
+        let layout = Layout::new([3, 2, 6], [3, -180, 15], 782);
+        assert_eq!(layout.index([0, 0, 0]), 782);
+        assert_eq!(layout.index([2, 1, 4]), 668);
+        assert_eq!(layout.index([1, -2, -3]), 830);
+        // zero-dim
+        let layout = Layout::new([], [], 10);
+        assert_eq!(layout.index([]), 10);
+    }
+
+    #[test]
+    fn test_bounds_index() {
+        // a = np.arange(9 * 12 * 15)
+        //       .reshape(9, 12, 15)[4:2:-1, 4:10, 2:10:3]
+        //       .transpose(2, 0, 1)
+        // a.min() = 602, a.max() = 863
+        let layout = Layout::new([3, 2, 6], [3, -180, 15], 782);
+        assert_eq!(layout.bounds_index().unwrap(), (602, 864));
+        // situation that fails
+        let layout = unsafe { Layout::new_unchecked([3, 2, 6], [3, -180, 15], 15) };
+        assert!(layout.bounds_index().is_err());
+        // zero-dim
+        let layout = Layout::new([], [], 10);
+        assert_eq!(layout.bounds_index().unwrap(), (10, 11));
+    }
+
+    #[test]
+    fn test_transpose() {
+        // general
+        let layout = Layout::new([3, 2, 6], [3, -180, 15], 782);
+        let trans = layout.transpose(&[2, 0, 1]).unwrap();
+        assert_eq!(trans.shape(), &[6, 3, 2]);
+        assert_eq!(trans.stride(), &[15, 3, -180]);
+        // permute_dims is alias of transpose
+        let trans = layout.permute_dims(&[2, 0, 1]).unwrap();
+        assert_eq!(trans.shape(), &[6, 3, 2]);
+        assert_eq!(trans.stride(), &[15, 3, -180]);
+        // negative axis also allowed
+        let trans = layout.transpose(&[-1, 0, 1]).unwrap();
+        assert_eq!(trans.shape(), &[6, 3, 2]);
+        assert_eq!(trans.stride(), &[15, 3, -180]);
+        // repeated axis
+        let trans = layout.transpose(&[-2, 0, 1]);
+        assert!(trans.is_err());
+        // non-valid dimension
+        let trans = layout.transpose(&[1, 0]);
+        assert!(trans.is_err());
+        // zero-dim
+        let layout = Layout::new([], [], 0);
+        let trans = layout.transpose(&[]);
+        assert!(trans.is_ok());
+    }
+
+    #[test]
+    fn test_reverse_axes() {
+        // general
+        let layout = Layout::new([3, 2, 6], [3, -180, 15], 782);
+        let trans = layout.reverse_axes();
+        assert_eq!(trans.shape(), &[6, 2, 3]);
+        assert_eq!(trans.stride(), &[15, -180, 3]);
+        // zero-dim
+        let layout = Layout::new([], [], 782);
+        let trans = layout.reverse_axes();
+        assert_eq!(trans.shape(), &[]);
+        assert_eq!(trans.stride(), &[]);
+    }
+
+    #[test]
+    fn test_swapaxes() {
+        // general
+        let layout = Layout::new([3, 2, 6], [3, -180, 15], 782);
+        let trans = layout.swapaxes(-1, -2).unwrap();
+        assert_eq!(trans.shape(), &[3, 6, 2]);
+        assert_eq!(trans.stride(), &[3, 15, -180]);
+        // same index is allowed
+        let layout = Layout::new([3, 2, 6], [3, -180, 15], 782);
+        let trans = layout.swapaxes(-1, -1).unwrap();
+        assert_eq!(trans.shape(), &[3, 2, 6]);
+        assert_eq!(trans.stride(), &[3, -180, 15]);
+    }
+
+    #[test]
+    fn test_index_uncheck() {
+        // a = np.arange(9 * 12 * 15)
+        //       .reshape(9, 12, 15)[4:2:-1, 4:10, 2:10:3]
+        //       .transpose(2, 0, 1)
+        unsafe {
+            // fixed dim
+            let layout = Layout::new([3, 2, 6], [3, -180, 15], 782);
+            assert_eq!(layout.index_uncheck(&[0, 0, 0]), 782);
+            assert_eq!(layout.index_uncheck(&[2, 1, 4]), 668);
+            // dynamic dim
+            let layout = Layout::new(vec![3, 2, 6], vec![3, -180, 15], 782);
+            assert_eq!(layout.index_uncheck(&[0, 0, 0]), 782);
+            assert_eq!(layout.index_uncheck(&[2, 1, 4]), 668);
+            // zero-dim
+            let layout = Layout::new([], [], 10);
+            assert_eq!(layout.index_uncheck(&[]), 10);
+        }
+    }
+
+    #[test]
+    fn test_new_contig() {
+        let layout = [3, 2, 6].c();
+        assert_eq!(layout.shape(), &[3, 2, 6]);
+        assert_eq!(layout.stride(), &[12, 6, 1]);
+        let layout = [3, 2, 6].f();
+        assert_eq!(layout.shape(), &[3, 2, 6]);
+        assert_eq!(layout.stride(), &[1, 3, 6]);
+        // following code generates contiguous layout
+        // c/f-contig depends on cargo feature
+        let layout: Layout<_> = [3, 2, 6].into();
         println!("{:?}", layout);
+    }
+
+    #[test]
+    fn test_layout_cast() {
+        let layout = [3, 2, 6].c();
+        assert!(layout.clone().into_dim::<IxD>().is_ok());
+        assert!(layout.clone().into_dim::<Ix3>().is_ok());
+        let layout = vec![3, 2, 6].c();
+        assert!(layout.clone().into_dim::<IxD>().is_ok());
+        assert!(layout.clone().into_dim::<Ix3>().is_ok());
+        assert!(layout.clone().into_dim::<Ix2>().is_err());
+        // following usage is not valid
+        let layout = unsafe { Layout::new_unchecked(vec![1, 2], vec![3, 4, 5], 1) };
+        assert!(layout.clone().into_dim::<IxD>().is_ok());
+        assert!(layout.clone().into_dim::<Ix2>().is_err());
+        assert!(layout.clone().into_dim::<Ix3>().is_err());
     }
 }

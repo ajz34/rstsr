@@ -264,7 +264,7 @@ where
     /// - The layout of the original tensor is not contiguous.
     pub fn to_shape_assume_contig<D2>(
         &self,
-        shape: impl Into<Shape<D2>>,
+        shape: D2,
     ) -> Result<TensorBase<DataRef<'_, R::Data>, D2>>
     where
         D2: DimAPI,
@@ -277,10 +277,7 @@ where
     /// # See also
     ///
     /// [`Tensor::to_shape_assume_contig`]
-    pub fn into_shape_assume_contig<D2>(
-        self,
-        shape: impl Into<Shape<D2>>,
-    ) -> Result<TensorBase<R, D2>>
+    pub fn into_shape_assume_contig<D2>(self, shape: impl Into<D2>) -> Result<TensorBase<R, D2>>
     where
         D2: DimAPI,
     {
@@ -288,21 +285,21 @@ where
         let is_c_contig = layout.is_c_contig();
         let is_f_contig = layout.is_f_contig();
 
-        let shape: Shape<D2> = shape.into();
+        let shape: D2 = shape.into();
         rstsr_assert_eq!(
             layout.size(),
-            shape.size(),
+            shape.shape_size(),
             InvalidLayout,
             "Number of elements not same."
         )?;
 
         let new_layout = match (is_c_contig, is_f_contig) {
             (true, true) => match Order::default() {
-                Order::C => shape.new_c_contig(layout.offset),
-                Order::F => shape.new_f_contig(layout.offset),
+                Order::C => shape.new_c_contig(Some(layout.offset)),
+                Order::F => shape.new_f_contig(Some(layout.offset)),
             },
-            (true, false) => shape.new_c_contig(layout.offset),
-            (false, true) => shape.new_f_contig(layout.offset),
+            (true, false) => shape.new_c_contig(Some(layout.offset)),
+            (false, true) => shape.new_f_contig(Some(layout.offset)),
             (false, false) => rstsr_raise!(InvalidLayout, "Assumes contiguous layout.")?,
         };
         unsafe { Ok(TensorBase::new_unchecked(self.data, new_layout)) }
@@ -350,7 +347,7 @@ where
     /// # See also
     ///
     /// - [Python array API standard: `reshape`](https://data-apis.org/array-api/2023.12/API_specification/generated/array_api.reshape.html)
-    pub fn reshape<D2>(&self, shape: impl Into<Shape<D2>>) -> TensorBase<DataCow<'_, R::Data>, D2>
+    pub fn reshape<D2>(&self, shape: D2) -> TensorBase<DataCow<'_, R::Data>, D2>
     where
         D2: DimAPI,
         B: OpAssignAPI<T, D2, D>,
@@ -363,13 +360,12 @@ where
     /// # See also
     ///
     /// [`Tensor::reshape`]
-    pub fn to_shape<D2>(&self, shape: impl Into<Shape<D2>>) -> TensorBase<DataCow<'_, R::Data>, D2>
+    pub fn to_shape<D2>(&self, shape: D2) -> TensorBase<DataCow<'_, R::Data>, D2>
     where
         D2: DimAPI,
         B: OpAssignAPI<T, D2, D>,
     {
-        let shape: Shape<D2> = shape.into();
-        rstsr_assert_eq!(self.size(), shape.size(), InvalidLayout).unwrap();
+        rstsr_assert_eq!(self.size(), shape.shape_size(), InvalidLayout).unwrap();
         let result = self.to_shape_assume_contig(shape.clone());
         if let Ok(result) = result {
             // contiguous, no data cloned
@@ -379,7 +375,7 @@ where
         } else {
             // non-contiguous, clone data if necessary
             let device = self.data.storage().device();
-            let layout_new = shape.new_contig(0);
+            let layout_new = shape.new_contig(None);
             let mut storage_new = unsafe { device.empty_impl(layout_new.size()).unwrap() };
             device
                 .assign_arbitary_layout(
@@ -439,7 +435,7 @@ mod tests {
     fn test_to_shape() {
         let a = Tensor::<f64, _>::linspace_cpu(0.0, 15.0, 16);
         let mut a = a.to_shape([4, 4]);
-        a.layout = Layout::new(Shape([2, 2]), Stride([2, 4]), 0);
+        a.layout = Layout::new([2, 2], [2, 4], 0);
         println!("{:?}", a);
         let b = a.to_shape([2, 2]);
         println!("{:?}", b);

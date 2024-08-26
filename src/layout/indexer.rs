@@ -63,10 +63,8 @@ where
         let axis = axis as usize;
 
         // get essential information
-        let mut shape = self.shape();
-        let mut stride = self.stride();
-        let shape_mut = shape.as_mut();
-        let stride_mut = stride.as_mut();
+        let mut shape = self.shape().clone();
+        let mut stride = self.stride().clone();
 
         // fast return if slice is empty
         if slice == (Slice { start: None, stop: None, step: None }) {
@@ -74,7 +72,7 @@ where
         }
 
         // previous shape length
-        let len_prev = shape_mut[axis] as isize;
+        let len_prev = shape[axis] as isize;
 
         // handle cases of step > 0 and step < 0
         let step = slice.step().unwrap_or(1);
@@ -107,9 +105,9 @@ where
                 stop = len_prev;
             }
 
-            let offset = (self.offset() as isize + stride_mut[axis] * start) as usize;
-            shape_mut[axis] = ((stop - start + step - 1) / step).max(0) as usize;
-            stride_mut[axis] *= step;
+            let offset = (self.offset() as isize + stride[axis] * start) as usize;
+            shape[axis] = ((stop - start + step - 1) / step).max(0) as usize;
+            stride[axis] *= step;
             return Ok(Self::new(shape, stride, offset));
         } else {
             // step < 0
@@ -134,9 +132,9 @@ where
                 start = len_prev - 1;
             }
 
-            let offset = (self.offset() as isize + stride_mut[axis] * start) as usize;
-            shape_mut[axis] = ((stop - start - step - 1) / step).max(0) as usize;
-            stride_mut[axis] *= step;
+            let offset = (self.offset() as isize + stride[axis] * start) as usize;
+            shape[axis] = ((stop - start - step - 1) / step).max(0) as usize;
+            stride[axis] *= step;
             return Ok(Self::new(shape, stride, offset));
         }
     }
@@ -168,8 +166,8 @@ where
         let axis = axis as usize;
 
         // get essential information
-        let Shape(shape) = self.shape_ref();
-        let Stride(stride) = self.stride_ref();
+        let shape = self.shape();
+        let stride = self.stride();
         let mut offset = self.offset() as isize;
         let mut shape_new: Vec<usize> = vec![];
         let mut stride_new: Vec<isize> = vec![];
@@ -189,7 +187,7 @@ where
         }
 
         let offset = offset as usize;
-        return Ok(Layout::<IxD>::new(Shape(shape_new), Stride(stride_new), offset));
+        return Ok(Layout::<IxD>::new(shape_new, stride_new, offset));
     }
 
     fn dim_insert(&self, axis: isize) -> Result<Layout<IxD>> {
@@ -200,8 +198,8 @@ where
 
         // get essential information
         let is_f_prefer = self.is_f_prefer();
-        let mut shape = self.shape_ref().as_ref().to_vec();
-        let mut stride = self.stride_ref().as_ref().to_vec();
+        let mut shape = self.shape().as_ref().to_vec();
+        let mut stride = self.stride().as_ref().to_vec();
         let offset = self.offset();
 
         if is_f_prefer {
@@ -220,15 +218,14 @@ where
             stride.insert(axis, stride[axis]);
         }
 
-        return Ok(Layout::<IxD>::new(Shape(shape), Stride(stride), offset));
+        return Ok(Layout::<IxD>::new(shape, stride, offset));
     }
 
     fn dim_slice(&self, indexers: &[Indexer]) -> Result<Layout<IxD>> {
         // transform any layout to dynamic layout
-        let shape = self.shape_ref().as_ref().to_vec();
-        let stride = self.stride_ref().as_ref().to_vec();
-        let mut layout =
-            Layout { shape: Shape(shape), stride: Stride(stride), offset: self.offset() };
+        let shape = self.shape().as_ref().to_vec();
+        let stride = self.stride().as_ref().to_vec();
+        let mut layout = Layout::new(shape, stride, self.offset);
 
         // clone indexers to vec to make it changeable
         let mut indexers = indexers.to_vec();
@@ -307,8 +304,8 @@ where
         let axis = axis as usize;
 
         // get essential information
-        let mut shape = self.shape_ref().as_ref().to_vec();
-        let mut stride = self.stride_ref().as_ref().to_vec();
+        let mut shape = self.shape().as_ref().to_vec();
+        let mut stride = self.stride().as_ref().to_vec();
         let offset = self.offset();
 
         if shape[axis] != 1 {
@@ -318,7 +315,7 @@ where
         shape.remove(axis);
         stride.remove(axis);
 
-        return Ok(Layout::<IxD>::new(Shape(shape), Stride(stride), offset));
+        return Ok(Layout::<IxD>::new(shape, stride, offset));
     }
 }
 
@@ -367,14 +364,14 @@ where
         let shape_new = index.iter().map(|&i| shape_old[i]).collect::<Vec<_>>();
         let stride_new = index.iter().map(|&i| stride_old[i]).collect::<Vec<_>>();
 
-        let mut shape_wrap = layout.shape();
-        let mut stride_wrap = layout.stride();
+        let mut shape = layout.shape().clone();
+        let mut stride = layout.stride().clone();
         for n in 0..layout.ndim() {
-            shape_wrap[n] = shape_new[n];
-            stride_wrap[n] = stride_new[n];
+            shape[n] = shape_new[n];
+            stride[n] = stride_new[n];
         }
         let offset = layout.offset();
-        return Layout::new(shape_wrap, stride_wrap, offset);
+        return Layout::new(shape, stride, offset);
     }
 }
 
@@ -415,7 +412,7 @@ mod tests {
 
     #[test]
     fn test_slice_at_dim() {
-        let l = Layout::<Ix3>::new(Shape([2, 3, 4]), Stride([1, 10, 100]), 0);
+        let l = Layout::<Ix3>::new([2, 3, 4], [1, 10, 100], 0);
         let s = slice!(10, 1, -1);
         let l1 = l.dim_narrow(1, s).unwrap();
         println!("{:?}", l1);
@@ -424,7 +421,7 @@ mod tests {
         let l3 = l.dim_insert(1).unwrap();
         println!("{:?}", l3);
 
-        let l = Layout::<Ix3>::new(Shape([2, 3, 4]), Stride([100, 10, 1]), 0);
+        let l = Layout::<Ix3>::new([2, 3, 4], [100, 10, 1], 0);
         let l3 = l.dim_insert(1).unwrap();
         println!("{:?}", l3);
 

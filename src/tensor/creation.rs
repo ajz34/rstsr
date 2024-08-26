@@ -160,7 +160,7 @@ where
     /// - [Python array API standard: `empty_like`](https://data-apis.org/array-api/2023.12/API_specification/generated/array_api.empty_like.html)
     pub unsafe fn empty_like(&self) -> Tensor<T, D, B> {
         let shape = self.layout().shape();
-        let layout = shape.new_contig(0);
+        let layout = shape.new_contig(None);
         let idx_max = layout.size();
         let device = self.data().storage().device();
         let data: Storage<T, _> = device.empty_impl(idx_max).unwrap();
@@ -223,7 +223,7 @@ where
     /// - [Python array API standard: `full_like`](https://data-apis.org/array-api/2023.12/API_specification/generated/array_api.full_like.html)
     pub fn full_like(&self, fill: T) -> Tensor<T, D, B> {
         let shape = self.layout().shape();
-        let layout = shape.new_contig(0);
+        let layout = shape.new_contig(None);
         let idx_max = layout.size();
         let device = self.data().storage().device();
         let data: Storage<T, _> = device.full_impl(idx_max, fill).unwrap();
@@ -333,7 +333,7 @@ where
     /// - [Python array API standard: `ones_like`](https://data-apis.org/array-api/2023.12/API_specification/generated/array_api.ones_like.html)
     pub fn ones_like(&self) -> Tensor<T, D, B> {
         let shape = self.layout().shape();
-        let layout = shape.new_contig(0);
+        let layout = shape.new_contig(None);
         let idx_max = layout.size();
         let device = self.data().storage().device();
         let data: Storage<T, B> = B::ones_impl(device, idx_max).unwrap();
@@ -398,7 +398,7 @@ where
     /// - [Python array API standard: `zeros_like`](https://data-apis.org/array-api/2023.12/API_specification/generated/array_api.zeros_like.html)
     pub fn zeros_like(&self) -> Tensor<T, D, B> {
         let shape = self.layout().shape();
-        let layout = shape.new_contig(0);
+        let layout = shape.new_contig(None);
         let idx_max = layout.size();
         let device = self.data().storage().device();
         let data: Storage<T, _> = B::zeros_impl(device, idx_max).unwrap();

@@ -44,23 +44,13 @@ where
     }
 
     #[inline]
-    pub fn shape(&self) -> &[usize] {
-        self.layout().shape_ref().as_ref()
+    pub fn shape(&self) -> &D {
+        self.layout().shape()
     }
 
     #[inline]
-    pub fn raw_shape(&self) -> D {
-        self.layout().shape().0
-    }
-
-    #[inline]
-    pub fn stride(&self) -> &[isize] {
-        self.layout().stride_ref().as_ref()
-    }
-
-    #[inline]
-    pub fn raw_stride(&self) -> D::Stride {
-        self.layout().stride().0
+    pub fn stride(&self) -> &D::Stride {
+        self.layout().stride()
     }
 
     #[inline]
@@ -122,7 +112,7 @@ mod test {
         use crate::layout::*;
         let a = Tensor::<f64, Ix<2>> {
             data: Storage { rawvec: vec![1.12345, 2.0], device: CpuDevice }.into(),
-            layout: [1, 2].new_c_contig(0),
+            layout: [1, 2].new_c_contig(None),
         };
         println!("{a:6.3?}");
     }

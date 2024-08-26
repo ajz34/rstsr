@@ -16,7 +16,7 @@ pub enum Error {
     RuntimeError(String),
 
     TryFromIntError(String),
-    Infallible(String),
+    Infallible,
 
     DeviceError(String),
 
@@ -36,7 +36,7 @@ pub type Result<T> = core::result::Result<T, Error>;
 
 impl From<Infallible> for Error {
     fn from(_: Infallible) -> Self {
-        Error::Infallible("Infallible".to_string())
+        Error::Infallible
     }
 }
 
