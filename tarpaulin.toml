@@ -1,0 +1,8 @@
+[coverage]
+features = "default"
+profile = "coverage"
+target-dir = "coverage"
+skip-clean = true
+
+[report]
+out = ["Html", "Lcov"]

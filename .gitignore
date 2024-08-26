@@ -3,6 +3,7 @@ tmp
 profile
 lcov.info
 tarpaulin-report.html
+/coverage/
 .vscode
 .idea
 book

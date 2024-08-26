@@ -22,6 +22,13 @@ approx = { version = "0.5" }
 [profile.dev]
 opt-level = 3
 
+[profile.release]
+opt-level = 3
+
+[profile.coverage]
+inherits = "dev"
+opt-level = 0
+
 [features]
 default = ["c_prefer"]
 std = []
