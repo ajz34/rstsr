@@ -15,7 +15,7 @@ pub use crate::layout::*;
 
 pub use crate::storage::creation::*;
 pub use crate::storage::device::*;
-pub use crate::storage::op_binary::*;
+pub use crate::storage::op_basic::*;
 
 pub use crate::cpu_backend::device::*;
 
