@@ -5,7 +5,7 @@ impl<R, D> TensorBase<R, D>
 where
     D: DimAPI,
 {
-    /// Get a view of tensor. See also [`view`].
+    /// Get a view of tensor.
     pub fn view(&self) -> TensorBase<DataRef<'_, R::Data>, D>
     where
         R: DataAPI,

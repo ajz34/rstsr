@@ -294,9 +294,9 @@ where
         )?;
 
         let new_layout = match (is_c_contig, is_f_contig) {
-            (true, true) => match Order::default() {
-                Order::C => shape.new_c_contig(Some(layout.offset)),
-                Order::F => shape.new_f_contig(Some(layout.offset)),
+            (true, true) => match TensorOrder::default() {
+                TensorOrder::C => shape.new_c_contig(Some(layout.offset)),
+                TensorOrder::F => shape.new_f_contig(Some(layout.offset)),
             },
             (true, false) => shape.new_c_contig(Some(layout.offset)),
             (false, true) => shape.new_f_contig(Some(layout.offset)),

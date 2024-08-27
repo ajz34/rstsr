@@ -10,6 +10,7 @@ pub use core::marker::PhantomData;
 pub use itertools::izip;
 
 pub use crate::error::{Error, Result};
+pub use crate::flags::*;
 
 pub use crate::layout::*;
 
@@ -21,7 +22,7 @@ pub use crate::cpu_backend::device::*;
 
 pub use crate::tensor::data::*;
 
-pub use crate::{Order, Tensor, TensorBase};
+pub use crate::{Tensor, TensorBase};
 
 pub use crate::slice;
 pub use crate::{rstsr_assert, rstsr_assert_eq, rstsr_invalid, rstsr_pattern, rstsr_raise};

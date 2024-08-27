@@ -3,28 +3,9 @@
 #![cfg_attr(not(test), no_std)]
 #![doc = include_str!("readme.md")]
 
-/* #region Configuration */
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Order {
-    C,
-    F,
-}
-
-impl Default for Order {
-    fn default() -> Self {
-        if cfg!(feature = "c_prefer") {
-            Order::C
-        } else {
-            Order::F
-        }
-    }
-}
-
-/* #endregion */
-
 pub mod prelude_dev;
 
+pub mod flags;
 pub mod error;
 
 pub mod layout;

@@ -625,9 +625,9 @@ where
             false => match (layout.is_c_prefer(), layout.is_f_prefer()) {
                 (true, false) => Ok(It::<D, CHG>::C(IterLayoutC::new_it(&layout)?)),
                 (false, true) => Ok(It::<D, CHG>::F(IterLayoutF::new_it(&layout)?)),
-                (_, _) => match Order::default() {
-                    Order::C => Ok(It::<D, CHG>::C(IterLayoutC::new_it(&layout)?)),
-                    Order::F => Ok(It::<D, CHG>::F(IterLayoutF::new_it(&layout)?)),
+                (_, _) => match TensorOrder::default() {
+                    TensorOrder::C => Ok(It::<D, CHG>::C(IterLayoutC::new_it(&layout)?)),
+                    TensorOrder::F => Ok(It::<D, CHG>::F(IterLayoutF::new_it(&layout)?)),
                 },
             },
             true => {
@@ -638,9 +638,9 @@ where
                     match (layout.is_c_prefer(), layout.is_f_prefer()) {
                         (true, false) => Ok(It::<D, CHG>::C(IterLayoutC::new_it(&layout)?)),
                         (false, true) => Ok(It::<D, CHG>::F(IterLayoutF::new_it(&layout)?)),
-                        (true, true) => match Order::default() {
-                            Order::C => Ok(It::<D, CHG>::C(IterLayoutC::new_it(&layout)?)),
-                            Order::F => Ok(It::<D, CHG>::F(IterLayoutF::new_it(&layout)?)),
+                        (true, true) => match TensorOrder::default() {
+                            TensorOrder::C => Ok(It::<D, CHG>::C(IterLayoutC::new_it(&layout)?)),
+                            TensorOrder::F => Ok(It::<D, CHG>::F(IterLayoutF::new_it(&layout)?)),
                         },
                         (false, false) => {
                             Ok(It::<D, CHG>::GreedyMajor(IterLayoutGreedy::new_it(&layout)?))

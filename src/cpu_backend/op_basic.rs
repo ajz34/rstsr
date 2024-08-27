@@ -32,7 +32,7 @@ where
             Ok(IterLayoutType::C)
         } else if l1.is_f_prefer() {
             Ok(IterLayoutType::F)
-        } else if Order::default() == Order::C {
+        } else if TensorOrder::default() == TensorOrder::C {
             Ok(IterLayoutType::C)
         } else {
             Ok(IterLayoutType::F)
@@ -68,7 +68,7 @@ where
             Ok(IterLayoutType::C)
         } else if l1.is_f_prefer() {
             Ok(IterLayoutType::F)
-        } else if Order::default() == Order::C {
+        } else if TensorOrder::default() == TensorOrder::C {
             Ok(IterLayoutType::C)
         } else {
             Ok(IterLayoutType::F)

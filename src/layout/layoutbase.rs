@@ -500,9 +500,9 @@ pub trait DimLayoutContigAPI: DimBaseAPI + DimShapeAPI + DimStrideAPI {
     /// Generate new layout by providing shape and offset; Whether c-contiguous
     /// or f-contiguous depends on cargo feature `c_prefer`.
     fn new_contig(&self, offset: Option<usize>) -> Layout<Self> {
-        match Order::default() {
-            Order::C => self.new_c_contig(offset),
-            Order::F => self.new_f_contig(offset),
+        match TensorOrder::default() {
+            TensorOrder::C => self.new_c_contig(offset),
+            TensorOrder::F => self.new_f_contig(offset),
         }
     }
 

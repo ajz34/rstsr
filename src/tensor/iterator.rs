@@ -205,9 +205,9 @@ where
     }
 
     pub fn iter_ref(&self) -> TensorLayoutIteratorRef<'_, '_, R, D, IterLayoutEnum<D, true>> {
-        let layout_iterator = match Order::default() {
-            Order::C => IterLayoutEnum::C(IterLayoutC::new_it(self.layout()).unwrap()),
-            Order::F => IterLayoutEnum::F(IterLayoutF::new_it(self.layout()).unwrap()),
+        let layout_iterator = match TensorOrder::default() {
+            TensorOrder::C => IterLayoutEnum::C(IterLayoutC::new_it(self.layout()).unwrap()),
+            TensorOrder::F => IterLayoutEnum::F(IterLayoutF::new_it(self.layout()).unwrap()),
         };
         TensorLayoutIteratorRef::<R, D, IterLayoutEnum<D, true>> {
             tensor: self,
@@ -220,9 +220,9 @@ where
     where
         R: DataMutAPI,
     {
-        let layout_iterator = match Order::default() {
-            Order::C => IterLayoutEnum::C(IterLayoutC::new_it(self.layout()).unwrap()),
-            Order::F => IterLayoutEnum::F(IterLayoutF::new_it(self.layout()).unwrap()),
+        let layout_iterator = match TensorOrder::default() {
+            TensorOrder::C => IterLayoutEnum::C(IterLayoutC::new_it(self.layout()).unwrap()),
+            TensorOrder::F => IterLayoutEnum::F(IterLayoutF::new_it(self.layout()).unwrap()),
         };
         TensorLayoutIteratorMut::<R, D, IterLayoutEnum<D, true>> {
             tensor: self,
