@@ -16,10 +16,7 @@ pub use shape::*;
 pub use slice::*;
 pub use stride::*;
 
-pub trait DimDevAPI:
-    DimBaseAPI + DimShapeAPI + DimStrideAPI + DimIndexUncheckAPI + DimLayoutContigAPI
-{
-}
+pub trait DimDevAPI: DimBaseAPI + DimShapeAPI + DimStrideAPI + DimLayoutContigAPI {}
 
 impl<const N: usize> DimDevAPI for Ix<N> {}
 impl DimDevAPI for IxD {}

@@ -169,8 +169,8 @@ where
         let shape = self.shape();
         let stride = self.stride();
         let mut offset = self.offset() as isize;
-        let mut shape_new: Vec<usize> = vec![];
-        let mut stride_new: Vec<isize> = vec![];
+        let mut shape_new = vec![];
+        let mut stride_new = vec![];
 
         // change everything
         for (i, (&d, &s)) in shape.as_ref().iter().zip(stride.as_ref().iter()).enumerate() {
@@ -313,62 +313,6 @@ where
         stride.remove(axis);
 
         return Ok(Layout::<IxD>::new(shape, stride, offset));
-    }
-}
-
-/// Utility functions for iteration.
-impl<D> Layout<D>
-where
-    D: DimDevAPI,
-{
-    /// This function will return a f-prefer layout that make minimal memory
-    /// accessing efforts (pointers will not frequently back-and-forth).
-    pub fn greedy_layout(&self) -> Layout<D> {
-        // if no elements in layout, return itself
-        if self.size() == 0 {
-            return self.clone();
-        }
-
-        // revert negative strides
-        let mut layout = self.clone();
-        for n in 0..self.ndim() {
-            if self.stride()[n] < 0 {
-                // should not panic here
-                layout = layout.dim_narrow(n as isize, slice!(None, None, -1)).unwrap();
-            }
-        }
-
-        let shape_old = layout.shape.as_ref();
-        let stride_old = layout.stride.as_ref();
-
-        // sort shape and strides
-        // (1, stride) the largest, then compare stride size
-        let mut index = (0..layout.ndim()).collect::<Vec<usize>>();
-        index.sort_by(|&i1, &i2| {
-            let d1 = shape_old[i1];
-            let d2 = shape_old[i2];
-            let t1 = stride_old[i1];
-            let t2 = stride_old[i2];
-            match (d1, d2) {
-                (1, 1) => t1.cmp(&t2),
-                (1, _) => core::cmp::Ordering::Greater,
-                (_, 1) => core::cmp::Ordering::Less,
-                _ => t1.cmp(&t2),
-            }
-        });
-
-        // copy to new shape and strides
-        let shape_new = index.iter().map(|&i| shape_old[i]).collect::<Vec<_>>();
-        let stride_new = index.iter().map(|&i| stride_old[i]).collect::<Vec<_>>();
-
-        let mut shape = layout.shape().clone();
-        let mut stride = layout.stride().clone();
-        for n in 0..layout.ndim() {
-            shape[n] = shape_new[n];
-            stride[n] = stride_new[n];
-        }
-        let offset = layout.offset();
-        return Layout::new(shape, stride, offset);
     }
 }
 

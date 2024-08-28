@@ -21,38 +21,73 @@ pub type IxD = Vec<usize>;
 pub type IxDyn = IxD;
 
 pub trait DimBaseAPI:
-    AsMut<[usize]> + AsRef<[usize]> + IndexMut<usize, Output = usize> + Debug + Clone
+    AsMut<[usize]> + AsRef<[usize]> + IndexMut<usize, Output = usize> + Debug + PartialEq + Clone
 {
-    type Stride: AsMut<[isize]> + AsRef<[isize]> + IndexMut<usize, Output = isize> + Debug + Clone;
+    type Stride: AsMut<[isize]>
+        + AsRef<[isize]>
+        + IndexMut<usize, Output = isize>
+        + Debug
+        + PartialEq
+        + Clone;
 
     /// Number of dimension
     fn ndim(&self) -> usize;
 
     /// Dynamic or static dimension
     fn is_dynamic() -> bool;
+
+    /// New shape
+    fn new_shape(&self) -> Self;
+
+    /// New stride
+    fn new_stride(&self) -> Self::Stride;
 }
 
 impl<const N: usize> DimBaseAPI for Ix<N> {
     type Stride = [isize; N];
 
+    #[inline]
     fn ndim(&self) -> usize {
         N
     }
 
+    #[inline]
     fn is_dynamic() -> bool {
         false
+    }
+
+    #[inline]
+    fn new_shape(&self) -> Self {
+        [0; N]
+    }
+
+    #[inline]
+    fn new_stride(&self) -> Self::Stride {
+        [0; N]
     }
 }
 
 impl DimBaseAPI for IxD {
     type Stride = Vec<isize>;
 
+    #[inline]
     fn ndim(&self) -> usize {
         self.len()
     }
 
+    #[inline]
     fn is_dynamic() -> bool {
         true
+    }
+
+    #[inline]
+    fn new_shape(&self) -> Self {
+        vec![0; self.len()]
+    }
+
+    #[inline]
+    fn new_stride(&self) -> Self::Stride {
+        vec![0; self.len()]
     }
 }
 

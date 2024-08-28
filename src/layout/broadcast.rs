@@ -139,6 +139,35 @@ where
     unsafe { Ok(Layout::new_unchecked(shape.clone(), stride, layout.offset())) }
 }
 
+impl<D> Layout<D>
+where
+    D: DimDevAPI,
+{
+    /// Get the size of the non-broadcasted part.
+    ///
+    /// Equivalent to `size()` if there is no broadcast (setting axis size = 1
+    /// where stride = 0).
+    pub fn size_non_broadcast(&self) -> usize {
+        if self.size() == 0 {
+            return 0;
+        }
+        let mut size = 1;
+        for i in 0..self.ndim() {
+            if self.stride[i] != 0 {
+                size *= self.shape[i];
+            }
+        }
+        return size;
+    }
+
+    /// Check whether current layout has been broadcasted.
+    ///
+    /// This check is done by checking whether any stride of axis is zero.
+    pub fn is_broadcasted(&self) -> bool {
+        self.stride().as_ref().iter().any(|&t| t == 0)
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;

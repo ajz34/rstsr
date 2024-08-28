@@ -126,6 +126,16 @@ macro_rules! rstsr_invalid {
         write!(s, " : {:?} = {:?}", stringify!($word), $word).unwrap();
         Err(Error::InvalidValue(s))
     }};
+    ($word:expr, $($arg:tt)*) => {{
+        use core::fmt::Write;
+        let mut s = String::new();
+        write!(s, concat!(file!(), ":", line!(), ": ")).unwrap();
+        write!(s, "Error::InvalidValue").unwrap();
+        write!(s, " : {:?} = {:?}", stringify!($word), $word).unwrap();
+        write!(s, " : ").unwrap();
+        write!(s, $($arg)*).unwrap();
+        Err(Error::InvalidValue(s))
+    }};
 }
 
 #[macro_export]

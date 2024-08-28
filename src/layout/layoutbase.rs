@@ -13,7 +13,7 @@ use itertools::izip;
 ///   each dimension.
 /// - Offset is the starting position of tensor.
 #[doc = include_str!("readme.md")]
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct Layout<D>
 where
     D: DimBaseAPI,
@@ -320,6 +320,20 @@ where
         let size = shape.shape_size();
         Layout { shape, stride, offset, size }
     }
+
+    /// New zero shape, which number of dimensions are the same to current
+    /// layout.
+    #[inline]
+    pub fn new_shape(&self) -> D {
+        self.shape.new_shape()
+    }
+
+    /// New zero stride, which number of dimensions are the same to current
+    /// layout.
+    #[inline]
+    pub fn new_stride(&self) -> D::Stride {
+        self.shape.new_stride()
+    }
 }
 
 /// Manuplation of layout.
@@ -362,8 +376,8 @@ where
 
         let shape_old = self.shape();
         let stride_old = self.stride();
-        let mut shape = self.shape().clone();
-        let mut stride = self.stride().clone();
+        let mut shape = self.new_shape();
+        let mut stride = self.new_stride();
         for i in 0..self.ndim() {
             shape[i] = shape_old[axes[i]];
             stride[i] = stride_old[axes[i]];
@@ -382,8 +396,8 @@ where
     pub fn reverse_axes(&self) -> Self {
         let shape_old = self.shape();
         let stride_old = self.stride();
-        let mut shape = self.shape().clone();
-        let mut stride = self.stride().clone();
+        let mut shape = self.new_shape();
+        let mut stride = self.new_stride();
         for i in 0..self.ndim() {
             shape[i] = shape_old[self.ndim() - i - 1];
             stride[i] = stride_old[self.ndim() - i - 1];
@@ -409,64 +423,9 @@ where
     }
 }
 
-pub trait DimIndexUncheckAPI: DimBaseAPI + DimStrideAPI + DimShapeAPI {
-    /// Index of tensor by list of indexes to dimensions.
-    ///
-    /// # Safety
-    ///
-    /// This function does not check for bounds, including
-    /// - Negative index
-    /// - Index greater than shape
-    unsafe fn index_uncheck(layout: &Layout<Self>, index: &[usize]) -> usize;
-}
-
-impl<const N: usize> DimIndexUncheckAPI for Ix<N> {
-    #[inline]
-    unsafe fn index_uncheck(layout: &Layout<Self>, index: &[usize]) -> usize {
-        let stride = layout.stride.as_ref();
-        match N {
-            0 => layout.offset,
-            1 => (layout.offset as isize + stride[0] * index[0] as isize) as usize,
-            2 => {
-                (layout.offset as isize
-                    + stride[0] * index[0] as isize
-                    + stride[1] * index[1] as isize) as usize
-            },
-            3 => {
-                (layout.offset as isize
-                    + stride[0] * index[0] as isize
-                    + stride[1] * index[1] as isize
-                    + stride[2] * index[2] as isize) as usize
-            },
-            4 => {
-                (layout.offset as isize
-                    + stride[0] * index[0] as isize
-                    + stride[1] * index[1] as isize
-                    + stride[2] * index[2] as isize
-                    + stride[3] * index[3] as isize) as usize
-            },
-            _ => {
-                let mut pos = layout.offset as isize;
-                stride.iter().zip(index.iter()).for_each(|(&s, &i)| pos += s * i as isize);
-                pos as usize
-            },
-        }
-    }
-}
-
-impl DimIndexUncheckAPI for IxD {
-    #[inline]
-    unsafe fn index_uncheck(layout: &Layout<Self>, index: &[usize]) -> usize {
-        let mut pos = layout.offset as isize;
-        let stride: &[isize] = layout.stride.as_ref();
-        stride.iter().zip(index.iter()).for_each(|(&s, &i)| pos += s * i as isize);
-        return pos as usize;
-    }
-}
-
 impl<D> Layout<D>
 where
-    D: DimIndexUncheckAPI,
+    D: DimBaseAPI + DimShapeAPI + DimStrideAPI,
 {
     /// Index of tensor by list of indexes to dimensions.
     ///
@@ -475,8 +434,82 @@ where
     /// This function does not check for bounds, including
     /// - Negative index
     /// - Index greater than shape
+    #[inline]
     pub unsafe fn index_uncheck(&self, index: &[usize]) -> usize {
-        D::index_uncheck(self, index)
+        let stride = self.stride.as_ref();
+        match self.ndim() {
+            0 => self.offset,
+            1 => (self.offset as isize + stride[0] * index[0] as isize) as usize,
+            2 => {
+                (self.offset as isize
+                    + stride[0] * index[0] as isize
+                    + stride[1] * index[1] as isize) as usize
+            },
+            3 => {
+                (self.offset as isize
+                    + stride[0] * index[0] as isize
+                    + stride[1] * index[1] as isize
+                    + stride[2] * index[2] as isize) as usize
+            },
+            4 => {
+                (self.offset as isize
+                    + stride[0] * index[0] as isize
+                    + stride[1] * index[1] as isize
+                    + stride[2] * index[2] as isize
+                    + stride[3] * index[3] as isize) as usize
+            },
+            _ => {
+                let mut pos = self.offset as isize;
+                stride.iter().zip(index.iter()).for_each(|(&s, &i)| pos += s * i as isize);
+                pos as usize
+            },
+        }
+    }
+
+    /// Index of tensor by list of indexes.
+    ///
+    /// # Safety
+    ///
+    /// This function does not check whether index is out of bounds.
+    #[inline]
+    pub unsafe fn unravel_index_f(&self, index: usize) -> D {
+        let mut index = index;
+        let mut result = self.new_shape();
+        match self.ndim() {
+            0 => (),
+            1 => {
+                result[0] = index;
+            },
+            2 => {
+                result[1] = index % self.shape()[1];
+                index /= self.shape()[1];
+                result[0] = index;
+            },
+            3 => {
+                result[2] = index % self.shape()[2];
+                index /= self.shape()[2];
+                result[1] = index % self.shape()[1];
+                index /= self.shape()[1];
+                result[0] = index;
+            },
+            4 => {
+                result[3] = index % self.shape()[3];
+                index /= self.shape()[3];
+                result[2] = index % self.shape()[2];
+                index /= self.shape()[2];
+                result[1] = index % self.shape()[1];
+                index /= self.shape()[1];
+                result[0] = index;
+            },
+            _ => {
+                for i in 0..self.ndim() {
+                    let dim = self.shape()[i];
+                    result[i] = index % dim;
+                    index /= dim;
+                }
+            },
+        }
+        result
     }
 }
 

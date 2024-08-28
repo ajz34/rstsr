@@ -75,20 +75,59 @@ impl_changeable_default!(
 ///
 /// You may change default value by [`TensorIterPolicy::change_default`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TensorIterType {
-    /// row-major order
+pub enum TensorIterOrder {
+    /// Row-major order.
+    ///
+    /// - absolute safe for array iteration
     C,
-    /// column-major order
+    /// Column-major order.
+    ///
+    /// - absolute safe for array iteration
     F,
-    /// try contiguous, otherwise TensorOrder::Default()
+    /// Automatically choose row/col-major order.
+    ///
+    /// - try c/f-contig first (also see [`TensorIterOrder::B`]),
+    /// - try c/f-prefer second (also see [`TensorIterOrder::C`],
+    ///   [`TensorIterOrder::F`]),
+    /// - otherwise [`TensorOrder::default()`], which is defined by crate
+    ///   feature `c_prefer`.
+    ///
+    /// - safe for multi-array iteration like `get_iter(a, b)`
+    /// - not safe for cases like `a.iter().zip(b.iter())`
     A,
-    /// keep similar stride with input tensor
+    /// Greedy when possible (reorder layouts during iteration).
+    ///
+    /// - safe for multi-array iteration like `get_iter(a, b)`
+    /// - not safe for cases like `a.iter().zip(b.iter())`
+    /// - if it is used to create a new array, the stride of new array will be
+    ///   in K order
     K,
-    /// greedy order (next() offset always larger then next_back())
+    /// Greedy when possible (reset dimension to 1 if axis is broadcasted).
+    ///
+    /// - not safe for multi-array iteration like `get_iter(a, b)`
+    /// - this is useful for inplace-assign broadcasted array.
     G,
+    /// Sequential buffer.
+    ///
+    /// - not safe for multi-array iteration like `get_iter(a, b)`
+    /// - this is useful for reshaping or all-contiguous cases.
+    B,
 }
 
-impl_changeable_default!(TensorIterType, DEFAULT_TENSOR_ITER_POLICY, TensorIterType::K);
+/// TODO: this is to be further implemented.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TensorIterType {
+    General,
+    Tril,
+    Triu,
+    Diag,
+    UnTril,
+    UnTriu,
+    UnDiag,
+}
+
+impl_changeable_default!(TensorIterType, DEFAULT_TENSOR_ITER_TYPE, TensorIterType::General);
 
 /* #endregion */
 
