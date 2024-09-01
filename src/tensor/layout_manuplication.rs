@@ -312,7 +312,7 @@ where
     pub fn to_dim<D2>(&self) -> Result<TensorBase<DataRef<'_, R::Data>, D2>>
     where
         D2: DimAPI,
-        Layout<D>: TryInto<Layout<D2>, Error = Error>,
+        D: DimConvertAPI<D2>,
     {
         self.view().into_dim()
     }
@@ -325,7 +325,7 @@ where
     pub fn into_dim<D2>(self) -> Result<TensorBase<R, D2>>
     where
         D2: DimAPI,
-        Layout<D>: TryInto<Layout<D2>, Error = Error>,
+        D: DimConvertAPI<D2>,
     {
         let layout = self.layout().clone().into_dim::<D2>()?;
         unsafe { Ok(TensorBase::new_unchecked(self.data, layout)) }

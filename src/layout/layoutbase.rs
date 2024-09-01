@@ -1,6 +1,5 @@
 //! Layout of tensor.
 use crate::prelude_dev::*;
-use core::convert::Infallible;
 use itertools::izip;
 
 /* #region Struct Definitions */
@@ -572,49 +571,66 @@ impl DimLayoutContigAPI for IxD {}
 
 /* #region Dimension Conversion */
 
-impl<const N: usize> TryFrom<Layout<Ix<N>>> for Layout<IxD> {
-    type Error = Error;
+pub trait DimConvertAPI<D>: DimBaseAPI
+where
+    D: DimBaseAPI,
+{
+    fn into_dim(layout: Layout<Self>) -> Result<Layout<D>>;
+}
 
-    fn try_from(layout: Layout<Ix<N>>) -> Result<Layout<IxD>> {
-        let Layout { shape, stride, offset, size } = layout;
-        let layout = Layout { shape: shape.to_vec(), stride: stride.to_vec(), offset, size };
+impl DimConvertAPI<IxD> for IxD {
+    fn into_dim(layout: Layout<IxD>) -> Result<Layout<IxD>> {
         Ok(layout)
     }
 }
 
-impl<const N: usize> TryFrom<Layout<IxD>> for Layout<Ix<N>> {
-    type Error = Error;
-
-    fn try_from(layout: Layout<IxD>) -> Result<Layout<Ix<N>>> {
-        let Layout { shape, stride, offset, size } = layout;
-        Ok(Layout {
-            shape: shape
-                .try_into()
-                .map_err(|_| Error::InvalidLayout(format!("Cannot convert IxD to Ix< {:} >", N)))?,
-            stride: stride
-                .try_into()
-                .map_err(|_| Error::InvalidLayout(format!("Cannot convert IxD to Ix< {:} >", N)))?,
-            offset,
-            size,
-        })
+impl<const N: usize> DimConvertAPI<Ix<N>> for IxD {
+    fn into_dim(layout: Layout<IxD>) -> Result<Layout<Ix<N>>> {
+        rstsr_assert_eq!(layout.ndim(), N, InvalidLayout)?;
+        let shape = layout.shape().clone().try_into().unwrap();
+        let stride = layout.stride().clone().try_into().unwrap();
+        let offset = layout.offset();
+        let size = layout.size();
+        return Ok(Layout { shape, stride, offset, size });
     }
 }
 
-pub trait LayoutConvertAPI<E>: Sized
+impl<const N: usize> DimConvertAPI<IxD> for Ix<N> {
+    fn into_dim(layout: Layout<Ix<N>>) -> Result<Layout<IxD>> {
+        let shape = (*layout.shape()).into();
+        let stride = (*layout.stride()).into();
+        let offset = layout.offset();
+        let size = layout.size();
+        return Ok(Layout { shape, stride, offset, size });
+    }
+}
+
+impl<const N: usize, const M: usize> DimConvertAPI<Ix<M>> for Ix<N> {
+    fn into_dim(layout: Layout<Ix<N>>) -> Result<Layout<Ix<M>>> {
+        rstsr_assert_eq!(N, M, InvalidLayout)?;
+        let mut shape = [0; M];
+        let mut stride = [0; M];
+        shape[..M].copy_from_slice(&layout.shape()[..M]);
+        stride[..M].copy_from_slice(&layout.stride()[..M]);
+        let offset = layout.offset();
+        let size = layout.size();
+        return Ok(Layout { shape, stride, offset, size });
+    }
+}
+
+impl<D> Layout<D>
 where
-    E: Into<Error>,
+    D: DimBaseAPI,
 {
-    fn into_dim<D2>(self) -> Result<Layout<D2>>
+    /// Convert layout to another dimension.
+    pub fn into_dim<D2>(self) -> Result<Layout<D2>>
     where
         D2: DimBaseAPI,
-        Self: TryInto<Layout<D2>, Error = E>,
+        D: DimConvertAPI<D2>,
     {
-        self.try_into().map_err(Into::into)
+        D::into_dim(self)
     }
 }
-
-impl<D> LayoutConvertAPI<Error> for Layout<D> where D: DimAPI {}
-impl<D> LayoutConvertAPI<Infallible> for Layout<D> where D: DimAPI {}
 
 impl<const N: usize> From<Ix<N>> for Layout<Ix<N>> {
     fn from(shape: Ix<N>) -> Self {
@@ -911,10 +927,5 @@ mod test {
         assert!(layout.clone().into_dim::<IxD>().is_ok());
         assert!(layout.clone().into_dim::<Ix3>().is_ok());
         assert!(layout.clone().into_dim::<Ix2>().is_err());
-        // following usage is not valid
-        let layout = unsafe { Layout::new_unchecked(vec![1, 2], vec![3, 4, 5], 1) };
-        assert!(layout.clone().into_dim::<IxD>().is_ok());
-        assert!(layout.clone().into_dim::<Ix2>().is_err());
-        assert!(layout.clone().into_dim::<Ix3>().is_err());
     }
 }

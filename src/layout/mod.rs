@@ -21,10 +21,7 @@ pub trait DimDevAPI: DimBaseAPI + DimShapeAPI + DimStrideAPI + DimLayoutContigAP
 impl<const N: usize> DimDevAPI for Ix<N> {}
 impl DimDevAPI for IxD {}
 
-pub trait DimAPI:
-    DimDevAPI + DimIterLayoutAPI<IterLayoutC<Self>> + DimIterLayoutAPI<IterLayoutF<Self>>
-{
-}
+pub trait DimAPI: DimDevAPI + DimConvertAPI<IxD> {}
 
 impl<const N: usize> DimAPI for Ix<N> {}
 impl DimAPI for IxD {}

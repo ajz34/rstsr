@@ -1,40 +1,46 @@
 use core::ops::Add;
 
+use num::{traits::NumAssign, Num, Zero};
+
 use crate::prelude_dev::*;
 
-pub trait OpAssignAPI<T, D1, D2>
+pub trait OpAssignAPI<T, DC, DA>
 where
-    D1: DimAPI,
-    D2: DimAPI,
-    Self: DeviceAPI<T>,
+    DC: DimAPI,
+    DA: DimAPI,
+    Self: DeviceRawVecAPI<T>,
 {
-    /// Assign values from `b` to `a` with arbitary layout.
-    ///
-    /// This function does not
     fn assign_arbitary_layout(
         &self,
-        a: &mut Storage<T, Self>,
-        la: &Layout<D1>,
-        b: &Storage<T, Self>,
-        lb: &Layout<D2>,
+        c: &mut Storage<T, Self>,
+        lc: &Layout<DC>,
+        a: &Storage<T, Self>,
+        la: &Layout<DA>,
     ) -> Result<()>;
 }
 
-pub trait OpAddAPI<TA, TB, TC, DA, DB, DC>
+pub trait OpAddAPI<T, D>
 where
-    TA: Add<TB, Output = TC>,
-    DA: DimAPI,
-    DB: DimAPI,
-    DC: DimAPI,
-    Self: DeviceRawVecAPI<TA> + DeviceRawVecAPI<TB> + DeviceRawVecAPI<TC>,
+    T: Add<Output = T> + Clone,
+    D: DimAPI,
+    Self: DeviceRawVecAPI<T>,
 {
-    fn add(
+    fn ternary_add(
         &self,
-        c: &mut Storage<TC, Self>,
-        lc: &Layout<DC>,
-        a: &mut Storage<TA, Self>,
-        la: &Layout<DA>,
-        b: &mut Storage<TB, Self>,
-        lb: &Layout<DB>,
+        c: &mut Storage<T, Self>,
+        lc: &Layout<D>,
+        a: &Storage<T, Self>,
+        la: &Layout<D>,
+        b: &Storage<T, Self>,
+        lb: &Layout<D>,
     ) -> Result<()>;
+}
+
+pub trait OpSumAPI<T, D>
+where
+    T: Zero + Add<Output = T> + Clone,
+    D: DimAPI,
+    Self: DeviceRawVecAPI<T>,
+{
+    fn sum(&self, a: &Storage<T, Self>, la: &Layout<D>) -> Result<T>;
 }

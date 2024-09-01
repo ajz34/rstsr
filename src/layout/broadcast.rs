@@ -81,6 +81,64 @@ where
     return Ok((shape, tp1, tp2));
 }
 
+pub trait DimBroadcastable: DimDevAPI {
+    /// Check whether second shape can be broadcasted to first shape.
+    ///
+    /// Order of the two parameters depends.
+    fn broadcastable_from<D2>(&self, other: &D2) -> bool
+    where
+        D2: DimDevAPI,
+    {
+        let (shape1, shape2) = (self.as_ref(), other.as_ref());
+        let (n1, n2) = (shape1.len(), shape2.len());
+        let n = usize::max(n1, n2);
+        if n != n1 {
+            return false;
+        }
+        for i in (0..n).rev() {
+            let in1 = (n1 + i) as isize - n as isize;
+            let in2 = (n2 + i) as isize - n as isize;
+
+            let d1 = if in1 >= 0 { shape1[in1 as usize] } else { 1 };
+            let d2 = if in2 >= 0 { shape2[in2 as usize] } else { 1 };
+
+            if d1 != d2 && d2 != 1 {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /// Check whether first shape can be broadcasted to second shape.
+    ///
+    /// Order of the two parameters depends.
+    fn broadcastable_to<D2>(&self, other: &D2) -> bool
+    where
+        D2: DimDevAPI,
+    {
+        let (shape1, shape2) = (self.as_ref(), other.as_ref());
+        let (n1, n2) = (shape1.len(), shape2.len());
+        let n = usize::max(n1, n2);
+        if n != n2 {
+            return false;
+        }
+        for i in (0..n).rev() {
+            let in1 = (n1 + i) as isize - n as isize;
+            let in2 = (n2 + i) as isize - n as isize;
+
+            let d1 = if in1 >= 0 { shape1[in1 as usize] } else { 1 };
+            let d2 = if in2 >= 0 { shape2[in2 as usize] } else { 1 };
+
+            if d1 != d2 && d1 != 1 {
+                return false;
+            }
+        }
+        return true;
+    }
+}
+
+impl<D> DimBroadcastable for D where D: DimAPI {}
+
 /// Layout broadcasting.
 ///
 /// Dimensions that to be upcasted or expanded will have stride length of zero.
@@ -182,6 +240,8 @@ mod test {
         let shape1 = [8, 1, 6, 1];
         let shape2 = [7, 1, 5];
         let broadcast = broadcast_shape(&shape1, &shape2).unwrap();
+        assert!(!shape1.broadcastable_from(&shape2));
+        assert!(!shape1.broadcastable_to(&shape2));
         assert_eq!(broadcast.0, [8, 7, 6, 5]);
         assert_eq!(broadcast.1, [Preserve, Upcast, Preserve, Upcast]);
         assert_eq!(broadcast.2, [Expand, Preserve, Upcast, Preserve]);
@@ -192,6 +252,8 @@ mod test {
         let shape1 = [5, 4];
         let shape2 = [1];
         let broadcast = broadcast_shape(&shape1, &shape2).unwrap();
+        assert!(shape1.broadcastable_from(&shape2));
+        assert!(!shape1.broadcastable_to(&shape2));
         assert_eq!(broadcast.0, [5, 4]);
         assert_eq!(broadcast.1, [Preserve, Preserve]);
         assert_eq!(broadcast.2, [Expand, Upcast]);
@@ -202,6 +264,8 @@ mod test {
         let shape1 = [5, 4];
         let shape2 = [4];
         let broadcast = broadcast_shape(&shape1, &shape2).unwrap();
+        assert!(shape1.broadcastable_from(&shape2));
+        assert!(!shape1.broadcastable_to(&shape2));
         assert_eq!(broadcast.0, [5, 4]);
         assert_eq!(broadcast.1, [Preserve, Preserve]);
         assert_eq!(broadcast.2, [Expand, Preserve]);
@@ -212,6 +276,8 @@ mod test {
         let shape1 = [15, 3, 5];
         let shape2 = [15, 1, 5];
         let broadcast = broadcast_shape(&shape1, &shape2).unwrap();
+        assert!(shape1.broadcastable_from(&shape2));
+        assert!(!shape1.broadcastable_to(&shape2));
         assert_eq!(broadcast.0, [15, 3, 5]);
         assert_eq!(broadcast.1, [Preserve, Preserve, Preserve]);
         assert_eq!(broadcast.2, [Preserve, Upcast, Preserve]);
@@ -222,6 +288,8 @@ mod test {
         let shape1 = [15, 3, 5];
         let shape2 = [3, 5];
         let broadcast = broadcast_shape(&shape1, &shape2).unwrap();
+        assert!(shape1.broadcastable_from(&shape2));
+        assert!(!shape1.broadcastable_to(&shape2));
         assert_eq!(broadcast.0, [15, 3, 5]);
         assert_eq!(broadcast.1, [Preserve, Preserve, Preserve]);
         assert_eq!(broadcast.2, [Expand, Preserve, Preserve]);
@@ -232,6 +300,8 @@ mod test {
         let shape1 = [15, 3, 5];
         let shape2 = [3, 1];
         let broadcast = broadcast_shape(&shape1, &shape2).unwrap();
+        assert!(shape1.broadcastable_from(&shape2));
+        assert!(!shape1.broadcastable_to(&shape2));
         assert_eq!(broadcast.0, [15, 3, 5]);
         assert_eq!(broadcast.1, [Preserve, Preserve, Preserve]);
         assert_eq!(broadcast.2, [Expand, Preserve, Upcast]);
@@ -240,6 +310,8 @@ mod test {
         let shape1 = [1, 1, 2];
         let shape2 = [1, 2];
         let broadcast = broadcast_shape(&shape1, &shape2).unwrap();
+        assert!(shape1.broadcastable_from(&shape2));
+        assert!(!shape1.broadcastable_to(&shape2));
         assert_eq!(broadcast.0, [1, 1, 2]);
         assert_eq!(broadcast.1, [Preserve, Preserve, Preserve]);
         assert_eq!(broadcast.2, [Expand, Preserve, Preserve]);
@@ -248,6 +320,8 @@ mod test {
         let shape1 = [1, 2];
         let shape2 = [1, 1, 2];
         let broadcast = broadcast_shape(&shape1, &shape2).unwrap();
+        assert!(!shape1.broadcastable_from(&shape2));
+        assert!(shape1.broadcastable_to(&shape2));
         assert_eq!(broadcast.0, [1, 1, 2]);
         assert_eq!(broadcast.1, [Expand, Preserve, Preserve]);
         assert_eq!(broadcast.2, [Preserve, Preserve, Preserve]);
