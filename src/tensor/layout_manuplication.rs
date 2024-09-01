@@ -282,8 +282,8 @@ where
         D2: DimAPI,
     {
         let layout = self.layout();
-        let is_c_contig = layout.is_c_contig();
-        let is_f_contig = layout.is_f_contig();
+        let is_c_contig = layout.c_contig();
+        let is_f_contig = layout.f_contig();
 
         let shape: D2 = shape.into();
         rstsr_assert_eq!(

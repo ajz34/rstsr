@@ -10,11 +10,18 @@ type Order = TensorIterOrder;
 ///
 /// Note that this function should only be used for iteration.
 ///
-/// # Parameters
+/// # Parameter `keep_shape`
 ///
-/// - `keep_shape`: Keep size of output layout when input layout is boardcasted.
-///   This option should be false if [`TensorIterOrder::K`] and true if
-///   [`TensorIterOrder::G`].
+/// Keep size of output layout when input layout is boardcasted.
+/// This option should be false if [`TensorIterOrder::K`] and true if
+/// [`TensorIterOrder::G`].
+///
+/// For example of layout shape `[5, 1, 2, 1, 3, 6]` and stride `[1000, 10, 10,
+/// 40, 0, 100]`,
+/// - false: shape `[2, 6, 5, 1, 1, 1]` and stride `[10, 100, 1000, 0, 0, 0]`;
+///   meaning that broadcasted shapes are eliminated and moved to last axes.
+/// - true: shape `[3, 1, 1, 2, 6, 5]` and stride `[0, 10, 40, 10, 100, 1000]`;
+///   meaning that broadcasted shapes are iterated with most priority.
 ///
 /// # Returns
 ///
@@ -109,7 +116,7 @@ where
 /// - G: greedy layout, eliminate broadcastable dimensions
 /// - B: sequential memory; valid option if `size = bound_max - bound_min`,
 ///   otherwise raise err
-pub fn translate_to_col_major_one<D>(
+pub fn translate_to_col_major_unary<D>(
     layout: &Layout<D>,
     it_ord: TensorIterOrder,
 ) -> Result<Layout<D>>
@@ -140,13 +147,13 @@ where
         Order::C => fn_c(layout),
         Order::F => fn_f(layout),
         Order::A => {
-            let c_contig = layout.is_c_contig();
-            let f_contig = layout.is_f_contig();
+            let c_contig = layout.c_contig();
+            let f_contig = layout.f_contig();
             if c_contig || f_contig {
                 fn_b(layout)
             } else {
-                let c_prefer = layout.is_c_prefer();
-                let f_prefer = layout.is_f_prefer();
+                let c_prefer = layout.c_prefer();
+                let f_prefer = layout.f_prefer();
                 match (c_prefer, f_prefer) {
                     (true, false) => fn_c(layout),
                     (false, true) => fn_f(layout),
@@ -188,7 +195,7 @@ where
     // this function will map all layouts to column-major iteration by a single
     // iter-order.
     let fn_single = |ls: &[Layout<D>], it_type| {
-        ls.iter().map(|l| translate_to_col_major_one(l, it_type)).collect()
+        ls.iter().map(|l| translate_to_col_major_unary(l, it_type)).collect()
     };
 
     // make sure all layouts have the same shape
@@ -198,13 +205,13 @@ where
     match it_ord {
         Order::C | Order::F | Order::B => fn_single(layouts, it_ord),
         Order::A => {
-            let c_contig = layouts.iter().all(Layout::is_c_contig);
-            let f_contig = layouts.iter().all(Layout::is_f_contig);
+            let c_contig = layouts.iter().all(Layout::c_contig);
+            let f_contig = layouts.iter().all(Layout::f_contig);
             if c_contig || f_contig {
                 fn_single(layouts, TensorIterOrder::B)
             } else {
-                let c_prefer = layouts.iter().all(Layout::is_c_prefer);
-                let f_prefer = layouts.iter().all(Layout::is_f_prefer);
+                let c_prefer = layouts.iter().all(Layout::c_prefer);
+                let f_prefer = layouts.iter().all(Layout::f_prefer);
                 match (c_prefer, f_prefer) {
                     (true, false) => fn_single(layouts, TensorIterOrder::C),
                     (false, true) => fn_single(layouts, TensorIterOrder::F),
@@ -252,7 +259,7 @@ where
 /// way. It is not related to default order, which could be defined by crate
 /// feature `c_prefer`.
 #[derive(Clone, Debug)]
-pub struct LayoutColMajorIterator<D>
+pub struct IterLayoutColMajor<D>
 where
     D: DimDevAPI,
 {
@@ -265,27 +272,22 @@ where
     index_end: D, // this is not used for buffer-order
     iter_end: usize,
     offset_end: usize,
-
-    iter_type: TensorIterType,
-    is_order_buffer: bool,
 }
 
-impl<D> LayoutColMajorIterator<D>
+impl<D> IterLayoutColMajor<D>
 where
     D: DimDevAPI,
 {
     /// This function generates col-major (f-prefer) layout, then give its
     /// iterator object.
-    pub fn new(layout: &Layout<D>, _it_type: Option<TensorIterType>) -> Result<Self> {
+    pub fn new(layout: &Layout<D>) -> Result<Self> {
         let layout = layout.clone();
         let iter_start = 0;
         let iter_end = layout.size();
         let index_start = layout.new_shape();
-        let index_end = layout.new_shape();
+        let index_end = unsafe { layout.unravel_index_f(iter_end) };
         let offset_start = layout.offset();
         let offset_end = unsafe { layout.index_uncheck(index_end.as_ref()) };
-        let is_order_buffer =
-            { layout.ndim() == 0 || layout.size() == layout.shape()[0] && layout.stride()[0] == 1 };
 
         return Ok(Self {
             layout,
@@ -295,25 +297,16 @@ where
             index_end,
             iter_end,
             offset_end,
-            iter_type: _it_type.unwrap_or_default(),
-            is_order_buffer,
         });
-        // todo: implement it_type
     }
 }
 
-impl<D> LayoutColMajorIterator<D>
+impl<D> IterLayoutColMajor<D>
 where
     D: DimDevAPI,
 {
     #[inline]
     fn next_iter_index(&mut self) {
-        // buffer-order fast return
-        if self.is_order_buffer {
-            self.iter_start += 1;
-            self.offset_start += 1;
-            return;
-        }
         let layout = &self.layout;
         let index = self.index_start.as_mut();
         let mut offset = self.offset_start as isize;
@@ -389,9 +382,93 @@ where
         self.offset_start = offset as usize;
         self.iter_start += 1;
     }
+
+    #[inline]
+    fn back_iter_index(&mut self) {
+        let layout = &self.layout;
+        let index = self.index_end.as_mut();
+        let mut offset = self.offset_end as isize;
+        let shape = layout.shape().as_ref();
+        let stride = layout.stride().as_ref();
+        match layout.ndim() {
+            0 => (),
+            1 => {
+                index[0] -= 1;
+                offset -= stride[0];
+            },
+            2 => {
+                if index[0] == 0 {
+                    index[0] = shape[0] - 1;
+                    offset += (shape[0] - 1) as isize * stride[0];
+                    index[1] -= 1;
+                    offset -= stride[1];
+                } else {
+                    index[0] -= 1;
+                    offset -= stride[0];
+                }
+            },
+            3 => {
+                if index[0] == 0 {
+                    index[0] = shape[0] - 1;
+                    offset += (shape[0] - 1) as isize * stride[0];
+                    if index[1] == 0 {
+                        index[1] = shape[1] - 1;
+                        offset += (shape[1] - 1) as isize * stride[1];
+                        index[2] -= 1;
+                        offset -= stride[2];
+                    } else {
+                        index[1] -= 1;
+                        offset -= stride[1];
+                    }
+                } else {
+                    index[0] -= 1;
+                    offset -= stride[0];
+                }
+            },
+            4 => {
+                if index[0] == 0 {
+                    index[0] = shape[0] - 1;
+                    offset += (shape[0] - 1) as isize * stride[0];
+                    if index[1] == 0 {
+                        index[1] = shape[1] - 1;
+                        offset += (shape[1] - 1) as isize * stride[1];
+                        if index[2] == 0 {
+                            index[2] = shape[2] - 1;
+                            offset += (shape[2] - 1) as isize * stride[2];
+                            index[3] -= 1;
+                            offset -= stride[3];
+                        } else {
+                            index[2] -= 1;
+                            offset -= stride[2];
+                        }
+                    } else {
+                        index[1] -= 1;
+                        offset -= stride[1];
+                    }
+                } else {
+                    index[0] -= 1;
+                    offset -= stride[0];
+                }
+            },
+            _ => {
+                for (d, t, idx) in izip!(shape, stride, index.as_mut()) {
+                    if *idx == 0 {
+                        *idx = *d - 1;
+                        offset += (*d - 1) as isize * t;
+                    } else {
+                        *idx -= 1;
+                        offset -= t;
+                        break;
+                    }
+                }
+            },
+        }
+        self.offset_end = offset as usize;
+        self.iter_end -= 1;
+    }
 }
 
-impl<D> Iterator for LayoutColMajorIterator<D>
+impl<D> Iterator for IterLayoutColMajor<D>
 where
     D: DimDevAPI,
 {
@@ -407,50 +484,27 @@ where
     }
 }
 
-impl<D> ExactSizeIterator for LayoutColMajorIterator<D>
+impl<D> DoubleEndedIterator for IterLayoutColMajor<D>
+where
+    D: DimDevAPI,
+{
+    fn next_back(&mut self) -> Option<Self::Item> {
+        if self.iter_start >= self.iter_end {
+            return None;
+        }
+        self.back_iter_index();
+        let offset = self.offset_end;
+        return Some(offset);
+    }
+}
+
+impl<D> ExactSizeIterator for IterLayoutColMajor<D>
 where
     D: DimDevAPI,
 {
     fn len(&self) -> usize {
         self.iter_end - self.iter_start
     }
-}
-
-#[test]
-fn playground() {
-    use std::time::Instant;
-    let n = 1024 * 1024;
-    let layout = [1024, 1024].f();
-    let it = LayoutColMajorIterator::new(&layout, None).unwrap();
-    let src = (0..n).map(|v| f64::from(v as u32)).collect::<Vec<f64>>();
-    let mut val = 0.0;
-
-    let now = Instant::now();
-    for _ in 0..1000 {
-        val = 0.0;
-        for i in it.clone() {
-            val += src[i];
-        }
-    }
-    println!("Time: {:?}", now.elapsed());
-    println!("{:}", val);
-
-    let now = Instant::now();
-    for _ in 0..1000 {
-        val = 0.0;
-        for i in it.clone() {
-            val += src[i];
-        }
-    }
-    println!("Time: {:?}", now.elapsed());
-    println!("{:}", val);
-
-    let now = Instant::now();
-    for _ in 0..1000 {
-        val = src.iter().sum()
-    }
-    println!("Time: {:?}", now.elapsed());
-    println!("{:}", val);
 }
 
 /* #endregion */
@@ -1079,7 +1133,7 @@ where
         // standard layout.
         let layout = layout.clone();
         match CHG {
-            false => match (layout.is_c_prefer(), layout.is_f_prefer()) {
+            false => match (layout.c_prefer(), layout.f_prefer()) {
                 (true, false) => Ok(It::<D, CHG>::C(IterLayoutC::new_it(&layout)?)),
                 (false, true) => Ok(It::<D, CHG>::F(IterLayoutF::new_it(&layout)?)),
                 (_, _) => match TensorOrder::default() {
@@ -1092,7 +1146,7 @@ where
                 if let Ok(it) = iter_mem_non_strided {
                     Ok(It::<D, CHG>::MemNonStrided(it))
                 } else {
-                    match (layout.is_c_prefer(), layout.is_f_prefer()) {
+                    match (layout.c_prefer(), layout.f_prefer()) {
                         (true, false) => Ok(It::<D, CHG>::C(IterLayoutC::new_it(&layout)?)),
                         (false, true) => Ok(It::<D, CHG>::F(IterLayoutF::new_it(&layout)?)),
                         (true, true) => match TensorOrder::default() {
@@ -1238,5 +1292,93 @@ mod test {
             let expect = Layout::new_unchecked([3, 1, 1, 2, 6, 5], [0, 10, 40, 10, 100, 1000], 0);
             assert_eq!(greedy, expect);
         }
+    }
+
+    #[test]
+    fn test_iter_next() {
+        let layout = Layout::new([3, 2, 6], [3, -180, 15], 782);
+        // np.array(np.nditer(a, order="C"))
+        let layout_trans = translate_to_col_major_unary(&layout, Order::C).unwrap();
+        let iter = IterLayoutColMajor::new(&layout_trans).unwrap();
+        let vec = iter.collect::<Vec<_>>();
+        assert_eq!(
+            vec,
+            [
+                782, 797, 812, 827, 842, 857, 602, 617, 632, 647, 662, 677, 785, 800, 815, 830,
+                845, 860, 605, 620, 635, 650, 665, 680, 788, 803, 818, 833, 848, 863, 608, 623,
+                638, 653, 668, 683
+            ]
+        );
+        // np.array(np.nditer(a, order="F"))
+        let layout_trans = translate_to_col_major_unary(&layout, Order::F).unwrap();
+        let iter = IterLayoutColMajor::new(&layout_trans).unwrap();
+        let vec = iter.collect::<Vec<_>>();
+        assert_eq!(
+            vec,
+            [
+                782, 785, 788, 602, 605, 608, 797, 800, 803, 617, 620, 623, 812, 815, 818, 632,
+                635, 638, 827, 830, 833, 647, 650, 653, 842, 845, 848, 662, 665, 668, 857, 860,
+                863, 677, 680, 683
+            ]
+        );
+        // np.array(np.nditer(a, order="K"))
+        let layout_trans = translate_to_col_major_unary(&layout, Order::K).unwrap();
+        let iter = IterLayoutColMajor::new(&layout_trans).unwrap();
+        let vec = iter.collect::<Vec<_>>();
+        assert_eq!(
+            vec,
+            [
+                602, 605, 608, 617, 620, 623, 632, 635, 638, 647, 650, 653, 662, 665, 668, 677,
+                680, 683, 782, 785, 788, 797, 800, 803, 812, 815, 818, 827, 830, 833, 842, 845,
+                848, 857, 860, 863
+            ]
+        );
+        // np.array(np.nditer(a, order="G"))
+        // for no broadcast case, greedy-order is same as k-order
+        let layout_trans = translate_to_col_major_unary(&layout, Order::K).unwrap();
+        let iter = IterLayoutColMajor::new(&layout_trans).unwrap();
+        let vec = iter.collect::<Vec<_>>();
+        assert_eq!(
+            vec,
+            [
+                602, 605, 608, 617, 620, 623, 632, 635, 638, 647, 650, 653, 662, 665, 668, 677,
+                680, 683, 782, 785, 788, 797, 800, 803, 812, 815, 818, 827, 830, 833, 842, 845,
+                848, 857, 860, 863
+            ]
+        );
+        // buffer should fail
+        assert!(translate_to_col_major_unary(&layout, Order::B).is_err());
+    }
+
+    #[test]
+    fn test_iter_back() {
+        let layout = Layout::new([10, 10, 10], [10, 1, 100], 0);
+        // np.array(np.nditer(a, order="C"))
+        let layout_trans = translate_to_col_major_unary(&layout, Order::C).unwrap();
+        println!("{:?}", unsafe { layout.unravel_index_f(100) });
+        let iter = IterLayoutColMajor::new(&layout_trans).unwrap();
+        let vec_next = iter.collect::<Vec<_>>();
+        let iter = IterLayoutColMajor::new(&layout_trans).unwrap();
+        let vec_back = iter.rev().collect::<Vec<_>>();
+        assert_eq!(vec_next, vec_back.iter().rev().copied().collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn test_iter_back_empty() {
+        let layout = Layout::new([3, 2, 6], [3, -180, 15], 782);
+        // np.array(np.nditer(a, order="C"))
+        let layout_trans = translate_to_col_major_unary(&layout, Order::C).unwrap();
+        let iter = IterLayoutColMajor::new(&layout_trans).unwrap();
+        let vec_next = iter.clone().collect::<Vec<_>>();
+        let vec_back = iter.clone().rev().collect::<Vec<_>>();
+        assert_eq!(vec_next, vec_back.iter().rev().copied().collect::<Vec<_>>());
+
+        let layout = Layout::new([10], [10], 10);
+        // np.array(np.nditer(a, order="C"))
+        let layout_trans = translate_to_col_major_unary(&layout, Order::C).unwrap();
+        let iter = IterLayoutColMajor::new(&layout_trans).unwrap();
+        let vec_next = iter.clone().collect::<Vec<_>>();
+        let vec_back = iter.clone().rev().collect::<Vec<_>>();
+        assert_eq!(vec_next, vec_back.iter().rev().copied().collect::<Vec<_>>());
     }
 }

@@ -8,10 +8,10 @@ where
         let shape = self.shape.as_ref();
         let stride = self.stride.as_ref();
         let offset = self.offset;
-        let is_c_contig = self.is_c_contig();
-        let is_f_contig = self.is_f_contig();
-        let is_c_prefer = self.is_c_prefer();
-        let is_f_prefer = self.is_f_prefer();
+        let is_c_contig = self.c_contig();
+        let is_f_contig = self.f_contig();
+        let is_c_prefer = self.c_prefer();
+        let is_f_prefer = self.f_prefer();
         let mut contig = String::new();
         if self.size() == 0 {
             write!(contig, "Empty")?;

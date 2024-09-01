@@ -197,7 +197,7 @@ where
         let axis = axis as usize;
 
         // get essential information
-        let is_f_prefer = self.is_f_prefer();
+        let is_f_prefer = self.f_prefer();
         let mut shape = self.shape().as_ref().to_vec();
         let mut stride = self.stride().as_ref().to_vec();
         let offset = self.offset();

@@ -18,19 +18,19 @@ where
     D2: DimAPI,
 {
     rstsr_assert_eq!(l1.size(), l2.size(), InvalidLayout)?;
-    if l1.is_c_contig() && l2.is_c_contig() || l1.is_f_contig() && l2.is_f_contig() {
+    if l1.c_contig() && l2.c_contig() || l1.f_contig() && l2.f_contig() {
         // contiguous layout use one-dimension iterator
         Ok(IterLayoutType::MemNonStrided)
     } else {
         // in other situations, try layout of array to be assigned,
         // if it is not c/f-prefer, then use default layout
-        if l1.is_c_prefer() && l2.is_c_prefer() {
+        if l1.c_prefer() && l2.c_prefer() {
             Ok(IterLayoutType::C)
-        } else if l1.is_f_prefer() && l2.is_f_prefer() {
+        } else if l1.f_prefer() && l2.f_prefer() {
             Ok(IterLayoutType::F)
-        } else if l1.is_c_prefer() {
+        } else if l1.c_prefer() {
             Ok(IterLayoutType::C)
-        } else if l1.is_f_prefer() {
+        } else if l1.f_prefer() {
             Ok(IterLayoutType::F)
         } else if TensorOrder::default() == TensorOrder::C {
             Ok(IterLayoutType::C)
@@ -52,21 +52,21 @@ where
 {
     rstsr_assert_eq!(l1.size(), l2.size(), InvalidLayout)?;
     rstsr_assert_eq!(l1.size(), l3.size(), InvalidLayout)?;
-    if l1.is_c_contig() && l2.is_c_contig() && l3.is_c_contig()
-        || l1.is_f_contig() && l2.is_f_contig() && l3.is_f_contig()
+    if l1.c_contig() && l2.c_contig() && l3.c_contig()
+        || l1.f_contig() && l2.f_contig() && l3.f_contig()
     {
         // contiguous layout use one-dimension iterator
         Ok(IterLayoutType::MemNonStrided)
     } else {
         // in other situations, try layout of array to be assigned,
         // if it is not c/f-prefer, then use default layout
-        if l1.is_c_prefer() && l2.is_c_prefer() && l3.is_c_prefer() {
+        if l1.c_prefer() && l2.c_prefer() && l3.c_prefer() {
             Ok(IterLayoutType::C)
-        } else if l1.is_f_prefer() && l2.is_f_prefer() && l3.is_f_prefer() {
+        } else if l1.f_prefer() && l2.f_prefer() && l3.f_prefer() {
             Ok(IterLayoutType::F)
-        } else if l1.is_c_prefer() {
+        } else if l1.c_prefer() {
             Ok(IterLayoutType::C)
-        } else if l1.is_f_prefer() {
+        } else if l1.f_prefer() {
             Ok(IterLayoutType::F)
         } else if TensorOrder::default() == TensorOrder::C {
             Ok(IterLayoutType::C)

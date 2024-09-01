@@ -75,7 +75,7 @@ where
     }
 
     /// Whether this tensor is f-preferred.
-    pub fn is_f_prefer(&self) -> bool {
+    pub fn f_prefer(&self) -> bool {
         // always true for 0-dimension or 0-size tensor
         if self.ndim() == 0 || self.size() == 0 {
             return true;
@@ -101,7 +101,7 @@ where
     }
 
     /// Whether this tensor is c-preferred.
-    pub fn is_c_prefer(&self) -> bool {
+    pub fn c_prefer(&self) -> bool {
         // always true for 0-dimension or 0-size tensor
         if self.ndim() == 0 || self.size() == 0 {
             return true;
@@ -126,6 +126,46 @@ where
         return true;
     }
 
+    /// Least number of dimensions that is f-contiguous for layout.
+    ///
+    /// This function can be useful determining when to iterate by contiguous,
+    /// and when to iterate by index.
+    pub fn ndim_of_f_contig(&self) -> usize {
+        if self.ndim() == 0 || self.size() == 0 {
+            return self.ndim();
+        }
+        let stride = self.stride.as_ref();
+        let shape = self.shape.as_ref();
+        let mut acc = 1;
+        for (ndim, (&s, &d)) in stride.iter().zip(shape.iter()).enumerate() {
+            if d != 1 && s != acc {
+                return ndim;
+            }
+            acc *= d as isize;
+        }
+        return self.ndim();
+    }
+
+    /// Least number of dimensions that is c-contiguous for layout.
+    ///
+    /// This function can be useful determining when to iterate by contiguous,
+    /// and when to iterate by index.
+    pub fn ndim_of_c_contig(&self) -> usize {
+        if self.ndim() == 0 || self.size() == 0 {
+            return self.ndim();
+        }
+        let stride = self.stride.as_ref();
+        let shape = self.shape.as_ref();
+        let mut acc = 1;
+        for (ndim, (&s, &d)) in stride.iter().zip(shape.iter()).rev().enumerate() {
+            if d != 1 && s != acc {
+                return ndim;
+            }
+            acc *= d as isize;
+        }
+        return self.ndim();
+    }
+
     /// Whether this tensor is f-contiguous.
     ///
     /// Special cases
@@ -133,22 +173,8 @@ where
     ///   not important.
     /// - When length of a dimension is zero, then tensor contains no elements,
     ///   thus f-contiguous.
-    pub fn is_f_contig(&self) -> bool {
-        // always true for 0-dimension or 0-size tensor
-        if self.ndim() == 0 || self.size() == 0 {
-            return true;
-        }
-
-        let stride = self.stride.as_ref();
-        let shape = self.shape.as_ref();
-        let mut acc = 1;
-        for (&s, &d) in stride.iter().zip(shape.iter()) {
-            if d != 1 && s != acc {
-                return false;
-            }
-            acc *= d as isize;
-        }
-        return true;
+    pub fn f_contig(&self) -> bool {
+        self.ndim() == self.ndim_of_f_contig()
     }
 
     /// Whether this tensor is c-contiguous.
@@ -158,22 +184,8 @@ where
     ///   not important.
     /// - When length of a dimension is zero, then tensor contains no elements,
     ///   thus c-contiguous.
-    pub fn is_c_contig(&self) -> bool {
-        // always true for 0-dimension or 0-size tensor
-        if self.ndim() == 0 || self.size() == 0 {
-            return true;
-        }
-
-        let stride = self.stride.as_ref();
-        let shape = self.shape.as_ref();
-        let mut acc = 1;
-        for (&s, &d) in stride.iter().zip(shape.iter()).rev() {
-            if d != 1 && s != acc {
-                return false;
-            }
-            acc *= d as isize;
-        }
-        return true;
+    pub fn c_contig(&self) -> bool {
+        self.ndim() == self.ndim_of_c_contig()
     }
 
     /// Index of tensor by list of indexes to dimensions.
@@ -423,6 +435,9 @@ where
     }
 }
 
+/// Fast indexing and utilities of layout.
+///
+/// These functions are mostly internal to this crate.
 impl<D> Layout<D>
 where
     D: DimBaseAPI + DimShapeAPI + DimStrideAPI,
@@ -481,35 +496,33 @@ where
                 result[0] = index;
             },
             2 => {
-                result[1] = index % self.shape()[1];
-                index /= self.shape()[1];
-                result[0] = index;
+                result[1] = index / self.shape()[0];
+                result[0] = index % self.shape()[0];
             },
             3 => {
-                result[2] = index % self.shape()[2];
-                index /= self.shape()[2];
-                result[1] = index % self.shape()[1];
-                index /= self.shape()[1];
-                result[0] = index;
+                result[2] = index / (self.shape()[0] * self.shape()[1]);
+                index %= self.shape()[0] * self.shape()[1];
+                result[1] = index / self.shape()[0];
+                result[0] = index % self.shape()[0];
             },
             4 => {
-                result[3] = index % self.shape()[3];
-                index /= self.shape()[3];
-                result[2] = index % self.shape()[2];
-                index /= self.shape()[2];
-                result[1] = index % self.shape()[1];
-                index /= self.shape()[1];
-                result[0] = index;
+                result[3] = index / (self.shape()[0] * self.shape()[1] * self.shape()[2]);
+                index %= self.shape()[0] * self.shape()[1] * self.shape()[2];
+                result[2] = index / (self.shape()[0] * self.shape()[1]);
+                index %= self.shape()[0] * self.shape()[1];
+                result[1] = index / self.shape()[0];
+                result[0] = index % self.shape()[0];
             },
             _ => {
-                for i in 0..self.ndim() {
+                for i in 0..(self.ndim() - 1) {
                     let dim = self.shape()[i];
                     result[i] = index % dim;
                     index /= dim;
                 }
+                result[self.ndim() - 1] = index;
             },
         }
-        result
+        return result;
     }
 }
 
@@ -683,26 +696,26 @@ mod test {
         // general case
         let shape = [3, 5, 7];
         let layout = Layout::new(shape, [1, 10, 100], 0);
-        assert!(layout.is_f_prefer());
+        assert!(layout.f_prefer());
         let layout = Layout::new(shape, [1, 3, 15], 0);
-        assert!(layout.is_f_prefer());
+        assert!(layout.f_prefer());
         let layout = Layout::new(shape, [1, 3, -15], 1000);
-        assert!(!layout.is_f_prefer());
+        assert!(!layout.f_prefer());
         let layout = Layout::new(shape, [1, 21, 3], 0);
-        assert!(!layout.is_f_prefer());
+        assert!(!layout.f_prefer());
         let layout = Layout::new(shape, [35, 7, 1], 0);
-        assert!(!layout.is_f_prefer());
+        assert!(!layout.f_prefer());
         let layout = Layout::new(shape, [2, 6, 30], 0);
-        assert!(!layout.is_f_prefer());
+        assert!(!layout.f_prefer());
         // zero dimension
         let layout = Layout::new([], [], 0);
-        assert!(layout.is_f_prefer());
+        assert!(layout.f_prefer());
         // zero size
         let layout = Layout::new([2, 0, 4], [1, 10, 100], 0);
-        assert!(layout.is_f_prefer());
+        assert!(layout.f_prefer());
         // shape with 1
         let layout = Layout::new([2, 1, 4], [1, 1, 2], 0);
-        assert!(layout.is_f_prefer());
+        assert!(layout.f_prefer());
     }
 
     #[test]
@@ -710,26 +723,26 @@ mod test {
         // general case
         let shape = [3, 5, 7];
         let layout = Layout::new(shape, [100, 10, 1], 0);
-        assert!(layout.is_c_prefer());
+        assert!(layout.c_prefer());
         let layout = Layout::new(shape, [35, 7, 1], 0);
-        assert!(layout.is_c_prefer());
+        assert!(layout.c_prefer());
         let layout = Layout::new(shape, [-35, 7, 1], 1000);
-        assert!(!layout.is_c_prefer());
+        assert!(!layout.c_prefer());
         let layout = Layout::new(shape, [7, 21, 1], 0);
-        assert!(!layout.is_c_prefer());
+        assert!(!layout.c_prefer());
         let layout = Layout::new(shape, [1, 3, 15], 0);
-        assert!(!layout.is_c_prefer());
+        assert!(!layout.c_prefer());
         let layout = Layout::new(shape, [70, 14, 2], 0);
-        assert!(!layout.is_c_prefer());
+        assert!(!layout.c_prefer());
         // zero dimension
         let layout = Layout::new([], [], 0);
-        assert!(layout.is_c_prefer());
+        assert!(layout.c_prefer());
         // zero size
         let layout = Layout::new([2, 0, 4], [1, 10, 100], 0);
-        assert!(layout.is_c_prefer());
+        assert!(layout.c_prefer());
         // shape with 1
         let layout = Layout::new([2, 1, 4], [4, 1, 1], 0);
-        assert!(layout.is_c_prefer());
+        assert!(layout.c_prefer());
     }
 
     #[test]
@@ -737,18 +750,18 @@ mod test {
         // general case
         let shape = [3, 5, 7];
         let layout = Layout::new(shape, [1, 3, 15], 0);
-        assert!(layout.is_f_contig());
+        assert!(layout.f_contig());
         let layout = Layout::new(shape, [1, 4, 20], 0);
-        assert!(!layout.is_f_contig());
+        assert!(!layout.f_contig());
         // zero dimension
         let layout = Layout::new([], [], 0);
-        assert!(layout.is_f_contig());
+        assert!(layout.f_contig());
         // zero size
         let layout = Layout::new([2, 0, 4], [1, 10, 100], 0);
-        assert!(layout.is_f_contig());
+        assert!(layout.f_contig());
         // shape with 1
         let layout = Layout::new([2, 1, 4], [1, 1, 2], 0);
-        assert!(layout.is_f_contig());
+        assert!(layout.f_contig());
     }
 
     #[test]
@@ -756,18 +769,18 @@ mod test {
         // general case
         let shape = [3, 5, 7];
         let layout = Layout::new(shape, [35, 7, 1], 0);
-        assert!(layout.is_c_contig());
+        assert!(layout.c_contig());
         let layout = Layout::new(shape, [36, 7, 1], 0);
-        assert!(!layout.is_c_contig());
+        assert!(!layout.c_contig());
         // zero dimension
         let layout = Layout::new([], [], 0);
-        assert!(layout.is_c_contig());
+        assert!(layout.c_contig());
         // zero size
         let layout = Layout::new([2, 0, 4], [1, 10, 100], 0);
-        assert!(layout.is_c_contig());
+        assert!(layout.c_contig());
         // shape with 1
         let layout = Layout::new([2, 1, 4], [4, 1, 1], 0);
-        assert!(layout.is_c_contig());
+        assert!(layout.c_contig());
     }
 
     #[test]
