@@ -3,7 +3,7 @@
 //! This file assumes that layouts are pre-processed and valid.
 
 use crate::prelude_dev::*;
-use core::ops::{Add, BitAnd, BitOr, BitXor, Div, Mul, Rem, Shl, Shr, Sub};
+use core::ops::IndexMut;
 use num::Zero;
 
 // this value is used to determine whether to use contiguous inner iteration
@@ -98,14 +98,14 @@ where
     }
 }
 
-/* #region basic binary operations involving ternary tensors */
+/* #region ternary-op */
 
 macro_rules! impl_op_api {
     ($DeviceOpAPI:ident, $Op:ident, $op_ternary:ident, $op:ident) => {
         impl<T, TB, D> $DeviceOpAPI<T, TB, D> for CpuDevice
         where
             TB: Clone,
-            T: $Op<TB, Output = T> + Clone,
+            T: core::ops::$Op<TB, Output = T> + Clone,
             D: DimAPI,
         {
             fn $op_ternary(
@@ -128,8 +128,10 @@ macro_rules! impl_op_api {
                     let iter_b = IterLayoutColMajor::new(&layouts_contig[2])?;
                     for (idx_c, idx_a, idx_b) in izip!(iter_c, iter_a, iter_b) {
                         for i in 0..size_contig {
-                            c.rawvec[idx_c + i] =
-                                $Op::$op(a.rawvec[idx_a + i].clone(), b.rawvec[idx_b + i].clone());
+                            c.rawvec[idx_c + i] = core::ops::$Op::$op(
+                                a.rawvec[idx_a + i].clone(),
+                                b.rawvec[idx_b + i].clone(),
+                            );
                         }
                     }
                 } else {
@@ -138,7 +140,7 @@ macro_rules! impl_op_api {
                     let iter_b = IterLayoutColMajor::new(&layouts_full[2])?;
                     for (idx_c, idx_a, idx_b) in izip!(iter_c, iter_a, iter_b) {
                         c.rawvec[idx_c] =
-                            $Op::$op(a.rawvec[idx_a].clone(), b.rawvec[idx_b].clone());
+                            core::ops::$Op::$op(a.rawvec[idx_a].clone(), b.rawvec[idx_b].clone());
                     }
                 }
                 return Ok(());
@@ -160,9 +162,68 @@ impl_op_api!(DeviceShrAPI, Shr, shr_ternary, shr);
 
 /* #endregion */
 
+/* #region binary-op */
+
+macro_rules! impl_op_assign_api {
+    ($DeviceOpAPI:ident, $Op:ident, $op_binary:ident, $op:ident) => {
+        impl<T, TB, D> $DeviceOpAPI<T, TB, D> for CpuDevice
+        where
+            T: core::ops::$Op<TB> + Clone,
+            TB: Clone,
+            D: DimAPI,
+        {
+            fn $op_binary(
+                &self,
+                c: &mut Storage<T, CpuDevice>,
+                lc: &Layout<D>,
+                b: &Storage<TB, CpuDevice>,
+                lb: &Layout<D>,
+            ) -> Result<()> {
+                let layouts_full = translate_to_col_major(&[lc, lb], TensorIterOrder::K)?;
+                let layouts_full_ref = layouts_full.iter().collect_vec();
+                let (layouts_contig, size_contig) =
+                    translate_to_col_major_with_contig(&layouts_full_ref);
+
+                if size_contig >= CONTIG_SWITCH {
+                    let iter_c = IterLayoutColMajor::new(&layouts_contig[0])?;
+                    let iter_b = IterLayoutColMajor::new(&layouts_contig[1])?;
+                    for (idx_c, idx_b) in izip!(iter_c, iter_b) {
+                        for i in 0..size_contig {
+                            core::ops::$Op::$op(
+                                c.rawvec.index_mut(idx_c + i),
+                                b.rawvec[idx_b + i].clone(),
+                            );
+                        }
+                    }
+                } else {
+                    let iter_c = IterLayoutColMajor::new(&layouts_full[0])?;
+                    let iter_b = IterLayoutColMajor::new(&layouts_full[1])?;
+                    for (idx_c, idx_b) in izip!(iter_c, iter_b) {
+                        core::ops::$Op::$op(c.rawvec.index_mut(idx_c), b.rawvec[idx_b].clone());
+                    }
+                }
+                return Ok(());
+            }
+        }
+    };
+}
+
+impl_op_assign_api!(DeviceAddAssignAPI, AddAssign, add_assign_binary, add_assign);
+impl_op_assign_api!(DeviceSubAssignAPI, SubAssign, sub_assign_binary, sub_assign);
+impl_op_assign_api!(DeviceMulAssignAPI, MulAssign, mul_assign_binary, mul_assign);
+impl_op_assign_api!(DeviceDivAssignAPI, DivAssign, div_assign_binary, div_assign);
+impl_op_assign_api!(DeviceRemAssignAPI, RemAssign, rem_assign_binary, rem_assign);
+impl_op_assign_api!(DeviceBitOrAssignAPI, BitOrAssign, bitor_assign_binary, bitor_assign);
+impl_op_assign_api!(DeviceBitAndAssignAPI, BitAndAssign, bitand_assign_binary, bitand_assign);
+impl_op_assign_api!(DeviceBitXorAssignAPI, BitXorAssign, bitxor_assign_binary, bitxor_assign);
+impl_op_assign_api!(DeviceShlAssignAPI, ShlAssign, shl_assign_binary, shl_assign);
+impl_op_assign_api!(DeviceShrAssignAPI, ShrAssign, shr_assign_binary, shr_assign);
+
+/* #endregion */
+
 impl<T, D> OpSumAPI<T, D> for CpuDevice
 where
-    T: Zero + Add<Output = T> + Clone,
+    T: Zero + core::ops::Add<Output = T> + Clone,
     D: DimAPI,
 {
     fn sum(&self, a: &Storage<T, Self>, la: &Layout<D>) -> Result<T> {
