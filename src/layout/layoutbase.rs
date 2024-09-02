@@ -56,13 +56,7 @@ where
     pub fn ndim(&self) -> usize {
         self.shape.ndim()
     }
-}
 
-/// Properties of layout.
-impl<D> Layout<D>
-where
-    D: DimBaseAPI + DimShapeAPI + DimStrideAPI,
-{
     /// Total number of elements in tensor.
     ///
     /// # Note
@@ -72,7 +66,13 @@ where
     pub fn size(&self) -> usize {
         self.size
     }
+}
 
+/// Properties of layout.
+impl<D> Layout<D>
+where
+    D: DimBaseAPI + DimShapeAPI + DimStrideAPI,
+{
     /// Whether this tensor is f-preferred.
     pub fn f_prefer(&self) -> bool {
         // always true for 0-dimension or 0-size tensor
@@ -303,7 +303,7 @@ where
 /// directly.
 impl<D> Layout<D>
 where
-    D: DimBaseAPI + DimShapeAPI + DimStrideAPI,
+    D: DimBaseAPI,
 {
     /// Generate new layout by providing everything.
     ///
@@ -313,7 +313,10 @@ where
     /// - Strides is correct (no elements can overlap)
     /// - Minimum bound is not negative
     #[inline]
-    pub fn new(shape: D, stride: D::Stride, offset: usize) -> Self {
+    pub fn new(shape: D, stride: D::Stride, offset: usize) -> Self
+    where
+        D: DimShapeAPI + DimStrideAPI,
+    {
         let layout = unsafe { Layout::new_unchecked(shape, stride, offset) };
         layout.bounds_index().unwrap();
         layout.check_strides().unwrap();
@@ -328,7 +331,7 @@ where
     /// This function does not check whether layout is valid.
     #[inline]
     pub unsafe fn new_unchecked(shape: D, stride: D::Stride, offset: usize) -> Self {
-        let size = shape.shape_size();
+        let size = shape.as_ref().iter().product();
         Layout { shape, stride, offset, size }
     }
 
@@ -605,16 +608,9 @@ impl<const N: usize> DimConvertAPI<IxD> for Ix<N> {
     }
 }
 
-impl<const N: usize, const M: usize> DimConvertAPI<Ix<M>> for Ix<N> {
-    fn into_dim(layout: Layout<Ix<N>>) -> Result<Layout<Ix<M>>> {
-        rstsr_assert_eq!(N, M, InvalidLayout)?;
-        let mut shape = [0; M];
-        let mut stride = [0; M];
-        shape[..M].copy_from_slice(&layout.shape()[..M]);
-        stride[..M].copy_from_slice(&layout.stride()[..M]);
-        let offset = layout.offset();
-        let size = layout.size();
-        return Ok(Layout { shape, stride, offset, size });
+impl<const N: usize> DimConvertAPI<Ix<N>> for Ix<N> {
+    fn into_dim(layout: Layout<Ix<N>>) -> Result<Layout<Ix<N>>> {
+        return Ok(layout);
     }
 }
 

@@ -21,14 +21,21 @@ pub type IxD = Vec<usize>;
 pub type IxDyn = IxD;
 
 pub trait DimBaseAPI:
-    AsMut<[usize]> + AsRef<[usize]> + IndexMut<usize, Output = usize> + Debug + PartialEq + Clone
+    AsMut<[usize]>
+    + AsRef<[usize]>
+    + IndexMut<usize, Output = usize>
+    + Debug
+    + PartialEq
+    + Clone
+    + TryFrom<Vec<usize>>
 {
     type Stride: AsMut<[isize]>
         + AsRef<[isize]>
         + IndexMut<usize, Output = isize>
         + Debug
         + PartialEq
-        + Clone;
+        + Clone
+        + TryFrom<Vec<isize>>;
 
     /// Number of dimension
     fn ndim(&self) -> usize;

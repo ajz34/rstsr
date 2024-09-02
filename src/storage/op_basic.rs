@@ -1,6 +1,6 @@
 use core::ops::Add;
 
-use num::{traits::NumAssign, Num, Zero};
+use num::Zero;
 
 use crate::prelude_dev::*;
 
@@ -8,7 +8,7 @@ pub trait OpAssignAPI<T, DC, DA>
 where
     DC: DimAPI,
     DA: DimAPI,
-    Self: DeviceRawVecAPI<T>,
+    Self: DeviceAPI<T>,
 {
     fn assign_arbitary_layout(
         &self,
@@ -19,19 +19,19 @@ where
     ) -> Result<()>;
 }
 
-pub trait OpAddAPI<T, D>
+pub trait OpAddAPI<T, TB, D>
 where
-    T: Add<Output = T> + Clone,
+    T: Add<TB, Output = T> + Clone,
     D: DimAPI,
-    Self: DeviceRawVecAPI<T>,
+    Self: DeviceAPI<T> + DeviceAPI<TB>,
 {
-    fn ternary_add(
+    fn add_ternary(
         &self,
         c: &mut Storage<T, Self>,
         lc: &Layout<D>,
         a: &Storage<T, Self>,
         la: &Layout<D>,
-        b: &Storage<T, Self>,
+        b: &Storage<TB, Self>,
         lb: &Layout<D>,
     ) -> Result<()>;
 }
@@ -40,7 +40,7 @@ pub trait OpSumAPI<T, D>
 where
     T: Zero + Add<Output = T> + Clone,
     D: DimAPI,
-    Self: DeviceRawVecAPI<T>,
+    Self: DeviceAPI<T>,
 {
     fn sum(&self, a: &Storage<T, Self>, la: &Layout<D>) -> Result<T>;
 }

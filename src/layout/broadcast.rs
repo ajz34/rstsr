@@ -24,9 +24,8 @@ pub fn broadcast_shape<D1, D2>(
     shape2: &D2,
 ) -> Result<(<D1 as DimMaxAPI<D2>>::Max, Vec<BroadcastType>, Vec<BroadcastType>)>
 where
-    D1: DimDevAPI + DimMaxAPI<D2>,
-    D2: DimDevAPI,
-    <D1 as DimMaxAPI<D2>>::Max: TryFrom<IxD>,
+    D1: DimBaseAPI + DimMaxAPI<D2>,
+    D2: DimBaseAPI,
 {
     // step 1-6: determine maximum shape
     let (n1, n2) = (shape1.ndim(), shape2.ndim());
@@ -81,13 +80,13 @@ where
     return Ok((shape, tp1, tp2));
 }
 
-pub trait DimBroadcastable: DimDevAPI {
+pub trait DimBroadcastableAPI: DimBaseAPI {
     /// Check whether second shape can be broadcasted to first shape.
     ///
     /// Order of the two parameters depends.
     fn broadcastable_from<D2>(&self, other: &D2) -> bool
     where
-        D2: DimDevAPI,
+        D2: DimBaseAPI,
     {
         let (shape1, shape2) = (self.as_ref(), other.as_ref());
         let (n1, n2) = (shape1.len(), shape2.len());
@@ -114,7 +113,7 @@ pub trait DimBroadcastable: DimDevAPI {
     /// Order of the two parameters depends.
     fn broadcastable_to<D2>(&self, other: &D2) -> bool
     where
-        D2: DimDevAPI,
+        D2: DimBaseAPI,
     {
         let (shape1, shape2) = (self.as_ref(), other.as_ref());
         let (n1, n2) = (shape1.len(), shape2.len());
@@ -137,7 +136,7 @@ pub trait DimBroadcastable: DimDevAPI {
     }
 }
 
-impl<D> DimBroadcastable for D where D: DimAPI {}
+impl<D> DimBroadcastableAPI for D where D: DimAPI {}
 
 /// Layout broadcasting.
 ///
@@ -156,10 +155,8 @@ pub fn broadcast_layout<D1, D2>(
     layout2: &Layout<D2>,
 ) -> Result<(Layout<<D1 as DimMaxAPI<D2>>::Max>, Layout<<D1 as DimMaxAPI<D2>>::Max>)>
 where
-    D1: DimDevAPI + DimMaxAPI<D2>,
-    D2: DimDevAPI,
-    <D1 as DimMaxAPI<D2>>::Max: DimDevAPI + TryFrom<IxD>,
-    <<D1 as DimMaxAPI<D2>>::Max as DimBaseAPI>::Stride: TryFrom<Vec<isize>>,
+    D1: DimBaseAPI + DimMaxAPI<D2>,
+    D2: DimBaseAPI,
 {
     let shape1 = layout1.shape();
     let shape2 = layout2.shape();
@@ -169,15 +166,36 @@ where
     return Ok((layout1, layout2));
 }
 
+/// Layout broadcasting.
+///
+/// This function will broadcast the layout to the first layout.
+///
+/// # See also
+///
+/// [`broadcast_layout`]
+pub fn broadcast_layout_to_first<D1, D2>(
+    layout1: &Layout<D1>,
+    layout2: &Layout<D2>,
+) -> Result<(Layout<D1>, Layout<D1>)>
+where
+    D1: DimBaseAPI + DimMaxAPI<D2>,
+    D2: DimBaseAPI,
+    <D1 as DimMaxAPI<D2>>::Max: DimConvertAPI<D1>,
+{
+    let (layout1, layout2) = broadcast_layout(layout1, layout2)?;
+    let layout1 = layout1.into_dim::<D1>()?;
+    let layout2 = layout2.into_dim::<D1>()?;
+    return Ok((layout1, layout2));
+}
+
 fn update_layout_by_shape<D, DMax>(
     layout: &Layout<D>,
     shape: &DMax,
     broadcast_type: &[BroadcastType],
 ) -> Result<Layout<DMax>>
 where
-    D: DimDevAPI,
-    DMax: DimDevAPI,
-    DMax::Stride: TryFrom<Vec<isize>>,
+    D: DimBaseAPI,
+    DMax: DimBaseAPI,
 {
     let n_old = layout.ndim();
     let stride_old = layout.stride();
@@ -199,7 +217,7 @@ where
 
 impl<D> Layout<D>
 where
-    D: DimDevAPI,
+    D: DimBaseAPI,
 {
     /// Get the size of the non-broadcasted part.
     ///

@@ -95,18 +95,19 @@ where
     }
 }
 
-impl<T, D> OpAddAPI<T, D> for CpuDevice
+impl<T, TB, D> OpAddAPI<T, TB, D> for CpuDevice
 where
-    T: Add<Output = T> + Clone,
+    TB: Clone,
+    T: Add<TB, Output = T> + Clone,
     D: DimAPI,
 {
-    fn ternary_add(
+    fn add_ternary(
         &self,
         c: &mut Storage<T, CpuDevice>,
         lc: &Layout<D>,
         a: &Storage<T, CpuDevice>,
         la: &Layout<D>,
-        b: &Storage<T, CpuDevice>,
+        b: &Storage<TB, CpuDevice>,
         lb: &Layout<D>,
     ) -> Result<()> {
         let layouts_full = translate_to_col_major(&[lc, la, lb], TensorIterOrder::K)?;

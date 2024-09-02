@@ -3,17 +3,17 @@ pub struct DataOwned<S>
 where
     S: Sized,
 {
-    storage: S,
+    pub(crate) storage: S,
 }
 
 #[derive(Debug, Clone)]
 pub struct DataRef<'a, S> {
-    storage: &'a S,
+    pub(crate) storage: &'a S,
 }
 
 #[derive(Debug)]
 pub struct DataRefMut<'a, S> {
-    storage: &'a mut S,
+    pub(crate) storage: &'a mut S,
 }
 
 #[derive(Debug)]
@@ -56,8 +56,7 @@ pub trait DataAPI {
     fn into_owned(self) -> DataOwned<Self::Data>;
 }
 
-pub trait DataMutAPI {
-    type Data;
+pub trait DataMutAPI: DataAPI {
     fn as_storage_mut(&mut self) -> &mut Self::Data;
     fn as_ref_mut(&mut self) -> DataRefMut<Self::Data>;
 }
@@ -153,8 +152,10 @@ where
 
 /* #region impl DataMutAPI */
 
-impl<S> DataMutAPI for DataOwned<S> {
-    type Data = S;
+impl<S> DataMutAPI for DataOwned<S>
+where
+    S: Clone,
+{
     #[inline]
     fn as_storage_mut(&mut self) -> &mut Self::Data {
         &mut self.storage
@@ -165,8 +166,10 @@ impl<S> DataMutAPI for DataOwned<S> {
     }
 }
 
-impl<'a, S> DataMutAPI for DataRefMut<'a, S> {
-    type Data = S;
+impl<'a, S> DataMutAPI for DataRefMut<'a, S>
+where
+    S: Clone,
+{
     #[inline]
     fn as_storage_mut(&mut self) -> &mut Self::Data {
         self.storage
