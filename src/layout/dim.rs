@@ -154,7 +154,10 @@ pub trait DimMaxAPI<D2>
 where
     D2: DimBaseAPI,
 {
-    type Max: DimBaseAPI;
+    // This type will be used in many cases outside layout module.
+    // So we use `DimAPI` instead of `DimBaseAPI`, being convenient for
+    // functions outside this module.
+    type Max: DimAPI;
 }
 
 impl DimMaxAPI<IxD> for IxD {

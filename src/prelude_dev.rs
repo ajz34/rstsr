@@ -20,6 +20,9 @@ pub use crate::storage::op_basic::*;
 
 pub use crate::cpu_backend::device::*;
 
+#[allow(unused_imports)]
+pub(crate) use crate::dev_utilities::*;
+
 pub use crate::tensor::data::*;
 
 pub use crate::{Tensor, TensorBase};

@@ -21,5 +21,7 @@ pub mod format;
 
 pub mod cpu_backend;
 
+mod dev_utilities;
+
 #[cfg(feature = "cuda")]
 pub mod cuda_backend;

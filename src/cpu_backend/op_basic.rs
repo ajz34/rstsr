@@ -6,6 +6,9 @@ use crate::prelude_dev::*;
 use core::ops::Add;
 use num::Zero;
 
+// this value is used to determine whether to use contiguous inner iteration
+const CONTIG_SWITCH: usize = 16;
+
 /// Fold over the manually unrolled `xs` with `f`
 ///
 /// # See also
@@ -114,7 +117,7 @@ where
         let layouts_full_ref = layouts_full.iter().collect_vec();
         let (layouts_contig, size_contig) = translate_to_col_major_with_contig(&layouts_full_ref);
 
-        if size_contig >= 16 {
+        if size_contig >= CONTIG_SWITCH {
             let iter_c = IterLayoutColMajor::new(&layouts_contig[0])?;
             let iter_a = IterLayoutColMajor::new(&layouts_contig[1])?;
             let iter_b = IterLayoutColMajor::new(&layouts_contig[2])?;
@@ -144,7 +147,7 @@ where
         let layout = translate_to_col_major_unary(la, TensorIterOrder::K)?;
         let (layout_contig, size_contig) = translate_to_col_major_with_contig(&[&layout]);
 
-        if size_contig >= 16 {
+        if size_contig >= CONTIG_SWITCH {
             let mut sum = T::zero();
             let iter_a = IterLayoutColMajor::new(&layout_contig[0])?;
             for idx_a in iter_a {

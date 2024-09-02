@@ -66,7 +66,6 @@ where
         B: DeviceAPI<TB> + DeviceCreationAnyAPI<T>,
         // broadcast constraints
         D: DimMaxAPI<DB>,
-        <D as DimMaxAPI<DB>>::Max: DimAPI,
         // operation constraints
         T: Add<TB, Output = T> + Clone,
         B: OpAddAPI<T, TB, <D as DimMaxAPI<DB>>::Max>,
@@ -108,7 +107,6 @@ where
     B: DeviceAPI<T> + DeviceAPI<TB> + DeviceCreationAnyAPI<T>,
     // broadcast constraints
     D: DimMaxAPI<DB>,
-    <D as DimMaxAPI<DB>>::Max: DimAPI,
     T: Add<TB, Output = T> + Clone,
     B: OpAddAPI<T, TB, <D as DimMaxAPI<DB>>::Max>,
 {
@@ -125,9 +123,44 @@ mod test {
 
     #[test]
     fn test_add() {
-        let a = Tensor::linspace_cpu(0.0, 20.0, 21);
-        let b = Tensor::linspace_cpu(0.0, 20.0, 21);
+        // contiguous
+        let a = Tensor::linspace_cpu(1.0, 5.0, 5);
+        let b = Tensor::linspace_cpu(2.0, 10.0, 5);
         let c = &a + &b;
-        println!("{c:6.3?}");
+        let c_ref = vec![3., 6., 9., 12., 15.].into();
+        assert!(allclose_f64(&c, &c_ref));
+
+        // broadcast
+        // [2, 3] + [3]
+        let a = Tensor::linspace_cpu(1.0, 6.0, 6).into_shape_assume_contig::<Ix2>([2, 3]).unwrap();
+        let b = Tensor::linspace_cpu(2.0, 6.0, 3);
+        let c = &a + &b;
+        let c_ref = vec![3., 6., 9., 6., 9., 12.].into();
+        assert!(allclose_f64(&c, &c_ref));
+
+        // broadcast
+        // [1, 2, 3] + [5, 1, 2, 1]
+        // a = np.linspace(1, 6, 6).reshape(1, 2, 3)
+        // b = np.linspace(1, 10, 10).reshape(5, 1, 2, 1)
+        let a = Tensor::linspace_cpu(1.0, 6.0, 6);
+        let a = a.into_shape_assume_contig::<Ix3>([1, 2, 3]).unwrap();
+        let b = Tensor::linspace_cpu(1.0, 10.0, 10);
+        let b = b.into_shape_assume_contig::<Ix4>([5, 1, 2, 1]).unwrap();
+        let c = &a + &b;
+        let c_ref = vec![
+            2., 3., 4., 6., 7., 8., 4., 5., 6., 8., 9., 10., 6., 7., 8., 10., 11., 12., 8., 9.,
+            10., 12., 13., 14., 10., 11., 12., 14., 15., 16.,
+        ];
+        let c_ref = c_ref.into();
+        assert!(allclose_f64(&c, &c_ref));
+
+        // transposed
+        let a = Tensor::linspace_cpu(1.0, 9.0, 9);
+        let a = a.into_shape_assume_contig::<Ix2>([3, 3]).unwrap();
+        let b = Tensor::linspace_cpu(2.0, 18.0, 9);
+        let b = b.into_shape_assume_contig::<Ix2>([3, 3]).unwrap().into_reverse_axes();
+        let c = &a + &b;
+        let c_ref = vec![3., 10., 17., 8., 15., 22., 13., 20., 27.].into();
+        assert!(allclose_f64(&c, &c_ref));
     }
 }
