@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use crate::prelude_dev::*;
 
 /// Compare two tensors with f64 data type.

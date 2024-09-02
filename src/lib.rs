@@ -5,8 +5,8 @@
 
 pub mod prelude_dev;
 
-pub mod flags;
 pub mod error;
+pub mod flags;
 
 pub mod layout;
 pub use layout::{DimAPI, Layout};
@@ -22,6 +22,3 @@ pub mod format;
 pub mod cpu_backend;
 
 mod dev_utilities;
-
-#[cfg(feature = "cuda")]
-pub mod cuda_backend;

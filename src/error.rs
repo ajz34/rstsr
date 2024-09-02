@@ -14,6 +14,7 @@ pub enum Error {
     InvalidValue(String),
     InvalidLayout(String),
     RuntimeError(String),
+    DeviceMismatch(String),
 
     TryFromIntError(String),
     Infallible,
