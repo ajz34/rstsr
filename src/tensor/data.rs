@@ -61,6 +61,8 @@ pub trait DataMutAPI: DataAPI {
     fn as_ref_mut(&mut self) -> DataRefMut<Self::Data>;
 }
 
+pub trait DataOwnedAPI: DataMutAPI {}
+
 /* #region impl DataAPI */
 
 impl<S> DataAPI for DataOwned<S>
@@ -181,6 +183,10 @@ where
 }
 
 /* #endregion */
+
+/* #region DataOwnedAPI */
+
+impl<S> DataOwnedAPI for DataOwned<S> where S: Clone {}
 
 /* #region DataCow */
 
