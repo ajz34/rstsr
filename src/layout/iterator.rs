@@ -104,6 +104,40 @@ where
     return (layout, index);
 }
 
+/// This function will return a layout that is suitable for array copy.
+pub fn layout_for_array_copy<D>(layout: Layout<D>, order: TensorIterOrder) -> Result<Layout<D>>
+where
+    D: DimDevAPI,
+{
+    let layout = match order {
+        Order::C => layout.shape().c(),
+        Order::F => layout.shape().f(),
+        Order::A => {
+            if layout.c_contig() {
+                layout.shape().c()
+            } else if layout.f_contig() {
+                layout.shape().f()
+            } else {
+                match TensorOrder::default() {
+                    TensorOrder::C => layout.shape().c(),
+                    TensorOrder::F => layout.shape().f(),
+                }
+            }
+        },
+        Order::K => {
+            let (greedy, index) = greedy_layout(&layout, true);
+            let layout = greedy.shape().f();
+            let mut new_index = vec![0; index.len()];
+            for (idx, &i) in index.iter().enumerate() {
+                new_index[i] = idx as isize;
+            }
+            layout.transpose(&new_index)?
+        },
+        _ => rstsr_invalid!(order, "Iter order for copy only accepts CFAK.")?,
+    };
+    return Ok(layout);
+}
+
 /// Translate one layout to column-major iteration.
 ///
 /// For how parameter `it_type` works, we refer to definition of
@@ -118,7 +152,7 @@ where
 ///   otherwise raise err
 pub fn translate_to_col_major_unary<D>(
     layout: &Layout<D>,
-    it_ord: TensorIterOrder,
+    order: TensorIterOrder,
 ) -> Result<Layout<D>>
 where
     D: DimAPI,
@@ -143,7 +177,7 @@ where
         }
         Ok(unsafe { Layout::new_unchecked(shape, stride, l.offset()) })
     };
-    match it_ord {
+    match order {
         Order::C => fn_c(layout),
         Order::F => fn_f(layout),
         Order::A => {
@@ -187,7 +221,7 @@ where
 ///   otherwise raise err
 pub fn translate_to_col_major<D>(
     layouts: &[&Layout<D>],
-    it_ord: TensorIterOrder,
+    order: TensorIterOrder,
 ) -> Result<Vec<Layout<D>>>
 where
     D: DimAPI,
@@ -210,8 +244,8 @@ where
         "All shape of layout in this function must be the same."
     )?;
 
-    match it_ord {
-        Order::C | Order::F | Order::B => fn_single(layouts, it_ord),
+    match order {
+        Order::C | Order::F | Order::B => fn_single(layouts, order),
         Order::A => {
             let c_contig = layouts.iter().all(|&l| l.c_contig());
             let f_contig = layouts.iter().all(|&l| l.f_contig());
@@ -243,7 +277,7 @@ where
             let permute_index = permute_index.iter().map(|&i| i as isize).collect::<Vec<isize>>();
             layouts.iter().map(|l| l.transpose(&permute_index)).collect()
         },
-        Order::G => rstsr_invalid!(it_ord, "This option is not valid for multiple layouts")?,
+        Order::G => rstsr_invalid!(order, "This option is not valid for multiple layouts")?,
     }
 }
 
