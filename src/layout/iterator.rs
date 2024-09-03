@@ -52,7 +52,7 @@ where
     if keep_shape {
         // sort shape and strides if keep shape
         // - (shape = 1 / stride = 0) the smallest (pointer not moving for these cases)
-        // - if (shape = 1 / stride = 0, broadcastable axes) then compare shape
+        // - if (shape = 1 / stride = 0, broadcastable axes) preserve order
         // - (larger shape first) if not broadcastable axes, then compare stride size
         //   (smaller stride first)
         index.sort_by(|&i1, &i2| {
@@ -61,7 +61,7 @@ where
             let t1 = stride_old[i1];
             let t2 = stride_old[i2];
             match (d1 == 1 || t1 == 0, d2 == 1 || t2 == 0) {
-                (true, true) => d2.cmp(&d1),
+                (true, true) => i1.cmp(&i2),
                 (true, false) => core::cmp::Ordering::Less,
                 (false, true) => core::cmp::Ordering::Greater,
                 (false, false) => t1.cmp(&t2),
@@ -76,7 +76,7 @@ where
             let t1 = stride_old[i1];
             let t2 = stride_old[i2];
             match (d1 == 1 || t1 == 0, d2 == 1 || t2 == 0) {
-                (true, true) => d2.cmp(&d1),
+                (true, true) => i1.cmp(&i2),
                 (true, false) => core::cmp::Ordering::Greater,
                 (false, true) => core::cmp::Ordering::Less,
                 (false, false) => t1.cmp(&t2),
@@ -582,7 +582,7 @@ mod test {
             let expect = Layout::new_unchecked([2, 6, 5, 1, 1, 1], [10, 100, 1000, 0, 0, 0], 0);
             assert_eq!(greedy, expect);
             let (greedy, _) = greedy_layout(&layout, true);
-            let expect = Layout::new_unchecked([3, 1, 1, 2, 6, 5], [0, 10, 40, 10, 100, 1000], 0);
+            let expect = Layout::new_unchecked([1, 1, 3, 2, 6, 5], [10, 40, 0, 10, 100, 1000], 0);
             assert_eq!(greedy, expect);
         }
     }
@@ -594,51 +594,39 @@ mod test {
         let layout_trans = translate_to_col_major_unary(&layout, Order::C).unwrap();
         let iter = IterLayoutColMajor::new(&layout_trans).unwrap();
         let vec = iter.collect::<Vec<_>>();
-        assert_eq!(
-            vec,
-            [
-                782, 797, 812, 827, 842, 857, 602, 617, 632, 647, 662, 677, 785, 800, 815, 830,
-                845, 860, 605, 620, 635, 650, 665, 680, 788, 803, 818, 833, 848, 863, 608, 623,
-                638, 653, 668, 683
-            ]
-        );
+        assert_eq!(vec, [
+            782, 797, 812, 827, 842, 857, 602, 617, 632, 647, 662, 677, 785, 800, 815, 830, 845,
+            860, 605, 620, 635, 650, 665, 680, 788, 803, 818, 833, 848, 863, 608, 623, 638, 653,
+            668, 683
+        ]);
         // np.array(np.nditer(a, order="F"))
         let layout_trans = translate_to_col_major_unary(&layout, Order::F).unwrap();
         let iter = IterLayoutColMajor::new(&layout_trans).unwrap();
         let vec = iter.collect::<Vec<_>>();
-        assert_eq!(
-            vec,
-            [
-                782, 785, 788, 602, 605, 608, 797, 800, 803, 617, 620, 623, 812, 815, 818, 632,
-                635, 638, 827, 830, 833, 647, 650, 653, 842, 845, 848, 662, 665, 668, 857, 860,
-                863, 677, 680, 683
-            ]
-        );
+        assert_eq!(vec, [
+            782, 785, 788, 602, 605, 608, 797, 800, 803, 617, 620, 623, 812, 815, 818, 632, 635,
+            638, 827, 830, 833, 647, 650, 653, 842, 845, 848, 662, 665, 668, 857, 860, 863, 677,
+            680, 683
+        ]);
         // np.array(np.nditer(a, order="K"))
         let layout_trans = translate_to_col_major_unary(&layout, Order::K).unwrap();
         let iter = IterLayoutColMajor::new(&layout_trans).unwrap();
         let vec = iter.collect::<Vec<_>>();
-        assert_eq!(
-            vec,
-            [
-                602, 605, 608, 617, 620, 623, 632, 635, 638, 647, 650, 653, 662, 665, 668, 677,
-                680, 683, 782, 785, 788, 797, 800, 803, 812, 815, 818, 827, 830, 833, 842, 845,
-                848, 857, 860, 863
-            ]
-        );
+        assert_eq!(vec, [
+            602, 605, 608, 617, 620, 623, 632, 635, 638, 647, 650, 653, 662, 665, 668, 677, 680,
+            683, 782, 785, 788, 797, 800, 803, 812, 815, 818, 827, 830, 833, 842, 845, 848, 857,
+            860, 863
+        ]);
         // np.array(np.nditer(a, order="G"))
         // for no broadcast case, greedy-order is same as k-order
         let layout_trans = translate_to_col_major_unary(&layout, Order::K).unwrap();
         let iter = IterLayoutColMajor::new(&layout_trans).unwrap();
         let vec = iter.collect::<Vec<_>>();
-        assert_eq!(
-            vec,
-            [
-                602, 605, 608, 617, 620, 623, 632, 635, 638, 647, 650, 653, 662, 665, 668, 677,
-                680, 683, 782, 785, 788, 797, 800, 803, 812, 815, 818, 827, 830, 833, 842, 845,
-                848, 857, 860, 863
-            ]
-        );
+        assert_eq!(vec, [
+            602, 605, 608, 617, 620, 623, 632, 635, 638, 647, 650, 653, 662, 665, 668, 677, 680,
+            683, 782, 785, 788, 797, 800, 803, 812, 815, 818, 827, 830, 833, 842, 845, 848, 857,
+            860, 863
+        ]);
         // buffer should fail
         assert!(translate_to_col_major_unary(&layout, Order::B).is_err());
     }
