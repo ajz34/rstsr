@@ -128,15 +128,15 @@
 
 ### Data Type Categories
 
-| rust trait | data type category | dtypes |
+| rust trait or struct | data type category | dtypes |
 |-|-|-|
-| | Numeric | int8, int16, int32, int64, uint8, uint16, uint32, uint64, float32, float64, complex64, complex128 |
+| [`num::Num`] | Numeric | int8, int16, int32, int64, uint8, uint16, uint32, uint64, float32, float64, complex64, complex128 |
 | | Real-valued | int8, int16, int32, int64, uint8, uint16, uint32, uint64, float32, float64 |
-| | Integer | int8, int16, int32, int64, uint8, uint16, uint32, uint64 |
-| | Floating-point | float32, float64, complex64, complex128 |
-| | Real-valued floating-point | float32, float64 |
-| | Complex floating-point | complex64, complex128 |
-| | Boolean | bool |
+| [`num::Integer`] | Integer | int8, int16, int32, int64, uint8, uint16, uint32, uint64 |
+| [`num::complex::ComplexFloat`] | Floating-point | float32, float64, complex64, complex128 |
+| [`num::Float`] | Real-valued floating-point | float32, float64 |
+| [`num::Complex`] | Complex floating-point | complex64, complex128 |
+| [`bool`] | Boolean | bool |
 
 
 ## Element-wise Functions
@@ -244,14 +244,17 @@
 | Y | [`expand_dims`] | [`expand_dims`](https://data-apis.org/array-api/2023.12/API_specification/generated/array_api.expand_dims.html) | Expands the shape of an array by inserting a new axis (dimension) of size one at the position specified by `axis`. |
 | Y | [`flip`] | [`flip`](https://data-apis.org/array-api/2023.12/API_specification/generated/array_api.flip.html) | Reverses the order of elements in an array along the given axis. |
 | | | `moveaxis` | Moves array axes (dimensions) to new positions, while leaving other axes in their original positions. |
-| | | `permute_dims` | Permutes the axes (dimensions) of an array x. |
+| Y | [`transpose`], [`permute_dims`] | [`permute_dims`](https://data-apis.org/array-api/2023.12/API_specification/generated/array_api.permute_dims.html) | Permutes the axes (dimensions) of an array `x`. |
 | | | `repeat` | Repeats each element of an array a specified number of times on a per-element basis. |
 | | | `reshape` | Reshapes an array without changing its data. |
 | | | `roll` | Rolls array elements along a specified axis. |
-| | | `squeeze` | Removes singleton dimensions (axes) from x. |
+| P | [`squeeze`] | [`squeeze`](https://data-apis.org/array-api/2023.12/API_specification/generated/array_api.squeeze.html) | Removes singleton dimensions (axes) from x. |
 | | | `stack` | Joins a sequence of arrays along a new axis. |
 | | | `tile` | Constructs an array by tiling an input array. |
 | | | `unstack` | Splits an array into a sequence of arrays along the given axis. |
+
+Partial implementation:
+- [`squeeze`] accepts one axis as input, instead of accepting multiple axes. This is mostly because output of smaller dimension tensor can be fixed-dimension array ([`DimSmallerOneAPI::SmallerOne`]) when only one axis is passed as argument.
 
 ## Searching Functions
 

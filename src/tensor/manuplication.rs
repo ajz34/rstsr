@@ -138,110 +138,193 @@ where
 
 /* #endregion */
 
-/// Methods for tensor manipulation (dimension preserved).
+/* #region permute_dims */
+
+/// Permutes the axes (dimensions) of an array `x`.
+///
+/// # See also
+///
+/// - [Python array API standard: `permute_dims`](https://data-apis.org/array-api/2023.12/API_specification/generated/array_api.permute_dims.html)
+pub fn transpose<I, R, D>(tensor: TensorBase<R, D>, axes: &[I]) -> Result<TensorBase<R, D>>
+where
+    R: DataAPI,
+    D: DimAPI,
+    I: TryInto<isize> + Copy,
+{
+    let axes =
+        axes.iter().map(|&x| x.try_into().map_err(|_| "Into isize failed").unwrap()).collect_vec();
+    let layout = tensor.layout().transpose(&axes)?;
+    unsafe { Ok(TensorBase::new_unchecked(tensor.data, layout)) }
+}
+
+pub use transpose as permute_dims;
+
 impl<R, D> TensorBase<R, D>
 where
     R: DataAPI,
     D: DimAPI,
 {
-    /// Permutes the axes (dimensions) of an array.
+    /// Permutes the axes (dimensions) of an array `x`.
     ///
     /// # See also
     ///
-    /// - [Python array API standard: `permute_dims`](https://data-apis.org/array-api/2023.12/API_specification/generated/array_api.permute_dims.html)
+    /// [`transpose`]
     pub fn transpose<I>(&self, axes: &[I]) -> Result<TensorBase<DataRef<'_, R::Data>, D>>
     where
-        I: TryInto<isize, Error = TryFromIntError> + Copy,
+        I: TryInto<isize> + Copy,
     {
-        self.view().into_transpose(axes)
+        transpose(self.view(), axes)
     }
 
-    /// Permutes the axes (dimensions) of an array.
+    /// Permutes the axes (dimensions) of an array `x`.
     ///
     /// # See also
     ///
-    /// [`Tensor::transpose`]
+    /// [`transpose`]
     pub fn into_transpose<I>(self, axes: &[I]) -> Result<TensorBase<R, D>>
     where
-        I: TryInto<isize, Error = TryFromIntError> + Copy,
+        I: TryInto<isize> + Copy,
     {
-        let axes = axes.iter().map(|&x| x.try_into().unwrap()).collect::<Vec<isize>>();
-        let layout = self.layout().transpose(&axes)?;
-        unsafe { Ok(TensorBase::new_unchecked(self.data, layout)) }
+        transpose(self, axes)
     }
 
-    /// Permutes the axes (dimensions) of an array.
+    /// Permutes the axes (dimensions) of an array `x`.
     ///
     /// # See also
     ///
-    /// [`Tensor::transpose`]
+    /// [`transpose`]
     pub fn permute_dims<I>(&self, axes: &[I]) -> Result<TensorBase<DataRef<'_, R::Data>, D>>
     where
-        I: TryInto<isize, Error = TryFromIntError> + Copy,
+        I: TryInto<isize> + Copy,
     {
-        self.view().into_transpose(axes)
+        transpose(self.view(), axes)
     }
 
-    /// Permutes the axes (dimensions) of an array.
+    /// Permutes the axes (dimensions) of an array `x`.
     ///
     /// # See also
     ///
-    /// [`Tensor::transpose`]
+    /// [`transpose`]
     pub fn into_permute_dims<I>(self, axes: &[I]) -> Result<TensorBase<R, D>>
     where
-        I: TryInto<isize, Error = TryFromIntError> + Copy,
+        I: TryInto<isize> + Copy,
     {
-        self.into_transpose(axes)
-    }
-
-    /// Reverse the order of elements in an array along the given axis.
-    pub fn reverse_axes(&self) -> TensorBase<DataRef<'_, R::Data>, D> {
-        self.view().into_reverse_axes()
-    }
-
-    /// Reverse the order of elements in an array along the given axis.
-    ///
-    /// # See also
-    ///
-    /// [`Tensor::reverse_axes`]
-    pub fn into_reverse_axes(self) -> TensorBase<R, D>
-    where
-        R: DataAPI,
-        D: DimAPI,
-    {
-        let layout = self.layout().reverse_axes();
-        unsafe { TensorBase::new_unchecked(self.data, layout) }
-    }
-
-    /// Interchange two axes of an array.
-    ///
-    /// # See also
-    ///
-    /// - [numpy `swapaxes`](https://numpy.org/doc/stable/reference/generated/numpy.swapaxes.html)
-    pub fn swapaxes<I>(&self, axis1: I, axis2: I) -> TensorBase<DataRef<'_, R::Data>, D>
-    where
-        I: TryInto<isize, Error = TryFromIntError>,
-    {
-        self.view().into_swapaxes(axis1, axis2)
-    }
-
-    /// Interchange two axes of an array.
-    ///
-    /// # See also
-    ///
-    /// [`Tensor::swapaxes`].
-    pub fn into_swapaxes<I>(self, axis1: I, axis2: I) -> TensorBase<R, D>
-    where
-        I: TryInto<isize, Error = TryFromIntError>,
-    {
-        let axis1 = axis1.try_into().unwrap();
-        let axis2 = axis2.try_into().unwrap();
-        let layout = self.layout().swapaxes(axis1, axis2).unwrap();
-        unsafe { TensorBase::new_unchecked(self.data, layout) }
+        transpose(self, axes)
     }
 }
 
-/// Methods for tensor manipulation (dimension shrinked).
+/* #endregion */
+
+/* #region reverse_axes */
+
+/// Reverse the order of elements in an array along the given axis.
+pub fn reverse_axes<R, D>(tensor: TensorBase<R, D>) -> TensorBase<R, D>
+where
+    R: DataAPI,
+    D: DimAPI,
+{
+    let layout = tensor.layout().reverse_axes();
+    unsafe { TensorBase::new_unchecked(tensor.data, layout) }
+}
+
+impl<R, D> TensorBase<R, D>
+where
+    R: DataAPI,
+    D: DimAPI,
+{
+    /// Reverse the order of elements in an array along the given axis.
+    ///
+    /// # See also
+    ///
+    /// [`reverse_axes`]
+    pub fn reverse_axes(&self) -> TensorBase<DataRef<'_, R::Data>, D> {
+        reverse_axes(self.view())
+    }
+
+    /// Reverse the order of elements in an array along the given axis.
+    ///
+    /// # See also
+    ///
+    /// [`reverse_axes`]
+    pub fn into_reverse_axes(self) -> TensorBase<R, D> {
+        reverse_axes(self)
+    }
+}
+
+/* #endregion */
+
+/* #region swapaxes */
+
+/// Interchange two axes of an array.
+///
+/// # See also
+///
+/// - [numpy `swapaxes`](https://numpy.org/doc/stable/reference/generated/numpy.swapaxes.html)
+pub fn swapaxes<I, R, D>(tensor: TensorBase<R, D>, axis1: I, axis2: I) -> TensorBase<R, D>
+where
+    R: DataAPI,
+    D: DimAPI,
+    I: TryInto<isize>,
+{
+    let axis1 = axis1.try_into().map_err(|_| "Into isize failed").unwrap();
+    let axis2 = axis2.try_into().map_err(|_| "Into isize failed").unwrap();
+    let layout = tensor.layout().swapaxes(axis1, axis2).unwrap();
+    unsafe { TensorBase::new_unchecked(tensor.data, layout) }
+}
+
+impl<R, D> TensorBase<R, D>
+where
+    R: DataAPI,
+    D: DimAPI,
+{
+    /// Interchange two axes of an array.
+    ///
+    /// # See also
+    ///
+    /// [`swapaxes`]
+    pub fn swapaxes<I>(&self, axis1: I, axis2: I) -> TensorBase<DataRef<'_, R::Data>, D>
+    where
+        I: TryInto<isize>,
+    {
+        swapaxes(self.view(), axis1, axis2)
+    }
+
+    /// Interchange two axes of an array.
+    ///
+    /// # See also
+    ///
+    /// [`swapaxes`]
+    pub fn into_swapaxes<I>(self, axis1: I, axis2: I) -> TensorBase<R, D>
+    where
+        I: TryInto<isize>,
+    {
+        swapaxes(self, axis1, axis2)
+    }
+}
+
+/* #endregion */
+
+/* #region squeeze */
+
+/// Removes singleton dimensions (axes) from `x`.
+///
+/// # See also
+///
+/// [Python array API standard: `squeeze`](https://data-apis.org/array-api/2023.12/API_specification/generated/array_api.squeeze.html)
+pub fn squeeze<I, R, D>(tensor: TensorBase<R, D>, axis: I) -> Result<TensorBase<R, D::SmallerOne>>
+where
+    R: DataAPI,
+    D: DimAPI + DimSmallerOneAPI,
+    D::SmallerOne: DimAPI,
+    Layout<D::SmallerOne>: TryFrom<Layout<IxD>, Error = Error>,
+    I: TryInto<isize>,
+{
+    let axis = axis.try_into().map_err(|_| "Into isize failed").unwrap(); // almost safe to unwrap
+    let layout = tensor.layout().dim_eliminate(axis)?;
+    let layout = layout.try_into().unwrap(); // safe to unwrap
+    unsafe { Ok(TensorBase::new_unchecked(tensor.data, layout)) }
+}
+
 impl<R, D> TensorBase<R, D>
 where
     R: DataAPI,
@@ -249,33 +332,32 @@ where
     D::SmallerOne: DimAPI,
     Layout<D::SmallerOne>: TryFrom<Layout<IxD>, Error = Error>,
 {
-    /// Removes singleton dimensions (axes).
+    /// Removes singleton dimensions (axes) from `x`.
     ///
     /// # See also
     ///
-    /// - [Python array API standard: `squeeze`](https://data-apis.org/array-api/2023.12/API_specification/generated/array_api.squeeze.html)
+    /// [`squeeze`]
     pub fn squeeze<I>(&self, axis: I) -> Result<TensorBase<DataRef<'_, R::Data>, D::SmallerOne>>
     where
-        I: TryInto<isize, Error = TryFromIntError>,
+        I: TryInto<isize>,
     {
-        self.view().into_squeeze(axis)
+        squeeze(self.view(), axis)
     }
 
-    /// Removes singleton dimensions (axes).
+    /// Removes singleton dimensions (axes) from `x`.
     ///
     /// # See also
     ///
-    /// [`Tensor::squeeze`]
+    /// [`squeeze`]
     pub fn into_squeeze<I>(self, axis: I) -> Result<TensorBase<R, D::SmallerOne>>
     where
-        I: TryInto<isize, Error = TryFromIntError>,
+        I: TryInto<isize>,
     {
-        let axis = axis.try_into().unwrap(); // almost safe to unwrap
-        let layout = self.layout().dim_eliminate(axis)?;
-        let layout = layout.try_into().unwrap(); // safe to unwrap
-        unsafe { Ok(TensorBase::new_unchecked(self.data, layout)) }
+        squeeze(self, axis)
     }
 }
+
+/* #endregion */
 
 /// Methods for tensor shape change without data clone.
 impl<R, D> TensorBase<R, D>
