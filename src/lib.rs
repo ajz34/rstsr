@@ -1,7 +1,7 @@
 #![allow(refining_impl_trait)]
 #![allow(clippy::needless_return)]
 #![cfg_attr(not(test), no_std)]
-#![doc = include_str!("readme.md")]
+#![doc = include_str!("docs/lib.md")]
 
 pub mod prelude_dev;
 
@@ -22,3 +22,10 @@ pub mod format;
 pub mod cpu_backend;
 
 mod dev_utilities;
+
+pub mod doc_api_specification {
+    #![doc = include_str!("docs/api_specification.md")]
+
+    #[allow(unused_imports)]
+    use crate::prelude_dev::*;
+}

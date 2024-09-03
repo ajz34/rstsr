@@ -24,6 +24,7 @@ pub use crate::cpu_backend::device::*;
 pub(crate) use crate::dev_utilities::*;
 
 pub use crate::tensor::data::*;
+pub use crate::tensor::layout_manuplication::*;
 
 pub use crate::{Tensor, TensorBase};
 

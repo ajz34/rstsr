@@ -17,6 +17,32 @@
 use crate::prelude_dev::*;
 use core::num::TryFromIntError;
 
+/* #region expand_dims */
+
+/// Expands the shape of an array by inserting a new axis (dimension) of size
+/// one at the position specified by `axis`.
+///
+/// # Panics
+///
+/// - If `axis` is greater than the number of axes in the original tensor.
+///
+/// # See also
+///
+/// [Python Array API standard: `expand_dims`](https://data-apis.org/array-api/2023.12/API_specification/generated/array_api.expand_dims.html)
+pub fn expand_dims<I, R, D>(tensor: TensorBase<R, D>, axis: I) -> TensorBase<R, D::LargerOne>
+where
+    R: DataAPI,
+    D: DimAPI + DimLargerOneAPI,
+    D::LargerOne: DimAPI,
+    Layout<D::LargerOne>: TryFrom<Layout<IxD>, Error = Error>,
+    I: TryInto<isize, Error = TryFromIntError>,
+{
+    let axis = axis.try_into().unwrap(); // almost safe to unwrap
+    let layout = tensor.layout().dim_insert(axis).unwrap();
+    let layout = layout.try_into().unwrap(); // safe to unwrap
+    unsafe { TensorBase::new_unchecked(tensor.data, layout) }
+}
+
 /// Methods for tensor manipulation (dimension expanded).
 impl<R, D> TensorBase<R, D>
 where
@@ -25,55 +51,92 @@ where
     D::LargerOne: DimAPI,
     Layout<D::LargerOne>: TryFrom<Layout<IxD>, Error = Error>,
 {
-    /// Expand the shape of tensor.
-    ///
-    /// Insert a new axis that will appear at the `axis` position in the
-    /// expanded tensor shape.
-    ///
-    /// # Arguments
-    ///
-    /// * `axis` - The position in the expanded axes where the new axis is
-    ///   placed.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// use rstsr::Tensor;
-    /// let a = Tensor::<f64, _>::zeros_cpu([4, 9, 8]);
-    /// let b = a.expand_dims(2);
-    /// assert_eq!(b.shape(), &[4, 9, 1, 8]);
-    /// ```
-    ///
-    /// # Panics
-    ///
-    /// - If `axis` is greater than the number of axes in the original tensor.
+    /// Expands the shape of an array by inserting a new axis (dimension) of
+    /// size one at the position specified by `axis`.
     ///
     /// # See also
     ///
-    /// - [numpy.expand_dims](https://numpy.org/doc/stable/reference/generated/numpy.expand_dims.html)
-    /// - [Python array API standard: `expand_dims`](https://data-apis.org/array-api/2023.12/API_specification/generated/array_api.expand_dims.html)
+    /// [`expand_dims`]
     pub fn expand_dims<I>(&self, axis: I) -> TensorBase<DataRef<'_, R::Data>, D::LargerOne>
     where
         I: TryInto<isize, Error = TryFromIntError>,
     {
-        self.view().into_expand_dims(axis)
+        expand_dims(self.view(), axis)
     }
 
-    /// Expand the shape of tensor.
+    /// Expands the shape of an array by inserting a new axis (dimension) of
+    /// size one at the position specified by `axis`.
     ///
     /// # See also
     ///
-    /// [`Tensor::expand_dims`]
+    /// [`expand_dims`]
     pub fn into_expand_dims<I>(self, axis: I) -> TensorBase<R, D::LargerOne>
     where
         I: TryInto<isize, Error = TryFromIntError>,
     {
-        let axis = axis.try_into().unwrap(); // almost safe to unwrap
-        let layout = self.layout().dim_insert(axis).unwrap();
-        let layout = layout.try_into().unwrap(); // safe to unwrap
-        unsafe { TensorBase::new_unchecked(self.data, layout) }
+        expand_dims(self, axis)
     }
 }
+
+/* #endregion */
+
+/* #region flip */
+
+/// Reverses the order of elements in an array along the given axis.
+///
+/// # Panics
+///
+/// - If some index in `axis` is greater than the number of axes in the original
+///   tensor.
+///
+/// # See also
+///
+/// [Python array API standard: `flip`](https://data-apis.org/array-api/2023.12/API_specification/generated/array_api.flip.html)
+pub fn flip<I, R, D>(tensor: TensorBase<R, D>, axes: &[I]) -> TensorBase<R, D>
+where
+    R: DataAPI,
+    D: DimAPI,
+    I: TryInto<isize> + Copy,
+{
+    let mut layout = tensor.layout().clone();
+    for &axis in axes.iter() {
+        let axis = axis.try_into().map_err(|_| "Into isize failed").unwrap();
+        layout = layout.dim_narrow(axis, slice!(None, None, -1)).unwrap();
+    }
+    unsafe { TensorBase::new_unchecked(tensor.data, layout) }
+}
+
+impl<R, D> TensorBase<R, D>
+where
+    R: DataAPI,
+    D: DimAPI,
+{
+    /// Reverses the order of elements in an array along the given axis.
+    ///
+    /// # See also
+    ///
+    /// [`flip`]
+    pub fn flip<I>(&self, axis: I) -> TensorBase<DataRef<'_, R::Data>, D>
+    where
+        I: TryInto<isize> + Copy,
+    {
+        flip(self.view(), &[axis])
+    }
+
+    /// Reverses the order of elements in an array along the given axis.
+    ///
+    /// # See also
+    ///
+    /// [`flip`]
+    pub fn into_flip<I>(self, axis: I) -> TensorBase<R, D>
+    where
+        I: TryInto<isize> + Copy,
+    {
+        flip(self, &[axis])
+    }
+}
+
+/* #endregion */
 
 /// Methods for tensor manipulation (dimension preserved).
 impl<R, D> TensorBase<R, D>
@@ -174,42 +237,6 @@ where
         let axis1 = axis1.try_into().unwrap();
         let axis2 = axis2.try_into().unwrap();
         let layout = self.layout().swapaxes(axis1, axis2).unwrap();
-        unsafe { TensorBase::new_unchecked(self.data, layout) }
-    }
-
-    /// Reverses the order of elements in an array along the given axis.
-    ///
-    /// The shape of the array must be preserved.
-    ///
-    /// # Arguments
-    ///
-    /// * `axis` - The axis to flip on.
-    ///
-    /// # Panics
-    ///
-    /// - If `axis` is greater than the number of axes in the original tensor.
-    ///
-    /// # See also
-    ///
-    /// - [Python array API standard: `flip`](https://data-apis.org/array-api/2023.12/API_specification/generated/array_api.flip.html)
-    pub fn flip<I>(&self, axis: I) -> TensorBase<DataRef<'_, R::Data>, D>
-    where
-        I: TryInto<isize, Error = TryFromIntError>,
-    {
-        self.view().into_flip(axis)
-    }
-
-    /// Reverses the order of elements in an array along the given axis.
-    ///
-    /// # See also
-    ///
-    /// [`Tensor::flip`]
-    pub fn into_flip<I>(self, axis: I) -> TensorBase<R, D>
-    where
-        I: TryInto<isize, Error = TryFromIntError>,
-    {
-        let axis = axis.try_into().unwrap(); // almost safe to unwrap
-        let layout = self.layout().dim_narrow(axis, slice!(None, None, -1)).unwrap();
         unsafe { TensorBase::new_unchecked(self.data, layout) }
     }
 }

@@ -65,15 +65,9 @@ impl_changeable_default!(
 
 /* #endregion */
 
-/* #region TensorIterPolicy */
+/* #region TensorIterOrder */
 
 /// The policy of the tensor iterator.
-///
-/// # Default
-///
-/// Default iteration policy is [`TensorIterPolicy::K`].
-///
-/// You may change default value by [`TensorIterPolicy::change_default`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TensorIterOrder {
     /// Row-major order.
