@@ -31,17 +31,20 @@ pub fn greedy_layout<D>(layout: &Layout<D>, keep_shape: bool) -> (Layout<D>, Vec
 where
     D: DimDevAPI,
 {
+    let mut layout = layout.clone();
+
     // if no elements in layout, return itself
     if layout.size() == 0 {
         return (layout.clone(), (0..layout.ndim()).collect::<Vec<usize>>());
     }
 
-    // revert negative strides
-    let mut layout = layout.clone();
-    for n in 0..layout.ndim() {
-        if layout.stride()[n] < 0 {
-            // should not panic here
-            layout = layout.dim_narrow(n as isize, slice!(None, None, -1)).unwrap();
+    // revert negative strides if keep_shape is not required
+    if keep_shape {
+        for n in 0..layout.ndim() {
+            if layout.stride()[n] < 0 {
+                // should not panic here
+                layout = layout.dim_narrow(n as isize, slice!(None, None, -1)).unwrap();
+            }
         }
     }
 
@@ -64,7 +67,7 @@ where
                 (true, true) => i1.cmp(&i2),
                 (true, false) => core::cmp::Ordering::Less,
                 (false, true) => core::cmp::Ordering::Greater,
-                (false, false) => t1.cmp(&t2),
+                (false, false) => t1.abs().cmp(&t2.abs()),
             }
         });
     } else {
@@ -79,7 +82,7 @@ where
                 (true, true) => i1.cmp(&i2),
                 (true, false) => core::cmp::Ordering::Greater,
                 (false, true) => core::cmp::Ordering::Less,
-                (false, false) => t1.cmp(&t2),
+                (false, false) => t1.abs().cmp(&t2.abs()),
             }
         });
     }
@@ -219,6 +222,8 @@ where
 /// - G: invalid option here
 /// - B:sequential memory; valid option if `size = bound_max - bound_min`,
 ///   otherwise raise err
+///
+/// This operation will not flip any strides.
 pub fn translate_to_col_major<D>(
     layouts: &[&Layout<D>],
     order: TensorIterOrder,
@@ -232,8 +237,8 @@ where
 
     // this function will map all layouts to column-major iteration by a single
     // iter-order.
-    let fn_single = |ls: &[&Layout<D>], it_type| {
-        ls.iter().map(|l| translate_to_col_major_unary(l, it_type)).collect()
+    let fn_single = |ls: &[&Layout<D>], order| {
+        ls.iter().map(|l| translate_to_col_major_unary(l, order)).collect()
     };
 
     // make sure all layouts have the same shape
@@ -618,6 +623,13 @@ mod test {
             let (greedy, _) = greedy_layout(&layout, true);
             let expect = Layout::new_unchecked([1, 1, 3, 2, 6, 5], [10, 40, 0, 10, 100, 1000], 0);
             assert_eq!(greedy, expect);
+            // negative strides
+            let layout = [2, 3, 4].f().dim_narrow(1, slice!(None, None, -1)).unwrap();
+            let layout = layout.swapaxes(-1, -2).unwrap();
+            let (greedy, _) = greedy_layout(&layout, true);
+            assert_eq!(greedy, [2, 3, 4].f());
+            let (greedy, _) = greedy_layout(&layout, false);
+            assert_eq!(greedy, [2, 3, 4].f().dim_narrow(1, slice!(None, None, -1)).unwrap());
         }
     }
 

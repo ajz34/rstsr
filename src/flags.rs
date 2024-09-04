@@ -108,50 +108,28 @@ pub enum TensorIterOrder {
     B,
 }
 
-/// TODO: this is to be further implemented.
-#[non_exhaustive]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TensorIterType {
-    General,
-    Tril,
-    Triu,
-    Diag,
-    UnTril,
-    UnTriu,
-    UnDiag,
-}
-
-impl_changeable_default!(TensorIterType, DEFAULT_TENSOR_ITER_TYPE, TensorIterType::General);
+impl_changeable_default!(TensorIterOrder, DEFAULT_TENSOR_ITER_ORDER, TensorIterOrder::K);
 
 /* #endregion */
 
-/* #region TensorParallelPolicy */
+/* #region TensorCopyPolicy */
 
-/// The policy of the tensor parallel.
-///
-/// # Default
-///
-/// Default parallel policy is [`TensorParallelPolicy::ParallelCPU`].
-///
-/// You may change default value by [`TensorParallelPolicy::change_default`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TensorParallelPolicy {
-    /// always serial
-    Serial,
-    /// parallel in most cases, serial when inside rayon threads or device is
-    /// not CPU (e.g. inside rayon::par_iter)
-    ParallelCPU,
-    /// parallel in most cases, serial when inside rayon threads
-    /// (e.g. inside rayon::par_iter)
-    Parallel,
-    /// always parallel
-    ParallelForce,
+/// The policy of copying tensor.
+pub mod TensorCopyPolicy {
+    #![allow(non_snake_case)]
+    #![allow(non_upper_case_globals)]
+
+    // this is a workaround in stable rust
+    // when const enum can not be used as generic parameters
+
+    /// Copy when needed
+    pub const Needed: i8 = 0;
+    /// Force copy
+    pub const Copy: i8 = 1;
+    /// Force not copy; and when copy is required, it will emit error
+    pub const NoCopy: i8 = 2;
+
+    pub const Default: i8 = Needed;
 }
-
-impl_changeable_default!(
-    TensorParallelPolicy,
-    DEFAULT_TENSOR_PARALLEL_POLICY,
-    TensorParallelPolicy::ParallelCPU
-);
 
 /* #endregion */

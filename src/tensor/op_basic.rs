@@ -263,6 +263,21 @@ mod test {
         let c = &a + &b;
         let c_ref = vec![3., 10., 17., 8., 15., 22., 13., 20., 27.].into();
         assert!(allclose_f64(&c, &c_ref));
+
+        // negative strides
+        let a = Tensor::linspace_cpu(1.0, 5.0, 5);
+        let b = Tensor::linspace_cpu(2.0, 10.0, 5);
+        let a = a.flip(0);
+        let c = &a + &b;
+        let c_ref = vec![7., 8., 9., 10., 11.].into();
+        assert!(allclose_f64(&c, &c_ref));
+
+        let a = Tensor::linspace_cpu(1.0, 5.0, 5);
+        let b = Tensor::linspace_cpu(2.0, 10.0, 5);
+        let b = b.flip(0);
+        let c = &a + &b;
+        let c_ref = vec![11., 10., 9., 8., 7.].into();
+        assert!(allclose_f64(&c, &c_ref));
     }
 
     #[test]
