@@ -1,21 +1,6 @@
 use crate::prelude_dev::*;
 use num::Zero;
 
-pub trait OpAssignAPI<T, DC, DA>
-where
-    DC: DimAPI,
-    DA: DimAPI,
-    Self: DeviceAPI<T>,
-{
-    fn assign_arbitary_layout(
-        &self,
-        c: &mut Storage<T, Self>,
-        lc: &Layout<DC>,
-        a: &Storage<T, Self>,
-        la: &Layout<DA>,
-    ) -> Result<()>;
-}
-
 /* #region ternary-op */
 
 macro_rules! trait_op_api {

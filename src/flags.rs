@@ -117,19 +117,20 @@ impl_changeable_default!(TensorIterOrder, DEFAULT_TENSOR_ITER_ORDER, TensorIterO
 /// The policy of copying tensor.
 pub mod TensorCopyPolicy {
     #![allow(non_snake_case)]
-    #![allow(non_upper_case_globals)]
 
     // this is a workaround in stable rust
     // when const enum can not be used as generic parameters
 
-    /// Copy when needed
-    pub const Needed: i8 = 0;
-    /// Force copy
-    pub const Copy: i8 = 1;
-    /// Force not copy; and when copy is required, it will emit error
-    pub const NoCopy: i8 = 2;
+    pub type FlagCopy = u8;
 
-    pub const Default: i8 = Needed;
+    /// Copy when needed
+    pub const COPY_NEEDED: FlagCopy = 0;
+    /// Force copy
+    pub const COPY_TRUE: FlagCopy = 1;
+    /// Force not copy; and when copy is required, it will emit error
+    pub const COPY_FALSE: FlagCopy = 2;
+
+    pub const DEFAULT: FlagCopy = COPY_NEEDED;
 }
 
 /* #endregion */

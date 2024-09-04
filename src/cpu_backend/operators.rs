@@ -53,51 +53,6 @@ where
     acc
 }
 
-impl<T, DC, DA> OpAssignAPI<T, DC, DA> for CpuDevice
-where
-    T: Clone,
-    DC: DimAPI,
-    DA: DimAPI,
-{
-    fn assign_arbitary_layout(
-        &self,
-        c: &mut Storage<T, Self>,
-        lc: &Layout<DC>,
-        a: &Storage<T, Self>,
-        la: &Layout<DA>,
-    ) -> Result<()> {
-        if lc.c_contig() && la.c_contig() || lc.f_contig() && la.f_contig() {
-            let offset_c = lc.offset();
-            let offset_a = la.offset();
-            let size = lc.size();
-            for i in 0..size {
-                c.rawvec[offset_c + i] = a.rawvec[offset_a + i].clone();
-            }
-        } else {
-            let order = {
-                if lc.c_prefer() && la.c_prefer() {
-                    TensorIterOrder::C
-                } else if lc.f_prefer() && la.f_prefer() {
-                    TensorIterOrder::F
-                } else {
-                    match TensorOrder::default() {
-                        TensorOrder::C => TensorIterOrder::C,
-                        TensorOrder::F => TensorIterOrder::F,
-                    }
-                }
-            };
-            let lc = translate_to_col_major_unary(lc, order)?;
-            let la = translate_to_col_major_unary(la, order)?;
-            let iter_c = IterLayoutColMajor::new(&lc)?;
-            let iter_a = IterLayoutColMajor::new(&la)?;
-            for (idx_c, idx_a) in izip!(iter_c, iter_a) {
-                c.rawvec[idx_c] = a.rawvec[idx_a].clone();
-            }
-        }
-        return Ok(());
-    }
-}
-
 /* #region ternary-op */
 
 macro_rules! impl_op_api {

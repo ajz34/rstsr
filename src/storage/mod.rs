@@ -1,7 +1,9 @@
+pub mod assignment;
 pub mod creation;
 pub mod device;
-pub mod op_basic;
+pub mod operators;
 
+pub use assignment::*;
 pub use creation::*;
 pub use device::*;
-pub use op_basic::*;
+pub use operators::*;

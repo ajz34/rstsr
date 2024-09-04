@@ -459,7 +459,7 @@ where
     pub fn reshape<D2>(&self, shape: D2) -> TensorBase<DataCow<'_, R::Data>, D2>
     where
         D2: DimAPI,
-        B: OpAssignAPI<T, D2, D>,
+        B: OpAssignArbitaryAPI<T, D2, D>,
     {
         self.to_shape(shape)
     }
@@ -472,7 +472,7 @@ where
     pub fn to_shape<D2>(&self, shape: D2) -> TensorBase<DataCow<'_, R::Data>, D2>
     where
         D2: DimAPI,
-        B: OpAssignAPI<T, D2, D>,
+        B: OpAssignArbitaryAPI<T, D2, D>,
     {
         rstsr_assert_eq!(self.size(), shape.shape_size(), InvalidLayout).unwrap();
         let result = self.to_shape_assume_contig(shape.clone());
@@ -487,12 +487,7 @@ where
             let layout_new = shape.new_contig(None);
             let mut storage_new = unsafe { device.empty_impl(layout_new.size()).unwrap() };
             device
-                .assign_arbitary_layout(
-                    &mut storage_new,
-                    &layout_new,
-                    self.storage(),
-                    self.layout(),
-                )
+                .assign_arbitary(&mut storage_new, &layout_new, self.storage(), self.layout())
                 .unwrap();
             let data_new = DataCow::Owned(storage_new.into());
             TensorBase { data: data_new, layout: layout_new }
