@@ -130,7 +130,7 @@ pub mod TensorCopyPolicy {
     /// Force not copy; and when copy is required, it will emit error
     pub const COPY_FALSE: FlagCopy = 2;
 
-    pub const DEFAULT: FlagCopy = COPY_NEEDED;
+    pub const COPY_DEFAULT: FlagCopy = COPY_NEEDED;
 }
 
 /* #endregion */

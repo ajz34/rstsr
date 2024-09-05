@@ -1,3 +1,5 @@
+use core::mem::ManuallyDrop;
+
 #[derive(Debug, Clone)]
 pub struct DataOwned<S>
 where
@@ -7,8 +9,9 @@ where
 }
 
 #[derive(Debug, Clone)]
-pub struct DataRef<'a, S> {
-    pub(crate) storage: &'a S,
+pub enum DataRef<'a, S> {
+    TrueRef(&'a S),
+    ManuallyDropOwned(ManuallyDrop<S>),
 }
 
 #[derive(Debug)]
@@ -49,6 +52,20 @@ impl<S> DataOwned<S> {
     }
 }
 
+impl<'a, S> From<&'a S> for DataRef<'a, S> {
+    #[inline]
+    fn from(data: &'a S) -> Self {
+        DataRef::TrueRef(data)
+    }
+}
+
+impl<'a, S> DataRef<'a, S> {
+    #[inline]
+    pub fn from_manually_drop(data: ManuallyDrop<S>) -> Self {
+        DataRef::ManuallyDropOwned(data)
+    }
+}
+
 pub trait DataAPI {
     type Data: Clone;
     fn storage(&self) -> &Self::Data;
@@ -70,14 +87,17 @@ where
     S: Clone,
 {
     type Data = S;
+
     #[inline]
     fn storage(&self) -> &Self::Data {
         &self.storage
     }
+
     #[inline]
     fn as_ref(&self) -> DataRef<Self::Data> {
-        DataRef { storage: &self.storage }
+        DataRef::from(&self.storage)
     }
+
     #[inline]
     fn into_owned(self) -> DataOwned<Self::Data> {
         self
@@ -89,17 +109,32 @@ where
     S: Clone,
 {
     type Data = S;
+
     #[inline]
     fn storage(&self) -> &Self::Data {
-        self.storage
+        match self {
+            DataRef::TrueRef(storage) => storage,
+            DataRef::ManuallyDropOwned(storage) => storage,
+        }
     }
+
     #[inline]
     fn as_ref(&self) -> DataRef<Self::Data> {
-        self.clone()
+        match self {
+            DataRef::TrueRef(storage) => DataRef::TrueRef(storage),
+            DataRef::ManuallyDropOwned(storage) => DataRef::TrueRef(storage),
+        }
     }
+
     #[inline]
     fn into_owned(self) -> DataOwned<Self::Data> {
-        DataOwned { storage: self.storage.clone() }
+        match self {
+            DataRef::TrueRef(storage) => DataOwned::from(storage.clone()),
+            DataRef::ManuallyDropOwned(storage) => {
+                let v = ManuallyDrop::into_inner(storage);
+                DataOwned::from(v.clone())
+            },
+        }
     }
 }
 
@@ -108,14 +143,17 @@ where
     S: Clone,
 {
     type Data = S;
+
     #[inline]
     fn storage(&self) -> &Self::Data {
         self.storage
     }
+
     #[inline]
     fn as_ref(&self) -> DataRef<'_, Self::Data> {
-        DataRef { storage: self.storage }
+        DataRef::from(&*self.storage)
     }
+
     #[inline]
     fn into_owned(self) -> DataOwned<Self::Data> {
         DataOwned { storage: self.storage.clone() }
@@ -127,6 +165,7 @@ where
     S: Clone,
 {
     type Data = S;
+
     #[inline]
     fn storage(&self) -> &Self::Data {
         match self {
@@ -134,6 +173,7 @@ where
             DataCow::Ref(data) => data.storage(),
         }
     }
+
     #[inline]
     fn as_ref(&self) -> DataRef<Self::Data> {
         match self {
@@ -141,6 +181,7 @@ where
             DataCow::Ref(data) => data.as_ref(),
         }
     }
+
     #[inline]
     fn into_owned(self) -> DataOwned<Self::Data> {
         match self {
@@ -162,6 +203,7 @@ where
     fn as_storage_mut(&mut self) -> &mut Self::Data {
         &mut self.storage
     }
+
     #[inline]
     fn as_ref_mut(&mut self) -> DataRefMut<Self::Data> {
         DataRefMut { storage: &mut self.storage }
@@ -176,6 +218,7 @@ where
     fn as_storage_mut(&mut self) -> &mut Self::Data {
         self.storage
     }
+
     #[inline]
     fn as_ref_mut(&mut self) -> DataRefMut<'_, Self::Data> {
         DataRefMut { storage: self.storage }
@@ -213,15 +256,23 @@ mod test {
     #[test]
     fn test_trait_data() {
         let vec = vec![10, 20, 30];
+        println!("===");
         println!("{:?}", vec.as_ptr());
-        let data = DataOwned { storage: vec };
+        let data = DataOwned { storage: vec.clone() };
         let data_ref = data.as_ref();
         let data_ref_ref = data_ref.as_ref();
-        println!("{:?}", data_ref.storage.as_ptr());
-        println!("{:?}", data_ref_ref.storage.as_ptr());
-        // let data2 = data.into_owned();
+        println!("{:?}", data_ref.storage().as_ptr());
+        println!("{:?}", data_ref_ref.storage().as_ptr());
         let data_ref2 = data_ref.into_owned();
-        // println!("{:?}", data2.data.as_ptr());
-        println!("{:?}", data_ref2.storage.as_ptr());
+        println!("{:?}", data_ref2.storage().as_ptr());
+
+        println!("===");
+        let data_ref = DataRef::from_manually_drop(ManuallyDrop::new(vec.clone()));
+        let data_ref_ref = data_ref.as_ref();
+        println!("{:?}", data_ref.storage().as_ptr());
+        println!("{:?}", data_ref_ref.storage().as_ptr());
+        let mut data_ref2 = data_ref.into_owned();
+        println!("{:?}", data_ref2.storage().as_ptr());
+        data_ref2.as_storage_mut()[1] = 10;
     }
 }

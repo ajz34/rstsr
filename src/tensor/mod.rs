@@ -4,5 +4,6 @@ pub mod iterator;
 pub mod manuplication;
 pub mod operators;
 pub mod ownership_conversion;
+pub mod asarray;
 
 pub use data::*;

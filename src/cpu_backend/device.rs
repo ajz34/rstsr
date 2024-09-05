@@ -3,6 +3,12 @@ use crate::prelude_dev::*;
 #[derive(Clone, Debug)]
 pub struct CpuDevice;
 
+impl Default for CpuDevice {
+    fn default() -> Self {
+        CpuDevice
+    }
+}
+
 impl DeviceBaseAPI for CpuDevice {
     fn same_device(&self, _other: &Self) -> bool {
         true

@@ -1,7 +1,7 @@
 use crate::cpu_backend::device::CpuDevice;
 use crate::prelude_dev::*;
 
-pub trait DeviceBaseAPI: Clone + Debug {
+pub trait DeviceBaseAPI: Default + Clone + Debug {
     fn same_device(&self, other: &Self) -> bool;
 }
 

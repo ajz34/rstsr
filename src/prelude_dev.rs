@@ -24,10 +24,11 @@ pub use crate::cpu_backend::device::*;
 #[allow(unused_imports)]
 pub(crate) use crate::dev_utilities::*;
 
+pub use crate::tensor::asarray::*;
 pub use crate::tensor::data::*;
 pub use crate::tensor::manuplication::*;
 
-pub use crate::{Tensor, TensorBase};
+pub use crate::{Tensor, TensorBase, TensorCow, TensorView, TensorViewMut};
 
 pub use crate::slice;
 pub use crate::{rstsr_assert, rstsr_assert_eq, rstsr_invalid, rstsr_pattern, rstsr_raise};
