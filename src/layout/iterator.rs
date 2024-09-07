@@ -108,7 +108,7 @@ where
 }
 
 /// This function will return a layout that is suitable for array copy.
-pub fn layout_for_array_copy<D>(layout: Layout<D>, order: TensorIterOrder) -> Result<Layout<D>>
+pub fn layout_for_array_copy<D>(layout: &Layout<D>, order: TensorIterOrder) -> Result<Layout<D>>
 where
     D: DimDevAPI,
 {

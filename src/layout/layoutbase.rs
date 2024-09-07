@@ -12,7 +12,7 @@ use itertools::izip;
 ///   each dimension.
 /// - Offset is the starting position of tensor.
 #[doc = include_str!("readme.md")]
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone)]
 pub struct Layout<D>
 where
     D: DimBaseAPI,
@@ -525,6 +525,30 @@ where
             },
         }
         return result;
+    }
+}
+
+impl<D> PartialEq for Layout<D>
+where
+    D: DimBaseAPI,
+{
+    /// For layout, shape must be the same, while stride should be the same when
+    /// shape is not zero or one, but can be arbitary otherwise.
+    fn eq(&self, other: &Self) -> bool {
+        if self.ndim() != other.ndim() {
+            return false;
+        }
+        for i in 0..self.ndim() {
+            let s1 = self.shape()[i];
+            let s2 = other.shape()[i];
+            if s1 != s2 {
+                return false;
+            }
+            if s1 != 1 && s1 != 0 && self.stride()[i] != other.stride()[i] {
+                return false;
+            }
+        }
+        return true;
     }
 }
 
