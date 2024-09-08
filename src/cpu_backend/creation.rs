@@ -67,7 +67,13 @@ where
     T: ComplexFloat + Clone + Debug,
     CpuDevice: DeviceRawVecAPI<T, RawVec = Vec<T>>,
 {
-    fn linspace_impl(&self, start: T, end: T, n: usize) -> Result<Storage<T, CpuDevice>>
+    fn linspace_impl(
+        &self,
+        start: T,
+        end: T,
+        n: usize,
+        endpoint: bool,
+    ) -> Result<Storage<T, CpuDevice>>
     where
         T: ComplexFloat,
     {
@@ -78,8 +84,11 @@ where
             return Ok(Storage::<T, CpuDevice> { rawvec: vec![start], device: self.clone() });
         }
 
-        let mut rawvec = vec![];
-        let step = (end - start) / T::from(n - 1).unwrap();
+        let mut rawvec = Vec::with_capacity(n);
+        let step = match endpoint {
+            true => (end - start) / T::from(n - 1).unwrap(),
+            false => (end - start) / T::from(n).unwrap(),
+        };
         let mut v = start;
         for _ in 0..n {
             rawvec.push(v);
@@ -128,10 +137,10 @@ mod test {
         println!("{:?}", storage);
         let storage = device.outof_cpu_vec(vec![1.0; 10]).unwrap();
         println!("{:?}", storage);
-        let storage = device.linspace_impl(0.0, 1.0, 10).unwrap();
+        let storage = device.linspace_impl(0.0, 1.0, 10, true).unwrap();
         println!("{:?}", storage);
         let storage =
-            device.linspace_impl(Complex::new(1.0, 2.0), Complex::new(3.5, 4.7), 10).unwrap();
+            device.linspace_impl(Complex::new(1.0, 2.0), Complex::new(3.5, 4.7), 10, true).unwrap();
         println!("{:?}", storage);
         let storage = device.arange_impl(0.0, 1.0, 0.1).unwrap();
         println!("{:?}", storage);

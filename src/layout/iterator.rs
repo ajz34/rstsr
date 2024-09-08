@@ -128,7 +128,7 @@ where
             }
         },
         Order::K => {
-            let (greedy, index) = greedy_layout(&layout, true);
+            let (greedy, index) = greedy_layout(layout, true);
             let layout = greedy.shape().f();
             let mut new_index = vec![0; index.len()];
             for (idx, &i) in index.iter().enumerate() {

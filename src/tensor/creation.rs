@@ -27,6 +27,22 @@ use num::{Float, Num};
 
 /* #region arange */
 
+/// Evenly spaced values within the half-open interval `[start, stop)` as
+/// one-dimensional array.
+///
+/// # See also
+///
+/// - [Python array API standard: `arange`](https://data-apis.org/array-api/2023.12/API_specification/generated/array_api.arange.html)
+pub fn arange<T, B>(start: T, stop: T, step: T, device: &B) -> Tensor<T, Ix1, B>
+where
+    T: Float,
+    B: DeviceAPI<T> + DeviceCreationFloatAPI<T>,
+{
+    let data = B::arange_impl(device, start, stop, step).unwrap();
+    let layout = [data.len()].into();
+    unsafe { Tensor::new_unchecked(data.into(), layout) }
+}
+
 impl<T, B> Tensor<T, Ix1, B>
 where
     T: Float,
@@ -37,12 +53,9 @@ where
     ///
     /// # See also
     ///
-    /// - [Python array API standard: `arange`](https://data-apis.org/array-api/2023.12/API_specification/generated/array_api.arange.html#array_api.arange)
-    /// - [`numpy.arange`](https://numpy.org/doc/stable/reference/generated/numpy.arange.html)
+    /// [`arange`]
     pub fn arange(start: T, stop: T, step: T, device: &B) -> Tensor<T, Ix1, B> {
-        let data = B::arange_impl(device, start, stop, step).unwrap();
-        let layout = [data.len()].into();
-        unsafe { Tensor::new_unchecked(data.into(), layout) }
+        arange(start, stop, step, device)
     }
 }
 
@@ -56,17 +69,27 @@ where
     ///
     /// # See also
     ///
-    /// - [`Tensor::arange`]
+    /// [`arange`]
     pub fn arange_cpu(start: T, stop: T, step: T) -> Tensor<T, Ix1, CpuDevice> {
-        let data = CpuDevice::arange_impl(&CpuDevice {}, start, stop, step).unwrap();
-        let layout = [data.len()].into();
-        unsafe { Tensor::new_unchecked(data.into(), layout) }
+        arange(start, stop, step, &CpuDevice {})
     }
 }
 
 /* #endregion */
 
 /* #region arange_int */
+
+/// Evenly spaced values within the half-open interval `[0, len)` as
+/// one-dimensional array, each step 1.
+pub fn arange_int<T, B>(len: usize, device: &B) -> Tensor<T, Ix1, B>
+where
+    T: Num,
+    B: DeviceAPI<T> + DeviceCreationNumAPI<T>,
+{
+    let data = B::arange_int_impl(device, len).unwrap();
+    let layout = [data.len()].into();
+    unsafe { Tensor::new_unchecked(data.into(), layout) }
+}
 
 impl<T, B> Tensor<T, Ix1, B>
 where
@@ -75,10 +98,12 @@ where
 {
     /// Evenly spaced values within the half-open interval `[0, len)` as
     /// one-dimensional array, each step 1.
+    ///
+    /// # See also
+    ///
+    /// [`arange_int`]
     pub fn arange_int(len: usize, device: &B) -> Tensor<T, Ix1, B> {
-        let data = B::arange_int_impl(device, len).unwrap();
-        let layout = [data.len()].into();
-        unsafe { Tensor::new_unchecked(data.into(), layout) }
+        arange_int(len, device)
     }
 }
 
@@ -89,14 +114,38 @@ where
 {
     /// Evenly spaced values within the half-open interval `[0, len)` as
     /// one-dimensional array, each step 1.
+    ///
+    /// # See also
+    ///
+    /// [`arange_int`]
     pub fn arange_int_cpu(len: usize) -> Tensor<T, Ix1, CpuDevice> {
-        Tensor::arange_int(len, &CpuDevice {})
+        arange_int(len, &CpuDevice {})
     }
 }
 
 /* #endregion arange_int */
 
 /* #region empty */
+
+/// Uninitialized tensor having a specified shape.
+///
+/// # Safety
+///
+/// This function is unsafe because it creates a tensor with uninitialized.
+///
+/// # See also
+///
+/// - [Python array API standard: `empty`](https://data-apis.org/array-api/2023.12/API_specification/generated/array_api.empty.html)
+pub unsafe fn empty<T, D, B>(layout: impl Into<Layout<D>>, device: &B) -> Tensor<T, D, B>
+where
+    D: DimAPI,
+    B: DeviceAPI<T> + DeviceCreationAnyAPI<T>,
+{
+    let layout = layout.into();
+    let (_, idx_max) = layout.bounds_index().unwrap();
+    let data: Storage<T, B> = B::empty_impl(device, idx_max).unwrap();
+    unsafe { Tensor::new_unchecked(data.into(), layout) }
+}
 
 impl<T, D, B> Tensor<T, D, B>
 where
@@ -111,12 +160,9 @@ where
     ///
     /// # See also
     ///
-    /// - [Python array API standard: `empty`](https://data-apis.org/array-api/2023.12/API_specification/generated/array_api.empty.html)
+    /// [`empty`]
     pub unsafe fn empty(layout: impl Into<Layout<D>>, device: &B) -> Tensor<T, D, B> {
-        let layout = layout.into();
-        let (_, idx_max) = layout.bounds_index().unwrap();
-        let data: Storage<T, B> = B::empty_impl(device, idx_max).unwrap();
-        unsafe { Tensor::new_unchecked(data.into(), layout) }
+        empty(layout, device)
     }
 }
 
@@ -133,15 +179,40 @@ where
     ///
     /// # See also
     ///
-    /// - [`Tensor::empty`]
+    /// [`empty`]
     pub unsafe fn empty_cpu(layout: impl Into<Layout<D>>) -> Tensor<T, D, CpuDevice> {
-        Tensor::empty(layout, &CpuDevice {})
+        empty(layout, &CpuDevice {})
     }
 }
 
 /* #endregion */
 
 /* #region empty_like */
+
+/// Uninitialized tensor with the same shape as an input tensor.
+///
+/// # Safety
+///
+/// This function is unsafe because it creates a tensor withuninitialized.
+///
+/// # See also
+///
+/// - [Python array API standard: `empty_like`](https://data-apis.org/array-api/2023.12/API_specification/generated/array_api.empty_like.html)
+pub unsafe fn empty_like<R, T, D, B>(
+    tensor: &TensorBase<R, D>,
+    order: TensorIterOrder,
+) -> Tensor<T, D, B>
+where
+    R: DataAPI<Data = Storage<T, B>>,
+    D: DimAPI,
+    B: DeviceAPI<T> + DeviceCreationAnyAPI<T>,
+{
+    let layout = layout_for_array_copy(tensor.layout(), order).unwrap();
+    let idx_max = layout.size();
+    let device = tensor.data().storage().device();
+    let data: Storage<T, _> = device.empty_impl(idx_max).unwrap();
+    unsafe { Tensor::new_unchecked(data.into(), layout) }
+}
 
 impl<R, T, D, B> TensorBase<R, D>
 where
@@ -157,20 +228,31 @@ where
     ///
     /// # See also
     ///
-    /// - [Python array API standard: `empty_like`](https://data-apis.org/array-api/2023.12/API_specification/generated/array_api.empty_like.html)
+    /// [`empty_like`]
     pub unsafe fn empty_like(&self) -> Tensor<T, D, B> {
-        let shape = self.layout().shape();
-        let layout = shape.new_contig(None);
-        let idx_max = layout.size();
-        let device = self.data().storage().device();
-        let data: Storage<T, _> = device.empty_impl(idx_max).unwrap();
-        unsafe { Tensor::new_unchecked(data.into(), layout) }
+        empty_like(self, TensorIterOrder::default())
     }
 }
 
 /* #endregion */
 
 /* #region full */
+
+/// New tensor having a specified shape and filled with given value.
+///
+/// # See also
+///
+/// - [Python array API standard: `full`](https://data-apis.org/array-api/2023.12/API_specification/generated/array_api.full.html)
+pub fn full<T, D, B>(layout: impl Into<Layout<D>>, fill: T, device: &B) -> Tensor<T, D, B>
+where
+    D: DimAPI,
+    B: DeviceAPI<T> + DeviceCreationAnyAPI<T>,
+{
+    let layout = layout.into();
+    let idx_max = layout.size();
+    let data: Storage<T, _> = device.full_impl(idx_max, fill).unwrap();
+    unsafe { Tensor::new_unchecked(data.into(), layout) }
+}
 
 impl<T, D, B> Tensor<T, D, B>
 where
@@ -181,12 +263,9 @@ where
     ///
     /// # See also
     ///
-    /// - [Python array API standard: `full`](https://data-apis.org/array-api/2023.12/API_specification/generated/array_api.full.html)
+    /// [`full`]
     pub fn full(layout: impl Into<Layout<D>>, fill: T, device: &B) -> Tensor<T, D, B> {
-        let layout = layout.into();
-        let idx_max = layout.size();
-        let data: Storage<T, _> = device.full_impl(idx_max, fill).unwrap();
-        unsafe { Tensor::new_unchecked(data.into(), layout) }
+        full(layout, fill, device)
     }
 }
 
@@ -199,15 +278,38 @@ where
     ///
     /// # See also
     ///
-    /// [`Tensor::full`]
+    /// [`full`]
     pub fn full_cpu(layout: impl Into<Layout<D>>, fill: T) -> Tensor<T, D, CpuDevice> {
-        Tensor::full(layout, fill, &CpuDevice {})
+        full(layout, fill, &CpuDevice {})
     }
 }
 
 /* #endregion */
 
 /* #region full_like */
+
+/// New tensor filled with given value and having the same shape as an input
+/// tensor.
+///
+/// # See also
+///
+/// - [Python array API standard: `full_like`](https://data-apis.org/array-api/2023.12/API_specification/generated/array_api.full_like.html)
+pub fn full_like<R, T, D, B>(
+    tensor: &TensorBase<R, D>,
+    fill: T,
+    order: TensorIterOrder,
+) -> Tensor<T, D, B>
+where
+    R: DataAPI<Data = Storage<T, B>>,
+    D: DimAPI,
+    B: DeviceAPI<T> + DeviceCreationAnyAPI<T>,
+{
+    let layout = layout_for_array_copy(tensor.layout(), order).unwrap();
+    let idx_max = layout.size();
+    let device = tensor.data().storage().device();
+    let data: Storage<T, _> = device.full_impl(idx_max, fill).unwrap();
+    unsafe { Tensor::new_unchecked(data.into(), layout) }
+}
 
 impl<R, T, D, B> TensorBase<R, D>
 where
@@ -220,20 +322,34 @@ where
     ///
     /// # See also
     ///
-    /// - [Python array API standard: `full_like`](https://data-apis.org/array-api/2023.12/API_specification/generated/array_api.full_like.html)
+    /// [`full_like`]
     pub fn full_like(&self, fill: T) -> Tensor<T, D, B> {
-        let shape = self.layout().shape();
-        let layout = shape.new_contig(None);
-        let idx_max = layout.size();
-        let device = self.data().storage().device();
-        let data: Storage<T, _> = device.full_impl(idx_max, fill).unwrap();
-        unsafe { Tensor::new_unchecked(data.into(), layout) }
+        full_like(self, fill, TensorIterOrder::default())
     }
 }
 
 /* #endregion */
 
 /* #region linspace */
+
+/// Evenly spaced numbers over a specified interval.
+///
+/// For boundary condition, current implementation is similar to numpy,
+/// where `n = 0` will return an empty array, and `n = 1` will return an
+/// array with starting value.
+///
+/// # See also
+///
+/// - [Python array API standard: `linspace`](https://data-apis.org/array-api/2023.12/API_specification/generated/array_api.linspace.html)
+pub fn linspace<T, B>(start: T, end: T, n: usize, endpoint: bool, device: &B) -> Tensor<T, Ix1, B>
+where
+    T: ComplexFloat,
+    B: DeviceAPI<T> + DeviceCreationComplexFloatAPI<T>,
+{
+    let data = B::linspace_impl(device, start, end, n, endpoint).unwrap();
+    let layout = [data.len()].into();
+    unsafe { Tensor::new_unchecked(data.into(), layout) }
+}
 
 impl<T, B> Tensor<T, Ix1, B>
 where
@@ -242,18 +358,11 @@ where
 {
     /// Evenly spaced numbers over a specified interval.
     ///
-    /// For boundary condition, current implementation is similar to numpy,
-    /// where `n = 0` will return an empty array, and `n = 1` will return an
-    /// array with starting value.
-    ///
     /// # See also
     ///
-    /// - [numpy.linspace](https://numpy.org/doc/stable/reference/generated/numpy.linspace.html)
-    /// - [Python array API standard: `linspace`](https://data-apis.org/array-api/2023.12/API_specification/generated/array_api.linspace.html)
+    /// [`linspace`]
     pub fn linspace(start: T, end: T, n: usize, device: &B) -> Tensor<T, Ix1, B> {
-        let data = B::linspace_impl(device, start, end, n).unwrap();
-        let layout = [data.len()].into();
-        unsafe { Tensor::new_unchecked(data.into(), layout) }
+        linspace(start, end, n, true, device)
     }
 }
 
@@ -266,15 +375,32 @@ where
     ///
     /// # See also
     ///
-    /// - [`Tensor::linspace`]
+    /// [`linspace`]
     pub fn linspace_cpu(start: T, end: T, n: usize) -> Tensor<T, Ix1, CpuDevice> {
-        Tensor::linspace(start, end, n, &CpuDevice {})
+        linspace(start, end, n, true, &CpuDevice {})
     }
 }
 
 /* #endregion */
 
 /* #region ones */
+
+/// New tensor filled with ones and having a specified shape.
+///
+/// # See also
+///
+/// - [Python array API standard: `ones`](https://data-apis.org/array-api/2023.12/API_specification/generated/array_api.ones.html)
+pub fn ones<T, D, B>(layout: impl Into<Layout<D>>, device: &B) -> Tensor<T, D, B>
+where
+    T: Num,
+    D: DimAPI,
+    B: DeviceAPI<T> + DeviceCreationNumAPI<T>,
+{
+    let layout = layout.into();
+    let (_, idx_max) = layout.bounds_index().unwrap();
+    let data: Storage<T, _> = B::ones_impl(device, idx_max).unwrap();
+    unsafe { Tensor::new_unchecked(data.into(), layout) }
+}
 
 impl<T, D, B> Tensor<T, D, B>
 where
@@ -286,12 +412,9 @@ where
     ///
     /// # See also
     ///
-    /// - [Python array API standard: `ones`](https://data-apis.org/array-api/2023.12/API_specification/generated/array_api.ones.html)
+    /// [`ones`]
     pub fn ones(layout: impl Into<Layout<D>>, device: &B) -> Tensor<T, D, B> {
-        let layout = layout.into();
-        let (_, idx_max) = layout.bounds_index().unwrap();
-        let data: Storage<T, _> = B::ones_impl(device, idx_max).unwrap();
-        unsafe { Tensor::new_unchecked(data.into(), layout) }
+        ones(layout, device)
     }
 }
 
@@ -304,7 +427,7 @@ where
     ///
     /// # See also
     ///
-    /// [`Tensor::ones`]
+    /// [`ones`]
     pub fn ones_cpu(layout: impl Into<Layout<D>>) -> Tensor<T, D, CpuDevice>
     where
         T: Num + Clone + Debug,
@@ -318,6 +441,26 @@ where
 
 /* #region ones_like */
 
+/// New tensor filled with ones and having the same shape as an input
+/// tensor.
+///
+/// # See also
+///
+/// - [Python array API standard: `ones_like`](https://data-apis.org/array-api/2023.12/API_specification/generated/array_api.ones_like.html)
+pub fn ones_like<R, T, D, B>(tensor: &TensorBase<R, D>, order: TensorIterOrder) -> Tensor<T, D, B>
+where
+    R: DataAPI<Data = Storage<T, B>>,
+    T: Num,
+    D: DimAPI,
+    B: DeviceAPI<T> + DeviceCreationNumAPI<T>,
+{
+    let layout = layout_for_array_copy(tensor.layout(), order).unwrap();
+    let idx_max = layout.size();
+    let device = tensor.data().storage().device();
+    let data: Storage<T, B> = B::ones_impl(device, idx_max).unwrap();
+    unsafe { Tensor::new_unchecked(data.into(), layout) }
+}
+
 impl<R, T, D, B> TensorBase<R, D>
 where
     R: DataAPI<Data = Storage<T, B>>,
@@ -330,20 +473,32 @@ where
     ///
     /// # See also
     ///
-    /// - [Python array API standard: `ones_like`](https://data-apis.org/array-api/2023.12/API_specification/generated/array_api.ones_like.html)
+    /// [`ones_like`]
     pub fn ones_like(&self) -> Tensor<T, D, B> {
-        let shape = self.layout().shape();
-        let layout = shape.new_contig(None);
-        let idx_max = layout.size();
-        let device = self.data().storage().device();
-        let data: Storage<T, B> = B::ones_impl(device, idx_max).unwrap();
-        unsafe { Tensor::new_unchecked(data.into(), layout) }
+        ones_like(self, TensorIterOrder::default())
     }
 }
 
 /* #endregion */
 
 /* #region zeros */
+
+/// New tensor filled with zeros and having a specified shape.
+///
+/// # See also
+///
+/// - [Python array API standard: `zeros`](https://data-apis.org/array-api/2023.12/API_specification/generated/array_api.zeros.html)
+pub fn zeros<T, D, B>(layout: impl Into<Layout<D>>, device: &B) -> Tensor<T, D, B>
+where
+    T: Num,
+    D: DimAPI,
+    B: DeviceAPI<T> + DeviceCreationNumAPI<T>,
+{
+    let layout = layout.into();
+    let (_, idx_max) = layout.bounds_index().unwrap();
+    let data: Storage<T, _> = B::zeros_impl(device, idx_max).unwrap();
+    unsafe { Tensor::new_unchecked(data.into(), layout) }
+}
 
 impl<T, D, B> Tensor<T, D, B>
 where
@@ -355,12 +510,9 @@ where
     ///
     /// # See also
     ///
-    /// - [Python array API standard: `zeros`](https://data-apis.org/array-api/2023.12/API_specification/generated/array_api.zeros.html)
+    /// [`zeros`]
     pub fn zeros(layout: impl Into<Layout<D>>, device: &B) -> Tensor<T, D, B> {
-        let layout = layout.into();
-        let (_, idx_max) = layout.bounds_index().unwrap();
-        let data: Storage<T, _> = B::zeros_impl(device, idx_max).unwrap();
-        unsafe { Tensor::new_unchecked(data.into(), layout) }
+        zeros(layout, device)
     }
 }
 
@@ -373,15 +525,35 @@ where
     ///
     /// # See also
     ///
-    /// - [Python array API standard: `zeros`](https://data-apis.org/array-api/2023.12/API_specification/generated/array_api.zeros.html)
+    /// [`zeros`]
     pub fn zeros_cpu(layout: impl Into<Layout<D>>) -> Tensor<T, D, CpuDevice> {
-        Tensor::zeros(layout, &CpuDevice {})
+        zeros(layout, &CpuDevice {})
     }
 }
 
 /* #endregion */
 
 /* #region zeros_like */
+
+/// New tensor filled with zeros and having the same shape as an input
+/// tensor.
+///
+/// # See also
+///
+/// - [Python array API standard: `zeros_like`](https://data-apis.org/array-api/2023.12/API_specification/generated/array_api.zeros_like.html)
+pub fn zeros_like<R, T, D, B>(tensor: &TensorBase<R, D>, order: TensorIterOrder) -> Tensor<T, D, B>
+where
+    R: DataAPI<Data = Storage<T, B>>,
+    T: Num,
+    D: DimAPI,
+    B: DeviceAPI<T> + DeviceCreationNumAPI<T>,
+{
+    let layout = layout_for_array_copy(tensor.layout(), order).unwrap();
+    let idx_max = layout.size();
+    let device = tensor.data().storage().device();
+    let data: Storage<T, _> = B::zeros_impl(device, idx_max).unwrap();
+    unsafe { Tensor::new_unchecked(data.into(), layout) }
+}
 
 impl<R, T, D, B> TensorBase<R, D>
 where
@@ -395,14 +567,9 @@ where
     ///
     /// # See also
     ///
-    /// - [Python array API standard: `zeros_like`](https://data-apis.org/array-api/2023.12/API_specification/generated/array_api.zeros_like.html)
+    /// [`zeros_like`]
     pub fn zeros_like(&self) -> Tensor<T, D, B> {
-        let shape = self.layout().shape();
-        let layout = shape.new_contig(None);
-        let idx_max = layout.size();
-        let device = self.data().storage().device();
-        let data: Storage<T, _> = B::zeros_impl(device, idx_max).unwrap();
-        unsafe { Tensor::new_unchecked(data.into(), layout) }
+        zeros_like(self, TensorIterOrder::default())
     }
 }
 

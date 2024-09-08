@@ -30,7 +30,8 @@ where
     T: ComplexFloat,
     Self: DeviceRawVecAPI<T>,
 {
-    fn linspace_impl(&self, start: T, end: T, n: usize) -> Result<Storage<T, Self>>;
+    fn linspace_impl(&self, start: T, end: T, n: usize, endpoint: bool)
+        -> Result<Storage<T, Self>>;
 }
 
 pub trait DeviceCreationFloatAPI<T>

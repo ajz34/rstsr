@@ -97,21 +97,24 @@
 
 | status | implementation | Python API | description |
 |-|-|-|-|
-| | | `arange` | Returns evenly spaced values within the half-open interval `[start, stop)` as a one-dimensional array. |
-| | | `asarray` | Convert the input to an array. |
-| | | `empty` | Returns an uninitialized array having a specified `shape`. |
-| | | `empty_like` | Returns an uninitialized array with the same `shape` as an input array `x`. |
+| Y | [`arange`], [`arange_int`] | [`arange`](https://data-apis.org/array-api/2023.12/API_specification/generated/array_api.empty.html) | Returns evenly spaced values within the half-open interval `[start, stop)` as a one-dimensional array. |
+| P | [`asarray`] | [`asarray`](https://data-apis.org/array-api/2023.12/API_specification/generated/array_api.asarray.html) | Convert the input to an array. |
+| Y | [`empty`] | [`empty`](https://data-apis.org/array-api/2023.12/API_specification/generated/array_api.empty.html) | Returns an uninitialized array having a specified `shape`. |
+| Y | [`empty_like`] | [`empty_like`](https://data-apis.org/array-api/2023.12/API_specification/generated/array_api.empty_like.html) | Returns an uninitialized array with the same `shape` as an input array `x`. |
 | | | `eye` | Returns a two-dimensional array with ones on the kth diagonal and zeros elsewhere. |
-| | | `full` | Returns a new array having a specified `shape` and filled with `fill_value`. |
-| | | `full_like` | Returns a new array filled with fill_value and having the same `shape` as an input array `x`. |
-| | | `linspace` | Returns evenly spaced numbers over a specified interval. |
+| Y | [`full`] | [`full`](https://data-apis.org/array-api/2023.12/API_specification/generated/array_api.full.html) | Returns a new array having a specified `shape` and filled with `fill_value`. |
+| Y | [`full_like`] | [`full_like`](https://data-apis.org/array-api/2023.12/API_specification/generated/array_api.full_like.html) | Returns a new array filled with fill_value and having the same `shape` as an input array `x`. |
+| Y | [`linspace`] | [`linspace`](https://data-apis.org/array-api/2023.12/API_specification/generated/array_api.linspace.html) | Returns evenly spaced numbers over a specified interval. |
 | | | `meshgrid` | Returns coordinate matrices from coordinate vectors. |
-| | | `ones` | Returns a new array having a specified shape and filled with ones. |
-| | | `ones_like` | Returns a new array filled with ones and having the same `shape` as an input array `x`. |
+| Y | [`ones`] | [`ones`](https://data-apis.org/array-api/2023.12/API_specification/generated/array_api.ones.html) | Returns a new array having a specified shape and filled with ones. |
+| Y | [`ones_like`] | [`ones_like`](https://data-apis.org/array-api/2023.12/API_specification/generated/array_api.ones_like.html) | Returns a new array filled with ones and having the same `shape` as an input array `x`. |
 | | | `tril` | Returns the lower triangular part of a matrix (or a stack of matrices) `x`. |
 | | | `triu` | Returns the upper triangular part of a matrix (or a stack of matrices) `x`. |
-| | | `zeros` | Returns a new array having a specified `shape` and filled with zeros. |
-| | | `zeros_like` | Returns a new array filled with zeros and having the same `shape` as an input array x. |
+| Y | [`zeros`] | [`zeros`](https://data-apis.org/array-api/2023.12/API_specification/generated/array_api.zeros.html) | Returns a new array having a specified `shape` and filled with zeros. |
+| Y | [`zeros_like`] | [`zeros_like`](https://data-apis.org/array-api/2023.12/API_specification/generated/array_api.zeros_like.html) | Returns a new array filled with zeros and having the same `shape` as an input array x. |
+
+Partial implementation:
+- [`asarray`]: This function have different implementations for `Vec<T>`, `[T; N]` and [`Tensor<T, D, B>`]. Different signatures are utilized for different inputs and purposes.
 
 ## Data Type
 
