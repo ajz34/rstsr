@@ -85,4 +85,25 @@ where
         }
         return Ok(());
     }
+
+    fn fill(&self, c: &mut Storage<T, Self>, lc: &Layout<D>, fill: T) -> Result<()> {
+        let layouts_full = [translate_to_col_major_unary(lc, TensorIterOrder::G)?];
+        let layouts_full_ref = layouts_full.iter().collect_vec();
+        let (layouts_contig, size_contig) = translate_to_col_major_with_contig(&layouts_full_ref);
+
+        if size_contig > CONTIG_SWITCH {
+            let iter_c = IterLayoutColMajor::new(&layouts_contig[0])?;
+            for idx_c in iter_c {
+                for i in 0..size_contig {
+                    c.rawvec_mut()[idx_c + i] = fill.clone();
+                }
+            }
+        } else {
+            let iter_c = IterLayoutColMajor::new(&layouts_full[0])?;
+            for idx_c in iter_c {
+                c.rawvec_mut()[idx_c] = fill.clone();
+            }
+        }
+        return Ok(());
+    }
 }

@@ -297,6 +297,65 @@ where
         }
         return Ok(());
     }
+
+    pub fn diagonal(
+        &self,
+        offset: Option<isize>,
+        axis1: Option<isize>,
+        axis2: Option<isize>,
+    ) -> Result<Layout<<D as DimSmallerOneAPI>::SmallerOne>>
+    where
+        D: DimSmallerOneAPI,
+        IxD: DimConvertAPI<<D as DimSmallerOneAPI>::SmallerOne>,
+    {
+        // check if this layout is at least 2-dimension
+        rstsr_assert!(self.ndim() >= 2, InvalidLayout)?;
+        // unwrap optional parameters
+        let offset = offset.unwrap_or(0);
+        let axis1 = axis1.unwrap_or(0);
+        let axis2 = axis2.unwrap_or(1);
+        let axis1 = if axis1 < 0 { self.ndim() as isize + axis1 } else { axis1 };
+        let axis2 = if axis2 < 0 { self.ndim() as isize + axis2 } else { axis2 };
+        rstsr_pattern!(axis1, 0..self.ndim() as isize, ValueOutOfRange)?;
+        rstsr_pattern!(axis2, 0..self.ndim() as isize, ValueOutOfRange)?;
+        let axis1 = axis1 as usize;
+        let axis2 = axis2 as usize;
+
+        // shape and strides of last two dimensions
+        let d1 = self.shape()[axis1] as isize;
+        let d2 = self.shape()[axis2] as isize;
+        let t1 = self.stride()[axis1];
+        let t2 = self.stride()[axis2];
+
+        // number of elements in diagonal, and starting offset
+        let (offset_diag, d_diag) = if (-d2 + 1..0).contains(&offset) {
+            let offset = -offset;
+            let offset_diag = (self.offset() as isize + t1 * offset) as usize;
+            let d_diag = (d1 - offset).min(d2) as usize;
+            (offset_diag, d_diag)
+        } else if (0..d1).contains(&offset) {
+            let offset_diag = (self.offset() as isize + t2 * offset) as usize;
+            let d_diag = (d2 - offset).min(d1) as usize;
+            (offset_diag, d_diag)
+        } else {
+            (self.offset(), 0)
+        };
+
+        // build new layout
+        let t_diag = t1 + t2;
+        let mut shape_diag = vec![];
+        let mut stride_diag = vec![];
+        for i in 0..self.ndim() {
+            if i != axis1 && i != axis2 {
+                shape_diag.push(self.shape()[i]);
+                stride_diag.push(self.stride()[i]);
+            }
+        }
+        shape_diag.push(d_diag);
+        stride_diag.push(t_diag);
+        let layout_diag = Layout::new(shape_diag, stride_diag, offset_diag);
+        return layout_diag.into_dim::<<D as DimSmallerOneAPI>::SmallerOne>();
+    }
 }
 
 /// Constructors of layout. See also [`DimLayoutContigAPI`] layout from shape
@@ -922,6 +981,17 @@ mod test {
             let layout = Layout::new([], [], 10);
             assert_eq!(layout.index_uncheck(&[]), 10);
         }
+    }
+
+    #[test]
+    fn test_diagonal() {
+        let layout = [2, 3, 4].c();
+        let diag = layout.diagonal(None, None, None).unwrap();
+        assert_eq!(diag, Layout::new([4, 2], [1, 16], 0));
+        let diag = layout.diagonal(Some(-1), Some(-2), Some(-1)).unwrap();
+        assert_eq!(diag, Layout::new([2, 2], [12, 5], 0));
+        let diag = layout.diagonal(Some(-4), Some(-2), Some(-1)).unwrap();
+        assert_eq!(diag, Layout::new([2, 0], [12, 5], 0));
     }
 
     #[test]

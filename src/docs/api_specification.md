@@ -101,7 +101,7 @@
 | P | [`asarray`] | [`asarray`](https://data-apis.org/array-api/2023.12/API_specification/generated/array_api.asarray.html) | Convert the input to an array. |
 | Y | [`empty`] | [`empty`](https://data-apis.org/array-api/2023.12/API_specification/generated/array_api.empty.html) | Returns an uninitialized array having a specified `shape`. |
 | Y | [`empty_like`] | [`empty_like`](https://data-apis.org/array-api/2023.12/API_specification/generated/array_api.empty_like.html) | Returns an uninitialized array with the same `shape` as an input array `x`. |
-| | | `eye` | Returns a two-dimensional array with ones on the kth diagonal and zeros elsewhere. |
+| Y | [`eye`] | [`eye`](https://data-apis.org/array-api/2023.12/API_specification/generated/array_api.eye.html) | Returns a two-dimensional array with ones on the kth diagonal and zeros elsewhere. |
 | Y | [`full`] | [`full`](https://data-apis.org/array-api/2023.12/API_specification/generated/array_api.full.html) | Returns a new array having a specified `shape` and filled with `fill_value`. |
 | Y | [`full_like`] | [`full_like`](https://data-apis.org/array-api/2023.12/API_specification/generated/array_api.full_like.html) | Returns a new array filled with fill_value and having the same `shape` as an input array `x`. |
 | Y | [`linspace`] | [`linspace`](https://data-apis.org/array-api/2023.12/API_specification/generated/array_api.linspace.html) | Returns evenly spaced numbers over a specified interval. |

@@ -236,6 +236,69 @@ where
 
 /* #endregion */
 
+/* #region eye */
+
+/// Returns a two-dimensional array with ones on the kth diagonal and zeros
+/// elsewhere.
+///
+/// # See also
+///
+/// - [Python array API standard: `eye`](https://data-apis.org/array-api/2023.12/API_specification/generated/array_api.eye.html)
+pub fn eye<T, B>(
+    n_rows: usize,
+    n_cols: usize,
+    k: isize,
+    order: TensorOrder,
+    device: &B,
+) -> Tensor<T, Ix2, B>
+where
+    T: Num,
+    B: DeviceAPI<T> + DeviceCreationNumAPI<T> + OpAssignAPI<T, Ix1>,
+{
+    let layout = match order {
+        TensorOrder::C => [n_rows, n_cols].c(),
+        TensorOrder::F => [n_cols, n_rows].f(),
+    };
+    let mut data = device.zeros_impl(layout.size()).unwrap();
+    let layout_diag = layout.diagonal(Some(k), Some(0), Some(1)).unwrap();
+    device.fill(&mut data, &layout_diag, T::one()).unwrap();
+    unsafe { Tensor::new_unchecked(data.into(), layout) }
+}
+
+impl<T, B> Tensor<T, Ix2, B>
+where
+    T: Num,
+    B: DeviceAPI<T> + DeviceCreationNumAPI<T> + OpAssignAPI<T, Ix1>,
+{
+    /// Returns a two-dimensional array with ones on the kth diagonal and zeros
+    /// elsewhere.
+    ///
+    /// # See also
+    ///
+    /// [`eye`]
+    pub fn eye(n_rows: usize, device: &B) -> Self {
+        eye(n_rows, n_rows, 0, TensorOrder::default(), device)
+    }
+}
+
+impl<T> Tensor<T, Ix2, CpuDevice>
+where
+    T: Num + Clone + Debug,
+    CpuDevice: DeviceAPI<T> + DeviceCreationNumAPI<T> + OpAssignAPI<T, Ix1>,
+{
+    /// Returns a two-dimensional array with ones on the kth diagonal and zeros
+    /// elsewhere.
+    ///
+    /// # See also
+    ///
+    /// [`eye`]
+    pub fn eye_cpu(n_rows: usize) -> Self {
+        eye(n_rows, n_rows, 0, TensorOrder::default(), &CpuDevice {})
+    }
+}
+
+/* #endregion */
+
 /* #region full */
 
 /// New tensor having a specified shape and filled with given value.
@@ -591,6 +654,8 @@ mod test {
         let a = unsafe { a.empty_like() };
         println!("{a:6.3?}");
         let a = unsafe { Tensor::empty_like(&a) };
+        println!("{a:6.3?}");
+        let a = Tensor::<f64, _>::eye_cpu(3);
         println!("{a:6.3?}");
         let a = Tensor::full_cpu([2, 2].f(), 3.16);
         println!("{a:6.3?}");

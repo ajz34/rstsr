@@ -32,4 +32,6 @@ where
         a: &Storage<T, Self>,
         la: &Layout<D>,
     ) -> Result<()>;
+
+    fn fill(&self, c: &mut Storage<T, Self>, lc: &Layout<D>, fill: T) -> Result<()>;
 }
