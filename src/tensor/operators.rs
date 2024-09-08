@@ -233,43 +233,73 @@ pub use impl_op_mutc_refa_refb_func::*;
 
 /* #endregion */
 
-/* #region binary-op */
+/* #region op_muta_refb_func */
 
-macro_rules! impl_tensor_op_assign_ref {
-    ($DeviceOpAPI:ident, $Op:ident, $op_binary:ident, $op:ident, $tensor_op_binary:ident) => {
-        pub fn $tensor_op_binary<RC, RB, DC, DB, T, TB, B>(
-            c: &mut TensorBase<RC, DC>,
+pub fn op_muta_refb_func<RA, RB, DA, DB, TA, TB, B, F>(
+    a: &mut TensorBase<RA, DA>,
+    b: &TensorBase<RB, DB>,
+    f: F,
+) -> Result<()>
+where
+    // lifetime and data constraints
+    RA: DataMutAPI<Data = Storage<TA, B>>,
+    RB: DataAPI<Data = Storage<TB, B>>,
+    DA: DimAPI,
+    DB: DimAPI,
+    B: DeviceAPI<TA> + DeviceAPI<TB>,
+    // broadcast constraints
+    DA: DimMaxAPI<DB>,
+    <DA as DimMaxAPI<DB>>::Max: DimConvertAPI<DA>,
+    // operation constraints
+    B: DeviceOp_MutA_RefB_API<TA, TB, DA, F>,
+    F: FnMut(&mut TA, &TB),
+{
+    rstsr_assert!(a.device().same_device(b.device()), DeviceMismatch)?;
+    let la = a.layout();
+    let lb = b.layout();
+    // all layouts should be broadcastable to lc
+    // we can first generate broadcasted shape, then check this
+    let (la_b, lb_b) = broadcast_layout_to_first(la, lb)?;
+    rstsr_assert_eq!(la_b, *la, InvalidLayout)?;
+    // op provided by device
+    let device = a.device().clone();
+    let storage_a = a.data_mut().as_storage_mut();
+    let storage_b = b.data().storage();
+    device.op_muta_refb_func(storage_a, &la_b, storage_b, &lb_b, f)
+}
+
+macro_rules! impl_op_muta_refb_func {
+    ($DeviceOpAPI:ident, $Op:ident, $op:ident, $op_muta_refb_func:ident) => {
+        pub fn $op_muta_refb_func<RA, RB, DA, DB, TA, TB, B>(
+            a: &mut TensorBase<RA, DA>,
             b: &TensorBase<RB, DB>,
         ) -> Result<()>
         where
             // lifetime and data constraints
-            RC: DataMutAPI<Data = Storage<T, B>>,
+            RA: DataMutAPI<Data = Storage<TA, B>>,
             RB: DataAPI<Data = Storage<TB, B>>,
-            DC: DimAPI,
+            DA: DimAPI,
             DB: DimAPI,
-            T: Clone,
-            TB: Clone,
-            B: DeviceAPI<T> + DeviceAPI<TB>,
+            B: DeviceAPI<TA> + DeviceAPI<TB>,
             // broadcast constraints
-            DC: DimMaxAPI<DB>,
-            <DC as DimMaxAPI<DB>>::Max: DimConvertAPI<DC>,
+            DA: DimMaxAPI<DB>,
+            <DA as DimMaxAPI<DB>>::Max: DimConvertAPI<DA>,
             // operation constraints
-            T: core::ops::$Op<TB>,
-            B: $DeviceOpAPI<T, TB, DC>,
+            TA: core::ops::$Op<TB>,
+            B: $DeviceOpAPI<TA, TB, DA>,
         {
-            rstsr_assert!(c.device().same_device(b.device()), DeviceMismatch)?;
-            let lc = c.layout();
+            rstsr_assert!(a.device().same_device(b.device()), DeviceMismatch)?;
+            let la = a.layout();
             let lb = b.layout();
-            let (lc_b, lb_b) = broadcast_layout(lc, lb)?;
-            let lc_b = lc_b.into_dim::<DC>()?;
-            let lb_b = lb_b.into_dim::<DC>()?;
             // all layouts should be broadcastable to lc
-            rstsr_assert_eq!(lc_b, *lc, InvalidLayout)?;
+            // we can first generate broadcasted shape, then check this
+            let (la_b, lb_b) = broadcast_layout_to_first(la, lb)?;
+            rstsr_assert_eq!(la_b, *la, InvalidLayout)?;
             // op provided by device
-            let device = c.device().clone();
-            let storage_c = c.data_mut().as_storage_mut();
+            let device = a.device().clone();
+            let storage_a = a.data_mut().as_storage_mut();
             let storage_b = b.data().storage();
-            device.$op_binary(storage_c, &lc_b, storage_b, &lb_b)
+            device.$op_muta_refb_func(storage_a, &la_b, storage_b, &lb_b)
         }
 
         impl<RC, RB, DC, DB, T, TB, B> core::ops::$Op<&TensorBase<RB, DB>> for TensorBase<RC, DC>
@@ -291,27 +321,50 @@ macro_rules! impl_tensor_op_assign_ref {
             B: $DeviceOpAPI<T, TB, DC>,
         {
             fn $op(&mut self, rhs: &TensorBase<RB, DB>) {
-                $tensor_op_binary(self, rhs).unwrap()
+                $op_muta_refb_func(self, rhs).unwrap()
+            }
+        }
+
+        impl<RC, RB, DC, DB, T, TB, B> core::ops::$Op<TensorBase<RB, DB>> for TensorBase<RC, DC>
+        where
+            // lifetime and
+            // data constraints
+            RC: DataMutAPI<Data = Storage<T, B>>,
+            RB: DataAPI<Data = Storage<TB, B>>,
+            DC: DimAPI,
+            DB: DimAPI,
+            T: Clone,
+            TB: Clone,
+            B: DeviceAPI<T> + DeviceAPI<TB>,
+            // broadcast constraints
+            DC: DimMaxAPI<DB>,
+            <DC as DimMaxAPI<DB>>::Max: DimConvertAPI<DC>,
+            // operation constraints
+            T: core::ops::$Op<TB>,
+            B: $DeviceOpAPI<T, TB, DC>,
+        {
+            fn $op(&mut self, rhs: TensorBase<RB, DB>) {
+                $op_muta_refb_func(self, &rhs).unwrap()
             }
         }
     };
 }
 
 #[rustfmt::skip]
-mod impl_tensor_op_assign_ref {
+mod impl_op_muta_refb_func {
     use super::*;
-    impl_tensor_op_assign_ref!(DeviceAddAssignAPI, AddAssign, add_assign_binary, add_assign, tensor_add_assign_binary);
-    impl_tensor_op_assign_ref!(DeviceSubAssignAPI, SubAssign, sub_assign_binary, sub_assign, tensor_sub_assign_binary);
-    impl_tensor_op_assign_ref!(DeviceMulAssignAPI, MulAssign, mul_assign_binary, mul_assign, tensor_mul_assign_binary);
-    impl_tensor_op_assign_ref!(DeviceDivAssignAPI, DivAssign, div_assign_binary, div_assign, tensor_div_assign_binary);
-    impl_tensor_op_assign_ref!(DeviceRemAssignAPI, RemAssign, rem_assign_binary, rem_assign, tensor_rem_assign_binary);
-    impl_tensor_op_assign_ref!(DeviceBitOrAssignAPI, BitOrAssign, bitor_assign_binary, bitor_assign, tensor_bitor_assign_binary);
-    impl_tensor_op_assign_ref!(DeviceBitAndAssignAPI, BitAndAssign, bitand_assign_binary, bitand_assign, tensor_bitand_assign_binary);
-    impl_tensor_op_assign_ref!(DeviceBitXorAssignAPI, BitXorAssign, bitxor_assign_binary, bitxor_assign, tensor_bitxor_assign_binary);
-    impl_tensor_op_assign_ref!(DeviceShlAssignAPI, ShlAssign, shl_assign_binary, shl_assign, tensor_shl_assign_binary);
-    impl_tensor_op_assign_ref!(DeviceShrAssignAPI, ShrAssign, shr_assign_binary, shr_assign, tensor_shr_assign_binary);
+    impl_op_muta_refb_func!(DeviceAddAssignAPI   , AddAssign   , add_assign, op_muta_refb_add_assign);
+    impl_op_muta_refb_func!(DeviceSubAssignAPI   , SubAssign   , sub_assign, op_muta_refb_sub_assign);
+    impl_op_muta_refb_func!(DeviceMulAssignAPI   , MulAssign   , mul_assign, op_muta_refb_mul_assign);
+    impl_op_muta_refb_func!(DeviceDivAssignAPI   , DivAssign   , div_assign, op_muta_refb_div_assign);
+    impl_op_muta_refb_func!(DeviceRemAssignAPI   , RemAssign   , rem_assign, op_muta_refb_rem_assign);
+    impl_op_muta_refb_func!(DeviceBitOrAssignAPI , BitOrAssign , bitor_assign, op_muta_refb_bitor_assign);
+    impl_op_muta_refb_func!(DeviceBitAndAssignAPI, BitAndAssign, bitand_assign, op_muta_refb_bitand_assign);
+    impl_op_muta_refb_func!(DeviceBitXorAssignAPI, BitXorAssign, bitxor_assign, op_muta_refb_bitxor_assign);
+    impl_op_muta_refb_func!(DeviceShlAssignAPI   , ShlAssign   , shl_assign, op_muta_refb_shl_assign);
+    impl_op_muta_refb_func!(DeviceShrAssignAPI   , ShrAssign   , shr_assign, op_muta_refb_shr_assign);
 }
-pub use impl_tensor_op_assign_ref::*;
+pub use impl_op_muta_refb_func::*;
 
 /* #endregion */
 
@@ -405,6 +458,9 @@ mod test {
         let b = Tensor::linspace_cpu(2.0, 10.0, 5);
         c += &b;
         let c_ref = vec![3., 6., 9., 12., 15.].into();
+        assert!(allclose_f64(&c, &c_ref));
+        c += b;
+        let c_ref = vec![5., 10., 15., 20., 25.].into();
         assert!(allclose_f64(&c, &c_ref));
 
         // broadcast

@@ -3,7 +3,6 @@
 //! This file assumes that layouts are pre-processed and valid.
 
 use crate::prelude_dev::*;
-use core::ops::IndexMut;
 use num::Zero;
 
 // this value is used to determine whether to use contiguous inner iteration
@@ -123,6 +122,7 @@ macro_rules! impl_op_mutc_refa_refb_func {
         }
     };
 }
+
 #[rustfmt::skip]
 mod impl_op_mutc_refa_refb_func {
     use super::*;
@@ -140,62 +140,83 @@ mod impl_op_mutc_refa_refb_func {
 
 /* #endregion */
 
-/* #region binary-op */
+/* #region op_muta_refb_func */
 
-macro_rules! impl_op_assign_api {
-    ($DeviceOpAPI:ident, $Op:ident, $op_binary:ident, $op:ident) => {
-        impl<T, TB, D> $DeviceOpAPI<T, TB, D> for CpuDevice
+impl<TA, TB, D, F> DeviceOp_MutA_RefB_API<TA, TB, D, F> for CpuDevice
+where
+    TA: Clone,
+    TB: Clone,
+    D: DimAPI,
+    F: FnMut(&mut TA, &TB),
+{
+    fn op_muta_refb_func(
+        &self,
+        a: &mut Storage<TA, CpuDevice>,
+        la: &Layout<D>,
+        b: &Storage<TB, CpuDevice>,
+        lb: &Layout<D>,
+        mut f: F,
+    ) -> Result<()> {
+        // re-align layouts
+        let layouts_full = translate_to_col_major(&[la, lb], TensorIterOrder::K)?;
+        let layouts_full_ref = layouts_full.iter().collect_vec();
+        let (layouts_contig, size_contig) = translate_to_col_major_with_contig(&layouts_full_ref);
+
+        // contiguous iteration if possible, otherwise use iterator of layout
+        if size_contig >= CONTIG_SWITCH {
+            let iter_a = IterLayoutColMajor::new(&layouts_contig[0])?;
+            let iter_b = IterLayoutColMajor::new(&layouts_contig[1])?;
+            for (idx_a, idx_b) in izip!(iter_a, iter_b) {
+                for i in 0..size_contig {
+                    f(&mut a.rawvec[idx_a + i], &b.rawvec[idx_b + i]);
+                }
+            }
+        } else {
+            let iter_a = IterLayoutColMajor::new(&layouts_full[0])?;
+            let iter_b = IterLayoutColMajor::new(&layouts_full[1])?;
+            for (idx_a, idx_b) in izip!(iter_a, iter_b) {
+                f(&mut a.rawvec[idx_a], &b.rawvec[idx_b]);
+            }
+        }
+        return Ok(());
+    }
+}
+
+macro_rules! impl_op_muta_refb_func {
+    ($DeviceOpAPI:ident, $Op:ident, $op_muta_refb_func:ident, $func:expr) => {
+        impl<TA, TB, D> $DeviceOpAPI<TA, TB, D> for CpuDevice
         where
-            T: core::ops::$Op<TB> + Clone,
+            TA: Clone + core::ops::$Op<TB>,
             TB: Clone,
             D: DimAPI,
         {
-            fn $op_binary(
+            fn $op_muta_refb_func(
                 &self,
-                c: &mut Storage<T, CpuDevice>,
-                lc: &Layout<D>,
+                a: &mut Storage<TA, CpuDevice>,
+                la: &Layout<D>,
                 b: &Storage<TB, CpuDevice>,
                 lb: &Layout<D>,
             ) -> Result<()> {
-                let layouts_full = translate_to_col_major(&[lc, lb], TensorIterOrder::K)?;
-                let layouts_full_ref = layouts_full.iter().collect_vec();
-                let (layouts_contig, size_contig) =
-                    translate_to_col_major_with_contig(&layouts_full_ref);
-
-                if size_contig >= CONTIG_SWITCH {
-                    let iter_c = IterLayoutColMajor::new(&layouts_contig[0])?;
-                    let iter_b = IterLayoutColMajor::new(&layouts_contig[1])?;
-                    for (idx_c, idx_b) in izip!(iter_c, iter_b) {
-                        for i in 0..size_contig {
-                            core::ops::$Op::$op(
-                                c.rawvec.index_mut(idx_c + i),
-                                b.rawvec[idx_b + i].clone(),
-                            );
-                        }
-                    }
-                } else {
-                    let iter_c = IterLayoutColMajor::new(&layouts_full[0])?;
-                    let iter_b = IterLayoutColMajor::new(&layouts_full[1])?;
-                    for (idx_c, idx_b) in izip!(iter_c, iter_b) {
-                        core::ops::$Op::$op(c.rawvec.index_mut(idx_c), b.rawvec[idx_b].clone());
-                    }
-                }
-                return Ok(());
+                self.op_muta_refb_func(a, la, b, lb, $func)
             }
         }
     };
 }
 
-impl_op_assign_api!(DeviceAddAssignAPI, AddAssign, add_assign_binary, add_assign);
-impl_op_assign_api!(DeviceSubAssignAPI, SubAssign, sub_assign_binary, sub_assign);
-impl_op_assign_api!(DeviceMulAssignAPI, MulAssign, mul_assign_binary, mul_assign);
-impl_op_assign_api!(DeviceDivAssignAPI, DivAssign, div_assign_binary, div_assign);
-impl_op_assign_api!(DeviceRemAssignAPI, RemAssign, rem_assign_binary, rem_assign);
-impl_op_assign_api!(DeviceBitOrAssignAPI, BitOrAssign, bitor_assign_binary, bitor_assign);
-impl_op_assign_api!(DeviceBitAndAssignAPI, BitAndAssign, bitand_assign_binary, bitand_assign);
-impl_op_assign_api!(DeviceBitXorAssignAPI, BitXorAssign, bitxor_assign_binary, bitxor_assign);
-impl_op_assign_api!(DeviceShlAssignAPI, ShlAssign, shl_assign_binary, shl_assign);
-impl_op_assign_api!(DeviceShrAssignAPI, ShrAssign, shr_assign_binary, shr_assign);
+#[rustfmt::skip]
+mod impl_op_muta_refb_func {
+    use super::*;
+    impl_op_muta_refb_func!(DeviceAddAssignAPI   , AddAssign   , op_muta_refb_add_assign   , |a, b| *a +=  b.clone());
+    impl_op_muta_refb_func!(DeviceSubAssignAPI   , SubAssign   , op_muta_refb_sub_assign   , |a, b| *a -=  b.clone());
+    impl_op_muta_refb_func!(DeviceMulAssignAPI   , MulAssign   , op_muta_refb_mul_assign   , |a, b| *a *=  b.clone());
+    impl_op_muta_refb_func!(DeviceDivAssignAPI   , DivAssign   , op_muta_refb_div_assign   , |a, b| *a /=  b.clone());
+    impl_op_muta_refb_func!(DeviceRemAssignAPI   , RemAssign   , op_muta_refb_rem_assign   , |a, b| *a %=  b.clone());
+    impl_op_muta_refb_func!(DeviceBitOrAssignAPI , BitOrAssign , op_muta_refb_bitor_assign , |a, b| *a |=  b.clone());
+    impl_op_muta_refb_func!(DeviceBitAndAssignAPI, BitAndAssign, op_muta_refb_bitand_assign, |a, b| *a &=  b.clone());
+    impl_op_muta_refb_func!(DeviceBitXorAssignAPI, BitXorAssign, op_muta_refb_bitxor_assign, |a, b| *a ^=  b.clone());
+    impl_op_muta_refb_func!(DeviceShlAssignAPI   , ShlAssign   , op_muta_refb_shl_assign   , |a, b| *a <<= b.clone());
+    impl_op_muta_refb_func!(DeviceShrAssignAPI   , ShrAssign   , op_muta_refb_shr_assign   , |a, b| *a >>= b.clone());
+}
 
 /* #endregion */
 

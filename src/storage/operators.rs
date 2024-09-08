@@ -62,37 +62,59 @@ pub use impl_op_mutc_refa_refb_func::*;
 
 /* #endregion */
 
-/* #region binary-op */
+/* #region op_muta_refb_func */
+
+#[allow(non_camel_case_types)]
+#[allow(clippy::too_many_arguments)]
+pub trait DeviceOp_MutA_RefB_API<TA, TB, D, F>
+where
+    D: DimAPI,
+    F: FnMut(&mut TA, &TB),
+    Self: DeviceAPI<TA> + DeviceAPI<TB>,
+{
+    fn op_muta_refb_func(
+        &self,
+        a: &mut Storage<TA, Self>,
+        la: &Layout<D>,
+        b: &Storage<TB, Self>,
+        lb: &Layout<D>,
+        f: F,
+    ) -> Result<()>;
+}
 
 macro_rules! trait_op_assign_api {
-    ($DeviceOpAPI:ident, $Op:ident, $op_binary:ident) => {
-        pub trait $DeviceOpAPI<T, TB, D>
+    ($DeviceOpAPI:ident, $Op:ident, $op_muta_refb_func:ident) => {
+        pub trait $DeviceOpAPI<TA, TB, D>
         where
-            T: core::ops::$Op<TB>,
+            TA: core::ops::$Op<TB>,
             D: DimAPI,
-            Self: DeviceAPI<T> + DeviceAPI<TB>,
+            Self: DeviceAPI<TA> + DeviceAPI<TB>,
         {
-            fn $op_binary(
+            fn $op_muta_refb_func(
                 &self,
-                c: &mut Storage<T, Self>,
-                lc: &Layout<D>,
+                a: &mut Storage<TA, Self>,
+                la: &Layout<D>,
                 b: &Storage<TB, Self>,
                 lb: &Layout<D>,
             ) -> Result<()>;
         }
     };
 }
-
-trait_op_assign_api!(DeviceAddAssignAPI, AddAssign, add_assign_binary);
-trait_op_assign_api!(DeviceSubAssignAPI, SubAssign, sub_assign_binary);
-trait_op_assign_api!(DeviceMulAssignAPI, MulAssign, mul_assign_binary);
-trait_op_assign_api!(DeviceDivAssignAPI, DivAssign, div_assign_binary);
-trait_op_assign_api!(DeviceRemAssignAPI, RemAssign, rem_assign_binary);
-trait_op_assign_api!(DeviceBitOrAssignAPI, BitOrAssign, bitor_assign_binary);
-trait_op_assign_api!(DeviceBitAndAssignAPI, BitAndAssign, bitand_assign_binary);
-trait_op_assign_api!(DeviceBitXorAssignAPI, BitXorAssign, bitxor_assign_binary);
-trait_op_assign_api!(DeviceShlAssignAPI, ShlAssign, shl_assign_binary);
-trait_op_assign_api!(DeviceShrAssignAPI, ShrAssign, shr_assign_binary);
+#[rustfmt::skip]
+mod impl_op_muta_refb_func {
+    use super::*;
+    trait_op_assign_api!(DeviceAddAssignAPI   , AddAssign   , op_muta_refb_add_assign   );
+    trait_op_assign_api!(DeviceSubAssignAPI   , SubAssign   , op_muta_refb_sub_assign   );
+    trait_op_assign_api!(DeviceMulAssignAPI   , MulAssign   , op_muta_refb_mul_assign   );
+    trait_op_assign_api!(DeviceDivAssignAPI   , DivAssign   , op_muta_refb_div_assign   );
+    trait_op_assign_api!(DeviceRemAssignAPI   , RemAssign   , op_muta_refb_rem_assign   );
+    trait_op_assign_api!(DeviceBitOrAssignAPI , BitOrAssign , op_muta_refb_bitor_assign );
+    trait_op_assign_api!(DeviceBitAndAssignAPI, BitAndAssign, op_muta_refb_bitand_assign);
+    trait_op_assign_api!(DeviceBitXorAssignAPI, BitXorAssign, op_muta_refb_bitxor_assign);
+    trait_op_assign_api!(DeviceShlAssignAPI   , ShlAssign   , op_muta_refb_shl_assign   );
+    trait_op_assign_api!(DeviceShrAssignAPI   , ShrAssign   , op_muta_refb_shr_assign   );
+}
+pub use impl_op_muta_refb_func::*;
 
 /* #endregion */
 
