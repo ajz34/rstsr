@@ -1,32 +1,121 @@
 use crate::prelude_dev::*;
 
-/* #region ternary-op */
+/* #region op_mutc_refa_refb_func */
 
-macro_rules! impl_tensor_op_ref {
-    ($DeviceOpAPI:ident, $Op:ident, $op_ternary:ident, $op:ident, $tensor_op_ternary:ident, $tensor_op_binary:ident) => {
-        pub fn $tensor_op_ternary<RC, RA, RB, DC, DA, DB, T, TB, B>(
+pub fn op_mutc_refa_refb_func<RA, RB, RC, DA, DB, DC, TA, TB, TC, B, F>(
+    c: &mut TensorBase<RC, DC>,
+    a: &TensorBase<RA, DA>,
+    b: &TensorBase<RB, DB>,
+    f: F,
+) -> Result<()>
+where
+    // lifetime and data constraints
+    RA: DataAPI<Data = Storage<TA, B>>,
+    RB: DataAPI<Data = Storage<TB, B>>,
+    RC: DataMutAPI<Data = Storage<TC, B>>,
+    DA: DimAPI,
+    DB: DimAPI,
+    DC: DimAPI,
+    B: DeviceAPI<TA> + DeviceAPI<TB> + DeviceAPI<TC>,
+    // broadcast constraints
+    DC: DimMaxAPI<DA> + DimMaxAPI<DB>,
+    <DC as DimMaxAPI<DA>>::Max: DimConvertAPI<DC>,
+    <DC as DimMaxAPI<DB>>::Max: DimConvertAPI<DC>,
+    // operation constraints
+    B: DeviceOp_MutC_RefA_RefB_API<TA, TB, TC, DC, F>,
+    F: FnMut(&mut TC, &TA, &TB),
+{
+    rstsr_assert!(c.device().same_device(a.device()), DeviceMismatch)?;
+    rstsr_assert!(c.device().same_device(b.device()), DeviceMismatch)?;
+    let lc = c.layout();
+    let la = a.layout();
+    let lb = b.layout();
+    // all layouts should be broadcastable to lc
+    // we can first generate broadcasted shape, then check this
+    let (lc_b, la_b) = broadcast_layout_to_first(lc, la)?;
+    rstsr_assert_eq!(lc_b, *lc, InvalidLayout)?;
+    let (lc_b, lb_b) = broadcast_layout_to_first(lc, lb)?;
+    rstsr_assert_eq!(lc_b, *lc, InvalidLayout)?;
+    // op provided by device
+    let device = c.device().clone();
+    let storage_c = c.data_mut().as_storage_mut();
+    let storage_a = a.data().storage();
+    let storage_b = b.data().storage();
+    device.op_mutc_refa_refb_func(storage_c, &lc_b, storage_a, &la_b, storage_b, &lb_b, f)
+}
+
+pub fn op_refa_refb_func<RA, RB, DA, DB, TA, TB, TC, B, F>(
+    a: &TensorBase<RA, DA>,
+    b: &TensorBase<RB, DB>,
+    f: F,
+) -> Result<Tensor<TC, <DA as DimMaxAPI<DB>>::Max, B>>
+where
+    // lifetime and data constraints
+    RA: DataAPI<Data = Storage<TA, B>>,
+    RB: DataAPI<Data = Storage<TB, B>>,
+    DA: DimAPI,
+    DB: DimAPI,
+    B: DeviceAPI<TA> + DeviceAPI<TB>,
+    // broadcast constraints
+    DA: DimMaxAPI<DB>,
+    // operation constraints
+    B: DeviceOp_MutC_RefA_RefB_API<TA, TB, TC, <DA as DimMaxAPI<DB>>::Max, F>,
+    B: DeviceCreationAnyAPI<TC>,
+    F: FnMut(&mut TC, &TA, &TB),
+{
+    rstsr_assert!(a.device().same_device(b.device()), DeviceMismatch)?;
+    let la = a.layout();
+    let lb = b.layout();
+    let (la_b, lb_b) = broadcast_layout(la, lb)?;
+    // generate output layout
+    let lc_from_a = layout_for_array_copy(&la_b, TensorIterOrder::K)?;
+    let lc_from_b = layout_for_array_copy(&lb_b, TensorIterOrder::K)?;
+    let lc = if lc_from_a == lc_from_b {
+        lc_from_a
+    } else {
+        match TensorOrder::default() {
+            TensorOrder::C => la_b.shape().c(),
+            TensorOrder::F => la_b.shape().f(),
+        }
+    };
+    // generate empty c
+    let device = a.device();
+    let mut storage_c = unsafe { device.empty_impl(lc.bounds_index()?.1)? };
+    // add provided by device
+    let storage_a = a.data().storage();
+    let storage_b = b.data().storage();
+    device.op_mutc_refa_refb_func(&mut storage_c, &lc, storage_a, &la_b, storage_b, &lb_b, f)?;
+    // return tensor
+    Tensor::new(DataOwned::from(storage_c), lc)
+}
+
+/* #endregion */
+
+/* #region op_mutc_refa_refb_operation */
+
+macro_rules! impl_op_mutc_refa_refb_func {
+    ($DeviceOpAPI:ident, $Op:ident, $op:ident, $op_mutc_refa_refb_func:ident, $op_refa_refb_func:ident) => {
+        pub fn $op_mutc_refa_refb_func<RA, RB, RC, DA, DB, DC, TA, TB, TC, B>(
             c: &mut TensorBase<RC, DC>,
             a: &TensorBase<RA, DA>,
             b: &TensorBase<RB, DB>,
         ) -> Result<()>
         where
             // lifetime and data constraints
-            RA: DataAPI<Data = Storage<T, B>>,
+            RA: DataAPI<Data = Storage<TA, B>>,
             RB: DataAPI<Data = Storage<TB, B>>,
-            RC: DataMutAPI<Data = Storage<T, B>>,
+            RC: DataMutAPI<Data = Storage<TC, B>>,
             DA: DimAPI,
             DB: DimAPI,
             DC: DimAPI,
-            T: Clone,
-            TB: Clone,
-            B: DeviceAPI<T> + DeviceAPI<TB>,
+            B: DeviceAPI<TA> + DeviceAPI<TB> + DeviceAPI<TC>,
             // broadcast constraints
             DC: DimMaxAPI<DA> + DimMaxAPI<DB>,
             <DC as DimMaxAPI<DA>>::Max: DimConvertAPI<DC>,
             <DC as DimMaxAPI<DB>>::Max: DimConvertAPI<DC>,
             // operation constraints
-            T: core::ops::$Op<TB, Output = T>,
-            B: $DeviceOpAPI<T, TB, DC>,
+            TA: core::ops::$Op<TB, Output = TC>,
+            B: $DeviceOpAPI<TA, TB, TC, DC>,
         {
             rstsr_assert!(c.device().same_device(a.device()), DeviceMismatch)?;
             rstsr_assert!(c.device().same_device(b.device()), DeviceMismatch)?;
@@ -44,37 +133,38 @@ macro_rules! impl_tensor_op_ref {
             let storage_c = c.data_mut().as_storage_mut();
             let storage_a = a.data().storage();
             let storage_b = b.data().storage();
-            device.$op_ternary(storage_c, &lc_b, storage_a, &la_b, storage_b, &lb_b)
+            device.$op_mutc_refa_refb_func(storage_c, &lc_b, storage_a, &la_b, storage_b, &lb_b)
         }
 
-        pub fn $tensor_op_binary<RA, RB, DA, DB, T, TB, B>(
+        pub fn $op_refa_refb_func<RA, RB, DA, DB, TA, TB, B>(
             a: &TensorBase<RA, DA>,
             b: &TensorBase<RB, DB>,
-        ) -> Result<Tensor<T, <DA as DimMaxAPI<DB>>::Max, B>>
+        ) -> Result<Tensor<<TA as core::ops::$Op<TB>>::Output, <DA as DimMaxAPI<DB>>::Max, B>>
         where
             // lifetime and data constraints
-            RA: DataAPI<Data = Storage<T, B>>,
+            RA: DataAPI<Data = Storage<TA, B>>,
             RB: DataAPI<Data = Storage<TB, B>>,
             DA: DimAPI,
             DB: DimAPI,
-            T: Clone,
+            TA: Clone,
             TB: Clone,
-            B: DeviceAPI<T> + DeviceAPI<TB> + DeviceCreationAnyAPI<T>,
+            B: DeviceAPI<TA> + DeviceAPI<TB>,
             // broadcast constraints
             DA: DimMaxAPI<DB>,
             // operation constraints
-            T: core::ops::$Op<TB, Output = T>,
-            B: $DeviceOpAPI<T, TB, <DA as DimMaxAPI<DB>>::Max>,
+            TA: core::ops::$Op<TB>,
+            B: $DeviceOpAPI<TA, TB, <TA as core::ops::$Op<TB>>::Output, <DA as DimMaxAPI<DB>>::Max>,
+            B: DeviceCreationAnyAPI<<TA as core::ops::$Op<TB>>::Output>,
         {
             rstsr_assert!(a.device().same_device(b.device()), DeviceMismatch)?;
             let la = a.layout();
             let lb = b.layout();
             let (la_b, lb_b) = broadcast_layout(la, lb)?;
             // generate output layout
-            let lc = if la_b.c_contig() && lb_b.c_contig() {
-                la_b.shape().c()
-            } else if la_b.f_contig() && lb_b.f_contig() {
-                la_b.shape().f()
+            let lc_from_a = layout_for_array_copy(&la_b, TensorIterOrder::K)?;
+            let lc_from_b = layout_for_array_copy(&lb_b, TensorIterOrder::K)?;
+            let lc = if lc_from_a == lc_from_b {
+                lc_from_a
             } else {
                 match TensorOrder::default() {
                     TensorOrder::C => la_b.shape().c(),
@@ -82,57 +172,64 @@ macro_rules! impl_tensor_op_ref {
                 }
             };
             // generate empty c
-            let device = a.device().clone();
+            let device = a.device();
             let mut storage_c = unsafe { device.empty_impl(lc.bounds_index()?.1)? };
-            // add provided by device
+            // op provided by device
             let storage_a = a.data().storage();
             let storage_b = b.data().storage();
-            device.$op_ternary(&mut storage_c, &lc, storage_a, &la_b, storage_b, &lb_b)?;
+            device.$op_mutc_refa_refb_func(
+                &mut storage_c,
+                &lc,
+                storage_a,
+                &la_b,
+                storage_b,
+                &lb_b,
+            )?;
             // return tensor
-            Tensor::new(DataOwned { storage: storage_c }, lc)
+            Tensor::new(DataOwned::from(storage_c), lc)
         }
 
-        impl<RA, RB, DA, DB, T, TB, B> core::ops::$Op<&TensorBase<RB, DB>> for &TensorBase<RA, DA>
+        impl<RA, RB, DA, DB, TA, TB, B> core::ops::$Op<&TensorBase<RB, DB>> for &TensorBase<RA, DA>
         where
-            // lifetime and data
-            // constraints
-            RA: DataAPI<Data = Storage<T, B>>,
+            // lifetime and data constraints
+            RA: DataAPI<Data = Storage<TA, B>>,
             RB: DataAPI<Data = Storage<TB, B>>,
             DA: DimAPI,
             DB: DimAPI,
-            T: Clone,
+            TA: Clone,
             TB: Clone,
-            B: DeviceAPI<T> + DeviceAPI<TB> + DeviceCreationAnyAPI<T>,
+            B: DeviceAPI<TA> + DeviceAPI<TB>,
             // broadcast constraints
             DA: DimMaxAPI<DB>,
             // operation constraints
-            T: core::ops::$Op<TB, Output = T>,
-            B: $DeviceOpAPI<T, TB, <DA as DimMaxAPI<DB>>::Max>,
+            TA: core::ops::$Op<TB>,
+            B: $DeviceOpAPI<TA, TB, <TA as core::ops::$Op<TB>>::Output, <DA as DimMaxAPI<DB>>::Max>,
+            B: DeviceCreationAnyAPI<<TA as core::ops::$Op<TB>>::Output>,
         {
-            type Output = Tensor<T, <DA as DimMaxAPI<DB>>::Max, B>;
+            type Output = Tensor<<TA as core::ops::$Op<TB>>::Output, <DA as DimMaxAPI<DB>>::Max, B>;
 
             fn $op(self, rhs: &TensorBase<RB, DB>) -> Self::Output {
-                $tensor_op_binary(self, rhs).unwrap()
+                $op_refa_refb_func(self, rhs).unwrap()
             }
         }
     };
 }
 
 #[rustfmt::skip]
-mod impl_tensor_op_ref {
+mod impl_op_mutc_refa_refb_func {
     use super::*;
-    impl_tensor_op_ref!(DeviceAddAPI, Add, add_ternary, add, tensor_add_ternary, tensor_add_binary);
-    impl_tensor_op_ref!(DeviceSubAPI, Sub, sub_ternary, sub, tensor_sub_ternary, tensor_sub_binary);
-    impl_tensor_op_ref!(DeviceMulAPI, Mul, mul_ternary, mul, tensor_mul_tenary, tensor_mul_binary);
-    impl_tensor_op_ref!(DeviceDivAPI, Div, div_ternary, div, tensor_div_tenary, tensor_div_binary);
-    impl_tensor_op_ref!(DeviceRemAPI, Rem, rem_ternary, rem, tensor_rem_tenary, tensor_rem_binary);
-    impl_tensor_op_ref!(DeviceBitOrAPI, BitOr, bitor_ternary, bitor, tensor_bitor_tenary, tensor_bitor_binary);
-    impl_tensor_op_ref!(DeviceBitAndAPI, BitAnd, bitand_ternary, bitand, tensor_bitand_tenary, tensor_bitand_binary);
-    impl_tensor_op_ref!(DeviceBitXorAPI, BitXor, bitxor_ternary, bitxor, tensor_bitxor_tenary, tensor_bitxor_binary);
-    impl_tensor_op_ref!(DeviceShlAPI, Shl, shl_ternary, shl, tensor_shl_tenary, tensor_shl_binary);
-    impl_tensor_op_ref!(DeviceShrAPI, Shr, shr_ternary, shr, tensor_shr_tenary, tensor_shr_binary);
+    impl_op_mutc_refa_refb_func!(DeviceAddAPI   , Add   , add   , op_mutc_refa_refb_add   , op_refa_refb_add   );
+    impl_op_mutc_refa_refb_func!(DeviceSubAPI   , Sub   , sub   , op_mutc_refa_refb_sub   , op_refa_refb_sub   );
+    impl_op_mutc_refa_refb_func!(DeviceMulAPI   , Mul   , mul   , op_mutc_refa_refb_mul   , op_refa_refb_mul   );
+    impl_op_mutc_refa_refb_func!(DeviceDivAPI   , Div   , div   , op_mutc_refa_refb_div   , op_refa_refb_div   );
+    impl_op_mutc_refa_refb_func!(DeviceRemAPI   , Rem   , rem   , op_mutc_refa_refb_rem   , op_refa_refb_rem   );
+    impl_op_mutc_refa_refb_func!(DeviceBitOrAPI , BitOr , bitor , op_mutc_refa_refb_bitor , op_refa_refb_bitor );
+    impl_op_mutc_refa_refb_func!(DeviceBitAndAPI, BitAnd, bitand, op_mutc_refa_refb_bitand, op_refa_refb_bitand);
+    impl_op_mutc_refa_refb_func!(DeviceBitXorAPI, BitXor, bitxor, op_mutc_refa_refb_bitxor, op_refa_refb_bitxor);
+    impl_op_mutc_refa_refb_func!(DeviceShlAPI   , Shl   , shl   , op_mutc_refa_refb_shl   , op_refa_refb_shl   );
+    impl_op_mutc_refa_refb_func!(DeviceShrAPI   , Shr   , shr   , op_mutc_refa_refb_shr   , op_refa_refb_shr   );
 }
-pub use impl_tensor_op_ref::*;
+pub use impl_op_mutc_refa_refb_func::*;
 
 /* #endregion */
 

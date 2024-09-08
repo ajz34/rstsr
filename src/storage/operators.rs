@@ -1,21 +1,41 @@
 use crate::prelude_dev::*;
 use num::Zero;
 
-/* #region ternary-op */
+/* #region op_mutc_refa_refb_func */
 
-macro_rules! trait_op_api {
-    ($DeviceOpAPI:ident, $Op:ident, $op_ternary:ident) => {
-        pub trait $DeviceOpAPI<T, TB, D>
+#[allow(non_camel_case_types)]
+#[allow(clippy::too_many_arguments)]
+pub trait DeviceOp_MutC_RefA_RefB_API<TA, TB, TC, D, F>
+where
+    D: DimAPI,
+    F: FnMut(&mut TC, &TA, &TB),
+    Self: DeviceAPI<TA> + DeviceAPI<TB> + DeviceAPI<TC>,
+{
+    fn op_mutc_refa_refb_func(
+        &self,
+        c: &mut Storage<TC, Self>,
+        lc: &Layout<D>,
+        a: &Storage<TA, Self>,
+        la: &Layout<D>,
+        b: &Storage<TB, Self>,
+        lb: &Layout<D>,
+        f: F,
+    ) -> Result<()>;
+}
+
+macro_rules! impl_op_mutc_refa_refb_func {
+    ($DeviceOpAPI:ident, $Op:ident, $op_mutc_refa_refb_func:ident) => {
+        pub trait $DeviceOpAPI<TA, TB, TC, D>
         where
-            T: core::ops::$Op<TB, Output = T>,
+            TA: core::ops::$Op<TB, Output = TC>,
             D: DimAPI,
-            Self: DeviceAPI<T> + DeviceAPI<TB>,
+            Self: DeviceAPI<TA> + DeviceAPI<TB> + DeviceAPI<TC>,
         {
-            fn $op_ternary(
+            fn $op_mutc_refa_refb_func(
                 &self,
-                c: &mut Storage<T, Self>,
+                c: &mut Storage<TC, Self>,
                 lc: &Layout<D>,
-                a: &Storage<T, Self>,
+                a: &Storage<TA, Self>,
                 la: &Layout<D>,
                 b: &Storage<TB, Self>,
                 lb: &Layout<D>,
@@ -24,16 +44,21 @@ macro_rules! trait_op_api {
     };
 }
 
-trait_op_api!(DeviceAddAPI, Add, add_ternary);
-trait_op_api!(DeviceSubAPI, Sub, sub_ternary);
-trait_op_api!(DeviceMulAPI, Mul, mul_ternary);
-trait_op_api!(DeviceDivAPI, Div, div_ternary);
-trait_op_api!(DeviceRemAPI, Rem, rem_ternary);
-trait_op_api!(DeviceBitOrAPI, BitOr, bitor_ternary);
-trait_op_api!(DeviceBitAndAPI, BitAnd, bitand_ternary);
-trait_op_api!(DeviceBitXorAPI, BitXor, bitxor_ternary);
-trait_op_api!(DeviceShlAPI, Shl, shl_ternary);
-trait_op_api!(DeviceShrAPI, Shr, shr_ternary);
+#[rustfmt::skip]
+mod impl_op_mutc_refa_refb_func {
+    use super::*;
+    impl_op_mutc_refa_refb_func!(DeviceAddAPI   , Add   , op_mutc_refa_refb_add   );
+    impl_op_mutc_refa_refb_func!(DeviceSubAPI   , Sub   , op_mutc_refa_refb_sub   );
+    impl_op_mutc_refa_refb_func!(DeviceMulAPI   , Mul   , op_mutc_refa_refb_mul   );
+    impl_op_mutc_refa_refb_func!(DeviceDivAPI   , Div   , op_mutc_refa_refb_div   );
+    impl_op_mutc_refa_refb_func!(DeviceRemAPI   , Rem   , op_mutc_refa_refb_rem   );
+    impl_op_mutc_refa_refb_func!(DeviceBitOrAPI , BitOr , op_mutc_refa_refb_bitor );
+    impl_op_mutc_refa_refb_func!(DeviceBitAndAPI, BitAnd, op_mutc_refa_refb_bitand);
+    impl_op_mutc_refa_refb_func!(DeviceBitXorAPI, BitXor, op_mutc_refa_refb_bitxor);
+    impl_op_mutc_refa_refb_func!(DeviceShlAPI   , Shl   , op_mutc_refa_refb_shl   );
+    impl_op_mutc_refa_refb_func!(DeviceShrAPI   , Shr   , op_mutc_refa_refb_shr   );
+}
+pub use impl_op_mutc_refa_refb_func::*;
 
 /* #endregion */
 

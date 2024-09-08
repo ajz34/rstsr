@@ -53,67 +53,90 @@ where
     acc
 }
 
-/* #region ternary-op */
+/* #region op_mutc_refa_refb_func */
 
-macro_rules! impl_op_api {
-    ($DeviceOpAPI:ident, $Op:ident, $op_ternary:ident, $op:ident) => {
-        impl<T, TB, D> $DeviceOpAPI<T, TB, D> for CpuDevice
+impl<TA, TB, TC, D, F> DeviceOp_MutC_RefA_RefB_API<TA, TB, TC, D, F> for CpuDevice
+where
+    TA: Clone,
+    TB: Clone,
+    TC: Clone,
+    D: DimAPI,
+    F: FnMut(&mut TC, &TA, &TB),
+{
+    fn op_mutc_refa_refb_func(
+        &self,
+        c: &mut Storage<TC, CpuDevice>,
+        lc: &Layout<D>,
+        a: &Storage<TA, CpuDevice>,
+        la: &Layout<D>,
+        b: &Storage<TB, CpuDevice>,
+        lb: &Layout<D>,
+        mut f: F,
+    ) -> Result<()> {
+        // re-align layouts
+        let layouts_full = translate_to_col_major(&[lc, la, lb], TensorIterOrder::K)?;
+        let layouts_full_ref = layouts_full.iter().collect_vec();
+        let (layouts_contig, size_contig) = translate_to_col_major_with_contig(&layouts_full_ref);
+
+        // contiguous iteration if possible, otherwise use iterator of layout
+        if size_contig >= CONTIG_SWITCH {
+            let iter_c = IterLayoutColMajor::new(&layouts_contig[0])?;
+            let iter_a = IterLayoutColMajor::new(&layouts_contig[1])?;
+            let iter_b = IterLayoutColMajor::new(&layouts_contig[2])?;
+            for (idx_c, idx_a, idx_b) in izip!(iter_c, iter_a, iter_b) {
+                for i in 0..size_contig {
+                    f(&mut c.rawvec[idx_c + i], &a.rawvec[idx_a + i], &b.rawvec[idx_b + i]);
+                }
+            }
+        } else {
+            let iter_c = IterLayoutColMajor::new(&layouts_full[0])?;
+            let iter_a = IterLayoutColMajor::new(&layouts_full[1])?;
+            let iter_b = IterLayoutColMajor::new(&layouts_full[2])?;
+            for (idx_c, idx_a, idx_b) in izip!(iter_c, iter_a, iter_b) {
+                f(&mut c.rawvec[idx_c], &a.rawvec[idx_a], &b.rawvec[idx_b]);
+            }
+        }
+        return Ok(());
+    }
+}
+
+macro_rules! impl_op_mutc_refa_refb_func {
+    ($DeviceOpAPI:ident, $Op:ident, $op_mutc_refa_refb_func:ident, $func:expr) => {
+        impl<TA, TB, TC, D> $DeviceOpAPI<TA, TB, TC, D> for CpuDevice
         where
+            TA: Clone + core::ops::$Op<TB, Output = TC>,
             TB: Clone,
-            T: core::ops::$Op<TB, Output = T> + Clone,
+            TC: Clone,
             D: DimAPI,
         {
-            fn $op_ternary(
+            fn $op_mutc_refa_refb_func(
                 &self,
-                c: &mut Storage<T, CpuDevice>,
+                c: &mut Storage<TC, Self>,
                 lc: &Layout<D>,
-                a: &Storage<T, CpuDevice>,
+                a: &Storage<TA, Self>,
                 la: &Layout<D>,
-                b: &Storage<TB, CpuDevice>,
+                b: &Storage<TB, Self>,
                 lb: &Layout<D>,
             ) -> Result<()> {
-                let layouts_full = translate_to_col_major(&[lc, la, lb], TensorIterOrder::K)?;
-                let layouts_full_ref = layouts_full.iter().collect_vec();
-                let (layouts_contig, size_contig) =
-                    translate_to_col_major_with_contig(&layouts_full_ref);
-
-                if size_contig >= CONTIG_SWITCH {
-                    let iter_c = IterLayoutColMajor::new(&layouts_contig[0])?;
-                    let iter_a = IterLayoutColMajor::new(&layouts_contig[1])?;
-                    let iter_b = IterLayoutColMajor::new(&layouts_contig[2])?;
-                    for (idx_c, idx_a, idx_b) in izip!(iter_c, iter_a, iter_b) {
-                        for i in 0..size_contig {
-                            c.rawvec[idx_c + i] = core::ops::$Op::$op(
-                                a.rawvec[idx_a + i].clone(),
-                                b.rawvec[idx_b + i].clone(),
-                            );
-                        }
-                    }
-                } else {
-                    let iter_c = IterLayoutColMajor::new(&layouts_full[0])?;
-                    let iter_a = IterLayoutColMajor::new(&layouts_full[1])?;
-                    let iter_b = IterLayoutColMajor::new(&layouts_full[2])?;
-                    for (idx_c, idx_a, idx_b) in izip!(iter_c, iter_a, iter_b) {
-                        c.rawvec[idx_c] =
-                            core::ops::$Op::$op(a.rawvec[idx_a].clone(), b.rawvec[idx_b].clone());
-                    }
-                }
-                return Ok(());
+                self.op_mutc_refa_refb_func(c, lc, a, la, b, lb, $func)
             }
         }
     };
 }
-
-impl_op_api!(DeviceAddAPI, Add, add_ternary, add);
-impl_op_api!(DeviceSubAPI, Sub, sub_ternary, sub);
-impl_op_api!(DeviceMulAPI, Mul, mul_ternary, mul);
-impl_op_api!(DeviceDivAPI, Div, div_ternary, div);
-impl_op_api!(DeviceRemAPI, Rem, rem_ternary, rem);
-impl_op_api!(DeviceBitOrAPI, BitOr, bitor_ternary, bitor);
-impl_op_api!(DeviceBitAndAPI, BitAnd, bitand_ternary, bitand);
-impl_op_api!(DeviceBitXorAPI, BitXor, bitxor_ternary, bitxor);
-impl_op_api!(DeviceShlAPI, Shl, shl_ternary, shl);
-impl_op_api!(DeviceShrAPI, Shr, shr_ternary, shr);
+#[rustfmt::skip]
+mod impl_op_mutc_refa_refb_func {
+    use super::*;
+    impl_op_mutc_refa_refb_func!(DeviceAddAPI   , Add   , op_mutc_refa_refb_add   , |c, a, b| *c = a.clone() + b.clone());
+    impl_op_mutc_refa_refb_func!(DeviceSubAPI   , Sub   , op_mutc_refa_refb_sub   , |c, a, b| *c = a.clone() - b.clone());
+    impl_op_mutc_refa_refb_func!(DeviceMulAPI   , Mul   , op_mutc_refa_refb_mul   , |c, a, b| *c = a.clone() * b.clone());
+    impl_op_mutc_refa_refb_func!(DeviceDivAPI   , Div   , op_mutc_refa_refb_div   , |c, a, b| *c = a.clone() / b.clone());
+    impl_op_mutc_refa_refb_func!(DeviceRemAPI   , Rem   , op_mutc_refa_refb_rem   , |c, a, b| *c = a.clone() % b.clone());
+    impl_op_mutc_refa_refb_func!(DeviceBitOrAPI , BitOr , op_mutc_refa_refb_bitor , |c, a, b| *c = a.clone() | b.clone());
+    impl_op_mutc_refa_refb_func!(DeviceBitAndAPI, BitAnd, op_mutc_refa_refb_bitand, |c, a, b| *c = a.clone() & b.clone());
+    impl_op_mutc_refa_refb_func!(DeviceBitXorAPI, BitXor, op_mutc_refa_refb_bitxor, |c, a, b| *c = a.clone() ^ b.clone());
+    impl_op_mutc_refa_refb_func!(DeviceShlAPI   , Shl   , op_mutc_refa_refb_shl   , |c, a, b| *c = a.clone() << b.clone());
+    impl_op_mutc_refa_refb_func!(DeviceShrAPI   , Shr   , op_mutc_refa_refb_shr   , |c, a, b| *c = a.clone() >> b.clone());
+}
 
 /* #endregion */
 
