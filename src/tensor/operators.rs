@@ -1,6 +1,6 @@
 use crate::prelude_dev::*;
 
-/* #region op_mutc_refa_refb_func */
+/* #region op_func */
 
 pub fn op_mutc_refa_refb_func<RA, RB, RC, DA, DB, DC, TA, TB, TC, B, F>(
     c: &mut TensorBase<RC, DC>,
@@ -120,6 +120,20 @@ where
     let storage_a = a.data_mut().as_storage_mut();
     let storage_b = b.data().storage();
     device.op_muta_refb_func(storage_a, &la_b, storage_b, &lb_b, f)
+}
+
+pub fn op_muta_func<R, T, D, B, F>(a: &mut TensorBase<R, D>, f: F) -> Result<()>
+where
+    R: DataMutAPI<Data = Storage<T, B>>,
+    D: DimAPI,
+    B: DeviceAPI<T>,
+    B: DeviceOp_MutA_API<T, D, F>,
+    F: FnMut(&mut T),
+{
+    let la = a.layout().clone();
+    let device = a.device().clone();
+    let storage_a = a.data_mut().as_storage_mut();
+    device.op_muta_func(storage_a, &la, f)
 }
 
 /* #endregion */
@@ -577,6 +591,39 @@ pub mod op_owna_refb_operator {
 
 /* #endregion */
 
+/* #region op_owna_operation */
+
+macro_rules! impl_op_muta_unary {
+    ($op:ident, $Op:ident, $op_muta_refb_closure:expr) => {
+        impl<T, D, B> core::ops::$Op for Tensor<T, D, B>
+        where
+            // lifetime and data constraints
+            T: Clone,
+            D: DimAPI,
+            B: DeviceAPI<T>,
+            // op provided by device
+            T: core::ops::$Op<Output = T>,
+            B: DeviceOp_MutA_API<T, D, fn(&mut T)>,
+        {
+            type Output = Tensor<T, D, B>;
+            fn $op(self) -> Self::Output {
+                let mut s = self;
+                op_muta_func(&mut s, $op_muta_refb_closure).unwrap();
+                s
+            }
+        }
+    };
+}
+
+#[rustfmt::skip]
+mod impl_op_muta_unary {
+    use super::*;
+    impl_op_muta_unary!(neg, Neg, |a| *a = -a.clone());
+    impl_op_muta_unary!(not, Not, |a| *a = !a.clone());
+}
+
+/* #endregion */
+
 #[cfg(test)]
 mod test {
     use crate::prelude_dev::*;
@@ -772,6 +819,9 @@ mod test {
     fn test_neg() {
         let a = Tensor::linspace_cpu(1.0, 5.0, 5);
         let b = -&a;
+        let b_ref = vec![-1., -2., -3., -4., -5.].into();
+        assert!(allclose_f64(&b, &b_ref));
+        let b = -a;
         let b_ref = vec![-1., -2., -3., -4., -5.].into();
         assert!(allclose_f64(&b, &b_ref));
     }

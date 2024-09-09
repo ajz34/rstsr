@@ -11,8 +11,8 @@ For column status:
 
 | status | implementation | Python API | description |
 |-|-|-|-|
-| | | `__pos__` | `+x` |
-| | | `__neg__` | `-x` |
+| D | | `__pos__` | `+x` |
+| Y | `-` | `__neg__` | `-x` |
 | Y | `+` | `__add__` | `x1 + x2` |
 | Y | `-` | `__sub__` | `x1 - x2` |
 | Y | `*` | `__mul__` | `x1 * x2` |
@@ -28,6 +28,9 @@ For column status:
 | | | `__ipow__` | `x1 **= x2` |
 | Y | `%=` | `__imod__` | `x1 %= x2` |
 
+Dropped support:
+- `__pos__`: In rust, leading `+` is not allowed.
+
 ### Array Operators
 
 | status | implementation | Python API | description |
@@ -42,7 +45,7 @@ Dropped support
 
 | status | implementation | Python API | description |
 |-|-|-|-|
-| | | `__invert__` | `~x` |
+| Y | `!`  | `__invert__` | `~x` |
 | Y | `&`  | `__and__` | `x1 & x2` |
 | Y | `\|` | `__or__` | `x1 \| x2` |
 | Y | `^`  | `__xor__` | `x1 ^ x2` |
