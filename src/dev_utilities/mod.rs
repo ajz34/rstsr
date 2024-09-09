@@ -15,6 +15,9 @@ where
 {
     let la = a.layout().reverse_axes();
     let lb = b.layout().reverse_axes();
+    if la.size() != lb.size() {
+        return false;
+    }
     let it_la = IterLayoutColMajor::new(&la).unwrap();
     let it_lb = IterLayoutColMajor::new(&lb).unwrap();
     let data_a = a.data().storage().rawvec();

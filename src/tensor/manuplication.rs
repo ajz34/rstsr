@@ -386,7 +386,7 @@ where
     /// # See also
     ///
     /// [`Tensor::to_shape_assume_contig`]
-    pub fn into_shape_assume_contig<D2>(self, shape: impl Into<D2>) -> Result<TensorBase<R, D2>>
+    pub fn into_shape_assume_contig<D2>(self, shape: D2) -> Result<TensorBase<R, D2>>
     where
         D2: DimAPI,
     {
@@ -394,7 +394,6 @@ where
         let is_c_contig = layout.c_contig();
         let is_f_contig = layout.f_contig();
 
-        let shape: D2 = shape.into();
         rstsr_assert_eq!(
             layout.size(),
             shape.shape_size(),

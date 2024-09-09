@@ -691,9 +691,14 @@ impl<const N: usize> DimConvertAPI<IxD> for Ix<N> {
     }
 }
 
-impl<const N: usize> DimConvertAPI<Ix<N>> for Ix<N> {
-    fn into_dim(layout: Layout<Ix<N>>) -> Result<Layout<Ix<N>>> {
-        return Ok(layout);
+impl<const N: usize, const M: usize> DimConvertAPI<Ix<M>> for Ix<N> {
+    fn into_dim(layout: Layout<Ix<N>>) -> Result<Layout<Ix<M>>> {
+        rstsr_assert_eq!(N, M, InvalidLayout)?;
+        let shape = layout.shape().to_vec().try_into().unwrap();
+        let stride = layout.stride().to_vec().try_into().unwrap();
+        let offset = layout.offset();
+        let size = layout.size();
+        return Ok(Layout { shape, stride, offset, size });
     }
 }
 
