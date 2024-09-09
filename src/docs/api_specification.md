@@ -1,5 +1,10 @@
 # Python Array API specification
 
+For column status:
+- Y: Implemented in rstsr (may not be fully functional like numpy or Python array API specification, but should be enough)
+- P: Partial implemented in rstsr (not all features in Python array API is implemented)
+- D: Features that would be dropped in rstsr.
+
 ## Operators
 
 ### Arithmetic Operators
@@ -8,43 +13,46 @@
 |-|-|-|-|
 | | | `__pos__` | `+x` |
 | | | `__neg__` | `-x` |
-| | | `__add__` | `x1 + x2` |
-| | | `__sub__` | `x1 - x2` |
-| | | `__mul__` | `x1 * x2` |
-| | | `__truediv__` | `x1 / x2` |
+| Y | `+` | `__add__` | `x1 + x2` |
+| Y | `-` | `__sub__` | `x1 - x2` |
+| Y | `*` | `__mul__` | `x1 * x2` |
+| Y | `/` | `__truediv__` | `x1 / x2` |
 | | | `__floordiv__` | `x1 // x2` |
-| | | `__mod__` | `x1 % x2` |
+| Y | `%` | `__mod__` | `x1 % x2` |
 | | | `__pow__` | `x1 ** x2` |
-| | | `__iadd__` | `x1 += x2` |
-| | | `__isub__` | `x1 -= x2` |
-| | | `__imul__` | `x1 *= x2` |
-| | | `__itruediv__` | `x1 /= x2` |
+| Y | `+=` | `__iadd__` | `x1 += x2` |
+| Y | `-=` | `__isub__` | `x1 -= x2` |
+| Y | `*=` | `__imul__` | `x1 *= x2` |
+| Y | `/=` | `__itruediv__` | `x1 /= x2` |
 | | | `__ifloordiv__` | `x1 //= x2` |
 | | | `__ipow__` | `x1 **= x2` |
-| | | `__imod__` | `x1 %= x2` |
+| Y | `%=` | `__imod__` | `x1 %= x2` |
 
 ### Array Operators
 
 | status | implementation | Python API | description |
 |-|-|-|-|
 | | | `__matmul__` | `x1 @ x2` |
-| | | `__imatmul__` | `x1 @= x2` |
+| D | | `__imatmul__` | `x1 @= x2` |
+
+Dropped support
+- `__imatmul__`: Inplace matmul is not convenient to be realized.
 
 ### Bitwise Operators
 
 | status | implementation | Python API | description |
 |-|-|-|-|
 | | | `__invert__` | `~x` |
-| | | `__and__` | `x1 & x2` |
-| | | `__or__` | `x1 \| x2` |
-| | | `__xor__` | `x1 ^ x2` |
-| | | `__lshift__` | `x1 << x2` |
-| | | `__rshift__` | `x1 >> x2` |
-| | | `__iand__` | `x1 &= x2` |
-| | | `__ior__` | `x1 \|= x2` |
-| | | `__ixor__` | `x1 ^= x2` |
-| | | `__ilshift__` | `x1 <<= x2` |
-| | | `__irshift__` | `x1 >>= x2` |
+| Y | `&`  | `__and__` | `x1 & x2` |
+| Y | `\|` | `__or__` | `x1 \| x2` |
+| Y | `^`  | `__xor__` | `x1 ^ x2` |
+| Y | `<<` | `__lshift__` | `x1 << x2` |
+| Y | `>>` | `__rshift__` | `x1 >> x2` |
+| Y | `&=` | `__iand__` | `x1 &= x2` |
+| Y | `\|=`| `__ior__` | `x1 \|= x2` |
+| Y | `^=` | `__ixor__` | `x1 ^= x2` |
+| Y | `<<=`| `__ilshift__` | `x1 <<= x2` |
+| Y | `>>=`| `__irshift__` | `x1 >>= x2` |
 
 ### Comparsion Operators
 

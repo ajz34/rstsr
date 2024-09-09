@@ -126,14 +126,14 @@ macro_rules! impl_op_mutc_refa_refb_func {
 #[rustfmt::skip]
 mod impl_op_mutc_refa_refb_func {
     use super::*;
-    impl_op_mutc_refa_refb_func!(DeviceAddAPI   , Add   , op_mutc_refa_refb_add   , |c, a, b| *c = a.clone() + b.clone());
-    impl_op_mutc_refa_refb_func!(DeviceSubAPI   , Sub   , op_mutc_refa_refb_sub   , |c, a, b| *c = a.clone() - b.clone());
-    impl_op_mutc_refa_refb_func!(DeviceMulAPI   , Mul   , op_mutc_refa_refb_mul   , |c, a, b| *c = a.clone() * b.clone());
-    impl_op_mutc_refa_refb_func!(DeviceDivAPI   , Div   , op_mutc_refa_refb_div   , |c, a, b| *c = a.clone() / b.clone());
-    impl_op_mutc_refa_refb_func!(DeviceRemAPI   , Rem   , op_mutc_refa_refb_rem   , |c, a, b| *c = a.clone() % b.clone());
-    impl_op_mutc_refa_refb_func!(DeviceBitOrAPI , BitOr , op_mutc_refa_refb_bitor , |c, a, b| *c = a.clone() | b.clone());
-    impl_op_mutc_refa_refb_func!(DeviceBitAndAPI, BitAnd, op_mutc_refa_refb_bitand, |c, a, b| *c = a.clone() & b.clone());
-    impl_op_mutc_refa_refb_func!(DeviceBitXorAPI, BitXor, op_mutc_refa_refb_bitxor, |c, a, b| *c = a.clone() ^ b.clone());
+    impl_op_mutc_refa_refb_func!(DeviceAddAPI   , Add   , op_mutc_refa_refb_add   , |c, a, b| *c = a.clone() +  b.clone());
+    impl_op_mutc_refa_refb_func!(DeviceSubAPI   , Sub   , op_mutc_refa_refb_sub   , |c, a, b| *c = a.clone() -  b.clone());
+    impl_op_mutc_refa_refb_func!(DeviceMulAPI   , Mul   , op_mutc_refa_refb_mul   , |c, a, b| *c = a.clone() *  b.clone());
+    impl_op_mutc_refa_refb_func!(DeviceDivAPI   , Div   , op_mutc_refa_refb_div   , |c, a, b| *c = a.clone() /  b.clone());
+    impl_op_mutc_refa_refb_func!(DeviceRemAPI   , Rem   , op_mutc_refa_refb_rem   , |c, a, b| *c = a.clone() %  b.clone());
+    impl_op_mutc_refa_refb_func!(DeviceBitOrAPI , BitOr , op_mutc_refa_refb_bitor , |c, a, b| *c = a.clone() |  b.clone());
+    impl_op_mutc_refa_refb_func!(DeviceBitAndAPI, BitAnd, op_mutc_refa_refb_bitand, |c, a, b| *c = a.clone() &  b.clone());
+    impl_op_mutc_refa_refb_func!(DeviceBitXorAPI, BitXor, op_mutc_refa_refb_bitxor, |c, a, b| *c = a.clone() ^  b.clone());
     impl_op_mutc_refa_refb_func!(DeviceShlAPI   , Shl   , op_mutc_refa_refb_shl   , |c, a, b| *c = a.clone() << b.clone());
     impl_op_mutc_refa_refb_func!(DeviceShrAPI   , Shr   , op_mutc_refa_refb_shr   , |c, a, b| *c = a.clone() >> b.clone());
 }
