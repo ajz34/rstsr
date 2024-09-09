@@ -218,6 +218,34 @@ mod impl_op_muta_refb_func {
     impl_op_muta_refb_func!(DeviceShrAssignAPI   , ShrAssign   , op_muta_refb_shr_assign   , |a, b| *a >>= b.clone());
 }
 
+macro_rules! impl_op_muta_refb_unary_func {
+    ($DeviceOpAPI:ident, $Op:ident, $op_muta_refb_func:ident, $func:expr) => {
+        impl<TA, TB, D> $DeviceOpAPI<TA, TB, D> for CpuDevice
+        where
+            TA: Clone,
+            TB: Clone + core::ops::$Op<Output = TA>,
+            D: DimAPI,
+        {
+            fn $op_muta_refb_func(
+                &self,
+                a: &mut Storage<TA, CpuDevice>,
+                la: &Layout<D>,
+                b: &Storage<TB, CpuDevice>,
+                lb: &Layout<D>,
+            ) -> Result<()> {
+                self.op_muta_refb_func(a, la, b, lb, $func)
+            }
+        }
+    };
+}
+
+#[rustfmt::skip]
+mod impl_op_muta_refb_unary_func {
+    use super::*;
+    impl_op_muta_refb_unary_func!(DeviceNegAPI, Neg, op_muta_refb_neg, |a, b| *a = -b.clone());
+    impl_op_muta_refb_unary_func!(DeviceNotAPI, Not, op_muta_refb_not, |a, b| *a = !b.clone());
+}
+
 /* #endregion */
 
 impl<T, D> OpSumAPI<T, D> for CpuDevice

@@ -89,11 +89,44 @@ where
     Tensor::new(DataOwned::from(storage_c), lc)
 }
 
+pub fn op_muta_refb_func<RA, RB, DA, DB, TA, TB, B, F>(
+    a: &mut TensorBase<RA, DA>,
+    b: &TensorBase<RB, DB>,
+    f: F,
+) -> Result<()>
+where
+    // lifetime and data constraints
+    RA: DataMutAPI<Data = Storage<TA, B>>,
+    RB: DataAPI<Data = Storage<TB, B>>,
+    DA: DimAPI,
+    DB: DimAPI,
+    B: DeviceAPI<TA> + DeviceAPI<TB>,
+    // broadcast constraints
+    DA: DimMaxAPI<DB>,
+    <DA as DimMaxAPI<DB>>::Max: DimConvertAPI<DA>,
+    // operation constraints
+    B: DeviceOp_MutA_RefB_API<TA, TB, DA, F>,
+    F: FnMut(&mut TA, &TB),
+{
+    rstsr_assert!(a.device().same_device(b.device()), DeviceMismatch)?;
+    let la = a.layout();
+    let lb = b.layout();
+    // all layouts should be broadcastable to lc
+    // we can first generate broadcasted shape, then check this
+    let (la_b, lb_b) = broadcast_layout_to_first(la, lb)?;
+    rstsr_assert_eq!(la_b, *la, InvalidLayout)?;
+    // op provided by device
+    let device = a.device().clone();
+    let storage_a = a.data_mut().as_storage_mut();
+    let storage_b = b.data().storage();
+    device.op_muta_refb_func(storage_a, &la_b, storage_b, &lb_b, f)
+}
+
 /* #endregion */
 
 /* #region op_mutc_refa_refb_operation */
 
-macro_rules! impl_op_mutc_refa_refb_func {
+macro_rules! impl_op_mutc_refa_refb_operator {
     ($DeviceOpAPI:ident, $Op:ident, $op:ident, $op_mutc_refa_refb_func:ident, $op_refa_refb_func:ident) => {
         pub fn $op_mutc_refa_refb_func<RA, RB, RC, DA, DB, DC, TA, TB, TC, B>(
             c: &mut TensorBase<RC, DC>,
@@ -212,59 +245,26 @@ macro_rules! impl_op_mutc_refa_refb_func {
 }
 
 #[rustfmt::skip]
-mod impl_op_mutc_refa_refb_func {
+mod impl_op_mutc_refa_refb_operator {
     use super::*;
-    impl_op_mutc_refa_refb_func!(DeviceAddAPI   , Add   , add   , op_mutc_refa_refb_add   , op_refa_refb_add   );
-    impl_op_mutc_refa_refb_func!(DeviceSubAPI   , Sub   , sub   , op_mutc_refa_refb_sub   , op_refa_refb_sub   );
-    impl_op_mutc_refa_refb_func!(DeviceMulAPI   , Mul   , mul   , op_mutc_refa_refb_mul   , op_refa_refb_mul   );
-    impl_op_mutc_refa_refb_func!(DeviceDivAPI   , Div   , div   , op_mutc_refa_refb_div   , op_refa_refb_div   );
-    impl_op_mutc_refa_refb_func!(DeviceRemAPI   , Rem   , rem   , op_mutc_refa_refb_rem   , op_refa_refb_rem   );
-    impl_op_mutc_refa_refb_func!(DeviceBitOrAPI , BitOr , bitor , op_mutc_refa_refb_bitor , op_refa_refb_bitor );
-    impl_op_mutc_refa_refb_func!(DeviceBitAndAPI, BitAnd, bitand, op_mutc_refa_refb_bitand, op_refa_refb_bitand);
-    impl_op_mutc_refa_refb_func!(DeviceBitXorAPI, BitXor, bitxor, op_mutc_refa_refb_bitxor, op_refa_refb_bitxor);
-    impl_op_mutc_refa_refb_func!(DeviceShlAPI   , Shl   , shl   , op_mutc_refa_refb_shl   , op_refa_refb_shl   );
-    impl_op_mutc_refa_refb_func!(DeviceShrAPI   , Shr   , shr   , op_mutc_refa_refb_shr   , op_refa_refb_shr   );
+    impl_op_mutc_refa_refb_operator!(DeviceAddAPI   , Add   , add   , op_mutc_refa_refb_add   , op_refa_refb_add   );
+    impl_op_mutc_refa_refb_operator!(DeviceSubAPI   , Sub   , sub   , op_mutc_refa_refb_sub   , op_refa_refb_sub   );
+    impl_op_mutc_refa_refb_operator!(DeviceMulAPI   , Mul   , mul   , op_mutc_refa_refb_mul   , op_refa_refb_mul   );
+    impl_op_mutc_refa_refb_operator!(DeviceDivAPI   , Div   , div   , op_mutc_refa_refb_div   , op_refa_refb_div   );
+    impl_op_mutc_refa_refb_operator!(DeviceRemAPI   , Rem   , rem   , op_mutc_refa_refb_rem   , op_refa_refb_rem   );
+    impl_op_mutc_refa_refb_operator!(DeviceBitOrAPI , BitOr , bitor , op_mutc_refa_refb_bitor , op_refa_refb_bitor );
+    impl_op_mutc_refa_refb_operator!(DeviceBitAndAPI, BitAnd, bitand, op_mutc_refa_refb_bitand, op_refa_refb_bitand);
+    impl_op_mutc_refa_refb_operator!(DeviceBitXorAPI, BitXor, bitxor, op_mutc_refa_refb_bitxor, op_refa_refb_bitxor);
+    impl_op_mutc_refa_refb_operator!(DeviceShlAPI   , Shl   , shl   , op_mutc_refa_refb_shl   , op_refa_refb_shl   );
+    impl_op_mutc_refa_refb_operator!(DeviceShrAPI   , Shr   , shr   , op_mutc_refa_refb_shr   , op_refa_refb_shr   );
 }
-pub use impl_op_mutc_refa_refb_func::*;
+pub use impl_op_mutc_refa_refb_operator::*;
 
 /* #endregion */
 
-/* #region op_muta_refb_func */
+/* #region op_muta_refb_operation */
 
-pub fn op_muta_refb_func<RA, RB, DA, DB, TA, TB, B, F>(
-    a: &mut TensorBase<RA, DA>,
-    b: &TensorBase<RB, DB>,
-    f: F,
-) -> Result<()>
-where
-    // lifetime and data constraints
-    RA: DataMutAPI<Data = Storage<TA, B>>,
-    RB: DataAPI<Data = Storage<TB, B>>,
-    DA: DimAPI,
-    DB: DimAPI,
-    B: DeviceAPI<TA> + DeviceAPI<TB>,
-    // broadcast constraints
-    DA: DimMaxAPI<DB>,
-    <DA as DimMaxAPI<DB>>::Max: DimConvertAPI<DA>,
-    // operation constraints
-    B: DeviceOp_MutA_RefB_API<TA, TB, DA, F>,
-    F: FnMut(&mut TA, &TB),
-{
-    rstsr_assert!(a.device().same_device(b.device()), DeviceMismatch)?;
-    let la = a.layout();
-    let lb = b.layout();
-    // all layouts should be broadcastable to lc
-    // we can first generate broadcasted shape, then check this
-    let (la_b, lb_b) = broadcast_layout_to_first(la, lb)?;
-    rstsr_assert_eq!(la_b, *la, InvalidLayout)?;
-    // op provided by device
-    let device = a.device().clone();
-    let storage_a = a.data_mut().as_storage_mut();
-    let storage_b = b.data().storage();
-    device.op_muta_refb_func(storage_a, &la_b, storage_b, &lb_b, f)
-}
-
-macro_rules! impl_op_muta_refb_func {
+macro_rules! impl_op_muta_refb_operator {
     ($DeviceOpAPI:ident, $Op:ident, $op:ident, $op_muta_refb_func:ident) => {
         pub fn $op_muta_refb_func<RA, RB, DA, DB, TA, TB, B>(
             a: &mut TensorBase<RA, DA>,
@@ -341,26 +341,96 @@ macro_rules! impl_op_muta_refb_func {
 }
 
 #[rustfmt::skip]
-mod impl_op_muta_refb_func {
+mod impl_op_muta_refb_operator {
     use super::*;
-    impl_op_muta_refb_func!(DeviceAddAssignAPI   , AddAssign   , add_assign   , op_muta_refb_add_assign   );
-    impl_op_muta_refb_func!(DeviceSubAssignAPI   , SubAssign   , sub_assign   , op_muta_refb_sub_assign   );
-    impl_op_muta_refb_func!(DeviceMulAssignAPI   , MulAssign   , mul_assign   , op_muta_refb_mul_assign   );
-    impl_op_muta_refb_func!(DeviceDivAssignAPI   , DivAssign   , div_assign   , op_muta_refb_div_assign   );
-    impl_op_muta_refb_func!(DeviceRemAssignAPI   , RemAssign   , rem_assign   , op_muta_refb_rem_assign   );
-    impl_op_muta_refb_func!(DeviceBitOrAssignAPI , BitOrAssign , bitor_assign , op_muta_refb_bitor_assign );
-    impl_op_muta_refb_func!(DeviceBitAndAssignAPI, BitAndAssign, bitand_assign, op_muta_refb_bitand_assign);
-    impl_op_muta_refb_func!(DeviceBitXorAssignAPI, BitXorAssign, bitxor_assign, op_muta_refb_bitxor_assign);
-    impl_op_muta_refb_func!(DeviceShlAssignAPI   , ShlAssign   , shl_assign   , op_muta_refb_shl_assign   );
-    impl_op_muta_refb_func!(DeviceShrAssignAPI   , ShrAssign   , shr_assign   , op_muta_refb_shr_assign   );
+    impl_op_muta_refb_operator!(DeviceAddAssignAPI   , AddAssign   , add_assign   , op_muta_refb_add_assign   );
+    impl_op_muta_refb_operator!(DeviceSubAssignAPI   , SubAssign   , sub_assign   , op_muta_refb_sub_assign   );
+    impl_op_muta_refb_operator!(DeviceMulAssignAPI   , MulAssign   , mul_assign   , op_muta_refb_mul_assign   );
+    impl_op_muta_refb_operator!(DeviceDivAssignAPI   , DivAssign   , div_assign   , op_muta_refb_div_assign   );
+    impl_op_muta_refb_operator!(DeviceRemAssignAPI   , RemAssign   , rem_assign   , op_muta_refb_rem_assign   );
+    impl_op_muta_refb_operator!(DeviceBitOrAssignAPI , BitOrAssign , bitor_assign , op_muta_refb_bitor_assign );
+    impl_op_muta_refb_operator!(DeviceBitAndAssignAPI, BitAndAssign, bitand_assign, op_muta_refb_bitand_assign);
+    impl_op_muta_refb_operator!(DeviceBitXorAssignAPI, BitXorAssign, bitxor_assign, op_muta_refb_bitxor_assign);
+    impl_op_muta_refb_operator!(DeviceShlAssignAPI   , ShlAssign   , shl_assign   , op_muta_refb_shl_assign   );
+    impl_op_muta_refb_operator!(DeviceShrAssignAPI   , ShrAssign   , shr_assign   , op_muta_refb_shr_assign   );
 }
-pub use impl_op_muta_refb_func::*;
+pub use impl_op_muta_refb_operator::*;
+
+macro_rules! impl_op_muta_refb_unary {
+    ($DeviceOpAPI:ident, $Op:ident, $op:ident, $op_muta_refb_func:ident) => {
+        pub fn $op_muta_refb_func<RA, RB, DA, DB, TA, TB, B>(
+            a: &mut TensorBase<RA, DA>,
+            b: &TensorBase<RB, DB>,
+        ) -> Result<()>
+        where
+            // lifetime and data constraints
+            RA: DataMutAPI<Data = Storage<TA, B>>,
+            RB: DataAPI<Data = Storage<TB, B>>,
+            DA: DimAPI,
+            DB: DimAPI,
+            B: DeviceAPI<TA> + DeviceAPI<TB>,
+            // broadcast constraints
+            DA: DimMaxAPI<DB>,
+            <DA as DimMaxAPI<DB>>::Max: DimConvertAPI<DA>,
+            // operation constraints
+            TB: core::ops::$Op<Output = TA>,
+            B: $DeviceOpAPI<TA, TB, DA>,
+        {
+            rstsr_assert!(a.device().same_device(b.device()), DeviceMismatch)?;
+            let la = a.layout();
+            let lb = b.layout();
+            // all layouts should be broadcastable to lc
+            // we can first generate broadcasted shape, then check this
+            let (la_b, lb_b) = broadcast_layout_to_first(la, lb)?;
+            rstsr_assert_eq!(la_b, *la, InvalidLayout)?;
+            // op provided by device
+            let device = a.device().clone();
+            let storage_a = a.data_mut().as_storage_mut();
+            let storage_b = b.data().storage();
+            device.$op_muta_refb_func(storage_a, &la_b, storage_b, &lb_b)
+        }
+
+        impl<R, D, TA, TB, B> core::ops::$Op for &TensorBase<R, D>
+        where
+            // lifetime and data constraints
+            R: DataAPI<Data = Storage<TB, B>>,
+            D: DimAPI,
+            B: DeviceAPI<TA> + DeviceAPI<TB>,
+            // operation constraints
+            TB: core::ops::$Op<Output = TA>,
+            B: $DeviceOpAPI<TA, TB, D>,
+            B: DeviceCreationAnyAPI<TA>,
+        {
+            type Output = Tensor<TA, D, B>;
+            fn $op(self) -> Self::Output {
+                let lb = self.layout();
+                let storage_b = self.data().storage();
+                // generate empty output tensor
+                let device = self.device();
+                let la = layout_for_array_copy(lb, TensorIterOrder::K).unwrap();
+                let mut storage_a =
+                    unsafe { device.empty_impl(la.bounds_index().unwrap().1).unwrap() };
+                // compute and return
+                device.$op_muta_refb_func(&mut storage_a, &la, storage_b, lb).unwrap();
+                return unsafe { Tensor::new_unchecked(DataOwned::from(storage_a), la) };
+            }
+        }
+    };
+}
+
+#[rustfmt::skip]
+mod impl_op_muta_refb_unary {
+    use super::*;
+    impl_op_muta_refb_unary!(DeviceNegAPI, Neg, neg, op_muta_refb_neg);
+    impl_op_muta_refb_unary!(DeviceNotAPI, Not, not, op_muta_refb_not);
+}
+pub use impl_op_muta_refb_unary::*;
 
 /* #endregion */
 
-/* #region op_owna_refb_func */
+/* #region op_owna_refb_operation */
 
-macro_rules! op_owna_refb_func {
+macro_rules! op_owna_refb_operator {
     (
         $op: ident,
         $DeviceOpAPI: ident,
@@ -491,18 +561,18 @@ macro_rules! op_owna_refb_func {
 }
 
 #[rustfmt::skip]
-pub mod op_owna_refb_func {
+pub mod op_owna_refb_operator {
     use super::*;
-    op_owna_refb_func!(add   , DeviceAddAPI   , Add   , op_refa_refb_add   , |a, b| *a = a.clone() +  b.clone(), |b, a| *b = a.clone() +  b.clone());
-    op_owna_refb_func!(sub   , DeviceSubAPI   , Sub   , op_refa_refb_sub   , |a, b| *a = a.clone() -  b.clone(), |b, a| *b = a.clone() -  b.clone());
-    op_owna_refb_func!(mul   , DeviceMulAPI   , Mul   , op_refa_refb_mul   , |a, b| *a = a.clone() *  b.clone(), |b, a| *b = a.clone() *  b.clone());
-    op_owna_refb_func!(div   , DeviceDivAPI   , Div   , op_refa_refb_div   , |a, b| *a = a.clone() /  b.clone(), |b, a| *b = a.clone() /  b.clone());
-    op_owna_refb_func!(rem   , DeviceRemAPI   , Rem   , op_refa_refb_rem   , |a, b| *a = a.clone() %  b.clone(), |b, a| *b = a.clone() %  b.clone());
-    op_owna_refb_func!(bitor , DeviceBitOrAPI , BitOr , op_refa_refb_bitor , |a, b| *a = a.clone() |  b.clone(), |b, a| *b = a.clone() |  b.clone());
-    op_owna_refb_func!(bitand, DeviceBitAndAPI, BitAnd, op_refa_refb_bitand, |a, b| *a = a.clone() &  b.clone(), |b, a| *b = a.clone() &  b.clone());
-    op_owna_refb_func!(bitxor, DeviceBitXorAPI, BitXor, op_refa_refb_bitxor, |a, b| *a = a.clone() ^  b.clone(), |b, a| *b = a.clone() ^  b.clone());
-    op_owna_refb_func!(shl   , DeviceShlAPI   , Shl   , op_refa_refb_shl   , |a, b| *a = a.clone() << b.clone(), |b, a| *b = a.clone() << b.clone());
-    op_owna_refb_func!(shr   , DeviceShrAPI   , Shr   , op_refa_refb_shr   , |a, b| *a = a.clone() >> b.clone(), |b, a| *b = a.clone() >> b.clone());
+    op_owna_refb_operator!(add   , DeviceAddAPI   , Add   , op_refa_refb_add   , |a, b| *a = a.clone() +  b.clone(), |b, a| *b = a.clone() +  b.clone());
+    op_owna_refb_operator!(sub   , DeviceSubAPI   , Sub   , op_refa_refb_sub   , |a, b| *a = a.clone() -  b.clone(), |b, a| *b = a.clone() -  b.clone());
+    op_owna_refb_operator!(mul   , DeviceMulAPI   , Mul   , op_refa_refb_mul   , |a, b| *a = a.clone() *  b.clone(), |b, a| *b = a.clone() *  b.clone());
+    op_owna_refb_operator!(div   , DeviceDivAPI   , Div   , op_refa_refb_div   , |a, b| *a = a.clone() /  b.clone(), |b, a| *b = a.clone() /  b.clone());
+    op_owna_refb_operator!(rem   , DeviceRemAPI   , Rem   , op_refa_refb_rem   , |a, b| *a = a.clone() %  b.clone(), |b, a| *b = a.clone() %  b.clone());
+    op_owna_refb_operator!(bitor , DeviceBitOrAPI , BitOr , op_refa_refb_bitor , |a, b| *a = a.clone() |  b.clone(), |b, a| *b = a.clone() |  b.clone());
+    op_owna_refb_operator!(bitand, DeviceBitAndAPI, BitAnd, op_refa_refb_bitand, |a, b| *a = a.clone() &  b.clone(), |b, a| *b = a.clone() &  b.clone());
+    op_owna_refb_operator!(bitxor, DeviceBitXorAPI, BitXor, op_refa_refb_bitxor, |a, b| *a = a.clone() ^  b.clone(), |b, a| *b = a.clone() ^  b.clone());
+    op_owna_refb_operator!(shl   , DeviceShlAPI   , Shl   , op_refa_refb_shl   , |a, b| *a = a.clone() << b.clone(), |b, a| *b = a.clone() << b.clone());
+    op_owna_refb_operator!(shr   , DeviceShrAPI   , Shr   , op_refa_refb_shr   , |a, b| *a = a.clone() >> b.clone(), |b, a| *b = a.clone() >> b.clone());
 }
 
 /* #endregion */
@@ -696,5 +766,13 @@ mod test {
         let c_ref = vec![-1., -2., -3., -4., -5.].into();
         assert!(allclose_f64(&c, &c_ref));
         assert_eq!(b_ptr, c_ptr);
+    }
+
+    #[test]
+    fn test_neg() {
+        let a = Tensor::linspace_cpu(1.0, 5.0, 5);
+        let b = -&a;
+        let b_ref = vec![-1., -2., -3., -4., -5.].into();
+        assert!(allclose_f64(&b, &b_ref));
     }
 }

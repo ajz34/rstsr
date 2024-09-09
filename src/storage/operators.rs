@@ -100,6 +100,7 @@ macro_rules! trait_op_assign_api {
         }
     };
 }
+
 #[rustfmt::skip]
 mod impl_op_muta_refb_func {
     use super::*;
@@ -115,6 +116,28 @@ mod impl_op_muta_refb_func {
     trait_op_assign_api!(DeviceShrAssignAPI   , ShrAssign   , op_muta_refb_shr_assign   );
 }
 pub use impl_op_muta_refb_func::*;
+
+macro_rules! trait_op_unary_api {
+    ($DeviceOpAPI:ident, $Op:ident, $op_muta_refb_func:ident) => {
+        pub trait $DeviceOpAPI<TA, TB, D>
+        where
+            TB: core::ops::$Op<Output = TA>,
+            D: DimAPI,
+            Self: DeviceAPI<TA> + DeviceAPI<TB>,
+        {
+            fn $op_muta_refb_func(
+                &self,
+                a: &mut Storage<TA, Self>,
+                la: &Layout<D>,
+                b: &Storage<TB, Self>,
+                lb: &Layout<D>,
+            ) -> Result<()>;
+        }
+    };
+}
+
+trait_op_unary_api!(DeviceNegAPI, Neg, op_muta_refb_neg);
+trait_op_unary_api!(DeviceNotAPI, Not, op_muta_refb_not);
 
 /* #endregion */
 
