@@ -252,15 +252,15 @@ Partial implementation:
 
 | status | implementation | Python API | description |
 |-|-|-|-|
-| | | `broadcast_arrays` | Broadcasts one or more arrays against one another. |
-| | | `broadcast_to` | Broadcasts an array to a specified shape. |
+| Y | [`broadcast_arrays`] | [`broadcast_arrays`](https://data-apis.org/array-api/2023.12/API_specification/generated/array_api.broadcast_arrays.html) | Broadcasts one or more arrays against one another. |
+| Y | [`broadcast_to`] | [`broadcast_to`](https://data-apis.org/array-api/2023.12/API_specification/generated/array_api.broadcast_to.html) | Broadcasts an array to a specified shape. |
 | | | `concat` | Joins a sequence of arrays along an existing axis. |
 | Y | [`expand_dims`] | [`expand_dims`](https://data-apis.org/array-api/2023.12/API_specification/generated/array_api.expand_dims.html) | Expands the shape of an array by inserting a new axis (dimension) of size one at the position specified by `axis`. |
 | Y | [`flip`] | [`flip`](https://data-apis.org/array-api/2023.12/API_specification/generated/array_api.flip.html) | Reverses the order of elements in an array along the given axis. |
 | | | `moveaxis` | Moves array axes (dimensions) to new positions, while leaving other axes in their original positions. |
 | Y | [`transpose`], [`permute_dims`] | [`permute_dims`](https://data-apis.org/array-api/2023.12/API_specification/generated/array_api.permute_dims.html) | Permutes the axes (dimensions) of an array `x`. |
 | | | `repeat` | Repeats each element of an array a specified number of times on a per-element basis. |
-| | | `reshape` | Reshapes an array without changing its data. |
+| P | [`Tensor::reshape`], [`Tensor::into_shape_assume_contig`] | [`reshape`](https://data-apis.org/array-api/2023.12/API_specification/generated/array_api.reshape.html) | Reshapes an array without changing its data. |
 | | | `roll` | Rolls array elements along a specified axis. |
 | P | [`squeeze`] | [`squeeze`](https://data-apis.org/array-api/2023.12/API_specification/generated/array_api.squeeze.html) | Removes singleton dimensions (axes) from x. |
 | | | `stack` | Joins a sequence of arrays along a new axis. |
@@ -269,6 +269,7 @@ Partial implementation:
 
 Partial implementation:
 - [`squeeze`] accepts one axis as input, instead of accepting multiple axes. This is mostly because output of smaller dimension tensor can be fixed-dimension array ([`DimSmallerOneAPI::SmallerOne`]) when only one axis is passed as argument.
+- `reshape`: Currently reshape is work-in-progress. It does not copy array when f/c-contiguous. For numpy, much more cases may not invoke explicit copy when reshape.
 
 ## Searching Functions
 

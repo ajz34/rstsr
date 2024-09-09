@@ -1,21 +1,103 @@
 //! This module handles tensor data manipulation.
-//!
-//! Functions that shall not explicitly copy any value:
-//!
-//! Some functions in Python array API will be implemented here:
-//! - [x] expand_dims [`Tensor::expand_dims`]
-//! - [x] flip [`Tensor::flip`]
-//! - [ ] moveaxis
-//! - [x] permute_dims [`Tensor::transpose`], [`Tensor::permute_dims`],
-//!   [`Tensor::swapaxes`]
-//! - [x] squeeze [`Tensor::squeeze`]
-//!
-//! Functions that will/may explicitly copy value:
-//!
-//! - [x] reshape [`Tensor::reshape`], [`Tensor::to_shape`]
 
 use crate::prelude_dev::*;
 use core::num::TryFromIntError;
+
+/* #region broadcast_arrays */
+
+/// Broadcasts any number of arrays against each other.
+///
+/// # See also
+///
+/// [Python Array API standard: `broadcast_arrays`](https://data-apis.org/array-api/2023.12/API_specification/generated/array_api.broadcast_arrays.html)
+pub fn broadcast_arrays<R>(tensors: Vec<TensorBase<R, IxD>>) -> Result<Vec<TensorBase<R, IxD>>>
+where
+    R: DataAPI,
+    IxD: DimMaxAPI<IxD>,
+{
+    // fast return if there is only zero/one tensor
+    if tensors.len() <= 1 {
+        return Ok(tensors);
+    }
+    let mut shape_b = tensors[0].shape().clone();
+    for tensor in tensors.iter().skip(1) {
+        let shape = tensor.shape();
+        let (shape, _, _) = broadcast_shape(shape, &shape_b)?;
+        shape_b = shape;
+    }
+    let mut tensors_new = Vec::with_capacity(tensors.len());
+    for tensor in tensors {
+        let tensor = broadcast_to(tensor, &shape_b)?;
+        tensors_new.push(tensor);
+    }
+    return Ok(tensors_new);
+}
+
+/* #endregion */
+
+/* #region broadcast_to */
+
+/// Broadcasts an array to a specified shape.
+///
+/// # See also
+///
+/// [Python Array API standard: `broadcast_to`](https://data-apis.org/array-api/2023.12/API_specification/generated/array_api.broadcast_to.html)
+pub fn broadcast_to<R, D, D2>(
+    tensor: TensorBase<R, D>,
+    shape: &D2,
+) -> Result<TensorBase<R, <D as DimMaxAPI<D2>>::Max>>
+where
+    R: DataAPI,
+    D: DimAPI + DimMaxAPI<D2>,
+    D2: DimAPI,
+{
+    let shape1 = tensor.shape();
+    let shape2 = &shape;
+    let (shape, tp1, _) = broadcast_shape(shape1, shape2)?;
+    let layout = update_layout_by_shape(tensor.layout(), &shape, &tp1)?;
+    unsafe { Ok(TensorBase::new_unchecked(tensor.data, layout)) }
+}
+
+impl<R, D> TensorBase<R, D>
+where
+    R: DataAPI,
+    D: DimAPI,
+{
+    /// Broadcasts an array to a specified shape.
+    ///
+    /// # See also
+    ///
+    /// [`broadcast_to`]
+    #[allow(clippy::type_complexity)]
+    pub fn broadcast_to<D2>(
+        &self,
+        shape: &D2,
+    ) -> Result<TensorBase<DataRef<'_, R::Data>, <D as DimMaxAPI<D2>>::Max>>
+    where
+        D2: DimAPI,
+        D: DimMaxAPI<D2>,
+    {
+        broadcast_to(self.view(), shape)
+    }
+
+    /// Broadcasts an array to a specified shape.
+    ///
+    /// # See also
+    ///
+    /// [`broadcast_to`]
+    pub fn into_broadcast_to<D2>(
+        self,
+        shape: &D2,
+    ) -> Result<TensorBase<R, <D as DimMaxAPI<D2>>::Max>>
+    where
+        D2: DimAPI,
+        D: DimMaxAPI<D2>,
+    {
+        broadcast_to(self, shape)
+    }
+}
+
+/* #endregion */
 
 /* #region expand_dims */
 
@@ -542,5 +624,14 @@ mod tests {
         println!("{:?}", a);
         let b = a.to_shape([2, 2]);
         println!("{:?}", b);
+    }
+
+    #[test]
+    fn test_broadcast_to() {
+        let a = Tensor::linspace_cpu(0.0, 15.0, 16);
+        let a = a.into_shape_assume_contig([4, 1, 4]).unwrap();
+        let a = a.broadcast_to(&[6, 4, 3, 4]).unwrap();
+        assert_eq!(a.layout(), unsafe { &Layout::new_unchecked([6, 4, 3, 4], [0, 4, 0, 1], 0) });
+        println!("{:?}", a);
     }
 }
