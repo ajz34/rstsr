@@ -134,3 +134,37 @@ pub mod TensorCopyPolicy {
 }
 
 /* #endregion */
+
+/* #region blas-flags */
+
+pub enum TensorTranspose {
+    /// No transpose
+    N,
+    /// Transpose
+    T,
+    /// Conjugate transpose
+    C,
+}
+
+pub enum TensorSide {
+    /// Left side
+    L,
+    /// Right side
+    R,
+}
+
+pub enum TensorUpLo {
+    /// Upper triangle
+    U,
+    /// Lower triangle
+    L,
+}
+
+pub enum TensorDiag {
+    /// Non-unit diagonal
+    N,
+    /// Unit diagonal
+    U,
+}
+
+/* #endregion */

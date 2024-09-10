@@ -35,6 +35,7 @@ where
     ) -> Result<()>;
 }
 
+#[allow(clippy::too_many_arguments)]
 pub trait DeviceSYMMAPI<TA, TB, TC>
 where
     Self: DeviceAPI<TA> + DeviceAPI<TB> + DeviceAPI<TC>,
@@ -47,6 +48,8 @@ where
         la: &Layout<Ix2>,
         b: &Storage<TB, Self>,
         lb: &Layout<Ix2>,
+        side: TensorSide,
+        uplo: TensorUpLo,
     ) -> Result<()>;
 }
 
@@ -60,6 +63,7 @@ where
         lc: &Layout<Ix2>,
         a: &Storage<TA, Self>,
         la: &Layout<Ix2>,
+        uplo: TensorUpLo,
     ) -> Result<()>;
 }
 
@@ -73,6 +77,7 @@ where
         lc: &Layout<Ix2>,
         a: &Storage<TA, Self>,
         la: &Layout<Ix2>,
+        uplo: TensorUpLo,
     ) -> Result<()>;
 }
 
