@@ -1,23 +1,24 @@
-[package]
+[workspace]
+resolver = "2"
+members = [
+    "rstsr-core",
+]
+
+[workspace.package]
 name = "rstsr"
 version = "0.1.0"
 edition = "2021"
 
-[dependencies]
+[workspace.dependencies]
+# basic dependencies
 num = { version = "0.4" }
 thiserror = { version = "1.0" }
 itertools = { version = "0.13" }
-
-[dev-dependencies]
-# rest_tensors = { path = "../rest_tensors", version = "*" }
+# dev dependencies
 anyhow = { version = "1.0" }
 rand = { version = "0.8" }
-itertools = { version = "0.13" }
 approx = { version = "0.5" }
-rayon = "1.10"
-# cudarc = { version = "0.11", default-features = false, features = ["cublas", "cuda-version-from-build-system"], optional = true }
-# candle-core = { version = "0.6", features = [] }
-# burn-core = { version = "0.12", features = ["ndarray"] }
+rayon = { version = "1.10" }
 ndarray = { version = "0.15" }
 
 [profile.dev]
@@ -29,10 +30,3 @@ opt-level = 3
 [profile.coverage]
 inherits = "dev"
 opt-level = 0
-
-[features]
-default = ["c_prefer"]
-std = []
-c_prefer = []
-cuda = []
-

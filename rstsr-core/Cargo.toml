@@ -1,0 +1,24 @@
+[package]
+name = "rstsr"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+num = { workspace = true }
+thiserror = { workspace = true }
+itertools = { workspace = true }
+
+[dev-dependencies]
+anyhow = { workspace = true }
+rand = { workspace = true }
+itertools = { workspace = true }
+approx = { workspace = true }
+rayon = { workspace = true }
+ndarray = { workspace = true }
+
+[features]
+default = ["c_prefer"]
+std = []
+c_prefer = []
+cuda = []
+
