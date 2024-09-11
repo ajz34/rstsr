@@ -149,5 +149,7 @@ where
         la: &Layout<Ix1>,
         b: &Storage<TB, Self>,
         lb: &Layout<Ix1>,
+        alpha: TC,
+        beta: TC,
     ) -> Result<()>;
 }

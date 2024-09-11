@@ -102,4 +102,3 @@ pub type Tensor<T, D, B = CpuDevice> = TensorBase<DataOwned<Storage<T, B>>, D>;
 pub type TensorView<'a, T, D, B = CpuDevice> = TensorBase<DataRef<'a, Storage<T, B>>, D>;
 pub type TensorViewMut<'a, T, D, B = CpuDevice> = TensorBase<DataRefMut<'a, Storage<T, B>>, D>;
 pub type TensorCow<'a, T, D, B = CpuDevice> = TensorBase<DataCow<'a, Storage<T, B>>, D>;
-

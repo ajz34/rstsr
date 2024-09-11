@@ -153,6 +153,9 @@ pub trait IndexerDynamic: IndexerPreserve {
 
     /// Eliminate dimension at index. Number of dimension will decrease by 1.
     fn dim_eliminate(&self, axis: isize) -> Result<Layout<IxD>>;
+
+    /// Split current layout into two layouts at axis, with offset unchanged.
+    fn dim_split_at(&self, axis: isize) -> Result<(Layout<IxD>, Layout<IxD>)>;
 }
 
 impl<D> IndexerDynamic for Layout<D>
@@ -313,6 +316,26 @@ where
         stride.remove(axis);
 
         return Ok(Layout::<IxD>::new(shape, stride, offset));
+    }
+
+    fn dim_split_at(&self, axis: isize) -> Result<(Layout<IxD>, Layout<IxD>)> {
+        // dimension check
+        // this functions allows [-n, n], not previous functions [-n, n)
+        let axis = if axis < 0 { self.ndim() as isize + axis } else { axis };
+        rstsr_pattern!(axis, 0..=self.ndim() as isize, ValueOutOfRange)?;
+        let axis = axis as usize;
+
+        // split layouts
+        let shape = self.shape().as_ref().to_vec();
+        let stride = self.stride().as_ref().to_vec();
+        let offset = self.offset();
+
+        let (shape1, shape2) = shape.split_at(axis);
+        let (stride1, stride2) = stride.split_at(axis);
+
+        let layout1 = unsafe { Layout::new_unchecked(shape1.to_vec(), stride1.to_vec(), offset) };
+        let layout2 = unsafe { Layout::new_unchecked(shape2.to_vec(), stride2.to_vec(), offset) };
+        return Ok((layout1, layout2));
     }
 }
 

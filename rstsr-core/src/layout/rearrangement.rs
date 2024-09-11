@@ -33,7 +33,7 @@ type Order = TensorIterOrder;
 ///
 /// - `layout`: The output layout of greedy iteration.
 /// - `index`: Transpose index from input layout to output layout.
-pub fn greedy_layout<D>(layout: &Layout<D>, keep_shape: bool) -> (Layout<D>, Vec<usize>)
+pub fn greedy_layout<D>(layout: &Layout<D>, keep_shape: bool) -> (Layout<D>, Vec<isize>)
 where
     D: DimDevAPI,
 {
@@ -41,7 +41,7 @@ where
 
     // if no elements in layout, return itself
     if layout.size() == 0 {
-        return (layout.clone(), (0..layout.ndim()).collect::<Vec<usize>>());
+        return (layout.clone(), (0..layout.ndim() as isize).collect_vec());
     }
 
     // revert negative strides if keep_shape is not required
@@ -57,7 +57,7 @@ where
     let shape_old = layout.shape.as_ref();
     let stride_old = layout.stride.as_ref();
 
-    let mut index = (0..layout.ndim()).collect::<Vec<usize>>();
+    let mut index = (0..layout.ndim() as isize).collect_vec();
     if keep_shape {
         // sort shape and strides if keep shape
         // - (shape = 1 / stride = 0) the smallest (pointer not moving for these cases)
@@ -65,10 +65,10 @@ where
         // - (larger shape first) if not broadcastable axes, then compare stride size
         //   (smaller stride first)
         index.sort_by(|&i1, &i2| {
-            let d1 = shape_old[i1];
-            let d2 = shape_old[i2];
-            let t1 = stride_old[i1];
-            let t2 = stride_old[i2];
+            let d1 = shape_old[i1 as usize];
+            let d2 = shape_old[i2 as usize];
+            let t1 = stride_old[i1 as usize];
+            let t2 = stride_old[i2 as usize];
             match (d1 == 1 || t1 == 0, d2 == 1 || t2 == 0) {
                 (true, true) => i1.cmp(&i2),
                 (true, false) => core::cmp::Ordering::Less,
@@ -80,10 +80,10 @@ where
         // sort shape and strides if not keep shape
         // everything is similar, though broadcastable axes should be moved to last
         index.sort_by(|&i1, &i2| {
-            let d1 = shape_old[i1];
-            let d2 = shape_old[i2];
-            let t1 = stride_old[i1];
-            let t2 = stride_old[i2];
+            let d1 = shape_old[i1 as usize];
+            let d2 = shape_old[i2 as usize];
+            let t1 = stride_old[i1 as usize];
+            let t2 = stride_old[i2 as usize];
             match (d1 == 1 || t1 == 0, d2 == 1 || t2 == 0) {
                 (true, true) => i1.cmp(&i2),
                 (true, false) => core::cmp::Ordering::Greater,
@@ -93,8 +93,7 @@ where
         });
     }
 
-    let index_isize = index.iter().map(|&i| i as isize).collect::<Vec<isize>>();
-    let mut layout = layout.transpose(&index_isize).unwrap();
+    let mut layout = layout.transpose(&index).unwrap();
 
     // for case of not keep shape, dimension of broadcastable axes will be set to 1,
     // strides will be set to 0.
@@ -113,7 +112,16 @@ where
     return (layout, index);
 }
 
-/// This function will return a layout that is suitable for array copy.
+/// Reversed permutation indices.
+pub fn reversed_permute(indices: &[isize]) -> Vec<isize> {
+    let mut new_indices = vec![0; indices.len()];
+    for (idx, &i) in indices.iter().enumerate() {
+        new_indices[i as usize] = idx as isize;
+    }
+    return new_indices;
+}
+
+/// Return a layout that is suitable for array copy.
 pub fn layout_for_array_copy<D>(layout: &Layout<D>, order: TensorIterOrder) -> Result<Layout<D>>
 where
     D: DimDevAPI,
@@ -134,13 +142,9 @@ where
             }
         },
         Order::K => {
-            let (greedy, index) = greedy_layout(layout, true);
+            let (greedy, indices) = greedy_layout(layout, true);
             let layout = greedy.shape().f();
-            let mut new_index = vec![0; index.len()];
-            for (idx, &i) in index.iter().enumerate() {
-                new_index[i] = idx as isize;
-            }
-            layout.transpose(&new_index)?
+            layout.transpose(&reversed_permute(&indices))?
         },
         _ => rstsr_invalid!(order, "Iter order for copy only accepts CFAK.")?,
     };
@@ -277,7 +281,7 @@ where
         },
         Order::K => {
             // find the layout with the largest non-broadcast-size
-            let size_iter = layouts.iter().map(|l| l.size_non_broadcast()).collect::<Vec<_>>();
+            let size_iter = layouts.iter().map(|l| l.size_non_broadcast()).collect_vec();
             let idx_layout = if size_iter.iter().max() == size_iter.iter().min() {
                 0
             } else {
@@ -285,7 +289,6 @@ where
             };
             // make same permutation for all layouts
             let (_, permute_index) = greedy_layout(layouts[idx_layout], true);
-            let permute_index = permute_index.iter().map(|&i| i as isize).collect::<Vec<isize>>();
             layouts.iter().map(|l| l.transpose(&permute_index)).collect()
         },
         Order::G => rstsr_invalid!(order, "This option is not valid for multiple layouts")?,
@@ -313,7 +316,7 @@ where
         return (vec![], 0);
     }
 
-    let dims_f_contig = layouts.iter().map(|l| l.ndim_of_f_contig()).collect::<Vec<usize>>();
+    let dims_f_contig = layouts.iter().map(|l| l.ndim_of_f_contig()).collect_vec();
     let ndim_f_contig = *dims_f_contig.iter().min().unwrap();
     // following is the worst case: no axes are contiguous in f-order
     if ndim_f_contig == 0 {
@@ -327,7 +330,7 @@ where
                 let stride = l.stride().as_ref()[ndim_f_contig..].iter().cloned().collect_vec();
                 unsafe { Layout::new_unchecked(shape, stride, l.offset()) }
             })
-            .collect::<Vec<_>>();
+            .collect_vec();
         return (result, size_contig);
     }
 }

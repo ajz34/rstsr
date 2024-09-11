@@ -33,7 +33,7 @@ where
 
     // special case
     if ndim == 0 {
-        return write!(fmt, "[]");
+        return write!(fmt, "{}", vec[layout.offset()]);
     }
 
     if idx_prev.last().is_some_and(|&v| v == shape[len_prev - 1]) {

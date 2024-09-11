@@ -74,7 +74,7 @@ pub trait DataAPI {
 }
 
 pub trait DataMutAPI: DataAPI {
-    fn as_storage_mut(&mut self) -> &mut Self::Data;
+    fn storage_mut(&mut self) -> &mut Self::Data;
     fn as_ref_mut(&mut self) -> DataRefMut<Self::Data>;
 }
 
@@ -200,7 +200,7 @@ where
     S: Clone,
 {
     #[inline]
-    fn as_storage_mut(&mut self) -> &mut Self::Data {
+    fn storage_mut(&mut self) -> &mut Self::Data {
         &mut self.storage
     }
 
@@ -215,7 +215,7 @@ where
     S: Clone,
 {
     #[inline]
-    fn as_storage_mut(&mut self) -> &mut Self::Data {
+    fn storage_mut(&mut self) -> &mut Self::Data {
         self.storage
     }
 
@@ -273,6 +273,6 @@ mod test {
         println!("{:?}", data_ref_ref.storage().as_ptr());
         let mut data_ref2 = data_ref.into_owned();
         println!("{:?}", data_ref2.storage().as_ptr());
-        data_ref2.as_storage_mut()[1] = 10;
+        data_ref2.storage_mut()[1] = 10;
     }
 }

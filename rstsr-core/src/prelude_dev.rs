@@ -29,6 +29,7 @@ pub use crate::tensor::asarray::*;
 pub use crate::tensor::creation::*;
 pub use crate::tensor::data::*;
 pub use crate::tensor::manuplication::*;
+pub use crate::tensor::ownership_conversion::*;
 
 pub use crate::{Tensor, TensorBase, TensorCow, TensorView, TensorViewMut};
 

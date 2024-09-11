@@ -714,6 +714,15 @@ where
     {
         D::into_dim(self)
     }
+
+    /// Convert layout to another dimension.
+    pub fn to_dim<D2>(&self) -> Result<Layout<D2>>
+    where
+        D2: DimBaseAPI,
+        D: DimConvertAPI<D2>,
+    {
+        D::into_dim(self.clone())
+    }
 }
 
 impl<const N: usize> From<Ix<N>> for Layout<Ix<N>> {

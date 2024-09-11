@@ -38,7 +38,7 @@ where
     rstsr_assert_eq!(lc_b, *lc, InvalidLayout)?;
     // op provided by device
     let device = c.device().clone();
-    let storage_c = c.data_mut().as_storage_mut();
+    let storage_c = c.data_mut().storage_mut();
     let storage_a = a.data().storage();
     let storage_b = b.data().storage();
     device.op_mutc_refa_refb_func(storage_c, &lc_b, storage_a, &la_b, storage_b, &lb_b, f)
@@ -117,7 +117,7 @@ where
     rstsr_assert_eq!(la_b, *la, InvalidLayout)?;
     // op provided by device
     let device = a.device().clone();
-    let storage_a = a.data_mut().as_storage_mut();
+    let storage_a = a.data_mut().storage_mut();
     let storage_b = b.data().storage();
     device.op_muta_refb_func(storage_a, &la_b, storage_b, &lb_b, f)
 }
@@ -132,7 +132,7 @@ where
 {
     let la = a.layout().clone();
     let device = a.device().clone();
-    let storage_a = a.data_mut().as_storage_mut();
+    let storage_a = a.data_mut().storage_mut();
     device.op_muta_func(storage_a, &la, f)
 }
 
@@ -177,7 +177,7 @@ macro_rules! impl_op_mutc_refa_refb_operator {
             rstsr_assert_eq!(lc_b, *lc, InvalidLayout)?;
             // op provided by device
             let device = c.device().clone();
-            let storage_c = c.data_mut().as_storage_mut();
+            let storage_c = c.data_mut().storage_mut();
             let storage_a = a.data().storage();
             let storage_b = b.data().storage();
             device.$op_mutc_refa_refb_func(storage_c, &lc_b, storage_a, &la_b, storage_b, &lb_b)
@@ -265,7 +265,7 @@ mod impl_op_mutc_refa_refb_operator {
     impl_op_mutc_refa_refb_operator!(DeviceSubAPI   , Sub   , sub   , op_mutc_refa_refb_sub   , op_refa_refb_sub   );
     impl_op_mutc_refa_refb_operator!(DeviceMulAPI   , Mul   , mul   , op_mutc_refa_refb_mul   , op_refa_refb_mul   );
     impl_op_mutc_refa_refb_operator!(DeviceDivAPI   , Div   , div   , op_mutc_refa_refb_div   , op_refa_refb_div   );
-    impl_op_mutc_refa_refb_operator!(DeviceRemAPI   , Rem   , rem   , op_mutc_refa_refb_rem   , op_refa_refb_rem   );
+//  impl_op_mutc_refa_refb_operator!(DeviceRemAPI   , Rem   , rem   , op_mutc_refa_refb_rem   , op_refa_refb_rem   );
     impl_op_mutc_refa_refb_operator!(DeviceBitOrAPI , BitOr , bitor , op_mutc_refa_refb_bitor , op_refa_refb_bitor );
     impl_op_mutc_refa_refb_operator!(DeviceBitAndAPI, BitAnd, bitand, op_mutc_refa_refb_bitand, op_refa_refb_bitand);
     impl_op_mutc_refa_refb_operator!(DeviceBitXorAPI, BitXor, bitxor, op_mutc_refa_refb_bitxor, op_refa_refb_bitxor);
@@ -307,7 +307,7 @@ macro_rules! impl_op_muta_refb_operator {
             rstsr_assert_eq!(la_b, *la, InvalidLayout)?;
             // op provided by device
             let device = a.device().clone();
-            let storage_a = a.data_mut().as_storage_mut();
+            let storage_a = a.data_mut().storage_mut();
             let storage_b = b.data().storage();
             device.$op_muta_refb_func(storage_a, &la_b, storage_b, &lb_b)
         }
@@ -399,7 +399,7 @@ macro_rules! impl_op_muta_refb_unary {
             rstsr_assert_eq!(la_b, *la, InvalidLayout)?;
             // op provided by device
             let device = a.device().clone();
-            let storage_a = a.data_mut().as_storage_mut();
+            let storage_a = a.data_mut().storage_mut();
             let storage_b = b.data().storage();
             device.$op_muta_refb_func(storage_a, &la_b, storage_b, &lb_b)
         }
@@ -581,7 +581,7 @@ pub mod op_owna_refb_operator {
     op_owna_refb_operator!(sub   , DeviceSubAPI   , Sub   , op_refa_refb_sub   , |a, b| *a = a.clone() -  b.clone(), |b, a| *b = a.clone() -  b.clone());
     op_owna_refb_operator!(mul   , DeviceMulAPI   , Mul   , op_refa_refb_mul   , |a, b| *a = a.clone() *  b.clone(), |b, a| *b = a.clone() *  b.clone());
     op_owna_refb_operator!(div   , DeviceDivAPI   , Div   , op_refa_refb_div   , |a, b| *a = a.clone() /  b.clone(), |b, a| *b = a.clone() /  b.clone());
-    op_owna_refb_operator!(rem   , DeviceRemAPI   , Rem   , op_refa_refb_rem   , |a, b| *a = a.clone() %  b.clone(), |b, a| *b = a.clone() %  b.clone());
+//  op_owna_refb_operator!(rem   , DeviceRemAPI   , Rem   , op_refa_refb_rem   , |a, b| *a = a.clone() %  b.clone(), |b, a| *b = a.clone() %  b.clone());
     op_owna_refb_operator!(bitor , DeviceBitOrAPI , BitOr , op_refa_refb_bitor , |a, b| *a = a.clone() |  b.clone(), |b, a| *b = a.clone() |  b.clone());
     op_owna_refb_operator!(bitand, DeviceBitAndAPI, BitAnd, op_refa_refb_bitand, |a, b| *a = a.clone() &  b.clone(), |b, a| *b = a.clone() &  b.clone());
     op_owna_refb_operator!(bitxor, DeviceBitXorAPI, BitXor, op_refa_refb_bitxor, |a, b| *a = a.clone() ^  b.clone(), |b, a| *b = a.clone() ^  b.clone());

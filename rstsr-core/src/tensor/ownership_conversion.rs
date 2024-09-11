@@ -67,3 +67,67 @@ where
 }
 
 /* #endregion */
+
+/* #region operation API */
+
+/// This trait is used for implementing operations that involves view-only
+/// input.
+pub trait TensorRefAPI<'a, S, D>
+where
+    D: DimAPI,
+{
+    fn view(self) -> TensorBase<DataRef<'a, S>, D>;
+}
+
+impl<'a, S, D> TensorRefAPI<'a, S, D> for TensorBase<DataRef<'a, S>, D>
+where
+    D: DimAPI,
+{
+    #[inline]
+    fn view(self) -> TensorBase<DataRef<'a, S>, D> {
+        self
+    }
+}
+
+impl<'a, R, S, D> TensorRefAPI<'a, S, D> for &'a TensorBase<R, D>
+where
+    R: DataAPI<Data = S>,
+    D: DimAPI,
+{
+    #[inline]
+    fn view(self) -> TensorBase<DataRef<'a, S>, D> {
+        self.view()
+    }
+}
+
+/// This trait is used for implementing operations that involves view-mut
+/// input.
+pub trait TensorRefMutAPI<'a, S, D>
+where
+    D: DimAPI,
+{
+    fn view_mut(self) -> TensorBase<DataRefMut<'a, S>, D>;
+}
+
+impl<'a, S, D> TensorRefMutAPI<'a, S, D> for TensorBase<DataRefMut<'a, S>, D>
+where
+    D: DimAPI,
+{
+    #[inline]
+    fn view_mut(self) -> TensorBase<DataRefMut<'a, S>, D> {
+        self
+    }
+}
+
+impl<'a, R, S, D> TensorRefMutAPI<'a, S, D> for &'a mut TensorBase<R, D>
+where
+    R: DataMutAPI<Data = S>,
+    D: DimAPI,
+{
+    #[inline]
+    fn view_mut(self) -> TensorBase<DataRefMut<'a, S>, D> {
+        self.view_mut()
+    }
+}
+
+/* #endregion */
