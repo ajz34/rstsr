@@ -103,36 +103,3 @@ pub type TensorView<'a, T, D, B = CpuDevice> = TensorBase<DataRef<'a, Storage<T,
 pub type TensorViewMut<'a, T, D, B = CpuDevice> = TensorBase<DataRefMut<'a, Storage<T, B>>, D>;
 pub type TensorCow<'a, T, D, B = CpuDevice> = TensorBase<DataCow<'a, Storage<T, B>>, D>;
 
-/* #region vector casting to tensor */
-
-/// One dimension vector can be simply casted to tensor in CPU.
-impl<T> From<Vec<T>> for Tensor<T, Ix1, CpuDevice>
-where
-    T: Clone,
-{
-    fn from(data: Vec<T>) -> Self {
-        let size = data.len();
-        let device = CpuDevice {};
-        let storage = Storage { rawvec: data, device };
-        let data = DataOwned { storage };
-        let layout = [size].into();
-        Tensor::new(data, layout).unwrap()
-    }
-}
-
-/* #endregion */
-
-#[cfg(test)]
-mod test {
-    use super::*;
-
-    #[test]
-    fn playground() {
-        use crate::layout::*;
-        let a = Tensor::<f64, Ix<2>> {
-            data: Storage { rawvec: vec![1.12345, 2.0], device: CpuDevice }.into(),
-            layout: [1, 2].new_c_contig(None),
-        };
-        println!("{a:6.3?}");
-    }
-}

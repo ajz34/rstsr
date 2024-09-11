@@ -15,6 +15,7 @@ pub enum Error {
     InvalidLayout(String),
     RuntimeError(String),
     DeviceMismatch(String),
+    UnImplemented(String),
 
     TryFromIntError(String),
     Infallible,
