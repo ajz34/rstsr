@@ -28,7 +28,7 @@ where
 
 /* #region Layout */
 
-/// Getter functions for layout.
+/// Getter/setter functions for layout.
 impl<D> Layout<D>
 where
     D: DimBaseAPI,
@@ -65,6 +65,17 @@ where
     #[inline]
     pub fn size(&self) -> usize {
         self.size
+    }
+
+    /// Manually set offset.
+    ///
+    /// # Safety
+    ///
+    /// We will not check whether this offset is valid or not.
+    /// In most cases, it is not intended to be used by user.
+    pub unsafe fn set_offset(&mut self, offset: usize) -> &mut Self {
+        self.offset = offset;
+        return self;
     }
 }
 

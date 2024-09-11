@@ -56,6 +56,24 @@ where
                 let lc = &lc.clone().into_dim::<Ix0>().unwrap();
                 self.inner_dot(c, lc, a, la, b, lb, alpha, beta)?;
             },
+            (1, 2.., _) => {
+                // rule 3: | `        K` | `..., K, N` | `   ..., N` |
+                rstsr_assert_eq!(lb.ndim(), lc.ndim() + 1, InvalidLayout)?;
+                let la = &la.clone().into_dim::<Ix1>().unwrap();
+                let (lb_rest, lb_matmul) = lb.dim_split_at(-2)?;
+                let (lc_rest, lc_matmul) = lc.dim_split_at(-1)?;
+                let lb_matmul = &mut lb_matmul.into_dim::<Ix2>()?;
+                let lc_matmul = &mut lc_matmul.into_dim::<Ix1>()?;
+                let l_rest = translate_to_col_major(&[&lb_rest, &lc_rest], TensorIterOrder::K)?;
+                let (lb_rest, lc_rest) = (&l_rest[0], &l_rest[1]);
+                let itb_rest = IterLayoutColMajor::new(lb_rest)?;
+                let itc_rest = IterLayoutColMajor::new(lc_rest)?;
+                for (ib_rest, ic_rest) in izip!(itb_rest, itc_rest) {
+                    unsafe { lb_matmul.set_offset(ib_rest) };
+                    unsafe { lc_matmul.set_offset(ic_rest) };
+                    self.gevm(c, lc_matmul, a, la, b, lb_matmul, alpha.clone(), beta.clone())?;
+                }
+            },
             _ => {
                 rstsr_raise!(
                     UnImplemented,
