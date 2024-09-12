@@ -2,7 +2,7 @@
 
 use core::ops::{Add, Mul, Rem};
 
-use num::{Num, One, Zero};
+use num::{One, Zero};
 
 use crate::prelude_dev::*;
 
@@ -130,6 +130,18 @@ mod test {
 
         let a = Tensor::linspace_cpu(0.0, 2.0, 3);
         let b = Tensor::linspace_cpu(0.0, 29.0, 30).into_shape_assume_contig([2, 3, 5]).unwrap();
+        println!("{:}", &a % &b);
+
+        let a = Tensor::linspace_cpu(0.0, 29.0, 30).into_shape_assume_contig([2, 3, 5]).unwrap();
+        let b = Tensor::linspace_cpu(0.0, 4.0, 5);
+        println!("{:}", &a % &b);
+
+        let a = Tensor::linspace_cpu(0.0, 14.0, 15).into_shape_assume_contig([5, 3]).unwrap();
+        let b = Tensor::linspace_cpu(0.0, 29.0, 30).into_shape_assume_contig([2, 3, 5]).unwrap();
+        println!("{:}", &a % &b);
+
+        let a = Tensor::linspace_cpu(0.0, 29.0, 30).into_shape_assume_contig([2, 3, 5]).unwrap();
+        let b = Tensor::linspace_cpu(0.0, 14.0, 15).into_shape_assume_contig([5, 3]).unwrap();
         println!("{:}", &a % &b);
     }
 }

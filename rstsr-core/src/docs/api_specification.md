@@ -1,8 +1,9 @@
 # Python Array API specification
 
 For column status:
-- Y: Implemented in rstsr (may not be fully functional like numpy or Python array API specification, but should be enough)
-- P: Partial implemented in rstsr (not all features in Python array API is implemented)
+- Y: Implemented in rstsr (may not be fully functional like numpy or Python array API specification, but should be enough);
+- C: Changed feature (**breaking using experience from numpy**);
+- P: Partial implemented in rstsr (not all features in Python array API is implemented);
 - D: Features that would be dropped in rstsr.
 
 ## Operators
@@ -18,7 +19,7 @@ For column status:
 | Y | `*` | `__mul__` | `x1 * x2` |
 | Y | `/` | `__truediv__` | `x1 / x2` |
 | | | `__floordiv__` | `x1 // x2` |
-| Y | `%` | `__mod__` | `x1 % x2` |
+| **C** | | `__mod__` | `x1 % x2` |
 | | | `__pow__` | `x1 ** x2` |
 | Y | `+=` | `__iadd__` | `x1 += x2` |
 | Y | `-=` | `__isub__` | `x1 -= x2` |
@@ -28,15 +29,22 @@ For column status:
 | | | `__ipow__` | `x1 **= x2` |
 | Y | `%=` | `__imod__` | `x1 %= x2` |
 
-Dropped support:
+**Changed feature**
+- `__mod__`: We do not use remainder function to represent something like `8 % 3 = 2`, but instead using notation `%` to represent matrix multiplication (`@` in python/numpy).
+
+
+**Dropped support**
 - `__pos__`: In rust, leading `+` is not allowed.
 
 ### Array Operators
 
 | status | implementation | Python API | description |
 |-|-|-|-|
-| | | `__matmul__` | `x1 @ x2` |
+| **C** | `%` | `__matmul__` | `x1 @ x2` |
 | D | | `__imatmul__` | `x1 @= x2` |
+
+**Changed feature**
+- `__matmul__`: In rust, there was discussions whether to implement `@` as matrix multiplication (or other operator notations, since `@` has been used in binary operation for pattern matching). Instead we use notation `%` to represent matrix multiplication (`@` in python/numpy). See `__rem__` function for more information.
 
 Dropped support
 - `__imatmul__`: Inplace matmul is not convenient to be realized.
@@ -124,7 +132,7 @@ Dropped support
 | Y | [`zeros`] | [`zeros`](https://data-apis.org/array-api/2023.12/API_specification/generated/array_api.zeros.html) | Returns a new array having a specified `shape` and filled with zeros. |
 | Y | [`zeros_like`] | [`zeros_like`](https://data-apis.org/array-api/2023.12/API_specification/generated/array_api.zeros_like.html) | Returns a new array filled with zeros and having the same `shape` as an input array x. |
 
-Partial implementation:
+**Partial implementation**
 - [`asarray`]: This function have different implementations for `Vec<T>`, `[T; N]` and [`Tensor<T, D, B>`]. Different signatures are utilized for different inputs and purposes.
 
 ## Data Type
@@ -267,7 +275,7 @@ Partial implementation:
 | | | `tile` | Constructs an array by tiling an input array. |
 | | | `unstack` | Splits an array into a sequence of arrays along the given axis. |
 
-Partial implementation:
+**Partial implementation**
 - [`squeeze`] accepts one axis as input, instead of accepting multiple axes. This is mostly because output of smaller dimension tensor can be fixed-dimension array ([`DimSmallerOneAPI::SmallerOne`]) when only one axis is passed as argument.
 - `reshape`: Currently reshape is work-in-progress. It does not copy array when f/c-contiguous. For numpy, much more cases may not invoke explicit copy when reshape.
 
