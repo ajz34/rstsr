@@ -255,6 +255,71 @@ macro_rules! impl_op_mutc_refa_refb_operator {
                 $op_refa_refb_func(self, rhs).unwrap()
             }
         }
+
+        impl<'a, RB, DA, DB, TA, TB, B> core::ops::$Op<&TensorBase<RB, DB>>
+            for TensorView<'a, TA, DA, B>
+        where
+            // lifetime and data constraints
+            RB: DataAPI<Data = Storage<TB, B>>,
+            DA: DimAPI,
+            DB: DimAPI,
+            B: DeviceAPI<TA> + DeviceAPI<TB>,
+            // broadcast constraints
+            DA: DimMaxAPI<DB>,
+            // operation constraints
+            TA: core::ops::$Op<TB>,
+            B: $DeviceOpAPI<TA, TB, <TA as core::ops::$Op<TB>>::Output, <DA as DimMaxAPI<DB>>::Max>,
+            B: DeviceCreationAnyAPI<<TA as core::ops::$Op<TB>>::Output>,
+        {
+            type Output = Tensor<<TA as core::ops::$Op<TB>>::Output, <DA as DimMaxAPI<DB>>::Max, B>;
+
+            fn $op(self, rhs: &TensorBase<RB, DB>) -> Self::Output {
+                $op_refa_refb_func(&self.view(), rhs).unwrap()
+            }
+        }
+
+        impl<'b, RA, DA, DB, TA, TB, B> core::ops::$Op<TensorView<'b, TB, DB, B>>
+            for &TensorBase<RA, DA>
+        where
+            // lifetime and data constraints
+            RA: DataAPI<Data = Storage<TA, B>>,
+            DA: DimAPI,
+            DB: DimAPI,
+            B: DeviceAPI<TA> + DeviceAPI<TB>,
+            // broadcast constraints
+            DA: DimMaxAPI<DB>,
+            // operation constraints
+            TA: core::ops::$Op<TB>,
+            B: $DeviceOpAPI<TA, TB, <TA as core::ops::$Op<TB>>::Output, <DA as DimMaxAPI<DB>>::Max>,
+            B: DeviceCreationAnyAPI<<TA as core::ops::$Op<TB>>::Output>,
+        {
+            type Output = Tensor<<TA as core::ops::$Op<TB>>::Output, <DA as DimMaxAPI<DB>>::Max, B>;
+
+            fn $op(self, rhs: TensorView<'b, TB, DB, B>) -> Self::Output {
+                $op_refa_refb_func(self, &rhs.view()).unwrap()
+            }
+        }
+
+        impl<'a, 'b, DA, DB, TA, TB, B> core::ops::$Op<TensorView<'b, TB, DB, B>>
+            for TensorView<'a, TA, DA, B>
+        where
+            // lifetime and data constraints
+            DA: DimAPI,
+            DB: DimAPI,
+            B: DeviceAPI<TA> + DeviceAPI<TB>,
+            // broadcast constraints
+            DA: DimMaxAPI<DB>,
+            // operation constraints
+            TA: core::ops::$Op<TB>,
+            B: $DeviceOpAPI<TA, TB, <TA as core::ops::$Op<TB>>::Output, <DA as DimMaxAPI<DB>>::Max>,
+            B: DeviceCreationAnyAPI<<TA as core::ops::$Op<TB>>::Output>,
+        {
+            type Output = Tensor<<TA as core::ops::$Op<TB>>::Output, <DA as DimMaxAPI<DB>>::Max, B>;
+
+            fn $op(self, rhs: TensorView<'b, TB, DB, B>) -> Self::Output {
+                $op_refa_refb_func(&self.view(), &rhs.view()).unwrap()
+            }
+        }
     };
 }
 
@@ -429,6 +494,32 @@ macro_rules! impl_op_muta_refb_unary {
                 return unsafe { Tensor::new_unchecked(DataOwned::from(storage_a), la) };
             }
         }
+
+        impl<'b, D, TA, TB, B> core::ops::$Op for TensorView<'b, TB, D, B>
+        where
+            // lifetime and data
+            // constraints
+            D: DimAPI,
+            B: DeviceAPI<TA> + DeviceAPI<TB>,
+            // operation constraints
+            TB: core::ops::$Op<Output = TA>,
+            B: $DeviceOpAPI<TA, TB, D>,
+            B: DeviceCreationAnyAPI<TA>,
+        {
+            type Output = Tensor<TA, D, B>;
+            fn $op(self) -> Self::Output {
+                let lb = self.layout();
+                let storage_b = self.data().storage();
+                // generate empty output tensor
+                let device = self.device();
+                let la = layout_for_array_copy(lb, TensorIterOrder::K).unwrap();
+                let mut storage_a =
+                    unsafe { device.empty_impl(la.bounds_index().unwrap().1).unwrap() };
+                // compute and return
+                device.$op_muta_refb_func(&mut storage_a, &la, storage_b, lb).unwrap();
+                return unsafe { Tensor::new_unchecked(DataOwned::from(storage_a), la) };
+            }
+        }
     };
 }
 
@@ -488,12 +579,45 @@ macro_rules! op_owna_refb_operator {
                 }
             }
         }
+        impl<'b, DA, DB, TA, TB, B> core::ops::$Op<TensorView<'b, TB, DB, B>> for Tensor<TA, DA, B>
+        where
+            // lifetime and data constraints
+            TA: Clone,
+            TB: Clone,
+            DA: DimAPI,
+            DB: DimAPI,
+            B: DeviceAPI<TA> + DeviceAPI<TB>,
+            // broadcast constraints
+            DA: DimMaxAPI<DB>,
+            <DA as DimMaxAPI<DB>>::Max: DimConvertAPI<DA>,
+            DA: DimConvertAPI<<DA as DimMaxAPI<DB>>::Max>,
+            // operation constraints
+            TA: core::ops::$Op<TB, Output = TA>,
+            B: DeviceCreationAnyAPI<TA>,
+            B: $DeviceOpAPI<TA, TB, TA, <DA as DimMaxAPI<DB>>::Max>,
+            B: DeviceOp_MutA_RefB_API<TA, TB, DA, fn(&mut TA, &TB)>,
+        {
+            type Output = Tensor<TA, <DA as DimMaxAPI<DB>>::Max, B>;
+            fn $op(self, rhs: TensorView<'b, TB, DB, B>) -> Self::Output {
+                let rhs = &rhs.view();
+                if self.layout().is_broadcasted()
+                    || broadcast_layout_to_first(self.layout(), rhs.layout()).is_err()
+                {
+                    // output shape of c is not the same to input owned a
+                    $op_refa_refb_func(&self, rhs).unwrap()
+                } else {
+                    // reuse a as c
+                    let mut s = self;
+                    op_muta_refb_func(&mut s, rhs, $closure_muta_refb).unwrap();
+                    s.into_dim::<<DA as DimMaxAPI<DB>>::Max>().unwrap() // this unwrap
+                                                                        // should be safe
+                }
+            }
+        }
 
         impl<RA, DA, DB, TA, TB, B> core::ops::$Op<Tensor<TB, DB, B>> for &TensorBase<RA, DA>
         where
-            // lifetime and
-            // data
-            // constraints
+            // lifetime and data constraints
             RA: DataAPI<Data = Storage<TA, B>>,
             TA: Clone,
             TB: Clone,
@@ -522,6 +646,42 @@ macro_rules! op_owna_refb_operator {
                     // reuse b as c
                     let mut rhs = rhs;
                     op_muta_refb_func(&mut rhs, self, $closure_refa_mutb).unwrap();
+                    rhs.into_dim::<<DA as DimMaxAPI<DB>>::Max>().unwrap()
+                }
+            }
+        }
+
+        impl<'a, DA, DB, TA, TB, B> core::ops::$Op<Tensor<TB, DB, B>> for TensorView<'a, TA, DA, B>
+        where
+            // lifetime and data constraints
+            TA: Clone,
+            TB: Clone,
+            DA: DimAPI,
+            DB: DimAPI,
+            B: DeviceAPI<TA> + DeviceAPI<TB>,
+            // broadcast constraints
+            DB: DimMaxAPI<DA>,
+            DA: DimMaxAPI<DB>,
+            <DB as DimMaxAPI<DA>>::Max: DimConvertAPI<DB>,
+            DB: DimConvertAPI<<DA as DimMaxAPI<DB>>::Max>,
+            // operation constraints
+            TA: core::ops::$Op<TB, Output = TB>,
+            B: DeviceCreationAnyAPI<TB>,
+            B: $DeviceOpAPI<TA, TB, TB, <DA as DimMaxAPI<DB>>::Max>,
+            B: DeviceOp_MutA_RefB_API<TB, TA, DB, fn(&mut TB, &TA)>,
+        {
+            type Output = Tensor<TB, <DA as DimMaxAPI<DB>>::Max, B>;
+            fn $op(self, rhs: Tensor<TB, DB, B>) -> Self::Output {
+                let lhs = &self.view();
+                if lhs.layout().is_broadcasted()
+                    || broadcast_layout_to_first(rhs.layout(), lhs.layout()).is_err()
+                {
+                    // output shape of c is not the same to input owned a
+                    $op_refa_refb_func(lhs, &rhs).unwrap()
+                } else {
+                    // reuse b as c
+                    let mut rhs = rhs;
+                    op_muta_refb_func(&mut rhs, lhs, $closure_refa_mutb).unwrap();
                     rhs.into_dim::<<DA as DimMaxAPI<DB>>::Max>().unwrap()
                 }
             }
@@ -684,6 +844,19 @@ mod test {
         let c = &a + &b;
         let c_ref = vec![11., 10., 9., 8., 7.].into();
         assert!(allclose_f64(&c, &c_ref));
+
+        // view
+        let a = Tensor::linspace_cpu(1.0, 5.0, 5);
+        let b = Tensor::linspace_cpu(2.0, 10.0, 5);
+        let c = a.view() + &b;
+        let c_ref = vec![3., 6., 9., 12., 15.].into();
+        assert!(allclose_f64(&c, &c_ref));
+
+        let a = Tensor::linspace_cpu(1.0, 5.0, 5);
+        let b = Tensor::linspace_cpu(2.0, 10.0, 5);
+        let c = a + b.view();
+        let c_ref = vec![3., 6., 9., 12., 15.].into();
+        assert!(allclose_f64(&c, &c_ref));
     }
 
     #[test]
@@ -813,6 +986,15 @@ mod test {
         let c_ref = vec![-1., -2., -3., -4., -5.].into();
         assert!(allclose_f64(&c, &c_ref));
         assert_eq!(b_ptr, c_ptr);
+        // a - &b
+        let a = Tensor::linspace_cpu(1.0, 5.0, 5);
+        let b = Tensor::linspace_cpu(2.0, 10.0, 5);
+        let a_ptr = a.data().storage().rawvec().as_ptr();
+        let c = a - b.view();
+        let c_ptr = c.data().storage().rawvec().as_ptr();
+        let c_ref = vec![-1., -2., -3., -4., -5.].into();
+        assert!(allclose_f64(&c, &c_ref));
+        assert_eq!(a_ptr, c_ptr);
     }
 
     #[test]
