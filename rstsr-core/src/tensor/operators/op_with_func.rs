@@ -783,7 +783,7 @@ mod impl_op_muta_unary {
 
 #[cfg(test)]
 mod test {
-    use crate::prelude_dev::*;
+    use super::*;
 
     #[test]
     fn test_add() {

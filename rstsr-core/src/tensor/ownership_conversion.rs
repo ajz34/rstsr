@@ -72,60 +72,104 @@ where
 
 /// This trait is used for implementing operations that involves view-only
 /// input.
-pub trait TensorRefAPI<'a, S, D>
+pub trait TensorRefAPI<S, D>
 where
     D: DimAPI,
 {
-    fn view(self) -> TensorBase<DataRef<'a, S>, D>;
+    fn tsr_view(&self) -> TensorBase<DataRef<'_, S>, D>;
 }
 
-impl<'a, S, D> TensorRefAPI<'a, S, D> for TensorBase<DataRef<'a, S>, D>
-where
-    D: DimAPI,
-{
-    #[inline]
-    fn view(self) -> TensorBase<DataRef<'a, S>, D> {
-        self
-    }
-}
-
-impl<'a, R, S, D> TensorRefAPI<'a, S, D> for &'a TensorBase<R, D>
+impl<'a, R, S, D> TensorRefAPI<S, D> for &'a TensorBase<R, D>
 where
     R: DataAPI<Data = S>,
     D: DimAPI,
 {
     #[inline]
-    fn view(self) -> TensorBase<DataRef<'a, S>, D> {
+    fn tsr_view(&self) -> TensorBase<DataRef<'_, S>, D> {
+        self.view()
+    }
+}
+
+impl<'a, S, D> TensorRefAPI<S, D> for TensorBase<DataRef<'a, S>, D>
+where
+    S: Clone,
+    D: DimAPI,
+{
+    #[inline]
+    fn tsr_view(&self) -> TensorBase<DataRef<'_, S>, D> {
+        self.view()
+    }
+}
+
+/// This trait is used for implementing operations that involves view-only
+/// operation, but input can be view-only or owned.
+pub trait TensorRefOrOwnedAPI<S, D>
+where
+    D: DimAPI,
+{
+    fn tsr_view(&self) -> TensorBase<DataRef<'_, S>, D>;
+}
+
+impl<'a, R, S, D> TensorRefOrOwnedAPI<S, D> for &'a TensorBase<R, D>
+where
+    R: DataAPI<Data = S>,
+    D: DimAPI,
+{
+    #[inline]
+    fn tsr_view(&self) -> TensorBase<DataRef<'_, S>, D> {
+        self.view()
+    }
+}
+
+impl<'a, S, D> TensorRefOrOwnedAPI<S, D> for TensorBase<DataRef<'a, S>, D>
+where
+    S: Clone,
+    D: DimAPI,
+{
+    #[inline]
+    fn tsr_view(&self) -> TensorBase<DataRef<'_, S>, D> {
+        self.view()
+    }
+}
+
+impl<S, D> TensorRefOrOwnedAPI<S, D> for TensorBase<DataOwned<S>, D>
+where
+    S: Clone,
+    D: DimAPI,
+{
+    #[inline]
+    fn tsr_view(&self) -> TensorBase<DataRef<'_, S>, D> {
         self.view()
     }
 }
 
 /// This trait is used for implementing operations that involves view-mut
 /// input.
-pub trait TensorRefMutAPI<'a, S, D>
+pub trait TensorRefMutAPI<S, D>
 where
     D: DimAPI,
 {
-    fn view_mut(self) -> TensorBase<DataRefMut<'a, S>, D>;
+    fn tsr_view_mut(&mut self) -> TensorBase<DataRefMut<'_, S>, D>;
 }
 
-impl<'a, S, D> TensorRefMutAPI<'a, S, D> for TensorBase<DataRefMut<'a, S>, D>
-where
-    D: DimAPI,
-{
-    #[inline]
-    fn view_mut(self) -> TensorBase<DataRefMut<'a, S>, D> {
-        self
-    }
-}
-
-impl<'a, R, S, D> TensorRefMutAPI<'a, S, D> for &'a mut TensorBase<R, D>
+impl<'a, R, S, D> TensorRefMutAPI<S, D> for &'a mut TensorBase<R, D>
 where
     R: DataMutAPI<Data = S>,
     D: DimAPI,
 {
     #[inline]
-    fn view_mut(self) -> TensorBase<DataRefMut<'a, S>, D> {
+    fn tsr_view_mut(&mut self) -> TensorBase<DataRefMut<'_, S>, D> {
+        self.view_mut()
+    }
+}
+
+impl<'a, S, D> TensorRefMutAPI<S, D> for TensorBase<DataRefMut<'a, S>, D>
+where
+    S: Clone,
+    D: DimAPI,
+{
+    #[inline]
+    fn tsr_view_mut(&mut self) -> TensorBase<DataRefMut<'_, S>, D> {
         self.view_mut()
     }
 }

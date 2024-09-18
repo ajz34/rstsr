@@ -20,7 +20,7 @@ macro_rules! trait_op_assign_api {
 }
 
 #[rustfmt::skip]
-mod impl_op_muta_refb_func {
+mod impl_op_muta_refb_assign {
     use super::*;
     use core::ops::*;
     trait_op_assign_api!(DeviceAddAssignAPI   , AddAssign   );
@@ -34,7 +34,79 @@ mod impl_op_muta_refb_func {
     trait_op_assign_api!(DeviceShlAssignAPI   , ShlAssign   );
     trait_op_assign_api!(DeviceShrAssignAPI   , ShrAssign   );
 }
-pub use impl_op_muta_refb_func::*;
+pub use impl_op_muta_refb_assign::*;
+
+macro_rules! trait_op_l_consume_api {
+    ($DeviceOpAPI:ident, $Op:ident) => {
+        pub trait $DeviceOpAPI<TA, TB, D>
+        where
+            TA: $Op<TB, Output = TA>,
+            D: DimAPI,
+            Self: DeviceAPI<TA> + DeviceAPI<TB>,
+        {
+            fn op_muta_refb(
+                &self,
+                a: &mut Storage<TA, Self>,
+                la: &Layout<D>,
+                b: &Storage<TB, Self>,
+                lb: &Layout<D>,
+            ) -> Result<()>;
+        }
+    };
+}
+
+#[rustfmt::skip]
+mod impl_op_muta_refb_l_consume {
+    use super::*;
+    use core::ops::*;
+    trait_op_l_consume_api!(DeviceLConsumeAddAPI   , Add   );
+    trait_op_l_consume_api!(DeviceLConsumeSubAPI   , Sub   );
+    trait_op_l_consume_api!(DeviceLConsumeMulAPI   , Mul   );
+    trait_op_l_consume_api!(DeviceLConsumeDivAPI   , Div   );
+    trait_op_l_consume_api!(DeviceLConsumeRemAPI   , Rem   );
+    trait_op_l_consume_api!(DeviceLConsumeBitOrAPI , BitOr );
+    trait_op_l_consume_api!(DeviceLConsumeBitAndAPI, BitAnd);
+    trait_op_l_consume_api!(DeviceLConsumeBitXorAPI, BitXor);
+    trait_op_l_consume_api!(DeviceLConsumeShlAPI   , Shl   );
+    trait_op_l_consume_api!(DeviceLConsumeShrAPI   , Shr   );
+}
+pub use impl_op_muta_refb_l_consume::*;
+
+macro_rules! trait_op_r_consume_api {
+    ($DeviceOpAPI:ident, $Op:ident) => {
+        pub trait $DeviceOpAPI<TA, TB, D>
+        where
+            TB: $Op<TA, Output = TA>,
+            D: DimAPI,
+            Self: DeviceAPI<TA> + DeviceAPI<TB>,
+        {
+            fn op_muta_refb(
+                &self,
+                a: &mut Storage<TA, Self>,
+                la: &Layout<D>,
+                b: &Storage<TB, Self>,
+                lb: &Layout<D>,
+            ) -> Result<()>;
+        }
+    };
+}
+
+#[rustfmt::skip]
+mod impl_op_muta_refb_r_consume {
+    use super::*;
+    use core::ops::*;
+    trait_op_r_consume_api!(DeviceRConsumeAddAPI   , Add   );
+    trait_op_r_consume_api!(DeviceRConsumeSubAPI   , Sub   );
+    trait_op_r_consume_api!(DeviceRConsumeMulAPI   , Mul   );
+    trait_op_r_consume_api!(DeviceRConsumeDivAPI   , Div   );
+    trait_op_r_consume_api!(DeviceRConsumeRemAPI   , Rem   );
+    trait_op_r_consume_api!(DeviceRConsumeBitOrAPI , BitOr );
+    trait_op_r_consume_api!(DeviceRConsumeBitAndAPI, BitAnd);
+    trait_op_r_consume_api!(DeviceRConsumeBitXorAPI, BitXor);
+    trait_op_r_consume_api!(DeviceRConsumeShlAPI   , Shl   );
+    trait_op_r_consume_api!(DeviceRConsumeShrAPI   , Shr   );
+}
+pub use impl_op_muta_refb_r_consume::*;
 
 macro_rules! trait_op_unary_api {
     ($DeviceOpAPI:ident, $Op:ident, $op_muta_refb_func:ident) => {
