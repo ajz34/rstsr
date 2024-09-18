@@ -78,18 +78,18 @@ macro_rules! impl_op_muta_refb_r_consume {
     ($DeviceOpAPI:ident, $Op:ident, $func:expr) => {
         impl<TA, TB, D> $DeviceOpAPI<TA, TB, D> for CpuDevice
         where
-            TB: Clone + $Op<TA, Output = TA>,
-            TA: Clone,
+            TA: Clone + $Op<TB, Output = TB>,
+            TB: Clone,
             D: DimAPI,
         {
             fn op_muta_refb(
                 &self,
-                a: &mut Storage<TA, CpuDevice>,
-                la: &Layout<D>,
-                b: &Storage<TB, CpuDevice>,
+                b: &mut Storage<TB, CpuDevice>,
                 lb: &Layout<D>,
+                a: &Storage<TA, CpuDevice>,
+                la: &Layout<D>,
             ) -> Result<()> {
-                self.op_muta_refb_func(a, la, b, lb, $func)
+                self.op_muta_refb_func(b, lb, a, la, $func)
             }
         }
     };

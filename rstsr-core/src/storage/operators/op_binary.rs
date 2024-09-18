@@ -76,16 +76,16 @@ macro_rules! trait_op_r_consume_api {
     ($DeviceOpAPI:ident, $Op:ident) => {
         pub trait $DeviceOpAPI<TA, TB, D>
         where
-            TB: $Op<TA, Output = TA>,
+            TA: $Op<TB, Output = TB>,
             D: DimAPI,
             Self: DeviceAPI<TA> + DeviceAPI<TB>,
         {
             fn op_muta_refb(
                 &self,
-                a: &mut Storage<TA, Self>,
-                la: &Layout<D>,
-                b: &Storage<TB, Self>,
+                b: &mut Storage<TB, Self>,
                 lb: &Layout<D>,
+                a: &Storage<TA, Self>,
+                la: &Layout<D>,
             ) -> Result<()>;
         }
     };

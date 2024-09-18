@@ -1,8 +1,8 @@
 use crate::prelude_dev::*;
 
 macro_rules! impl_binary_with_output {
-    ($fn_name: ident, $DeviceOpAPI: ident, $Op: ident) => {
-        pub fn $fn_name<TRA, TRB, TRC, TA, TB, TC, DA, DB, DC, B>(
+    ($op: ident, $DeviceOpAPI: ident, $Op: ident) => {
+        pub fn $op<TRA, TRB, TRC, TA, TB, TC, DA, DB, DC, B>(
             a: TRA,
             b: TRB,
             mut c: TRC,
@@ -25,9 +25,11 @@ macro_rules! impl_binary_with_output {
             TA: $Op<TB, Output = TC>,
             B: $DeviceOpAPI<TA, TB, TC, DC>,
         {
+            // get tensor views
             let a = a.tsr_view();
             let b = b.tsr_view();
             let mut c = c.tsr_view_mut();
+            // check device
             rstsr_assert!(c.device().same_device(a.device()), DeviceMismatch)?;
             rstsr_assert!(c.device().same_device(b.device()), DeviceMismatch)?;
             let lc = c.layout();
