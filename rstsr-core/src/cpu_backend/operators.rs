@@ -169,15 +169,15 @@ where
 /* #region op_mutc_refa_refb_operator */
 
 macro_rules! impl_op_mutc_refa_refb_operator {
-    ($DeviceOpAPI:ident, $Op:ident, $op_mutc_refa_refb_func:ident, $func:expr) => {
+    ($DeviceOpAPI:ident, $Op:ident, $func:expr) => {
         impl<TA, TB, TC, D> $DeviceOpAPI<TA, TB, TC, D> for CpuDevice
         where
-            TA: Clone + core::ops::$Op<TB, Output = TC>,
+            TA: Clone + $Op<TB, Output = TC>,
             TB: Clone,
             TC: Clone,
             D: DimAPI,
         {
-            fn $op_mutc_refa_refb_func(
+            fn op_mutc_refa_refb(
                 &self,
                 c: &mut Storage<TC, Self>,
                 lc: &Layout<D>,
@@ -195,16 +195,17 @@ macro_rules! impl_op_mutc_refa_refb_operator {
 #[rustfmt::skip]
 mod impl_op_mutc_refa_refb_operator {
     use super::*;
-    impl_op_mutc_refa_refb_operator!(DeviceAddAPI   , Add   , op_mutc_refa_refb_add   , |c, a, b| *c = a.clone() +  b.clone());
-    impl_op_mutc_refa_refb_operator!(DeviceSubAPI   , Sub   , op_mutc_refa_refb_sub   , |c, a, b| *c = a.clone() -  b.clone());
-    impl_op_mutc_refa_refb_operator!(DeviceMulAPI   , Mul   , op_mutc_refa_refb_mul   , |c, a, b| *c = a.clone() *  b.clone());
-    impl_op_mutc_refa_refb_operator!(DeviceDivAPI   , Div   , op_mutc_refa_refb_div   , |c, a, b| *c = a.clone() /  b.clone());
-    impl_op_mutc_refa_refb_operator!(DeviceRemAPI   , Rem   , op_mutc_refa_refb_rem   , |c, a, b| *c = a.clone() %  b.clone());
-    impl_op_mutc_refa_refb_operator!(DeviceBitOrAPI , BitOr , op_mutc_refa_refb_bitor , |c, a, b| *c = a.clone() |  b.clone());
-    impl_op_mutc_refa_refb_operator!(DeviceBitAndAPI, BitAnd, op_mutc_refa_refb_bitand, |c, a, b| *c = a.clone() &  b.clone());
-    impl_op_mutc_refa_refb_operator!(DeviceBitXorAPI, BitXor, op_mutc_refa_refb_bitxor, |c, a, b| *c = a.clone() ^  b.clone());
-    impl_op_mutc_refa_refb_operator!(DeviceShlAPI   , Shl   , op_mutc_refa_refb_shl   , |c, a, b| *c = a.clone() << b.clone());
-    impl_op_mutc_refa_refb_operator!(DeviceShrAPI   , Shr   , op_mutc_refa_refb_shr   , |c, a, b| *c = a.clone() >> b.clone());
+    use core::ops::*;
+    impl_op_mutc_refa_refb_operator!(DeviceAddAPI   , Add   , |c, a, b| *c = a.clone() +  b.clone());
+    impl_op_mutc_refa_refb_operator!(DeviceSubAPI   , Sub   , |c, a, b| *c = a.clone() -  b.clone());
+    impl_op_mutc_refa_refb_operator!(DeviceMulAPI   , Mul   , |c, a, b| *c = a.clone() *  b.clone());
+    impl_op_mutc_refa_refb_operator!(DeviceDivAPI   , Div   , |c, a, b| *c = a.clone() /  b.clone());
+    impl_op_mutc_refa_refb_operator!(DeviceRemAPI   , Rem   , |c, a, b| *c = a.clone() %  b.clone());
+    impl_op_mutc_refa_refb_operator!(DeviceBitOrAPI , BitOr , |c, a, b| *c = a.clone() |  b.clone());
+    impl_op_mutc_refa_refb_operator!(DeviceBitAndAPI, BitAnd, |c, a, b| *c = a.clone() &  b.clone());
+    impl_op_mutc_refa_refb_operator!(DeviceBitXorAPI, BitXor, |c, a, b| *c = a.clone() ^  b.clone());
+    impl_op_mutc_refa_refb_operator!(DeviceShlAPI   , Shl   , |c, a, b| *c = a.clone() << b.clone());
+    impl_op_mutc_refa_refb_operator!(DeviceShrAPI   , Shr   , |c, a, b| *c = a.clone() >> b.clone());
 }
 
 /* #endregion */
@@ -212,14 +213,14 @@ mod impl_op_mutc_refa_refb_operator {
 /* #region op_muta_refb_operator */
 
 macro_rules! impl_op_muta_refb_operator {
-    ($DeviceOpAPI:ident, $Op:ident, $op_muta_refb_func:ident, $func:expr) => {
+    ($DeviceOpAPI:ident, $Op:ident, $func:expr) => {
         impl<TA, TB, D> $DeviceOpAPI<TA, TB, D> for CpuDevice
         where
-            TA: Clone + core::ops::$Op<TB>,
+            TA: Clone + $Op<TB>,
             TB: Clone,
             D: DimAPI,
         {
-            fn $op_muta_refb_func(
+            fn op_muta_refb(
                 &self,
                 a: &mut Storage<TA, CpuDevice>,
                 la: &Layout<D>,
@@ -235,16 +236,17 @@ macro_rules! impl_op_muta_refb_operator {
 #[rustfmt::skip]
 mod impl_op_muta_refb_operator {
     use super::*;
-    impl_op_muta_refb_operator!(DeviceAddAssignAPI   , AddAssign   , op_muta_refb_add_assign   , |a, b| *a +=  b.clone());
-    impl_op_muta_refb_operator!(DeviceSubAssignAPI   , SubAssign   , op_muta_refb_sub_assign   , |a, b| *a -=  b.clone());
-    impl_op_muta_refb_operator!(DeviceMulAssignAPI   , MulAssign   , op_muta_refb_mul_assign   , |a, b| *a *=  b.clone());
-    impl_op_muta_refb_operator!(DeviceDivAssignAPI   , DivAssign   , op_muta_refb_div_assign   , |a, b| *a /=  b.clone());
-    impl_op_muta_refb_operator!(DeviceRemAssignAPI   , RemAssign   , op_muta_refb_rem_assign   , |a, b| *a %=  b.clone());
-    impl_op_muta_refb_operator!(DeviceBitOrAssignAPI , BitOrAssign , op_muta_refb_bitor_assign , |a, b| *a |=  b.clone());
-    impl_op_muta_refb_operator!(DeviceBitAndAssignAPI, BitAndAssign, op_muta_refb_bitand_assign, |a, b| *a &=  b.clone());
-    impl_op_muta_refb_operator!(DeviceBitXorAssignAPI, BitXorAssign, op_muta_refb_bitxor_assign, |a, b| *a ^=  b.clone());
-    impl_op_muta_refb_operator!(DeviceShlAssignAPI   , ShlAssign   , op_muta_refb_shl_assign   , |a, b| *a <<= b.clone());
-    impl_op_muta_refb_operator!(DeviceShrAssignAPI   , ShrAssign   , op_muta_refb_shr_assign   , |a, b| *a >>= b.clone());
+    use core::ops::*;
+    impl_op_muta_refb_operator!(DeviceAddAssignAPI   , AddAssign   , |a, b| *a +=  b.clone());
+    impl_op_muta_refb_operator!(DeviceSubAssignAPI   , SubAssign   , |a, b| *a -=  b.clone());
+    impl_op_muta_refb_operator!(DeviceMulAssignAPI   , MulAssign   , |a, b| *a *=  b.clone());
+    impl_op_muta_refb_operator!(DeviceDivAssignAPI   , DivAssign   , |a, b| *a /=  b.clone());
+    impl_op_muta_refb_operator!(DeviceRemAssignAPI   , RemAssign   , |a, b| *a %=  b.clone());
+    impl_op_muta_refb_operator!(DeviceBitOrAssignAPI , BitOrAssign , |a, b| *a |=  b.clone());
+    impl_op_muta_refb_operator!(DeviceBitAndAssignAPI, BitAndAssign, |a, b| *a &=  b.clone());
+    impl_op_muta_refb_operator!(DeviceBitXorAssignAPI, BitXorAssign, |a, b| *a ^=  b.clone());
+    impl_op_muta_refb_operator!(DeviceShlAssignAPI   , ShlAssign   , |a, b| *a <<= b.clone());
+    impl_op_muta_refb_operator!(DeviceShrAssignAPI   , ShrAssign   , |a, b| *a >>= b.clone());
 }
 
 macro_rules! impl_op_muta_refb_unary {
@@ -252,7 +254,7 @@ macro_rules! impl_op_muta_refb_unary {
         impl<TA, TB, D> $DeviceOpAPI<TA, TB, D> for CpuDevice
         where
             TA: Clone,
-            TB: Clone + core::ops::$Op<Output = TA>,
+            TB: Clone + $Op<Output = TA>,
             D: DimAPI,
         {
             fn $op_muta_refb_func(
@@ -271,6 +273,7 @@ macro_rules! impl_op_muta_refb_unary {
 #[rustfmt::skip]
 mod impl_op_muta_refb_unary {
     use super::*;
+    use core::ops::*;
     impl_op_muta_refb_unary!(DeviceNegAPI, Neg, op_muta_refb_neg, |a, b| *a = -b.clone());
     impl_op_muta_refb_unary!(DeviceNotAPI, Not, op_muta_refb_not, |a, b| *a = !b.clone());
 }

@@ -161,7 +161,7 @@ macro_rules! impl_op_mutc_refa_refb_operator {
             <DC as DimMaxAPI<DA>>::Max: DimConvertAPI<DC>,
             <DC as DimMaxAPI<DB>>::Max: DimConvertAPI<DC>,
             // operation constraints
-            TA: core::ops::$Op<TB, Output = TC>,
+            TA: $Op<TB, Output = TC>,
             B: $DeviceOpAPI<TA, TB, TC, DC>,
         {
             rstsr_assert!(c.device().same_device(a.device()), DeviceMismatch)?;
@@ -180,13 +180,13 @@ macro_rules! impl_op_mutc_refa_refb_operator {
             let storage_c = c.data_mut().storage_mut();
             let storage_a = a.data().storage();
             let storage_b = b.data().storage();
-            device.$op_mutc_refa_refb_func(storage_c, &lc_b, storage_a, &la_b, storage_b, &lb_b)
+            device.op_mutc_refa_refb(storage_c, &lc_b, storage_a, &la_b, storage_b, &lb_b)
         }
 
         pub fn $op_refa_refb_func<RA, RB, DA, DB, TA, TB, B>(
             a: &TensorBase<RA, DA>,
             b: &TensorBase<RB, DB>,
-        ) -> Result<Tensor<<TA as core::ops::$Op<TB>>::Output, <DA as DimMaxAPI<DB>>::Max, B>>
+        ) -> Result<Tensor<<TA as $Op<TB>>::Output, <DA as DimMaxAPI<DB>>::Max, B>>
         where
             // lifetime and data constraints
             RA: DataAPI<Data = Storage<TA, B>>,
@@ -197,9 +197,9 @@ macro_rules! impl_op_mutc_refa_refb_operator {
             // broadcast constraints
             DA: DimMaxAPI<DB>,
             // operation constraints
-            TA: core::ops::$Op<TB>,
-            B: $DeviceOpAPI<TA, TB, <TA as core::ops::$Op<TB>>::Output, <DA as DimMaxAPI<DB>>::Max>,
-            B: DeviceCreationAnyAPI<<TA as core::ops::$Op<TB>>::Output>,
+            TA: $Op<TB>,
+            B: $DeviceOpAPI<TA, TB, <TA as $Op<TB>>::Output, <DA as DimMaxAPI<DB>>::Max>,
+            B: DeviceCreationAnyAPI<<TA as $Op<TB>>::Output>,
         {
             rstsr_assert!(a.device().same_device(b.device()), DeviceMismatch)?;
             let la = a.layout();
@@ -222,19 +222,12 @@ macro_rules! impl_op_mutc_refa_refb_operator {
             // op provided by device
             let storage_a = a.data().storage();
             let storage_b = b.data().storage();
-            device.$op_mutc_refa_refb_func(
-                &mut storage_c,
-                &lc,
-                storage_a,
-                &la_b,
-                storage_b,
-                &lb_b,
-            )?;
+            device.op_mutc_refa_refb(&mut storage_c, &lc, storage_a, &la_b, storage_b, &lb_b)?;
             // return tensor
             Tensor::new(DataOwned::from(storage_c), lc)
         }
 
-        impl<RA, RB, DA, DB, TA, TB, B> core::ops::$Op<&TensorBase<RB, DB>> for &TensorBase<RA, DA>
+        impl<RA, RB, DA, DB, TA, TB, B> $Op<&TensorBase<RB, DB>> for &TensorBase<RA, DA>
         where
             // lifetime and data constraints
             RA: DataAPI<Data = Storage<TA, B>>,
@@ -245,19 +238,18 @@ macro_rules! impl_op_mutc_refa_refb_operator {
             // broadcast constraints
             DA: DimMaxAPI<DB>,
             // operation constraints
-            TA: core::ops::$Op<TB>,
-            B: $DeviceOpAPI<TA, TB, <TA as core::ops::$Op<TB>>::Output, <DA as DimMaxAPI<DB>>::Max>,
-            B: DeviceCreationAnyAPI<<TA as core::ops::$Op<TB>>::Output>,
+            TA: $Op<TB>,
+            B: $DeviceOpAPI<TA, TB, <TA as $Op<TB>>::Output, <DA as DimMaxAPI<DB>>::Max>,
+            B: DeviceCreationAnyAPI<<TA as $Op<TB>>::Output>,
         {
-            type Output = Tensor<<TA as core::ops::$Op<TB>>::Output, <DA as DimMaxAPI<DB>>::Max, B>;
+            type Output = Tensor<<TA as $Op<TB>>::Output, <DA as DimMaxAPI<DB>>::Max, B>;
 
             fn $op(self, rhs: &TensorBase<RB, DB>) -> Self::Output {
                 $op_refa_refb_func(self, rhs).unwrap()
             }
         }
 
-        impl<'a, RB, DA, DB, TA, TB, B> core::ops::$Op<&TensorBase<RB, DB>>
-            for TensorView<'a, TA, DA, B>
+        impl<'a, RB, DA, DB, TA, TB, B> $Op<&TensorBase<RB, DB>> for TensorView<'a, TA, DA, B>
         where
             // lifetime and data constraints
             RB: DataAPI<Data = Storage<TB, B>>,
@@ -267,19 +259,18 @@ macro_rules! impl_op_mutc_refa_refb_operator {
             // broadcast constraints
             DA: DimMaxAPI<DB>,
             // operation constraints
-            TA: core::ops::$Op<TB>,
-            B: $DeviceOpAPI<TA, TB, <TA as core::ops::$Op<TB>>::Output, <DA as DimMaxAPI<DB>>::Max>,
-            B: DeviceCreationAnyAPI<<TA as core::ops::$Op<TB>>::Output>,
+            TA: $Op<TB>,
+            B: $DeviceOpAPI<TA, TB, <TA as $Op<TB>>::Output, <DA as DimMaxAPI<DB>>::Max>,
+            B: DeviceCreationAnyAPI<<TA as $Op<TB>>::Output>,
         {
-            type Output = Tensor<<TA as core::ops::$Op<TB>>::Output, <DA as DimMaxAPI<DB>>::Max, B>;
+            type Output = Tensor<<TA as $Op<TB>>::Output, <DA as DimMaxAPI<DB>>::Max, B>;
 
             fn $op(self, rhs: &TensorBase<RB, DB>) -> Self::Output {
                 $op_refa_refb_func(&self.view(), rhs).unwrap()
             }
         }
 
-        impl<'b, RA, DA, DB, TA, TB, B> core::ops::$Op<TensorView<'b, TB, DB, B>>
-            for &TensorBase<RA, DA>
+        impl<'b, RA, DA, DB, TA, TB, B> $Op<TensorView<'b, TB, DB, B>> for &TensorBase<RA, DA>
         where
             // lifetime and data constraints
             RA: DataAPI<Data = Storage<TA, B>>,
@@ -289,19 +280,18 @@ macro_rules! impl_op_mutc_refa_refb_operator {
             // broadcast constraints
             DA: DimMaxAPI<DB>,
             // operation constraints
-            TA: core::ops::$Op<TB>,
-            B: $DeviceOpAPI<TA, TB, <TA as core::ops::$Op<TB>>::Output, <DA as DimMaxAPI<DB>>::Max>,
-            B: DeviceCreationAnyAPI<<TA as core::ops::$Op<TB>>::Output>,
+            TA: $Op<TB>,
+            B: $DeviceOpAPI<TA, TB, <TA as $Op<TB>>::Output, <DA as DimMaxAPI<DB>>::Max>,
+            B: DeviceCreationAnyAPI<<TA as $Op<TB>>::Output>,
         {
-            type Output = Tensor<<TA as core::ops::$Op<TB>>::Output, <DA as DimMaxAPI<DB>>::Max, B>;
+            type Output = Tensor<<TA as $Op<TB>>::Output, <DA as DimMaxAPI<DB>>::Max, B>;
 
             fn $op(self, rhs: TensorView<'b, TB, DB, B>) -> Self::Output {
                 $op_refa_refb_func(self, &rhs.view()).unwrap()
             }
         }
 
-        impl<'a, 'b, DA, DB, TA, TB, B> core::ops::$Op<TensorView<'b, TB, DB, B>>
-            for TensorView<'a, TA, DA, B>
+        impl<'a, 'b, DA, DB, TA, TB, B> $Op<TensorView<'b, TB, DB, B>> for TensorView<'a, TA, DA, B>
         where
             // lifetime and data constraints
             DA: DimAPI,
@@ -310,11 +300,11 @@ macro_rules! impl_op_mutc_refa_refb_operator {
             // broadcast constraints
             DA: DimMaxAPI<DB>,
             // operation constraints
-            TA: core::ops::$Op<TB>,
-            B: $DeviceOpAPI<TA, TB, <TA as core::ops::$Op<TB>>::Output, <DA as DimMaxAPI<DB>>::Max>,
-            B: DeviceCreationAnyAPI<<TA as core::ops::$Op<TB>>::Output>,
+            TA: $Op<TB>,
+            B: $DeviceOpAPI<TA, TB, <TA as $Op<TB>>::Output, <DA as DimMaxAPI<DB>>::Max>,
+            B: DeviceCreationAnyAPI<<TA as $Op<TB>>::Output>,
         {
-            type Output = Tensor<<TA as core::ops::$Op<TB>>::Output, <DA as DimMaxAPI<DB>>::Max, B>;
+            type Output = Tensor<<TA as $Op<TB>>::Output, <DA as DimMaxAPI<DB>>::Max, B>;
 
             fn $op(self, rhs: TensorView<'b, TB, DB, B>) -> Self::Output {
                 $op_refa_refb_func(&self.view(), &rhs.view()).unwrap()
@@ -326,16 +316,17 @@ macro_rules! impl_op_mutc_refa_refb_operator {
 #[rustfmt::skip]
 mod impl_op_mutc_refa_refb_operator {
     use super::*;
-    impl_op_mutc_refa_refb_operator!(DeviceAddAPI   , Add   , add   , op_mutc_refa_refb_add   , op_refa_refb_add   );
-    impl_op_mutc_refa_refb_operator!(DeviceSubAPI   , Sub   , sub   , op_mutc_refa_refb_sub   , op_refa_refb_sub   );
-    impl_op_mutc_refa_refb_operator!(DeviceMulAPI   , Mul   , mul   , op_mutc_refa_refb_mul   , op_refa_refb_mul   );
-    impl_op_mutc_refa_refb_operator!(DeviceDivAPI   , Div   , div   , op_mutc_refa_refb_div   , op_refa_refb_div   );
-//  impl_op_mutc_refa_refb_operator!(DeviceRemAPI   , Rem   , rem   , op_mutc_refa_refb_rem   , op_refa_refb_rem   );
-    impl_op_mutc_refa_refb_operator!(DeviceBitOrAPI , BitOr , bitor , op_mutc_refa_refb_bitor , op_refa_refb_bitor );
-    impl_op_mutc_refa_refb_operator!(DeviceBitAndAPI, BitAnd, bitand, op_mutc_refa_refb_bitand, op_refa_refb_bitand);
-    impl_op_mutc_refa_refb_operator!(DeviceBitXorAPI, BitXor, bitxor, op_mutc_refa_refb_bitxor, op_refa_refb_bitxor);
-    impl_op_mutc_refa_refb_operator!(DeviceShlAPI   , Shl   , shl   , op_mutc_refa_refb_shl   , op_refa_refb_shl   );
-    impl_op_mutc_refa_refb_operator!(DeviceShrAPI   , Shr   , shr   , op_mutc_refa_refb_shr   , op_refa_refb_shr   );
+    use core::ops::*;
+    impl_op_mutc_refa_refb_operator!(DeviceAddAPI   , Add   , add   , op_mut_refa_refb_add   , op_refa_refb_add   );
+    impl_op_mutc_refa_refb_operator!(DeviceSubAPI   , Sub   , sub   , op_mut_refa_refb_sub   , op_refa_refb_sub   );
+    impl_op_mutc_refa_refb_operator!(DeviceMulAPI   , Mul   , mul   , op_mut_refa_refb_mul   , op_refa_refb_mul   );
+    impl_op_mutc_refa_refb_operator!(DeviceDivAPI   , Div   , div   , op_mut_refa_refb_div   , op_refa_refb_div   );
+//  impl_op_mutc_refa_refb_operator!(DeviceRemAPI   , Rem   , rem   , op_mut_refa_refb_rem   , op_refa_refb_rem   );
+    impl_op_mutc_refa_refb_operator!(DeviceBitOrAPI , BitOr , bitor , op_mut_refa_refb_bitor , op_refa_refb_bitor );
+    impl_op_mutc_refa_refb_operator!(DeviceBitAndAPI, BitAnd, bitand, op_mut_refa_refb_bitand, op_refa_refb_bitand);
+    impl_op_mutc_refa_refb_operator!(DeviceBitXorAPI, BitXor, bitxor, op_mut_refa_refb_bitxor, op_refa_refb_bitxor);
+    impl_op_mutc_refa_refb_operator!(DeviceShlAPI   , Shl   , shl   , op_mut_refa_refb_shl   , op_refa_refb_shl   );
+    impl_op_mutc_refa_refb_operator!(DeviceShrAPI   , Shr   , shr   , op_mut_refa_refb_shr   , op_refa_refb_shr   );
 }
 pub use impl_op_mutc_refa_refb_operator::*;
 
@@ -360,7 +351,7 @@ macro_rules! impl_op_muta_refb_operator {
             DA: DimMaxAPI<DB>,
             <DA as DimMaxAPI<DB>>::Max: DimConvertAPI<DA>,
             // operation constraints
-            TA: core::ops::$Op<TB>,
+            TA: $Op<TB>,
             B: $DeviceOpAPI<TA, TB, DA>,
         {
             rstsr_assert!(a.device().same_device(b.device()), DeviceMismatch)?;
@@ -374,10 +365,10 @@ macro_rules! impl_op_muta_refb_operator {
             let device = a.device().clone();
             let storage_a = a.data_mut().storage_mut();
             let storage_b = b.data().storage();
-            device.$op_muta_refb_func(storage_a, &la_b, storage_b, &lb_b)
+            device.op_muta_refb(storage_a, &la_b, storage_b, &lb_b)
         }
 
-        impl<RA, RB, DA, DB, TA, TB, B> core::ops::$Op<&TensorBase<RB, DB>> for TensorBase<RA, DA>
+        impl<RA, RB, DA, DB, TA, TB, B> $Op<&TensorBase<RB, DB>> for TensorBase<RA, DA>
         where
             // lifetime and data constraints
             RA: DataMutAPI<Data = Storage<TA, B>>,
@@ -389,7 +380,7 @@ macro_rules! impl_op_muta_refb_operator {
             DA: DimMaxAPI<DB>,
             <DA as DimMaxAPI<DB>>::Max: DimConvertAPI<DA>,
             // operation constraints
-            TA: core::ops::$Op<TB>,
+            TA: $Op<TB>,
             B: $DeviceOpAPI<TA, TB, DA>,
         {
             fn $op(&mut self, rhs: &TensorBase<RB, DB>) {
@@ -397,7 +388,7 @@ macro_rules! impl_op_muta_refb_operator {
             }
         }
 
-        impl<RA, RB, DA, DB, TA, TB, B> core::ops::$Op<TensorBase<RB, DB>> for TensorBase<RA, DA>
+        impl<RA, RB, DA, DB, TA, TB, B> $Op<TensorBase<RB, DB>> for TensorBase<RA, DA>
         where
             // lifetime and data constraints
             RA: DataMutAPI<Data = Storage<TA, B>>,
@@ -409,7 +400,7 @@ macro_rules! impl_op_muta_refb_operator {
             DA: DimMaxAPI<DB>,
             <DA as DimMaxAPI<DB>>::Max: DimConvertAPI<DA>,
             // operation constraints
-            TA: core::ops::$Op<TB>,
+            TA: $Op<TB>,
             B: $DeviceOpAPI<TA, TB, DA>,
         {
             fn $op(&mut self, rhs: TensorBase<RB, DB>) {
@@ -422,6 +413,7 @@ macro_rules! impl_op_muta_refb_operator {
 #[rustfmt::skip]
 mod impl_op_muta_refb_operator {
     use super::*;
+    use core::ops::*;
     impl_op_muta_refb_operator!(DeviceAddAssignAPI   , AddAssign   , add_assign   , op_muta_refb_add_assign   );
     impl_op_muta_refb_operator!(DeviceSubAssignAPI   , SubAssign   , sub_assign   , op_muta_refb_sub_assign   );
     impl_op_muta_refb_operator!(DeviceMulAssignAPI   , MulAssign   , mul_assign   , op_muta_refb_mul_assign   );
@@ -452,7 +444,7 @@ macro_rules! impl_op_muta_refb_unary {
             DA: DimMaxAPI<DB>,
             <DA as DimMaxAPI<DB>>::Max: DimConvertAPI<DA>,
             // operation constraints
-            TB: core::ops::$Op<Output = TA>,
+            TB: $Op<Output = TA>,
             B: $DeviceOpAPI<TA, TB, DA>,
         {
             rstsr_assert!(a.device().same_device(b.device()), DeviceMismatch)?;
@@ -469,14 +461,14 @@ macro_rules! impl_op_muta_refb_unary {
             device.$op_muta_refb_func(storage_a, &la_b, storage_b, &lb_b)
         }
 
-        impl<R, D, TA, TB, B> core::ops::$Op for &TensorBase<R, D>
+        impl<R, D, TA, TB, B> $Op for &TensorBase<R, D>
         where
             // lifetime and data constraints
             R: DataAPI<Data = Storage<TB, B>>,
             D: DimAPI,
             B: DeviceAPI<TA> + DeviceAPI<TB>,
             // operation constraints
-            TB: core::ops::$Op<Output = TA>,
+            TB: $Op<Output = TA>,
             B: $DeviceOpAPI<TA, TB, D>,
             B: DeviceCreationAnyAPI<TA>,
         {
@@ -495,14 +487,14 @@ macro_rules! impl_op_muta_refb_unary {
             }
         }
 
-        impl<'b, D, TA, TB, B> core::ops::$Op for TensorView<'b, TB, D, B>
+        impl<'b, D, TA, TB, B> $Op for TensorView<'b, TB, D, B>
         where
             // lifetime and data
             // constraints
             D: DimAPI,
             B: DeviceAPI<TA> + DeviceAPI<TB>,
             // operation constraints
-            TB: core::ops::$Op<Output = TA>,
+            TB: $Op<Output = TA>,
             B: $DeviceOpAPI<TA, TB, D>,
             B: DeviceCreationAnyAPI<TA>,
         {
@@ -526,6 +518,7 @@ macro_rules! impl_op_muta_refb_unary {
 #[rustfmt::skip]
 mod impl_op_muta_refb_unary {
     use super::*;
+    use core::ops::*;
     impl_op_muta_refb_unary!(DeviceNegAPI, Neg, neg, op_muta_refb_neg);
     impl_op_muta_refb_unary!(DeviceNotAPI, Not, not, op_muta_refb_not);
 }
@@ -544,9 +537,10 @@ macro_rules! op_owna_refb_operator {
         $closure_muta_refb: expr,
         $closure_refa_mutb: expr
     ) => {
-        impl<RB, DA, DB, TA, TB, B> core::ops::$Op<&TensorBase<RB, DB>> for Tensor<TA, DA, B>
+        impl<RB, DA, DB, TA, TB, B> $Op<&TensorBase<RB, DB>> for Tensor<TA, DA, B>
         where
-            // lifetime and data constraints
+            // lifetime and
+            // data constraints
             RB: DataAPI<Data = Storage<TB, B>>,
             TA: Clone,
             TB: Clone,
@@ -558,7 +552,7 @@ macro_rules! op_owna_refb_operator {
             <DA as DimMaxAPI<DB>>::Max: DimConvertAPI<DA>,
             DA: DimConvertAPI<<DA as DimMaxAPI<DB>>::Max>,
             // operation constraints
-            TA: core::ops::$Op<TB, Output = TA>,
+            TA: $Op<TB, Output = TA>,
             B: DeviceCreationAnyAPI<TA>,
             B: $DeviceOpAPI<TA, TB, TA, <DA as DimMaxAPI<DB>>::Max>,
             B: DeviceOp_MutA_RefB_API<TA, TB, DA, fn(&mut TA, &TB)>,
@@ -579,7 +573,7 @@ macro_rules! op_owna_refb_operator {
                 }
             }
         }
-        impl<'b, DA, DB, TA, TB, B> core::ops::$Op<TensorView<'b, TB, DB, B>> for Tensor<TA, DA, B>
+        impl<'b, DA, DB, TA, TB, B> $Op<TensorView<'b, TB, DB, B>> for Tensor<TA, DA, B>
         where
             // lifetime and data constraints
             TA: Clone,
@@ -592,7 +586,7 @@ macro_rules! op_owna_refb_operator {
             <DA as DimMaxAPI<DB>>::Max: DimConvertAPI<DA>,
             DA: DimConvertAPI<<DA as DimMaxAPI<DB>>::Max>,
             // operation constraints
-            TA: core::ops::$Op<TB, Output = TA>,
+            TA: $Op<TB, Output = TA>,
             B: DeviceCreationAnyAPI<TA>,
             B: $DeviceOpAPI<TA, TB, TA, <DA as DimMaxAPI<DB>>::Max>,
             B: DeviceOp_MutA_RefB_API<TA, TB, DA, fn(&mut TA, &TB)>,
@@ -615,9 +609,10 @@ macro_rules! op_owna_refb_operator {
             }
         }
 
-        impl<RA, DA, DB, TA, TB, B> core::ops::$Op<Tensor<TB, DB, B>> for &TensorBase<RA, DA>
+        impl<RA, DA, DB, TA, TB, B> $Op<Tensor<TB, DB, B>> for &TensorBase<RA, DA>
         where
-            // lifetime and data constraints
+            // lifetime and
+            // data constraints
             RA: DataAPI<Data = Storage<TA, B>>,
             TA: Clone,
             TB: Clone,
@@ -630,7 +625,7 @@ macro_rules! op_owna_refb_operator {
             <DB as DimMaxAPI<DA>>::Max: DimConvertAPI<DB>,
             DB: DimConvertAPI<<DA as DimMaxAPI<DB>>::Max>,
             // operation constraints
-            TA: core::ops::$Op<TB, Output = TB>,
+            TA: $Op<TB, Output = TB>,
             B: DeviceCreationAnyAPI<TB>,
             B: $DeviceOpAPI<TA, TB, TB, <DA as DimMaxAPI<DB>>::Max>,
             B: DeviceOp_MutA_RefB_API<TB, TA, DB, fn(&mut TB, &TA)>,
@@ -651,7 +646,7 @@ macro_rules! op_owna_refb_operator {
             }
         }
 
-        impl<'a, DA, DB, TA, TB, B> core::ops::$Op<Tensor<TB, DB, B>> for TensorView<'a, TA, DA, B>
+        impl<'a, DA, DB, TA, TB, B> $Op<Tensor<TB, DB, B>> for TensorView<'a, TA, DA, B>
         where
             // lifetime and data constraints
             TA: Clone,
@@ -665,7 +660,7 @@ macro_rules! op_owna_refb_operator {
             <DB as DimMaxAPI<DA>>::Max: DimConvertAPI<DB>,
             DB: DimConvertAPI<<DA as DimMaxAPI<DB>>::Max>,
             // operation constraints
-            TA: core::ops::$Op<TB, Output = TB>,
+            TA: $Op<TB, Output = TB>,
             B: DeviceCreationAnyAPI<TB>,
             B: $DeviceOpAPI<TA, TB, TB, <DA as DimMaxAPI<DB>>::Max>,
             B: DeviceOp_MutA_RefB_API<TB, TA, DB, fn(&mut TB, &TA)>,
@@ -687,7 +682,7 @@ macro_rules! op_owna_refb_operator {
             }
         }
 
-        impl<DA, DB, T, B> core::ops::$Op<Tensor<T, DB, B>> for Tensor<T, DA, B>
+        impl<DA, DB, T, B> $Op<Tensor<T, DB, B>> for Tensor<T, DA, B>
         where
             // lifetime and
             // data constraints
@@ -703,7 +698,7 @@ macro_rules! op_owna_refb_operator {
             DB: DimConvertAPI<<DA as DimMaxAPI<DB>>::Max>,
             DA: DimConvertAPI<<DA as DimMaxAPI<DB>>::Max>,
             // operation constraints
-            T: core::ops::$Op<T, Output = T>,
+            T: $Op<T, Output = T>,
             B: DeviceCreationAnyAPI<T>,
             B: $DeviceOpAPI<T, T, T, <DA as DimMaxAPI<DB>>::Max>,
             B: DeviceOp_MutA_RefB_API<T, T, DA, fn(&mut T, &T)>,
@@ -737,6 +732,7 @@ macro_rules! op_owna_refb_operator {
 #[rustfmt::skip]
 pub mod op_owna_refb_operator {
     use super::*;
+    use core::ops::*;
     op_owna_refb_operator!(add   , DeviceAddAPI   , Add   , op_refa_refb_add   , |a, b| *a = a.clone() +  b.clone(), |b, a| *b = a.clone() +  b.clone());
     op_owna_refb_operator!(sub   , DeviceSubAPI   , Sub   , op_refa_refb_sub   , |a, b| *a = a.clone() -  b.clone(), |b, a| *b = a.clone() -  b.clone());
     op_owna_refb_operator!(mul   , DeviceMulAPI   , Mul   , op_refa_refb_mul   , |a, b| *a = a.clone() *  b.clone(), |b, a| *b = a.clone() *  b.clone());
@@ -755,14 +751,14 @@ pub mod op_owna_refb_operator {
 
 macro_rules! impl_op_muta_unary {
     ($op:ident, $Op:ident, $op_muta_refb_closure:expr) => {
-        impl<T, D, B> core::ops::$Op for Tensor<T, D, B>
+        impl<T, D, B> $Op for Tensor<T, D, B>
         where
             // lifetime and data constraints
             T: Clone,
             D: DimAPI,
             B: DeviceAPI<T>,
             // op provided by device
-            T: core::ops::$Op<Output = T>,
+            T: $Op<Output = T>,
             B: DeviceOp_MutA_API<T, D, fn(&mut T)>,
         {
             type Output = Tensor<T, D, B>;
@@ -778,6 +774,7 @@ macro_rules! impl_op_muta_unary {
 #[rustfmt::skip]
 mod impl_op_muta_unary {
     use super::*;
+    use core::ops::*;
     impl_op_muta_unary!(neg, Neg, |a| *a = -a.clone());
     impl_op_muta_unary!(not, Not, |a| *a = !a.clone());
 }

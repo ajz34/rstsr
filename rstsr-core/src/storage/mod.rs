@@ -8,4 +8,3 @@ pub use assignment::*;
 pub use creation::*;
 pub use device::*;
 pub use matmul::*;
-pub use operators::*;
