@@ -46,7 +46,7 @@ pub fn op_refa_refb_func<RA, RB, DA, DB, DC, TA, TB, TC, B, F>(
     a: &TensorBase<RA, DA>,
     b: &TensorBase<RB, DB>,
     f: F,
-) -> Result<Tensor<TC, <DA as DimMaxAPI<DB>>::Max, B>>
+) -> Result<Tensor<TC, DC, B>>
 where
     // lifetime and data constraints
     RA: DataAPI<Data = Storage<TA, B>>,

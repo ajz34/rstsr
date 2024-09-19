@@ -18,14 +18,14 @@ pub enum BroadcastType {
 /// # See also
 ///
 /// [broadcasting](https://data-apis.org/array-api/2023.12/API_specification/broadcasting.html)
-#[allow(clippy::type_complexity)]
-pub fn broadcast_shape<D1, D2>(
+pub fn broadcast_shape<D1, D2, D>(
     shape1: &D1,
     shape2: &D2,
-) -> Result<(<D1 as DimMaxAPI<D2>>::Max, Vec<BroadcastType>, Vec<BroadcastType>)>
+) -> Result<(D, Vec<BroadcastType>, Vec<BroadcastType>)>
 where
-    D1: DimBaseAPI + DimMaxAPI<D2>,
+    D1: DimBaseAPI + DimMaxAPI<D2, Max = D>,
     D2: DimBaseAPI,
+    D: DimBaseAPI,
 {
     // step 1-6: determine maximum shape
     let (n1, n2) = (shape1.ndim(), shape2.ndim());
@@ -74,7 +74,7 @@ where
         }
     }
 
-    let shape = TryInto::<<D1 as DimMaxAPI<D2>>::Max>::try_into(shape);
+    let shape = TryInto::<D>::try_into(shape);
     let shape = shape.map_err(|_| Error::InvalidLayout("Type cast error.".to_string()))?;
 
     return Ok((shape, tp1, tp2));
@@ -149,14 +149,14 @@ impl<D> DimBroadcastableAPI for D where D: DimAPI {}
 /// # See also
 ///
 /// [broadcasting](https://data-apis.org/array-api/2023.12/API_specification/broadcasting.html)
-#[allow(clippy::type_complexity)]
-pub fn broadcast_layout<D1, D2>(
+pub fn broadcast_layout<D1, D2, D>(
     layout1: &Layout<D1>,
     layout2: &Layout<D2>,
-) -> Result<(Layout<<D1 as DimMaxAPI<D2>>::Max>, Layout<<D1 as DimMaxAPI<D2>>::Max>)>
+) -> Result<(Layout<D>, Layout<D>)>
 where
-    D1: DimBaseAPI + DimMaxAPI<D2>,
+    D1: DimBaseAPI + DimMaxAPI<D2, Max = D>,
     D2: DimBaseAPI,
+    D: DimBaseAPI,
 {
     let shape1 = layout1.shape();
     let shape2 = layout2.shape();
@@ -173,14 +173,14 @@ where
 /// # See also
 ///
 /// [`broadcast_layout`]
-pub fn broadcast_layout_to_first<D1, D2>(
+pub fn broadcast_layout_to_first<D1, D2, D>(
     layout1: &Layout<D1>,
     layout2: &Layout<D2>,
 ) -> Result<(Layout<D1>, Layout<D1>)>
 where
-    D1: DimBaseAPI + DimMaxAPI<D2>,
+    D1: DimBaseAPI + DimMaxAPI<D2, Max = D>,
     D2: DimBaseAPI,
-    <D1 as DimMaxAPI<D2>>::Max: DimConvertAPI<D1>,
+    D: DimConvertAPI<D1>,
 {
     let (layout1, layout2) = broadcast_layout(layout1, layout2)?;
     let layout1 = layout1.into_dim::<D1>()?;

@@ -42,13 +42,10 @@ where
 /// # See also
 ///
 /// [Python Array API standard: `broadcast_to`](https://data-apis.org/array-api/2023.12/API_specification/generated/array_api.broadcast_to.html)
-pub fn broadcast_to<R, D, D2>(
-    tensor: TensorBase<R, D>,
-    shape: &D2,
-) -> Result<TensorBase<R, <D as DimMaxAPI<D2>>::Max>>
+pub fn broadcast_to<R, D, D2>(tensor: TensorBase<R, D>, shape: &D2) -> Result<TensorBase<R, D2>>
 where
     R: DataAPI,
-    D: DimAPI + DimMaxAPI<D2>,
+    D: DimAPI + DimMaxAPI<D2, Max = D2>,
     D2: DimAPI,
 {
     let shape1 = tensor.shape();
@@ -68,14 +65,10 @@ where
     /// # See also
     ///
     /// [`broadcast_to`]
-    #[allow(clippy::type_complexity)]
-    pub fn broadcast_to<D2>(
-        &self,
-        shape: &D2,
-    ) -> Result<TensorBase<DataRef<'_, R::Data>, <D as DimMaxAPI<D2>>::Max>>
+    pub fn broadcast_to<D2>(&self, shape: &D2) -> Result<TensorBase<DataRef<'_, R::Data>, D2>>
     where
         D2: DimAPI,
-        D: DimMaxAPI<D2>,
+        D: DimMaxAPI<D2, Max = D2>,
     {
         broadcast_to(self.view(), shape)
     }
@@ -85,13 +78,10 @@ where
     /// # See also
     ///
     /// [`broadcast_to`]
-    pub fn into_broadcast_to<D2>(
-        self,
-        shape: &D2,
-    ) -> Result<TensorBase<R, <D as DimMaxAPI<D2>>::Max>>
+    pub fn into_broadcast_to<D2>(self, shape: &D2) -> Result<TensorBase<R, D2>>
     where
         D2: DimAPI,
-        D: DimMaxAPI<D2>,
+        D: DimMaxAPI<D2, Max = D2>,
     {
         broadcast_to(self, shape)
     }
