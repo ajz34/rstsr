@@ -51,6 +51,8 @@ macro_rules! trait_op_l_consume_api {
                 b: &Storage<TB, Self>,
                 lb: &Layout<D>,
             ) -> Result<()>;
+
+            fn op_muta_numb(&self, a: &mut Storage<TA, Self>, la: &Layout<D>, b: TB) -> Result<()>;
         }
     };
 }
@@ -87,6 +89,8 @@ macro_rules! trait_op_r_consume_api {
                 a: &Storage<TA, Self>,
                 la: &Layout<D>,
             ) -> Result<()>;
+
+            fn op_muta_numb(&self, b: &mut Storage<TB, Self>, lb: &Layout<D>, a: TA) -> Result<()>;
         }
     };
 }

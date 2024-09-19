@@ -54,6 +54,15 @@ macro_rules! impl_op_muta_refb_l_consume {
             ) -> Result<()> {
                 self.op_muta_refb_func(a, la, b, lb, $func)
             }
+
+            fn op_muta_numb(
+                &self,
+                a: &mut Storage<TA, CpuDevice>,
+                la: &Layout<D>,
+                b: TB,
+            ) -> Result<()> {
+                self.op_muta_numb_func(a, la, b, $func)
+            }
         }
     };
 }
@@ -90,6 +99,15 @@ macro_rules! impl_op_muta_refb_r_consume {
                 la: &Layout<D>,
             ) -> Result<()> {
                 self.op_muta_refb_func(b, lb, a, la, $func)
+            }
+
+            fn op_muta_numb(
+                &self,
+                b: &mut Storage<TB, CpuDevice>,
+                lb: &Layout<D>,
+                a: TA,
+            ) -> Result<()> {
+                self.op_muta_numb_func(b, lb, a, $func)
             }
         }
     };

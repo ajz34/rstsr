@@ -221,6 +221,39 @@ where
     }
 }
 
+impl<TA, TB, D, F> DeviceOp_MutA_NumB_API<TA, TB, D, F> for CpuDevice
+where
+    TA: Clone,
+    D: DimAPI,
+    F: FnMut(&mut TA, &TB),
+{
+    fn op_muta_numb_func(
+        &self,
+        a: &mut Storage<TA, CpuDevice>,
+        la: &Layout<D>,
+        b: TB,
+        mut f: F,
+    ) -> Result<()> {
+        let layout = translate_to_col_major_unary(la, TensorIterOrder::K)?;
+        let (layout_contig, size_contig) = translate_to_col_major_with_contig(&[&layout]);
+
+        if size_contig >= CONTIG_SWITCH {
+            let iter_a = IterLayoutColMajor::new(&layout_contig[0])?;
+            for idx_a in iter_a {
+                for i in 0..size_contig {
+                    f(&mut a.rawvec[idx_a + i], &b);
+                }
+            }
+        } else {
+            let iter_a = IterLayoutColMajor::new(&layout)?;
+            for idx_a in iter_a {
+                f(&mut a.rawvec[idx_a], &b);
+            }
+        }
+        return Ok(());
+    }
+}
+
 impl<T, D, F> DeviceOp_MutA_API<T, D, F> for CpuDevice
 where
     T: Clone,

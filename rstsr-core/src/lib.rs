@@ -1,3 +1,4 @@
+#![recursion_limit = "512"]
 #![allow(refining_impl_trait)]
 #![allow(clippy::needless_return)]
 #![cfg_attr(not(test), no_std)]
@@ -15,7 +16,7 @@ pub mod storage;
 
 pub mod tensor;
 pub mod tensorbase;
-pub use tensorbase::{Tensor, TensorBase, TensorView, TensorViewMut, TensorCow};
+pub use tensorbase::{Tensor, TensorBase, TensorCow, TensorView, TensorViewMut};
 
 pub mod format;
 

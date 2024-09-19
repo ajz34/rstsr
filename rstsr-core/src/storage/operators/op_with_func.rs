@@ -77,6 +77,22 @@ where
 }
 
 #[allow(non_camel_case_types)]
+pub trait DeviceOp_MutA_NumB_API<TA, TB, D, F>
+where
+    D: DimAPI,
+    F: FnMut(&mut TA, &TB),
+    Self: DeviceAPI<TA>,
+{
+    fn op_muta_numb_func(
+        &self,
+        a: &mut Storage<TA, Self>,
+        la: &Layout<D>,
+        b: TB,
+        f: F,
+    ) -> Result<()>;
+}
+
+#[allow(non_camel_case_types)]
 pub trait DeviceOp_MutA_API<T, D, F>
 where
     D: DimAPI,
