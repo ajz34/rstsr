@@ -99,6 +99,88 @@ where
     }
 }
 
+impl<TA, TB, TC, D, F> DeviceOp_MutC_RefA_NumB_API<TA, TB, TC, D, F> for CpuDevice
+where
+    TA: Clone,
+    TC: Clone,
+    D: DimAPI,
+    F: FnMut(&mut TC, &TA, &TB),
+{
+    fn op_mutc_refa_numb_func(
+        &self,
+        c: &mut Storage<TC, CpuDevice>,
+        lc: &Layout<D>,
+        a: &Storage<TA, CpuDevice>,
+        la: &Layout<D>,
+        b: TB,
+        mut f: F,
+    ) -> Result<()> {
+        // re-align layouts
+        let layouts_full = translate_to_col_major(&[lc, la], TensorIterOrder::K)?;
+        let layouts_full_ref = layouts_full.iter().collect_vec();
+        let (layouts_contig, size_contig) = translate_to_col_major_with_contig(&layouts_full_ref);
+
+        // contiguous iteration if possible, otherwise use iterator of layout
+        if size_contig >= CONTIG_SWITCH {
+            let iter_c = IterLayoutColMajor::new(&layouts_contig[0])?;
+            let iter_a = IterLayoutColMajor::new(&layouts_contig[1])?;
+            for (idx_c, idx_a) in izip!(iter_c, iter_a) {
+                for i in 0..size_contig {
+                    f(&mut c.rawvec[idx_c + i], &a.rawvec[idx_a + i], &b);
+                }
+            }
+        } else {
+            let iter_c = IterLayoutColMajor::new(&layouts_full[0])?;
+            let iter_a = IterLayoutColMajor::new(&layouts_full[1])?;
+            for (idx_c, idx_a) in izip!(iter_c, iter_a) {
+                f(&mut c.rawvec[idx_c], &a.rawvec[idx_a], &b);
+            }
+        }
+        return Ok(());
+    }
+}
+
+impl<TA, TB, TC, D, F> DeviceOp_MutC_NumA_RefB_API<TA, TB, TC, D, F> for CpuDevice
+where
+    TB: Clone,
+    TC: Clone,
+    D: DimAPI,
+    F: FnMut(&mut TC, &TA, &TB),
+{
+    fn op_mutc_numa_refb_func(
+        &self,
+        c: &mut Storage<TC, CpuDevice>,
+        lc: &Layout<D>,
+        a: TA,
+        b: &Storage<TB, CpuDevice>,
+        lb: &Layout<D>,
+        mut f: F,
+    ) -> Result<()> {
+        // re-align layouts
+        let layouts_full = translate_to_col_major(&[lc, lb], TensorIterOrder::K)?;
+        let layouts_full_ref = layouts_full.iter().collect_vec();
+        let (layouts_contig, size_contig) = translate_to_col_major_with_contig(&layouts_full_ref);
+
+        // contiguous iteration if possible, otherwise use iterator of layout
+        if size_contig >= CONTIG_SWITCH {
+            let iter_c = IterLayoutColMajor::new(&layouts_contig[0])?;
+            let iter_b = IterLayoutColMajor::new(&layouts_contig[1])?;
+            for (idx_c, idx_b) in izip!(iter_c, iter_b) {
+                for i in 0..size_contig {
+                    f(&mut c.rawvec[idx_c + i], &a, &b.rawvec[idx_b + i]);
+                }
+            }
+        } else {
+            let iter_c = IterLayoutColMajor::new(&layouts_full[0])?;
+            let iter_b = IterLayoutColMajor::new(&layouts_full[1])?;
+            for (idx_c, idx_b) in izip!(iter_c, iter_b) {
+                f(&mut c.rawvec[idx_c], &a, &b.rawvec[idx_b]);
+            }
+        }
+        return Ok(());
+    }
+}
+
 impl<TA, TB, D, F> DeviceOp_MutA_RefB_API<TA, TB, D, F> for CpuDevice
 where
     TA: Clone,

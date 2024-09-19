@@ -18,9 +18,7 @@ macro_rules! impl_binary_with_output {
             DC: DimAPI,
             B: DeviceAPI<TA> + DeviceAPI<TB> + DeviceAPI<TC>,
             // broadcast constraints
-            DC: DimMaxAPI<DA> + DimMaxAPI<DB>,
-            <DC as DimMaxAPI<DA>>::Max: DimConvertAPI<DC>,
-            <DC as DimMaxAPI<DB>>::Max: DimConvertAPI<DC>,
+            DC: DimMaxAPI<DA, Max = DC> + DimMaxAPI<DB, Max = DC>,
             // operation constraints
             TA: $Op<TB, Output = TC>,
             B: $DeviceOpAPI<TA, TB, TC, DC>,

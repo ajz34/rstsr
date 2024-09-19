@@ -17,6 +17,24 @@ macro_rules! impl_op_mutc_refa_refb_operator {
                 b: &Storage<TB, Self>,
                 lb: &Layout<D>,
             ) -> Result<()>;
+
+            fn op_mutc_refa_numb(
+                &self,
+                c: &mut Storage<TC, Self>,
+                lc: &Layout<D>,
+                a: &Storage<TA, Self>,
+                la: &Layout<D>,
+                b: TB,
+            ) -> Result<()>;
+
+            fn op_mutc_numa_refb(
+                &self,
+                c: &mut Storage<TC, Self>,
+                lc: &Layout<D>,
+                a: TA,
+                b: &Storage<TB, Self>,
+                lb: &Layout<D>,
+            ) -> Result<()>;
         }
     };
 }

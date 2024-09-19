@@ -38,6 +38,7 @@ pub trait DimAPI:
     + DimConvertAPI<Ix7>
     + DimConvertAPI<Ix8>
     + DimConvertAPI<Ix9>
+    + DimConvertAPI<Self>
 {
 }
 

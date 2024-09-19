@@ -24,7 +24,42 @@ where
 }
 
 #[allow(non_camel_case_types)]
-#[allow(clippy::too_many_arguments)]
+pub trait DeviceOp_MutC_RefA_NumB_API<TA, TB, TC, D, F>
+where
+    D: DimAPI,
+    F: FnMut(&mut TC, &TA, &TB),
+    Self: DeviceAPI<TA> + DeviceAPI<TC>,
+{
+    fn op_mutc_refa_numb_func(
+        &self,
+        c: &mut Storage<TC, Self>,
+        lc: &Layout<D>,
+        a: &Storage<TA, Self>,
+        la: &Layout<D>,
+        b: TB,
+        f: F,
+    ) -> Result<()>;
+}
+
+#[allow(non_camel_case_types)]
+pub trait DeviceOp_MutC_NumA_RefB_API<TA, TB, TC, D, F>
+where
+    D: DimAPI,
+    F: FnMut(&mut TC, &TA, &TB),
+    Self: DeviceAPI<TB> + DeviceAPI<TC>,
+{
+    fn op_mutc_numa_refb_func(
+        &self,
+        c: &mut Storage<TC, Self>,
+        lc: &Layout<D>,
+        a: TA,
+        b: &Storage<TB, Self>,
+        lb: &Layout<D>,
+        f: F,
+    ) -> Result<()>;
+}
+
+#[allow(non_camel_case_types)]
 pub trait DeviceOp_MutA_RefB_API<TA, TB, D, F>
 where
     D: DimAPI,
@@ -42,7 +77,6 @@ where
 }
 
 #[allow(non_camel_case_types)]
-#[allow(clippy::too_many_arguments)]
 pub trait DeviceOp_MutA_API<T, D, F>
 where
     D: DimAPI,

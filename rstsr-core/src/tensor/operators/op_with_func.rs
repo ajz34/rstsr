@@ -18,9 +18,7 @@ where
     DC: DimAPI,
     B: DeviceAPI<TA> + DeviceAPI<TB> + DeviceAPI<TC>,
     // broadcast constraints
-    DC: DimMaxAPI<DA> + DimMaxAPI<DB>,
-    <DC as DimMaxAPI<DA>>::Max: DimConvertAPI<DC>,
-    <DC as DimMaxAPI<DB>>::Max: DimConvertAPI<DC>,
+    DC: DimMaxAPI<DA, Max = DC> + DimMaxAPI<DB, Max = DC>,
     // operation constraints
     B: DeviceOp_MutC_RefA_RefB_API<TA, TB, TC, DC, F>,
     F: FnMut(&mut TC, &TA, &TB),
@@ -44,7 +42,7 @@ where
     device.op_mutc_refa_refb_func(storage_c, &lc_b, storage_a, &la_b, storage_b, &lb_b, f)
 }
 
-pub fn op_refa_refb_func<RA, RB, DA, DB, TA, TB, TC, B, F>(
+pub fn op_refa_refb_func<RA, RB, DA, DB, DC, TA, TB, TC, B, F>(
     a: &TensorBase<RA, DA>,
     b: &TensorBase<RB, DB>,
     f: F,
@@ -55,11 +53,12 @@ where
     RB: DataAPI<Data = Storage<TB, B>>,
     DA: DimAPI,
     DB: DimAPI,
+    DC: DimAPI,
     B: DeviceAPI<TA> + DeviceAPI<TB>,
     // broadcast constraints
-    DA: DimMaxAPI<DB>,
+    DA: DimMaxAPI<DB, Max = DC>,
     // operation constraints
-    B: DeviceOp_MutC_RefA_RefB_API<TA, TB, TC, <DA as DimMaxAPI<DB>>::Max, F>,
+    B: DeviceOp_MutC_RefA_RefB_API<TA, TB, TC, DC, F>,
     B: DeviceCreationAnyAPI<TC>,
     F: FnMut(&mut TC, &TA, &TB),
 {
@@ -102,8 +101,7 @@ where
     DB: DimAPI,
     B: DeviceAPI<TA> + DeviceAPI<TB>,
     // broadcast constraints
-    DA: DimMaxAPI<DB>,
-    <DA as DimMaxAPI<DB>>::Max: DimConvertAPI<DA>,
+    DA: DimMaxAPI<DB, Max = DA>,
     // operation constraints
     B: DeviceOp_MutA_RefB_API<TA, TB, DA, F>,
     F: FnMut(&mut TA, &TB),
