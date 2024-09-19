@@ -7,6 +7,7 @@ edition = "2021"
 num = { workspace = true }
 thiserror = { workspace = true }
 itertools = { workspace = true }
+half = { workspace = true }
 
 [dev-dependencies]
 anyhow = { workspace = true }

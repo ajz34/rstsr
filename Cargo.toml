@@ -13,6 +13,7 @@ edition = "2021"
 num = { version = "0.4" }
 thiserror = { version = "1.0" }
 itertools = { version = "0.13" }
+half = { version = "2.4" }
 # dev dependencies
 anyhow = { version = "1.0" }
 rand = { version = "0.8" }

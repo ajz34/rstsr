@@ -23,7 +23,7 @@ mod trait_binary_arithmetic {
     trait_binary_arithmetic!(sub   , TensorSubAPI   );
     trait_binary_arithmetic!(mul   , TensorMulAPI   );
     trait_binary_arithmetic!(div   , TensorDivAPI   );
-//  trait_binary_arithmetic!(rem   , TensorRemAPI   );
+    trait_binary_arithmetic!(rem   , TensorRemAPI   );
     trait_binary_arithmetic!(bitor , TensorBitOrAPI );
     trait_binary_arithmetic!(bitand, TensorBitAndAPI);
     trait_binary_arithmetic!(bitxor, TensorBitXorAPI);
@@ -169,7 +169,7 @@ mod impl_binary_arithmetic_ref {
     impl_binary_arithmetic_ref!(sub   , DeviceSubAPI   , TensorSubAPI   , Sub   );
     impl_binary_arithmetic_ref!(mul   , DeviceMulAPI   , TensorMulAPI   , Mul   );
     impl_binary_arithmetic_ref!(div   , DeviceDivAPI   , TensorDivAPI   , Div   );
-//  impl_binary_arithmetic_ref!(rem   , DeviceRemAPI   , TensorRemAPI   , Rem   );
+    impl_binary_arithmetic_ref!(rem   , DeviceRemAPI   , TensorRemAPI   , Rem   );
     impl_binary_arithmetic_ref!(bitor , DeviceBitOrAPI , TensorBitOrAPI , BitOr );
     impl_binary_arithmetic_ref!(bitand, DeviceBitAndAPI, TensorBitAndAPI, BitAnd);
     impl_binary_arithmetic_ref!(bitxor, DeviceBitXorAPI, TensorBitXorAPI, BitXor);
@@ -376,7 +376,7 @@ mod impl_binary_lr_consume {
     impl_binary_lr_consume!(sub   , DeviceSubAPI   , TensorSubAPI   , Sub   , DeviceLConsumeSubAPI   , DeviceRConsumeSubAPI   );
     impl_binary_lr_consume!(mul   , DeviceMulAPI   , TensorMulAPI   , Mul   , DeviceLConsumeMulAPI   , DeviceRConsumeMulAPI   );
     impl_binary_lr_consume!(div   , DeviceDivAPI   , TensorDivAPI   , Div   , DeviceLConsumeDivAPI   , DeviceRConsumeDivAPI   );
-//  impl_binary_lr_consume!(rem   , DeviceRemAPI   , TensorRemAPI   , Rem   , DeviceLConsumeRemAPI   , DeviceRConsumeRemAPI   );
+    impl_binary_lr_consume!(rem   , DeviceRemAPI   , TensorRemAPI   , Rem   , DeviceLConsumeRemAPI   , DeviceRConsumeRemAPI   );
     impl_binary_lr_consume!(bitor , DeviceBitOrAPI , TensorBitOrAPI , BitOr , DeviceLConsumeBitOrAPI , DeviceRConsumeBitOrAPI );
     impl_binary_lr_consume!(bitand, DeviceBitAndAPI, TensorBitAndAPI, BitAnd, DeviceLConsumeBitAndAPI, DeviceRConsumeBitAndAPI);
     impl_binary_lr_consume!(bitxor, DeviceBitXorAPI, TensorBitXorAPI, BitXor, DeviceLConsumeBitXorAPI, DeviceRConsumeBitXorAPI);
