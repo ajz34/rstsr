@@ -15,6 +15,8 @@ macro_rules! trait_op_assign_api {
                 b: &Storage<TB, Self>,
                 lb: &Layout<D>,
             ) -> Result<()>;
+
+            fn op_muta_numb(&self, a: &mut Storage<TA, Self>, la: &Layout<D>, b: TB) -> Result<()>;
         }
     };
 }

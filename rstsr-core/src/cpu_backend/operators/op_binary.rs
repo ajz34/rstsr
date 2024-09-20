@@ -17,6 +17,15 @@ macro_rules! impl_op_muta_refb_assign {
             ) -> Result<()> {
                 self.op_muta_refb_func(a, la, b, lb, $func)
             }
+
+            fn op_muta_numb(
+                &self,
+                a: &mut Storage<TA, CpuDevice>,
+                la: &Layout<D>,
+                b: TB,
+            ) -> Result<()> {
+                self.op_muta_numb_func(a, la, b, $func)
+            }
         }
     };
 }
