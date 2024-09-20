@@ -6,10 +6,10 @@ use num::complex::Complex;
 
 // this file is branched from `op_binary_arithmetic.rs`
 
-macro_rules! impl_arithmetic_scalar {
-    ($ty: ty, $op: ident, $Op: ident, $DeviceOpAPI: ident, $TensorOpAPI: ident, $DeviceLConsumeOpAPI: ident, $DeviceRConsumeOpAPI: ident) => {
-        /* #region num a op tsr b */
+/* #region num a op tsr b */
 
+macro_rules! impl_arithmetic_scalar_lhs {
+    ($ty: ty, $op: ident, $Op: ident, $DeviceOpAPI: ident, $TensorOpAPI: ident, $DeviceRConsumeOpAPI: ident) => {
         impl<T, R, D, B> $TensorOpAPI<&TensorBase<R, D>> for $ty
         where
             T: From<$ty> + $Op<T, Output = T>,
@@ -108,24 +108,87 @@ macro_rules! impl_arithmetic_scalar {
                 $TensorOpAPI::$op(self, rhs).unwrap()
             }
         }
+    };
+}
 
-        /* #endregion */
+#[rustfmt::skip]
+macro_rules! impl_arithmetic_scalar_lhs_all {
+    ($ty: ty) => {
+        impl_arithmetic_scalar_lhs!($ty, add   , Add   , DeviceAddAPI   , TensorAddAPI   , DeviceRConsumeAddAPI   );
+        impl_arithmetic_scalar_lhs!($ty, sub   , Sub   , DeviceSubAPI   , TensorSubAPI   , DeviceRConsumeSubAPI   );
+        impl_arithmetic_scalar_lhs!($ty, mul   , Mul   , DeviceMulAPI   , TensorMulAPI   , DeviceRConsumeMulAPI   );
+        impl_arithmetic_scalar_lhs!($ty, div   , Div   , DeviceDivAPI   , TensorDivAPI   , DeviceRConsumeDivAPI   );
+        impl_arithmetic_scalar_lhs!($ty, rem   , Rem   , DeviceRemAPI   , TensorRemAPI   , DeviceRConsumeRemAPI   );
+        impl_arithmetic_scalar_lhs!($ty, bitor , BitOr , DeviceBitOrAPI , TensorBitOrAPI , DeviceRConsumeBitOrAPI );
+        impl_arithmetic_scalar_lhs!($ty, bitand, BitAnd, DeviceBitAndAPI, TensorBitAndAPI, DeviceRConsumeBitAndAPI);
+        impl_arithmetic_scalar_lhs!($ty, bitxor, BitXor, DeviceBitXorAPI, TensorBitXorAPI, DeviceRConsumeBitXorAPI);
+        impl_arithmetic_scalar_lhs!($ty, shl   , Shl   , DeviceShlAPI   , TensorShlAPI   , DeviceRConsumeShlAPI   );
+        impl_arithmetic_scalar_lhs!($ty, shr   , Shr   , DeviceShrAPI   , TensorShrAPI   , DeviceRConsumeShrAPI   );
+    };
+}
 
-        /* #region tsr a op num b */
+#[rustfmt::skip]
+macro_rules! impl_arithmetic_scalar_lhs_bool {
+    ($ty: ty) => {
+        impl_arithmetic_scalar_lhs!($ty, bitor , BitOr , DeviceBitOrAPI , TensorBitOrAPI , DeviceRConsumeBitOrAPI );
+        impl_arithmetic_scalar_lhs!($ty, bitand, BitAnd, DeviceBitAndAPI, TensorBitAndAPI, DeviceRConsumeBitAndAPI);
+        impl_arithmetic_scalar_lhs!($ty, bitxor, BitXor, DeviceBitXorAPI, TensorBitXorAPI, DeviceRConsumeBitXorAPI);
+    };
+}
 
-        // for this case, core::ops::* is not required to be re-implemented
-        // see macro_rule `impl_core_ops`
+#[rustfmt::skip]
+macro_rules! impl_arithmetic_scalar_lhs_float {
+    ($ty: ty) => {
+        impl_arithmetic_scalar_lhs!($ty, add   , Add   , DeviceAddAPI   , TensorAddAPI   , DeviceRConsumeAddAPI   );
+        impl_arithmetic_scalar_lhs!($ty, sub   , Sub   , DeviceSubAPI   , TensorSubAPI   , DeviceRConsumeSubAPI   );
+        impl_arithmetic_scalar_lhs!($ty, mul   , Mul   , DeviceMulAPI   , TensorMulAPI   , DeviceRConsumeMulAPI   );
+        impl_arithmetic_scalar_lhs!($ty, div   , Div   , DeviceDivAPI   , TensorDivAPI   , DeviceRConsumeDivAPI   );
+    };
+}
 
-        impl<T, R, D, B> $TensorOpAPI<$ty> for &TensorBase<R, D>
+impl_arithmetic_scalar_lhs_all!(i8);
+impl_arithmetic_scalar_lhs_all!(u8);
+impl_arithmetic_scalar_lhs_all!(i16);
+impl_arithmetic_scalar_lhs_all!(u16);
+impl_arithmetic_scalar_lhs_all!(i32);
+impl_arithmetic_scalar_lhs_all!(u32);
+impl_arithmetic_scalar_lhs_all!(i64);
+impl_arithmetic_scalar_lhs_all!(u64);
+impl_arithmetic_scalar_lhs_all!(i128);
+impl_arithmetic_scalar_lhs_all!(u128);
+impl_arithmetic_scalar_lhs_all!(isize);
+impl_arithmetic_scalar_lhs_all!(usize);
+
+impl_arithmetic_scalar_lhs_bool!(bool);
+
+impl_arithmetic_scalar_lhs_float!(bf16);
+impl_arithmetic_scalar_lhs_float!(f16);
+impl_arithmetic_scalar_lhs_float!(f32);
+impl_arithmetic_scalar_lhs_float!(f64);
+impl_arithmetic_scalar_lhs_float!(Complex<f32>);
+impl_arithmetic_scalar_lhs_float!(Complex<f64>);
+
+/* #endregion */
+
+/* #region tsr a op num b */
+
+// for this case, core::ops::* is not required to be re-implemented
+// see macro_rule `impl_core_ops`
+
+macro_rules! impl_arithmetic_scalar_rhs {
+    ($op: ident, $Op: ident, $DeviceOpAPI: ident, $TensorOpAPI: ident, $DeviceLConsumeOpAPI: ident) => {
+        impl<T, TB, R, D, B> $TensorOpAPI<TB> for &TensorBase<R, D>
         where
-            T: From<$ty> + $Op<T, Output = T>,
+            T: From<TB> + $Op<T, Output = T>,
             R: DataAPI<Data = Storage<T, B>>,
             D: DimAPI,
             B: DeviceAPI<T> + DeviceCreationAnyAPI<T>,
             B: $DeviceOpAPI<T, T, T, D>,
+            // this constraint prohibits confliting impl to TensorBase<RB, D>
+            TB: num::Num,
         {
             type Output = Tensor<T, D, B>;
-            fn $op(a: Self, b: $ty) -> Result<Self::Output> {
+            fn $op(a: Self, b: TB) -> Result<Self::Output> {
                 let b = T::from(b);
                 let device = a.device();
                 let la = a.layout();
@@ -137,15 +200,17 @@ macro_rules! impl_arithmetic_scalar {
             }
         }
 
-        impl<'l, T, D, B> $TensorOpAPI<$ty> for TensorView<'l, T, D, B>
+        impl<'l, T, TB, D, B> $TensorOpAPI<TB> for TensorView<'l, T, D, B>
         where
-            T: From<$ty> + $Op<T, Output = T>,
+            T: From<TB> + $Op<T, Output = T>,
             D: DimAPI,
             B: DeviceAPI<T> + DeviceCreationAnyAPI<T>,
             B: $DeviceOpAPI<T, T, T, D>,
+            // this constraint prohibits confliting impl to TensorBase<RB, D>
+            TB: num::Num,
         {
             type Output = Tensor<T, D, B>;
-            fn $op(a: Self, b: $ty) -> Result<Self::Output> {
+            fn $op(a: Self, b: TB) -> Result<Self::Output> {
                 let b = T::from(b);
                 let device = a.device();
                 let la = a.layout();
@@ -157,15 +222,17 @@ macro_rules! impl_arithmetic_scalar {
             }
         }
 
-        impl<T, D, B> $TensorOpAPI<$ty> for Tensor<T, D, B>
+        impl<T, TB, D, B> $TensorOpAPI<TB> for Tensor<T, D, B>
         where
-            T: From<$ty> + $Op<T, Output = T>,
+            T: From<TB> + $Op<T, Output = T>,
             D: DimAPI,
-            B: DeviceAPI<T> + DeviceCreationAnyAPI<T>,
+            B: DeviceAPI<T>,
             B: $DeviceLConsumeOpAPI<T, T, D>,
+            // this constraint prohibits confliting impl to TensorBase<RB, D>
+            TB: num::Num,
         {
             type Output = Tensor<T, D, B>;
-            fn $op(mut a: Self, b: $ty) -> Result<Self::Output> {
+            fn $op(mut a: Self, b: TB) -> Result<Self::Output> {
                 let b = T::from(b);
                 let device = a.device().clone();
                 let la = a.layout().clone();
@@ -174,67 +241,25 @@ macro_rules! impl_arithmetic_scalar {
                 return Ok(a);
             }
         }
-
-        /* #endregion */
     };
 }
 
 #[rustfmt::skip]
-macro_rules! impl_arithmetic_scalar_all {
-    ($ty: ty) => {
-        impl_arithmetic_scalar!($ty, add   , Add   , DeviceAddAPI   , TensorAddAPI   , DeviceLConsumeAddAPI   , DeviceRConsumeAddAPI   );
-        impl_arithmetic_scalar!($ty, sub   , Sub   , DeviceSubAPI   , TensorSubAPI   , DeviceLConsumeSubAPI   , DeviceRConsumeSubAPI   );
-        impl_arithmetic_scalar!($ty, mul   , Mul   , DeviceMulAPI   , TensorMulAPI   , DeviceLConsumeMulAPI   , DeviceRConsumeMulAPI   );
-        impl_arithmetic_scalar!($ty, div   , Div   , DeviceDivAPI   , TensorDivAPI   , DeviceLConsumeDivAPI   , DeviceRConsumeDivAPI   );
-        impl_arithmetic_scalar!($ty, rem   , Rem   , DeviceRemAPI   , TensorRemAPI   , DeviceLConsumeRemAPI   , DeviceRConsumeRemAPI   );
-        impl_arithmetic_scalar!($ty, bitor , BitOr , DeviceBitOrAPI , TensorBitOrAPI , DeviceLConsumeBitOrAPI , DeviceRConsumeBitOrAPI );
-        impl_arithmetic_scalar!($ty, bitand, BitAnd, DeviceBitAndAPI, TensorBitAndAPI, DeviceLConsumeBitAndAPI, DeviceRConsumeBitAndAPI);
-        impl_arithmetic_scalar!($ty, bitxor, BitXor, DeviceBitXorAPI, TensorBitXorAPI, DeviceLConsumeBitXorAPI, DeviceRConsumeBitXorAPI);
-        impl_arithmetic_scalar!($ty, shl   , Shl   , DeviceShlAPI   , TensorShlAPI   , DeviceLConsumeShlAPI   , DeviceRConsumeShlAPI   );
-        impl_arithmetic_scalar!($ty, shr   , Shr   , DeviceShrAPI   , TensorShrAPI   , DeviceLConsumeShrAPI   , DeviceRConsumeShrAPI   );
-    };
+mod impl_arithmetic_scalar_rhs {
+    use super::*;
+    impl_arithmetic_scalar_rhs!(add   , Add   , DeviceAddAPI   , TensorAddAPI   , DeviceLConsumeAddAPI   );
+    impl_arithmetic_scalar_rhs!(sub   , Sub   , DeviceSubAPI   , TensorSubAPI   , DeviceLConsumeSubAPI   );
+    impl_arithmetic_scalar_rhs!(mul   , Mul   , DeviceMulAPI   , TensorMulAPI   , DeviceLConsumeMulAPI   );
+    impl_arithmetic_scalar_rhs!(div   , Div   , DeviceDivAPI   , TensorDivAPI   , DeviceLConsumeDivAPI   );
+    impl_arithmetic_scalar_rhs!(rem   , Rem   , DeviceRemAPI   , TensorRemAPI   , DeviceLConsumeRemAPI   );
+    impl_arithmetic_scalar_rhs!(bitor , BitOr , DeviceBitOrAPI , TensorBitOrAPI , DeviceLConsumeBitOrAPI );
+    impl_arithmetic_scalar_rhs!(bitand, BitAnd, DeviceBitAndAPI, TensorBitAndAPI, DeviceLConsumeBitAndAPI);
+    impl_arithmetic_scalar_rhs!(bitxor, BitXor, DeviceBitXorAPI, TensorBitXorAPI, DeviceLConsumeBitXorAPI);
+    impl_arithmetic_scalar_rhs!(shl   , Shl   , DeviceShlAPI   , TensorShlAPI   , DeviceLConsumeShlAPI   );
+    impl_arithmetic_scalar_rhs!(shr   , Shr   , DeviceShrAPI   , TensorShrAPI   , DeviceLConsumeShrAPI   );
 }
 
-#[rustfmt::skip]
-macro_rules! impl_arithmetic_scalar_bool {
-    ($ty: ty) => {
-        impl_arithmetic_scalar!($ty, bitor , BitOr , DeviceBitOrAPI , TensorBitOrAPI , DeviceLConsumeBitOrAPI , DeviceRConsumeBitOrAPI );
-        impl_arithmetic_scalar!($ty, bitand, BitAnd, DeviceBitAndAPI, TensorBitAndAPI, DeviceLConsumeBitAndAPI, DeviceRConsumeBitAndAPI);
-        impl_arithmetic_scalar!($ty, bitxor, BitXor, DeviceBitXorAPI, TensorBitXorAPI, DeviceLConsumeBitXorAPI, DeviceRConsumeBitXorAPI);
-    };
-}
-
-#[rustfmt::skip]
-macro_rules! impl_arithmetic_scalar_float {
-    ($ty: ty) => {
-        impl_arithmetic_scalar!($ty, add   , Add   , DeviceAddAPI   , TensorAddAPI   , DeviceLConsumeAddAPI   , DeviceRConsumeAddAPI   );
-        impl_arithmetic_scalar!($ty, sub   , Sub   , DeviceSubAPI   , TensorSubAPI   , DeviceLConsumeSubAPI   , DeviceRConsumeSubAPI   );
-        impl_arithmetic_scalar!($ty, mul   , Mul   , DeviceMulAPI   , TensorMulAPI   , DeviceLConsumeMulAPI   , DeviceRConsumeMulAPI   );
-        impl_arithmetic_scalar!($ty, div   , Div   , DeviceDivAPI   , TensorDivAPI   , DeviceLConsumeDivAPI   , DeviceRConsumeDivAPI   );
-    };
-}
-
-impl_arithmetic_scalar_all!(i8);
-impl_arithmetic_scalar_all!(u8);
-impl_arithmetic_scalar_all!(i16);
-impl_arithmetic_scalar_all!(u16);
-impl_arithmetic_scalar_all!(i32);
-impl_arithmetic_scalar_all!(u32);
-impl_arithmetic_scalar_all!(i64);
-impl_arithmetic_scalar_all!(u64);
-impl_arithmetic_scalar_all!(i128);
-impl_arithmetic_scalar_all!(u128);
-impl_arithmetic_scalar_all!(isize);
-impl_arithmetic_scalar_all!(usize);
-
-impl_arithmetic_scalar_bool!(bool);
-
-impl_arithmetic_scalar_float!(bf16);
-impl_arithmetic_scalar_float!(f16);
-impl_arithmetic_scalar_float!(f32);
-impl_arithmetic_scalar_float!(f64);
-impl_arithmetic_scalar_float!(Complex<f32>);
-impl_arithmetic_scalar_float!(Complex<f64>);
+/* #endregion */
 
 #[cfg(test)]
 mod tests {
