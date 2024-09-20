@@ -139,21 +139,31 @@ mod impl_op_muta_refb_r_consume {
 }
 
 macro_rules! impl_op_muta_refb_unary {
-    ($DeviceOpAPI:ident, $Op:ident, $op_muta_refb_func:ident, $func:expr) => {
+    ($DeviceOpAPI:ident, $Op:ident, $op_muta_refb_func:ident, $func:expr, $func_inplace:expr) => {
         impl<TA, TB, D> $DeviceOpAPI<TA, TB, D> for CpuDevice
         where
             TA: Clone,
-            TB: Clone + $Op<Output = TA>,
+            TB: Clone,
             D: DimAPI,
         {
-            fn $op_muta_refb_func(
+            fn op_muta_refb(
                 &self,
                 a: &mut Storage<TA, CpuDevice>,
                 la: &Layout<D>,
                 b: &Storage<TB, CpuDevice>,
                 lb: &Layout<D>,
-            ) -> Result<()> {
+            ) -> Result<()>
+            where
+                TB: $Op<Output = TA>,
+            {
                 self.op_muta_refb_func(a, la, b, lb, $func)
+            }
+
+            fn op_muta(&self, a: &mut Storage<TA, CpuDevice>, la: &Layout<D>) -> Result<()>
+            where
+                TA: $Op<Output = TA>,
+            {
+                self.op_muta_func(a, la, $func_inplace)
             }
         }
     };
@@ -163,6 +173,6 @@ macro_rules! impl_op_muta_refb_unary {
 mod impl_op_muta_refb_unary {
     use super::*;
     use core::ops::*;
-    impl_op_muta_refb_unary!(DeviceNegAPI, Neg, op_muta_refb_neg, |a, b| *a = -b.clone());
-    impl_op_muta_refb_unary!(DeviceNotAPI, Not, op_muta_refb_not, |a, b| *a = !b.clone());
+    impl_op_muta_refb_unary!(DeviceNegAPI, Neg, op_muta_refb_neg, |a, b| *a = -b.clone(), |a| *a = -a.clone());
+    impl_op_muta_refb_unary!(DeviceNotAPI, Not, op_muta_refb_not, |a, b| *a = !b.clone(), |a| *a = !a.clone());
 }

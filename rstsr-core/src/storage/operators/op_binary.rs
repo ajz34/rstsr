@@ -115,20 +115,25 @@ mod impl_op_muta_refb_r_consume {
 pub use impl_op_muta_refb_r_consume::*;
 
 macro_rules! trait_op_unary_api {
-    ($DeviceOpAPI:ident, $Op:ident, $op_muta_refb_func:ident) => {
+    ($DeviceOpAPI:ident, $Op:ident) => {
         pub trait $DeviceOpAPI<TA, TB, D>
         where
-            TB: $Op<Output = TA>,
             D: DimAPI,
             Self: DeviceAPI<TA> + DeviceAPI<TB>,
         {
-            fn $op_muta_refb_func(
+            fn op_muta_refb(
                 &self,
                 a: &mut Storage<TA, Self>,
                 la: &Layout<D>,
                 b: &Storage<TB, Self>,
                 lb: &Layout<D>,
-            ) -> Result<()>;
+            ) -> Result<()>
+            where
+                TB: $Op<Output = TA>;
+
+            fn op_muta(&self, a: &mut Storage<TA, Self>, la: &Layout<D>) -> Result<()>
+            where
+                TA: $Op<Output = TA>;
         }
     };
 }
@@ -136,7 +141,7 @@ macro_rules! trait_op_unary_api {
 mod impl_op_unary_api {
     use super::*;
     use core::ops::*;
-    trait_op_unary_api!(DeviceNegAPI, Neg, op_muta_refb_neg);
-    trait_op_unary_api!(DeviceNotAPI, Not, op_muta_refb_not);
+    trait_op_unary_api!(DeviceNegAPI, Neg);
+    trait_op_unary_api!(DeviceNotAPI, Not);
 }
 pub use impl_op_unary_api::*;
