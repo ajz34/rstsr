@@ -15,8 +15,9 @@ pub enum DataRef<'a, S> {
 }
 
 #[derive(Debug)]
-pub struct DataRefMut<'a, S> {
-    pub(crate) storage: &'a mut S,
+pub enum DataRefMut<'a, S> {
+    TrueRef(&'a mut S),
+    ManuallyDropOwned(ManuallyDrop<S>),
 }
 
 #[derive(Debug)]
@@ -146,17 +147,20 @@ where
 
     #[inline]
     fn storage(&self) -> &Self::Data {
-        self.storage
+        match self {
+            DataRefMut::TrueRef(storage) => storage,
+            DataRefMut::ManuallyDropOwned(storage) => storage,
+        }
     }
 
     #[inline]
     fn as_ref(&self) -> DataRef<'_, Self::Data> {
-        DataRef::from(&*self.storage)
+        DataRef::from(self.storage())
     }
 
     #[inline]
     fn into_owned(self) -> DataOwned<Self::Data> {
-        DataOwned { storage: self.storage.clone() }
+        DataOwned::from(self.storage().clone())
     }
 }
 
@@ -206,7 +210,7 @@ where
 
     #[inline]
     fn as_ref_mut(&mut self) -> DataRefMut<Self::Data> {
-        DataRefMut { storage: &mut self.storage }
+        DataRefMut::TrueRef(&mut self.storage)
     }
 }
 
@@ -216,12 +220,18 @@ where
 {
     #[inline]
     fn storage_mut(&mut self) -> &mut Self::Data {
-        self.storage
+        match self {
+            DataRefMut::TrueRef(storage) => storage,
+            DataRefMut::ManuallyDropOwned(storage) => storage,
+        }
     }
 
     #[inline]
     fn as_ref_mut(&mut self) -> DataRefMut<'_, Self::Data> {
-        DataRefMut { storage: self.storage }
+        match self {
+            DataRefMut::TrueRef(storage) => DataRefMut::TrueRef(storage),
+            DataRefMut::ManuallyDropOwned(storage) => DataRefMut::TrueRef(storage),
+        }
     }
 }
 
