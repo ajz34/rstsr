@@ -127,7 +127,7 @@ where
                 }
             },
             _ => {
-                for (d, t, idx) in izip!(shape, stride, index.as_mut(),) {
+                for (d, t, idx) in izip!(shape, stride, index.as_mut()) {
                     *idx += 1;
                     offset += t;
                     if idx == d {
@@ -276,6 +276,10 @@ mod test {
 
     #[test]
     fn test_iter_next() {
+        // a = np.arange(9 * 12 * 15)
+        //       .reshape(9, 12, 15)[4:2:-1, 4:10, 2:10:3]
+        //       .transpose(2, 0, 1)
+        // a = np.asfortranarray(a)
         let layout = Layout::new([3, 2, 6], [3, -180, 15], 782);
         // np.array(np.nditer(a, order="C"))
         let layout_trans = translate_to_col_major_unary(&layout, Order::C).unwrap();
