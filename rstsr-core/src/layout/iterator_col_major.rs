@@ -2,7 +2,7 @@
 
 use crate::prelude_dev::*;
 
-/// Layout iterator.
+/// Layout iterator (column-major).
 ///
 /// This iterator only handles column-major iterator.
 /// For other iteration orders, use function [`translate_to_col_major`] to
@@ -26,11 +26,11 @@ where
 
     index_start: D, // this is not used for buffer-order
     iter_start: usize,
-    offset_start: usize,
+    offset_start: isize,
 
     index_end: D, // this is not used for buffer-order
     iter_end: usize,
-    offset_end: usize,
+    offset_end: isize,
 }
 
 impl<D> IterLayoutColMajor<D>
@@ -41,11 +41,12 @@ where
     /// iterator object.
     pub fn new(layout: &Layout<D>) -> Result<Self> {
         let layout = layout.clone();
+        let shape = layout.shape();
         let iter_start = 0;
         let iter_end = layout.size();
         let index_start = layout.new_shape();
-        let index_end = unsafe { layout.unravel_index_f(iter_end) };
-        let offset_start = layout.offset();
+        let index_end = unsafe { shape.unravel_index_f(iter_end) };
+        let offset_start = layout.offset() as isize;
         let offset_end = unsafe { layout.index_uncheck(index_end.as_ref()) };
 
         return Ok(Self {
@@ -68,7 +69,7 @@ where
     fn next_iter_index(&mut self) {
         let layout = &self.layout;
         let index = self.index_start.as_mut();
-        let mut offset = self.offset_start as isize;
+        let mut offset = self.offset_start;
         let shape = layout.shape().as_ref();
         let stride = layout.stride().as_ref();
         match layout.ndim() {
@@ -138,7 +139,7 @@ where
                 }
             },
         }
-        self.offset_start = offset as usize;
+        self.offset_start = offset;
         self.iter_start += 1;
     }
 
@@ -146,7 +147,7 @@ where
     fn back_iter_index(&mut self) {
         let layout = &self.layout;
         let index = self.index_end.as_mut();
-        let mut offset = self.offset_end as isize;
+        let mut offset = self.offset_end;
         let shape = layout.shape().as_ref();
         let stride = layout.stride().as_ref();
         match layout.ndim() {
@@ -222,7 +223,7 @@ where
                 }
             },
         }
-        self.offset_end = offset as usize;
+        self.offset_end = offset;
         self.iter_end -= 1;
     }
 }
@@ -239,7 +240,7 @@ where
         }
         let offset = self.offset_start;
         self.next_iter_index();
-        return Some(offset);
+        return Some(offset.try_into().unwrap());
     }
 }
 
@@ -253,7 +254,7 @@ where
         }
         self.back_iter_index();
         let offset = self.offset_end;
-        return Some(offset);
+        return Some(offset.try_into().unwrap());
     }
 }
 

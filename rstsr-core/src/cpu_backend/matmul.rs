@@ -217,14 +217,14 @@ where
         unsafe {
             for i_n in 0..m {
                 for i_m in 0..n {
-                    let idx_c = lc.index_uncheck(&[i_m, i_n]);
+                    let idx_c = lc.index_uncheck(&[i_m, i_n]) as usize;
                     vc[idx_c] = beta.clone() * vc[idx_c].clone();
                 }
                 for i_k in 0..k {
-                    let idx_b = lb.index_uncheck(&[i_k, i_n]);
+                    let idx_b = lb.index_uncheck(&[i_k, i_n]) as usize;
                     for i_m in 0..n {
-                        let idx_c = lc.index_uncheck(&[i_m, i_n]);
-                        let idx_a = la.index_uncheck(&[i_m, i_k]);
+                        let idx_c = lc.index_uncheck(&[i_m, i_n]) as usize;
+                        let idx_a = la.index_uncheck(&[i_m, i_k]) as usize;
                         vc[idx_c] = alpha.clone() * (va[idx_a].clone() * vb[idx_b].clone())
                             + vc[idx_c].clone();
                     }
@@ -268,11 +268,11 @@ where
         let vb = b.rawvec();
         unsafe {
             for i_n in 0..n {
-                let idx_c = lc.index_uncheck(&[i_n]);
+                let idx_c = lc.index_uncheck(&[i_n]) as usize;
                 vc[idx_c] = beta.clone() * vc[idx_c].clone();
                 for i_k in 0..k {
-                    let idx_a = la.index_uncheck(&[i_n, i_k]);
-                    let idx_b = lb.index_uncheck(&[i_k]);
+                    let idx_a = la.index_uncheck(&[i_n, i_k]) as usize;
+                    let idx_b = lb.index_uncheck(&[i_k]) as usize;
                     vc[idx_c] =
                         alpha.clone() * (va[idx_a].clone() * vb[idx_b].clone()) + vc[idx_c].clone();
                 }
@@ -306,11 +306,11 @@ where
         let vb = b.rawvec();
         unsafe {
             for i_n in 0..n {
-                let idx_c = lc.index_uncheck(&[i_n]);
+                let idx_c = lc.index_uncheck(&[i_n]) as usize;
                 vc[idx_c] = beta.clone() * vc[idx_c].clone();
                 for i_k in 0..k {
-                    let idx_a = la.index_uncheck(&[i_k]);
-                    let idx_b = lb.index_uncheck(&[i_k, i_n]);
+                    let idx_a = la.index_uncheck(&[i_k]) as usize;
+                    let idx_b = lb.index_uncheck(&[i_k, i_n]) as usize;
                     vc[idx_c] =
                         alpha.clone() * (va[idx_a].clone() * vb[idx_b].clone()) + vc[idx_c].clone();
                 }
@@ -350,11 +350,11 @@ where
         let va = a.rawvec();
         let vb = b.rawvec();
         unsafe {
-            let idx_c = lc.index_uncheck(&[]);
+            let idx_c = lc.index_uncheck(&[]) as usize;
             let mut sum = beta * vc[idx_c].clone();
             for i in 0..n {
-                let idx_a = la.index_uncheck(&[i]);
-                let idx_b = lb.index_uncheck(&[i]);
+                let idx_a = la.index_uncheck(&[i]) as usize;
+                let idx_b = lb.index_uncheck(&[i]) as usize;
                 sum = sum + alpha.clone() * (va[idx_a].clone() * vb[idx_b].clone());
             }
             vc[0] = sum;

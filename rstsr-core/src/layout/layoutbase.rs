@@ -521,39 +521,40 @@ where
     /// This function does not check for bounds, including
     /// - Negative index
     /// - Index greater than shape
+    ///
+    /// Due to these reasons, this function may well give index smaller than
+    /// zero, which may occur in iterator; so this function returns isize.
     #[inline]
-    pub unsafe fn index_uncheck(&self, index: &[usize]) -> usize {
+    pub unsafe fn index_uncheck(&self, index: &[usize]) -> isize {
         let stride = self.stride.as_ref();
         match self.ndim() {
-            0 => self.offset,
-            1 => (self.offset as isize + stride[0] * index[0] as isize) as usize,
+            0 => self.offset as isize,
+            1 => self.offset as isize + stride[0] * index[0] as isize,
             2 => {
-                (self.offset as isize
-                    + stride[0] * index[0] as isize
-                    + stride[1] * index[1] as isize) as usize
+                self.offset as isize + stride[0] * index[0] as isize + stride[1] * index[1] as isize
             },
             3 => {
-                (self.offset as isize
-                    + stride[0] * index[0] as isize
-                    + stride[1] * index[1] as isize
-                    + stride[2] * index[2] as isize) as usize
-            },
-            4 => {
-                (self.offset as isize
+                self.offset as isize
                     + stride[0] * index[0] as isize
                     + stride[1] * index[1] as isize
                     + stride[2] * index[2] as isize
-                    + stride[3] * index[3] as isize) as usize
+            },
+            4 => {
+                self.offset as isize
+                    + stride[0] * index[0] as isize
+                    + stride[1] * index[1] as isize
+                    + stride[2] * index[2] as isize
+                    + stride[3] * index[3] as isize
             },
             _ => {
                 let mut pos = self.offset as isize;
                 stride.iter().zip(index.iter()).for_each(|(&s, &i)| pos += s * i as isize);
-                pos as usize
+                pos
             },
         }
     }
 
-    /// Index of tensor by list of indexes.
+    /// Index (col-major) of tensor by list of indexes.
     ///
     /// # Safety
     ///
@@ -592,6 +593,50 @@ where
                     index /= dim;
                 }
                 result[self.ndim() - 1] = index;
+            },
+        }
+        return result;
+    }
+
+    /// Index (row-major) of tensor by list of indexes.
+    ///
+    /// # Safety
+    ///
+    /// This function does not check whether index is out of bounds.
+    #[inline]
+    pub unsafe fn unravel_index_c(&self, index: usize) -> D {
+        let mut index = index;
+        let mut result = self.new_shape();
+        match self.ndim() {
+            0 => (),
+            1 => {
+                result[0] = index;
+            },
+            2 => {
+                result[0] = index / self.shape()[1];
+                result[1] = index % self.shape()[1];
+            },
+            3 => {
+                result[0] = index / (self.shape()[1] * self.shape()[2]);
+                index %= self.shape()[1] * self.shape()[2];
+                result[1] = index / self.shape()[2];
+                result[2] = index % self.shape()[2];
+            },
+            4 => {
+                result[0] = index / (self.shape()[1] * self.shape()[2] * self.shape()[3]);
+                index %= self.shape()[1] * self.shape()[2] * self.shape()[3];
+                result[1] = index / (self.shape()[2] * self.shape()[3]);
+                index %= self.shape()[2] * self.shape()[3];
+                result[2] = index / self.shape()[3];
+                result[3] = index % self.shape()[3];
+            },
+            _ => {
+                for i in (1..self.ndim()).rev() {
+                    let dim = self.shape()[i];
+                    result[i] = index % dim;
+                    index /= dim;
+                }
+                result[0] = index;
             },
         }
         return result;
@@ -1042,5 +1087,16 @@ mod test {
         assert!(layout.clone().into_dim::<IxD>().is_ok());
         assert!(layout.clone().into_dim::<Ix3>().is_ok());
         assert!(layout.clone().into_dim::<Ix2>().is_err());
+    }
+
+    #[test]
+    fn test_unravel_index() {
+        unsafe {
+            let shape = [3, 2, 6];
+            assert_eq!(shape.unravel_index_f(0), [0, 0, 0]);
+            assert_eq!(shape.unravel_index_f(16), [1, 1, 2]);
+            assert_eq!(shape.unravel_index_c(0), [0, 0, 0]);
+            assert_eq!(shape.unravel_index_c(16), [1, 0, 4]);
+        }
     }
 }

@@ -137,4 +137,3 @@ mod test {
         assert!(allclose_f64(&b, &b_ref));
     }
 }
-

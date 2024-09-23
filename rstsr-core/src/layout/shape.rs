@@ -53,6 +53,20 @@ pub trait DimShapeAPI: DimBaseAPI {
     /// Whether c-contiguous or f-contiguous will depends on cargo feature
     /// `c_prefer`.
     fn stride_contig(&self) -> Self::Stride;
+
+    /// Index (col-major) of tensor by list of indexes.
+    ///
+    /// # Safety
+    ///
+    /// This function does not check whether index is out of bounds.
+    unsafe fn unravel_index_f(&self, index: usize) -> Self;
+
+    /// Index (row-major) of tensor by list of indexes.
+    ///
+    /// # Safety
+    ///
+    /// This function does not check whether index is out of bounds.
+    unsafe fn unravel_index_c(&self, index: usize) -> Self;
 }
 
 impl<const N: usize> DimShapeAPI for Ix<N> {
@@ -85,6 +99,84 @@ impl<const N: usize> DimShapeAPI for Ix<N> {
             TensorOrder::F => Self::stride_f_contig(self),
         }
     }
+
+    #[inline]
+    unsafe fn unravel_index_f(&self, index: usize) -> Self {
+        let mut index = index;
+        let mut result = self.new_shape();
+        match self.ndim() {
+            0 => (),
+            1 => {
+                result[0] = index;
+            },
+            2 => {
+                result[1] = index / self[0];
+                result[0] = index % self[0];
+            },
+            3 => {
+                result[2] = index / (self[0] * self[1]);
+                index %= self[0] * self[1];
+                result[1] = index / self[0];
+                result[0] = index % self[0];
+            },
+            4 => {
+                result[3] = index / (self[0] * self[1] * self[2]);
+                index %= self[0] * self[1] * self[2];
+                result[2] = index / (self[0] * self[1]);
+                index %= self[0] * self[1];
+                result[1] = index / self[0];
+                result[0] = index % self[0];
+            },
+            _ => {
+                for i in 0..(self.ndim() - 1) {
+                    let dim = self[i];
+                    result[i] = index % dim;
+                    index /= dim;
+                }
+                result[self.ndim() - 1] = index;
+            },
+        }
+        return result;
+    }
+
+    #[inline]
+    unsafe fn unravel_index_c(&self, index: usize) -> Self {
+        let mut index = index;
+        let mut result = self.new_shape();
+        match self.ndim() {
+            0 => (),
+            1 => {
+                result[0] = index;
+            },
+            2 => {
+                result[0] = index / self[1];
+                result[1] = index % self[1];
+            },
+            3 => {
+                result[0] = index / (self[1] * self[2]);
+                index %= self[1] * self[2];
+                result[1] = index / self[2];
+                result[2] = index % self[2];
+            },
+            4 => {
+                result[0] = index / (self[1] * self[2] * self[3]);
+                index %= self[1] * self[2] * self[3];
+                result[1] = index / (self[2] * self[3]);
+                index %= self[2] * self[3];
+                result[2] = index / self[3];
+                result[3] = index % self[3];
+            },
+            _ => {
+                for i in (1..self.ndim()).rev() {
+                    let dim = self[i];
+                    result[i] = index % dim;
+                    index /= dim;
+                }
+                result[0] = index;
+            },
+        }
+        return result;
+    }
 }
 
 impl DimShapeAPI for IxD {
@@ -116,6 +208,32 @@ impl DimShapeAPI for IxD {
             TensorOrder::C => Self::stride_c_contig(self),
             TensorOrder::F => Self::stride_f_contig(self),
         }
+    }
+
+    #[inline]
+    unsafe fn unravel_index_f(&self, index: usize) -> Self {
+        let mut index = index;
+        let mut result = self.new_shape();
+        for i in 0..(self.ndim() - 1) {
+            let dim = self[i];
+            result[i] = index % dim;
+            index /= dim;
+        }
+        result[self.ndim() - 1] = index;
+        return result;
+    }
+
+    #[inline]
+    unsafe fn unravel_index_c(&self, index: usize) -> Self {
+        let mut index = index;
+        let mut result = self.new_shape();
+        for i in (1..self.ndim()).rev() {
+            let dim = self[i];
+            result[i] = index % dim;
+            index /= dim;
+        }
+        result[0] = index;
+        return result;
     }
 }
 
