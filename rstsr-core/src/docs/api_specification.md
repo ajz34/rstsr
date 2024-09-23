@@ -163,62 +163,37 @@ Dropped support
 
 ## Element-wise Functions
 
+### Unary Functions
+
 | status | implementation | Python API | description |
 |-|-|-|-|
 | | | `abs` | Calculates the absolute value for each element x_i of the input array x. |
 | | | `acos` | Calculates an implementation-dependent approximation of the principal value of the inverse cosine for each element x_i of the input array x. |
 | | | `acosh` | Calculates an implementation-dependent approximation to the inverse hyperbolic cosine for each element x_i of the input array x. |
-| | | `add` | Calculates the sum for each element x1_i of the input array x1 with the respective element x2_i of the input array x2. |
 | | | `asin` | Calculates an implementation-dependent approximation of the principal value of the inverse sine for each element x_i of the input array x. |
 | | | `asinh` | Calculates an implementation-dependent approximation to the inverse hyperbolic sine for each element x_i in the input array x. |
 | | | `atan` | Calculates an implementation-dependent approximation of the principal value of the inverse tangent for each element x_i of the input array x. |
-| | | `atan2` | Calculates an implementation-dependent approximation of the inverse tangent of the quotient x1/x2, having domain [-infinity, +infinity] x [-infinity, +infinity] (where the x notation denotes the set of ordered pairs of elements (x1_i, x2_i)) and codomain [-π, +π], for each pair of elements (x1_i, x2_i) of the input arrays x1 and x2, respectively. |
 | | | `atanh` | Calculates an implementation-dependent approximation to the inverse hyperbolic tangent for each element x_i of the input array x. |
-| | | `bitwise_and` | Computes the bitwise AND of the underlying binary representation of each element x1_i of the input array x1 with the respective element x2_i of the input array x2. |
-| | | `bitwise_left_shift` | Shifts the bits of each element x1_i of the input array x1 to the left by appending x2_i (i.e., the respective element in the input array x2) zeros to the right of x1_i. |
 | | | `bitwise_invert` | Inverts (flips) each bit for each element x_i of the input array x. |
-| | | `bitwise_or` | Computes the bitwise OR of the underlying binary representation of each element x1_i of the input array x1 with the respective element x2_i of the input array x2. |
-| | | `bitwise_right_shift` | Shifts the bits of each element x1_i of the input array x1 to the right according to the respective element x2_i of the input array x2. |
-| | | `bitwise_xor` | Computes the bitwise XOR of the underlying binary representation of each element x1_i of the input array x1 with the respective element x2_i of the input array x2. |
 | | | `ceil` | Rounds each element x_i of the input array x to the smallest (i.e., closest to -infinity) integer-valued number that is not less than x_i. |
-| | | `clip` | Clamps each element x_i of the input array x to the range [min, max]. |
 | | | `conj` | Returns the complex conjugate for each element x_i of the input array x. |
-| | | `copysign` | Composes a floating-point value with the magnitude of x1_i and the sign of x2_i for each element of the input array x1. |
 | | | `cos` | Calculates an implementation-dependent approximation to the cosine for each element x_i of the input array x. |
 | | | `cosh` | Calculates an implementation-dependent approximation to the hyperbolic cosine for each element x_i in the input array x. |
-| | | `divide` | Calculates the division of each element x1_i of the input array x1 with the respective element x2_i of the input array x2. |
-| | | `equal` | Computes the truth value of x1_i == x2_i for each element x1_i of the input array x1 with the respective element x2_i of the input array x2. |
 | | | `exp` | Calculates an implementation-dependent approximation to the exponential function for each element x_i of the input array x (e raised to the power of x_i, where e is the base of the natural logarithm). |
 | | | `expm1` | Calculates an implementation-dependent approximation to exp(x)-1 for each element x_i of the input array x. |
 | | | `floor` | Rounds each element x_i of the input array x to the greatest (i.e., closest to +infinity) integer-valued number that is not greater than x_i. |
-| | | `floor_divide` | Rounds the result of dividing each element x1_i of the input array x1 by the respective element x2_i of the input array x2 to the greatest (i.e., closest to +infinity) integer-value number that is not greater than the division result. |
-| | | `greater` | Computes the truth value of x1_i > x2_i for each element x1_i of the input array x1 with the respective element x2_i of the input array x2. |
-| | | `greater_equal` | Computes the truth value of x1_i >= x2_i for each element x1_i of the input array x1 with the respective element x2_i of the input array x2. |
-| | | `hypot` | Computes the square root of the sum of squares for each element x1_i of the input array x1 with the respective element x2_i of the input array x2. |
 | | | `imag` | Returns the imaginary component of a complex number for each element x_i of the input array x. |
 | | | `isfinite` | Tests each element x_i of the input array x to determine if finite. |
 | | | `isinf` | Tests each element x_i of the input array x to determine if equal to positive or negative infinity. |
 | | | `isnan` | Tests each element x_i of the input array x to determine whether the element is NaN. |
-| | | `less` | Computes the truth value of x1_i < x2_i for each element x1_i of the input array x1 with the respective element x2_i of the input array x2. |
-| | | `less_equal` | Computes the truth value of x1_i <= x2_i for each element x1_i of the input array x1 with the respective element x2_i of the input array x2. |
 | | | `log` | Calculates an implementation-dependent approximation to the natural (base e) logarithm for each element x_i of the input array x. |
 | | | `log1p` | Calculates an implementation-dependent approximation to log(1+x), where log refers to the natural (base e) logarithm, for each element x_i of the input array x. |
 | | | `log2` | Calculates an implementation-dependent approximation to the base 2 logarithm for each element x_i of the input array x. |
 | | | `log10` | Calculates an implementation-dependent approximation to the base 10 logarithm for each element x_i of the input array x. |
-| | | `logaddexp` | Calculates the logarithm of the sum of exponentiations log(exp(x1) + exp(x2)) for each element x1_i of the input array x1 with the respective element x2_i of the input array x2. |
-| | | `logical_and` | Computes the logical AND for each element x1_i of the input array x1 with the respective element x2_i of the input array x2. |
 | | | `logical_not` | Computes the logical NOT for each element x_i of the input array x. |
-| | | `logical_or` | Computes the logical OR for each element x1_i of the input array x1 with the respective element x2_i of the input array x2. |
-| | | `logical_xor` | Computes the logical XOR for each element x1_i of the input array x1 with the respective element x2_i of the input array x2. |
-| | | `maximum` | Computes the maximum value for each element x1_i of the input array x1 relative to the respective element x2_i of the input array x2. |
-| | | `minimum` | Computes the minimum value for each element x1_i of the input array x1 relative to the respective element x2_i of the input array x2. |
-| | | `multiply` | Calculates the product for each element x1_i of the input array x1 with the respective element x2_i of the input array x2. |
 | | | `negative` | Computes the numerical negative of each element x_i (i.e., y_i = -x_i) of the input array x. |
-| | | `not_equal` | Computes the truth value of x1_i != x2_i for each element x1_i of the input array x1 with the respective element x2_i of the input array x2. |
 | | | `positive` | Computes the numerical positive of each element x_i (i.e., y_i = +x_i) of the input array x. |
-| | | `pow` | Calculates an implementation-dependent approximation of exponentiation by raising each element x1_i (the base) of the input array x1 to the power of x2_i (the exponent), where x2_i is the corresponding element of the input array x2. |
 | | | `real` | Returns the real component of a complex number for each element x_i of the input array x. |
-| | | `remainder` | Returns the remainder of division for each element x1_i of the input array x1 and the respective element x2_i of the input array x2. |
 | | | `round` | Rounds each element x_i of the input array x to the nearest integer-valued number. |
 | | | `sign` | Returns an indication of the sign of a number for each element x_i of the input array x. |
 | | | `signbit` | Determines whether the sign bit is set for each element x_i of the input array x. |
@@ -226,10 +201,47 @@ Dropped support
 | | | `sinh` | Calculates an implementation-dependent approximation to the hyperbolic sine for each element x_i of the input array x. |
 | | | `square` | Squares each element x_i of the input array x. |
 | | | `sqrt` | Calculates the principal square root for each element x_i of the input array x. |
-| | | `subtract` | Calculates the difference for each element x1_i of the input array x1 with the respective element x2_i of the input array x2. |
 | | | `tan` | Calculates an implementation-dependent approximation to the tangent for each element x_i of the input array x. |
 | | | `tanh` | Calculates an implementation-dependent approximation to the hyperbolic tangent for each element x_i of the input array x. |
 | | | `trunc` | Rounds each element x_i of the input array x to the nearest integer-valued number that is closer to zero than x_i. |
+
+### Binary Functions
+
+| status | implementation | Python API | description |
+|-|-|-|-|
+| | | `add` | Calculates the sum for each element x1_i of the input array x1 with the respective element x2_i of the input array x2. |
+| | | `atan2` | Calculates an implementation-dependent approximation of the inverse tangent of the quotient x1/x2, having domain [-infinity, +infinity] x [-infinity, +infinity] (where the x notation denotes the set of ordered pairs of elements (x1_i, x2_i)) and codomain [-π, +π], for each pair of elements (x1_i, x2_i) of the input arrays x1 and x2, respectively. |
+| | | `bitwise_and` | Computes the bitwise AND of the underlying binary representation of each element x1_i of the input array x1 with the respective element x2_i of the input array x2. |
+| | | `bitwise_left_shift` | Shifts the bits of each element x1_i of the input array x1 to the left by appending x2_i (i.e., the respective element in the input array x2) zeros to the right of x1_i. |
+| | | `bitwise_or` | Computes the bitwise OR of the underlying binary representation of each element x1_i of the input array x1 with the respective element x2_i of the input array x2. |
+| | | `bitwise_right_shift` | Shifts the bits of each element x1_i of the input array x1 to the right according to the respective element x2_i of the input array x2. |
+| | | `bitwise_xor` | Computes the bitwise XOR of the underlying binary representation of each element x1_i of the input array x1 with the respective element x2_i of the input array x2. |
+| | | `copysign` | Composes a floating-point value with the magnitude of x1_i and the sign of x2_i for each element of the input array x1. |
+| | | `divide` | Calculates the division of each element x1_i of the input array x1 with the respective element x2_i of the input array x2. |
+| | | `equal` | Computes the truth value of x1_i == x2_i for each element x1_i of the input array x1 with the respective element x2_i of the input array x2. |
+| | | `floor_divide` | Rounds the result of dividing each element x1_i of the input array x1 by the respective element x2_i of the input array x2 to the greatest (i.e., closest to +infinity) integer-value number that is not greater than the division result. |
+| | | `greater` | Computes the truth value of x1_i > x2_i for each element x1_i of the input array x1 with the respective element x2_i of the input array x2. |
+| | | `greater_equal` | Computes the truth value of x1_i >= x2_i for each element x1_i of the input array x1 with the respective element x2_i of the input array x2. |
+| | | `hypot` | Computes the square root of the sum of squares for each element x1_i of the input array x1 with the respective element x2_i of the input array x2. |
+| | | `less` | Computes the truth value of x1_i < x2_i for each element x1_i of the input array x1 with the respective element x2_i of the input array x2. |
+| | | `less_equal` | Computes the truth value of x1_i <= x2_i for each element x1_i of the input array x1 with the respective element x2_i of the input array x2. |
+| | | `logaddexp` | Calculates the logarithm of the sum of exponentiations log(exp(x1) + exp(x2)) for each element x1_i of the input array x1 with the respective element x2_i of the input array x2. |
+| | | `logical_and` | Computes the logical AND for each element x1_i of the input array x1 with the respective element x2_i of the input array x2. |
+| | | `logical_or` | Computes the logical OR for each element x1_i of the input array x1 with the respective element x2_i of the input array x2. |
+| | | `logical_xor` | Computes the logical XOR for each element x1_i of the input array x1 with the respective element x2_i of the input array x2. |
+| | | `maximum` | Computes the maximum value for each element x1_i of the input array x1 relative to the respective element x2_i of the input array x2. |
+| | | `minimum` | Computes the minimum value for each element x1_i of the input array x1 relative to the respective element x2_i of the input array x2. |
+| | | `multiply` | Calculates the product for each element x1_i of the input array x1 with the respective element x2_i of the input array x2. |
+| | | `not_equal` | Computes the truth value of x1_i != x2_i for each element x1_i of the input array x1 with the respective element x2_i of the input array x2. |
+| | | `pow` | Calculates an implementation-dependent approximation of exponentiation by raising each element x1_i (the base) of the input array x1 to the power of x2_i (the exponent), where x2_i is the corresponding element of the input array x2. |
+| | | `remainder` | Returns the remainder of division for each element x1_i of the input array x1 and the respective element x2_i of the input array x2. |
+| | | `subtract` | Calculates the difference for each element x1_i of the input array x1 with the respective element x2_i of the input array x2. |
+
+### Other functions
+
+| status | implementation | Python API | description |
+|-|-|-|-|
+| | | `clip` | Clamps each element x_i of the input array x to the range [min, max]. |
 
 ## Indexing Functions
 

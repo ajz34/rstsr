@@ -18,7 +18,7 @@ macro_rules! impl_op_mutc_refa_refb_operator {
                 b: &Storage<TB, Self>,
                 lb: &Layout<D>,
             ) -> Result<()> {
-                self.op_mutc_refa_refb_func(c, lc, a, la, b, lb, $func)
+                self.op_mutc_refa_refb_func(c, lc, a, la, b, lb, &mut $func)
             }
 
             fn op_mutc_refa_numb(
@@ -29,7 +29,7 @@ macro_rules! impl_op_mutc_refa_refb_operator {
                 la: &Layout<D>,
                 b: TB,
             ) -> Result<()> {
-                self.op_mutc_refa_numb_func(c, lc, a, la, b, $func)
+                self.op_mutc_refa_numb_func(c, lc, a, la, b, &mut $func)
             }
 
             fn op_mutc_numa_refb(
@@ -40,7 +40,7 @@ macro_rules! impl_op_mutc_refa_refb_operator {
                 b: &Storage<TB, Self>,
                 lb: &Layout<D>,
             ) -> Result<()> {
-                self.op_mutc_numa_refb_func(c, lc, a, b, lb, $func)
+                self.op_mutc_numa_refb_func(c, lc, a, b, lb, &mut $func)
             }
         }
     };

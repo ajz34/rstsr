@@ -60,7 +60,7 @@ where
     TB: Clone,
     TC: Clone,
     D: DimAPI,
-    F: FnMut(&mut TC, &TA, &TB),
+    F: FnMut(&mut TC, &TA, &TB) + ?Sized,
 {
     fn op_mutc_refa_refb_func(
         &self,
@@ -70,7 +70,7 @@ where
         la: &Layout<D>,
         b: &Storage<TB, CpuDevice>,
         lb: &Layout<D>,
-        mut f: F,
+        f: &mut F,
     ) -> Result<()> {
         // re-align layouts
         let layouts_full = translate_to_col_major(&[lc, la, lb], TensorIterOrder::K)?;
@@ -104,7 +104,7 @@ where
     TA: Clone,
     TC: Clone,
     D: DimAPI,
-    F: FnMut(&mut TC, &TA, &TB),
+    F: FnMut(&mut TC, &TA, &TB) + ?Sized,
 {
     fn op_mutc_refa_numb_func(
         &self,
@@ -113,7 +113,7 @@ where
         a: &Storage<TA, CpuDevice>,
         la: &Layout<D>,
         b: TB,
-        mut f: F,
+        f: &mut F,
     ) -> Result<()> {
         // re-align layouts
         let layouts_full = translate_to_col_major(&[lc, la], TensorIterOrder::K)?;
@@ -145,7 +145,7 @@ where
     TB: Clone,
     TC: Clone,
     D: DimAPI,
-    F: FnMut(&mut TC, &TA, &TB),
+    F: FnMut(&mut TC, &TA, &TB) + ?Sized,
 {
     fn op_mutc_numa_refb_func(
         &self,
@@ -154,7 +154,7 @@ where
         a: TA,
         b: &Storage<TB, CpuDevice>,
         lb: &Layout<D>,
-        mut f: F,
+        f: &mut F,
     ) -> Result<()> {
         // re-align layouts
         let layouts_full = translate_to_col_major(&[lc, lb], TensorIterOrder::K)?;
@@ -186,7 +186,7 @@ where
     TA: Clone,
     TB: Clone,
     D: DimAPI,
-    F: FnMut(&mut TA, &TB),
+    F: FnMut(&mut TA, &TB) + ?Sized,
 {
     fn op_muta_refb_func(
         &self,
@@ -194,7 +194,7 @@ where
         la: &Layout<D>,
         b: &Storage<TB, CpuDevice>,
         lb: &Layout<D>,
-        mut f: F,
+        f: &mut F,
     ) -> Result<()> {
         // re-align layouts
         let layouts_full = translate_to_col_major(&[la, lb], TensorIterOrder::K)?;
@@ -225,14 +225,14 @@ impl<TA, TB, D, F> DeviceOp_MutA_NumB_API<TA, TB, D, F> for CpuDevice
 where
     TA: Clone,
     D: DimAPI,
-    F: FnMut(&mut TA, &TB),
+    F: FnMut(&mut TA, &TB) + ?Sized,
 {
     fn op_muta_numb_func(
         &self,
         a: &mut Storage<TA, CpuDevice>,
         la: &Layout<D>,
         b: TB,
-        mut f: F,
+        f: &mut F,
     ) -> Result<()> {
         let layout = translate_to_col_major_unary(la, TensorIterOrder::K)?;
         let (layout_contig, size_contig) = translate_to_col_major_with_contig(&[&layout]);
@@ -258,9 +258,9 @@ impl<T, D, F> DeviceOp_MutA_API<T, D, F> for CpuDevice
 where
     T: Clone,
     D: DimAPI,
-    F: FnMut(&mut T),
+    F: FnMut(&mut T) + ?Sized,
 {
-    fn op_muta_func(&self, a: &mut Storage<T, CpuDevice>, la: &Layout<D>, mut f: F) -> Result<()> {
+    fn op_muta_func(&self, a: &mut Storage<T, CpuDevice>, la: &Layout<D>, f: &mut F) -> Result<()> {
         let layout = translate_to_col_major_unary(la, TensorIterOrder::K)?;
         let (layout_contig, size_contig) = translate_to_col_major_with_contig(&[&layout]);
 

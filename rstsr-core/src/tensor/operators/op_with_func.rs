@@ -6,7 +6,7 @@ pub fn op_mutc_refa_refb_func<RA, RB, RC, DA, DB, DC, TA, TB, TC, B, F>(
     c: &mut TensorBase<RC, DC>,
     a: &TensorBase<RA, DA>,
     b: &TensorBase<RB, DB>,
-    f: F,
+    f: &mut F,
 ) -> Result<()>
 where
     // lifetime and data constraints
@@ -21,7 +21,7 @@ where
     DC: DimMaxAPI<DA, Max = DC> + DimMaxAPI<DB, Max = DC>,
     // operation constraints
     B: DeviceOp_MutC_RefA_RefB_API<TA, TB, TC, DC, F>,
-    F: FnMut(&mut TC, &TA, &TB),
+    F: FnMut(&mut TC, &TA, &TB) + ?Sized,
 {
     rstsr_assert!(c.device().same_device(a.device()), DeviceMismatch)?;
     rstsr_assert!(c.device().same_device(b.device()), DeviceMismatch)?;
@@ -45,7 +45,7 @@ where
 pub fn op_refa_refb_func<RA, RB, DA, DB, DC, TA, TB, TC, B, F>(
     a: &TensorBase<RA, DA>,
     b: &TensorBase<RB, DB>,
-    f: F,
+    f: &mut F,
 ) -> Result<Tensor<TC, DC, B>>
 where
     // lifetime and data constraints
@@ -60,7 +60,7 @@ where
     // operation constraints
     B: DeviceOp_MutC_RefA_RefB_API<TA, TB, TC, DC, F>,
     B: DeviceCreationAnyAPI<TC>,
-    F: FnMut(&mut TC, &TA, &TB),
+    F: FnMut(&mut TC, &TA, &TB) + ?Sized,
 {
     rstsr_assert!(a.device().same_device(b.device()), DeviceMismatch)?;
     let la = a.layout();
@@ -91,7 +91,7 @@ where
 pub fn op_muta_refb_func<RA, RB, DA, DB, TA, TB, B, F>(
     a: &mut TensorBase<RA, DA>,
     b: &TensorBase<RB, DB>,
-    f: F,
+    f: &mut F,
 ) -> Result<()>
 where
     // lifetime and data constraints
@@ -104,7 +104,7 @@ where
     DA: DimMaxAPI<DB, Max = DA>,
     // operation constraints
     B: DeviceOp_MutA_RefB_API<TA, TB, DA, F>,
-    F: FnMut(&mut TA, &TB),
+    F: FnMut(&mut TA, &TB) + ?Sized,
 {
     rstsr_assert!(a.device().same_device(b.device()), DeviceMismatch)?;
     let la = a.layout();
@@ -120,13 +120,13 @@ where
     device.op_muta_refb_func(storage_a, &la_b, storage_b, &lb_b, f)
 }
 
-pub fn op_muta_func<R, T, D, B, F>(a: &mut TensorBase<R, D>, f: F) -> Result<()>
+pub fn op_muta_func<R, T, D, B, F>(a: &mut TensorBase<R, D>, f: &mut F) -> Result<()>
 where
     R: DataMutAPI<Data = Storage<T, B>>,
     D: DimAPI,
     B: DeviceAPI<T>,
     B: DeviceOp_MutA_API<T, D, F>,
-    F: FnMut(&mut T),
+    F: FnMut(&mut T) + ?Sized,
 {
     let la = a.layout().clone();
     let device = a.device().clone();
