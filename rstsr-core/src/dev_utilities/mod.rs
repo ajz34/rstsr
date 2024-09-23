@@ -8,8 +8,8 @@ use crate::prelude_dev::*;
 /// dimensions are broadcastable.
 pub(crate) fn allclose_f64<RA, RB, DA, DB>(a: &TensorBase<RA, DA>, b: &TensorBase<RB, DB>) -> bool
 where
-    RA: DataAPI<Data = Storage<f64, CpuDevice>>,
-    RB: DataAPI<Data = Storage<f64, CpuDevice>>,
+    RA: DataAPI<Data = Storage<f64, DeviceCpuSerial>>,
+    RB: DataAPI<Data = Storage<f64, DeviceCpuSerial>>,
     DA: DimAPI,
     DB: DimAPI,
 {

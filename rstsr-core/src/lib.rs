@@ -20,9 +20,11 @@ pub use tensorbase::{Tensor, TensorBase, TensorCow, TensorView, TensorViewMut};
 
 pub mod format;
 
-pub mod cpu_backend;
+pub mod device_cpu_serial;
 
 mod dev_utilities;
+
+pub type DeviceCpu = device_cpu_serial::DeviceCpuSerial;
 
 pub mod doc_api_specification {
     #![doc = include_str!("docs/api_specification.md")]

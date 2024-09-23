@@ -20,7 +20,6 @@
 //! - [x] `zeros`: [`Tensor::zeros`]
 //! - [x] `zeros_like`: [`Tensor::zeros_like`]
 
-use crate::cpu_backend::device::CpuDevice;
 use crate::prelude_dev::*;
 use num::complex::ComplexFloat;
 use num::{Float, Num};
@@ -59,10 +58,10 @@ where
     }
 }
 
-impl<T> Tensor<T, Ix1, CpuDevice>
+impl<T> Tensor<T, Ix1, DeviceCpu>
 where
     T: Float,
-    CpuDevice: DeviceAPI<T> + DeviceCreationFloatAPI<T>,
+    DeviceCpu: DeviceAPI<T> + DeviceCreationFloatAPI<T>,
 {
     /// Evenly spaced values within the half-open interval `[start, stop)` as
     /// one-dimensional array.
@@ -70,8 +69,8 @@ where
     /// # See also
     ///
     /// [`arange`]
-    pub fn arange_cpu(start: T, stop: T, step: T) -> Tensor<T, Ix1, CpuDevice> {
-        arange(start, stop, step, &CpuDevice {})
+    pub fn arange_cpu(start: T, stop: T, step: T) -> Tensor<T, Ix1, DeviceCpu> {
+        arange(start, stop, step, &DeviceCpu {})
     }
 }
 
@@ -107,10 +106,10 @@ where
     }
 }
 
-impl<T> Tensor<T, Ix1, CpuDevice>
+impl<T> Tensor<T, Ix1, DeviceCpu>
 where
     T: Num,
-    CpuDevice: DeviceAPI<T> + DeviceCreationNumAPI<T>,
+    DeviceCpu: DeviceAPI<T> + DeviceCreationNumAPI<T>,
 {
     /// Evenly spaced values within the half-open interval `[0, len)` as
     /// one-dimensional array, each step 1.
@@ -118,8 +117,8 @@ where
     /// # See also
     ///
     /// [`arange_int`]
-    pub fn arange_int_cpu(len: usize) -> Tensor<T, Ix1, CpuDevice> {
-        arange_int(len, &CpuDevice {})
+    pub fn arange_int_cpu(len: usize) -> Tensor<T, Ix1, DeviceCpu> {
+        arange_int(len, &DeviceCpu {})
     }
 }
 
@@ -166,7 +165,7 @@ where
     }
 }
 
-impl<T, D> Tensor<T, D, CpuDevice>
+impl<T, D> Tensor<T, D, DeviceCpu>
 where
     T: Clone + Debug,
     D: DimAPI,
@@ -180,8 +179,8 @@ where
     /// # See also
     ///
     /// [`empty`]
-    pub unsafe fn empty_cpu(layout: impl Into<Layout<D>>) -> Tensor<T, D, CpuDevice> {
-        empty(layout, &CpuDevice {})
+    pub unsafe fn empty_cpu(layout: impl Into<Layout<D>>) -> Tensor<T, D, DeviceCpu> {
+        empty(layout, &DeviceCpu {})
     }
 }
 
@@ -281,10 +280,10 @@ where
     }
 }
 
-impl<T> Tensor<T, Ix2, CpuDevice>
+impl<T> Tensor<T, Ix2, DeviceCpu>
 where
     T: Num + Clone + Debug,
-    CpuDevice: DeviceAPI<T> + DeviceCreationNumAPI<T> + OpAssignAPI<T, Ix1>,
+    DeviceCpu: DeviceAPI<T> + DeviceCreationNumAPI<T> + OpAssignAPI<T, Ix1>,
 {
     /// Returns a two-dimensional array with ones on the kth diagonal and zeros
     /// elsewhere.
@@ -293,7 +292,7 @@ where
     ///
     /// [`eye`]
     pub fn eye_cpu(n_rows: usize) -> Self {
-        eye(n_rows, n_rows, 0, TensorOrder::default(), &CpuDevice {})
+        eye(n_rows, n_rows, 0, TensorOrder::default(), &DeviceCpu {})
     }
 }
 
@@ -332,7 +331,7 @@ where
     }
 }
 
-impl<T, D> Tensor<T, D, CpuDevice>
+impl<T, D> Tensor<T, D, DeviceCpu>
 where
     T: Clone + Debug,
     D: DimAPI,
@@ -342,8 +341,8 @@ where
     /// # See also
     ///
     /// [`full`]
-    pub fn full_cpu(layout: impl Into<Layout<D>>, fill: T) -> Tensor<T, D, CpuDevice> {
-        full(layout, fill, &CpuDevice {})
+    pub fn full_cpu(layout: impl Into<Layout<D>>, fill: T) -> Tensor<T, D, DeviceCpu> {
+        full(layout, fill, &DeviceCpu {})
     }
 }
 
@@ -429,18 +428,18 @@ where
     }
 }
 
-impl<T> Tensor<T, Ix1, CpuDevice>
+impl<T> Tensor<T, Ix1, DeviceCpu>
 where
     T: ComplexFloat,
-    CpuDevice: DeviceAPI<T> + DeviceCreationComplexFloatAPI<T>,
+    DeviceCpu: DeviceAPI<T> + DeviceCreationComplexFloatAPI<T>,
 {
     /// Evenly spaced numbers over a specified interval.
     ///
     /// # See also
     ///
     /// [`linspace`]
-    pub fn linspace_cpu(start: T, end: T, n: usize) -> Tensor<T, Ix1, CpuDevice> {
-        linspace(start, end, n, true, &CpuDevice {})
+    pub fn linspace_cpu(start: T, end: T, n: usize) -> Tensor<T, Ix1, DeviceCpu> {
+        linspace(start, end, n, true, &DeviceCpu {})
     }
 }
 
@@ -481,7 +480,7 @@ where
     }
 }
 
-impl<T, D> Tensor<T, D, CpuDevice>
+impl<T, D> Tensor<T, D, DeviceCpu>
 where
     T: Num + Clone + Debug,
     D: DimAPI,
@@ -491,12 +490,12 @@ where
     /// # See also
     ///
     /// [`ones`]
-    pub fn ones_cpu(layout: impl Into<Layout<D>>) -> Tensor<T, D, CpuDevice>
+    pub fn ones_cpu(layout: impl Into<Layout<D>>) -> Tensor<T, D, DeviceCpu>
     where
         T: Num + Clone + Debug,
         D: DimAPI,
     {
-        Tensor::ones(layout, &CpuDevice {})
+        Tensor::ones(layout, &DeviceCpu {})
     }
 }
 
@@ -579,7 +578,7 @@ where
     }
 }
 
-impl<T, D> Tensor<T, D, CpuDevice>
+impl<T, D> Tensor<T, D, DeviceCpu>
 where
     T: Num + Clone + Debug,
     D: DimAPI,
@@ -589,8 +588,8 @@ where
     /// # See also
     ///
     /// [`zeros`]
-    pub fn zeros_cpu(layout: impl Into<Layout<D>>) -> Tensor<T, D, CpuDevice> {
-        zeros(layout, &CpuDevice {})
+    pub fn zeros_cpu(layout: impl Into<Layout<D>>) -> Tensor<T, D, DeviceCpu> {
+        zeros(layout, &DeviceCpu {})
     }
 }
 

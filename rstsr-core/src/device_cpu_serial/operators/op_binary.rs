@@ -2,7 +2,7 @@ use crate::prelude_dev::*;
 
 macro_rules! impl_op_muta_refb_assign {
     ($DeviceOpAPI:ident, $Op:ident, $func:expr) => {
-        impl<TA, TB, D> $DeviceOpAPI<TA, TB, D> for CpuDevice
+        impl<TA, TB, D> $DeviceOpAPI<TA, TB, D> for DeviceCpuSerial
         where
             TA: Clone + $Op<TB>,
             TB: Clone,
@@ -10,9 +10,9 @@ macro_rules! impl_op_muta_refb_assign {
         {
             fn op_muta_refb(
                 &self,
-                a: &mut Storage<TA, CpuDevice>,
+                a: &mut Storage<TA, DeviceCpuSerial>,
                 la: &Layout<D>,
-                b: &Storage<TB, CpuDevice>,
+                b: &Storage<TB, DeviceCpuSerial>,
                 lb: &Layout<D>,
             ) -> Result<()> {
                 self.op_muta_refb_func(a, la, b, lb, &mut $func)
@@ -20,7 +20,7 @@ macro_rules! impl_op_muta_refb_assign {
 
             fn op_muta_numb(
                 &self,
-                a: &mut Storage<TA, CpuDevice>,
+                a: &mut Storage<TA, DeviceCpuSerial>,
                 la: &Layout<D>,
                 b: TB,
             ) -> Result<()> {
@@ -48,7 +48,7 @@ mod impl_op_muta_refb_assign {
 
 macro_rules! impl_op_muta_refb_l_consume {
     ($DeviceOpAPI:ident, $Op:ident, $func:expr) => {
-        impl<TA, TB, D> $DeviceOpAPI<TA, TB, D> for CpuDevice
+        impl<TA, TB, D> $DeviceOpAPI<TA, TB, D> for DeviceCpuSerial
         where
             TA: Clone + $Op<TB, Output = TA>,
             TB: Clone,
@@ -56,9 +56,9 @@ macro_rules! impl_op_muta_refb_l_consume {
         {
             fn op_muta_refb(
                 &self,
-                a: &mut Storage<TA, CpuDevice>,
+                a: &mut Storage<TA, DeviceCpuSerial>,
                 la: &Layout<D>,
-                b: &Storage<TB, CpuDevice>,
+                b: &Storage<TB, DeviceCpuSerial>,
                 lb: &Layout<D>,
             ) -> Result<()> {
                 self.op_muta_refb_func(a, la, b, lb, &mut $func)
@@ -66,7 +66,7 @@ macro_rules! impl_op_muta_refb_l_consume {
 
             fn op_muta_numb(
                 &self,
-                a: &mut Storage<TA, CpuDevice>,
+                a: &mut Storage<TA, DeviceCpuSerial>,
                 la: &Layout<D>,
                 b: TB,
             ) -> Result<()> {
@@ -94,7 +94,7 @@ mod impl_op_muta_refb_l_consume {
 
 macro_rules! impl_op_muta_refb_r_consume {
     ($DeviceOpAPI:ident, $Op:ident, $func:expr) => {
-        impl<TA, TB, D> $DeviceOpAPI<TA, TB, D> for CpuDevice
+        impl<TA, TB, D> $DeviceOpAPI<TA, TB, D> for DeviceCpuSerial
         where
             TA: Clone + $Op<TB, Output = TB>,
             TB: Clone,
@@ -102,9 +102,9 @@ macro_rules! impl_op_muta_refb_r_consume {
         {
             fn op_muta_refb(
                 &self,
-                b: &mut Storage<TB, CpuDevice>,
+                b: &mut Storage<TB, DeviceCpuSerial>,
                 lb: &Layout<D>,
-                a: &Storage<TA, CpuDevice>,
+                a: &Storage<TA, DeviceCpuSerial>,
                 la: &Layout<D>,
             ) -> Result<()> {
                 self.op_muta_refb_func(b, lb, a, la, &mut $func)
@@ -112,7 +112,7 @@ macro_rules! impl_op_muta_refb_r_consume {
 
             fn op_muta_numb(
                 &self,
-                b: &mut Storage<TB, CpuDevice>,
+                b: &mut Storage<TB, DeviceCpuSerial>,
                 lb: &Layout<D>,
                 a: TA,
             ) -> Result<()> {
@@ -140,7 +140,7 @@ mod impl_op_muta_refb_r_consume {
 
 macro_rules! impl_op_muta_refb_unary {
     ($DeviceOpAPI:ident, $Op:ident, $op_muta_refb_func:ident, $func:expr, $func_inplace:expr) => {
-        impl<TA, TB, D> $DeviceOpAPI<TA, TB, D> for CpuDevice
+        impl<TA, TB, D> $DeviceOpAPI<TA, TB, D> for DeviceCpuSerial
         where
             TA: Clone,
             TB: Clone,
@@ -148,9 +148,9 @@ macro_rules! impl_op_muta_refb_unary {
         {
             fn op_muta_refb(
                 &self,
-                a: &mut Storage<TA, CpuDevice>,
+                a: &mut Storage<TA, DeviceCpuSerial>,
                 la: &Layout<D>,
-                b: &Storage<TB, CpuDevice>,
+                b: &Storage<TB, DeviceCpuSerial>,
                 lb: &Layout<D>,
             ) -> Result<()>
             where
@@ -159,7 +159,7 @@ macro_rules! impl_op_muta_refb_unary {
                 self.op_muta_refb_func(a, la, b, lb, &mut $func)
             }
 
-            fn op_muta(&self, a: &mut Storage<TA, CpuDevice>, la: &Layout<D>) -> Result<()>
+            fn op_muta(&self, a: &mut Storage<TA, DeviceCpuSerial>, la: &Layout<D>) -> Result<()>
             where
                 TA: $Op<Output = TA>,
             {

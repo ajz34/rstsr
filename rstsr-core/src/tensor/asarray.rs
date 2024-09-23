@@ -84,13 +84,13 @@ where
     }
 }
 
-impl<T> AsArrayAPI<Vec<T>> for Tensor<T, Ix1, CpuDevice>
+impl<T> AsArrayAPI<Vec<T>> for Tensor<T, Ix1, DeviceCpu>
 where
     T: Clone,
 {
     fn asarray(input: Vec<T>) -> Result<Self> {
         let layout = [input.len()].c();
-        let device = CpuDevice {};
+        let device = DeviceCpu {};
         let storage = Storage::new(input, device);
         let data = DataOwned::from(storage);
         let tensor = unsafe { Tensor::new_unchecked(data, layout) };
@@ -114,13 +114,13 @@ where
     }
 }
 
-impl<T, const N: usize> AsArrayAPI<[T; N]> for Tensor<T, Ix1, CpuDevice>
+impl<T, const N: usize> AsArrayAPI<[T; N]> for Tensor<T, Ix1, DeviceCpu>
 where
     T: Clone,
 {
     fn asarray(input: [T; N]) -> Result<Self> {
         let layout = [input.len()].c();
-        let device = CpuDevice {};
+        let device = DeviceCpu {};
         let storage = Storage::new(input.into(), device);
         let data = DataOwned::from(storage);
         let tensor = unsafe { Tensor::new_unchecked(data, layout) };
@@ -128,13 +128,13 @@ where
     }
 }
 
-impl<'a, T> AsArrayAPI<&'a [T]> for TensorView<'a, T, Ix1, CpuDevice>
+impl<'a, T> AsArrayAPI<&'a [T]> for TensorView<'a, T, Ix1, DeviceCpu>
 where
     T: Clone,
 {
     fn asarray(input: &'a [T]) -> Result<Self> {
         let layout = [input.len()].c();
-        let device = CpuDevice {};
+        let device = DeviceCpu {};
 
         let ptr = input.as_ptr();
         let len = input.len();
@@ -152,13 +152,13 @@ where
 /* #region vector casting to tensor */
 
 /// One dimension vector can be simply casted to tensor in CPU.
-impl<T> From<Vec<T>> for Tensor<T, Ix1, CpuDevice>
+impl<T> From<Vec<T>> for Tensor<T, Ix1, DeviceCpu>
 where
     T: Clone,
 {
     fn from(data: Vec<T>) -> Self {
         let size = data.len();
-        let device = CpuDevice {};
+        let device = DeviceCpu {};
         let storage = Storage { rawvec: data, device };
         let data = DataOwned { storage };
         let layout = [size].into();
@@ -198,7 +198,7 @@ mod tests {
     fn vec_cast_to_tensor() {
         use crate::layout::*;
         let a = Tensor::<f64, Ix<2>> {
-            data: Storage { rawvec: vec![1.12345, 2.0], device: CpuDevice }.into(),
+            data: Storage { rawvec: vec![1.12345, 2.0], device: DeviceCpu {} }.into(),
             layout: [1, 2].new_c_contig(None),
         };
         println!("{a:6.3?}");

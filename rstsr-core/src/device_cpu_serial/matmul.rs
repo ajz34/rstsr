@@ -6,7 +6,7 @@ use core::ops::{Add, Mul};
 
 use crate::prelude_dev::*;
 
-impl<TA, TB, TC, DA, DB, DC> DeviceMatMulAPI<TA, TB, TC, DA, DB, DC> for CpuDevice
+impl<TA, TB, TC, DA, DB, DC> DeviceMatMulAPI<TA, TB, TC, DA, DB, DC> for DeviceCpuSerial
 where
     TA: Clone,
     TB: Clone,
@@ -182,7 +182,7 @@ where
     }
 }
 
-impl<TA, TB, TC> DeviceGEMMAPI<TA, TB, TC> for CpuDevice
+impl<TA, TB, TC> DeviceGEMMAPI<TA, TB, TC> for DeviceCpuSerial
 where
     TA: Clone,
     TB: Clone,
@@ -235,7 +235,7 @@ where
     }
 }
 
-impl<TA, TB, TC> DeviceGEMVAPI<TA, TB, TC> for CpuDevice
+impl<TA, TB, TC> DeviceGEMVAPI<TA, TB, TC> for DeviceCpuSerial
 where
     TA: Clone,
     TB: Clone,
@@ -320,7 +320,7 @@ where
     }
 }
 
-impl<TA, TB, TC> DeviceInnerDotAPI<TA, TB, TC> for CpuDevice
+impl<TA, TB, TC> DeviceInnerDotAPI<TA, TB, TC> for DeviceCpuSerial
 where
     TA: Clone,
     TB: Clone,

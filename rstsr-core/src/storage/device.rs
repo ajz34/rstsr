@@ -1,4 +1,4 @@
-use crate::cpu_backend::device::CpuDevice;
+use crate::device_cpu_serial::device::DeviceCpuSerial;
 use crate::prelude_dev::*;
 
 pub trait DeviceBaseAPI: Default + Clone + Debug {
@@ -10,7 +10,7 @@ pub trait DeviceRawVecAPI<T>: DeviceBaseAPI {
 }
 
 #[derive(Debug)]
-pub struct Storage<T, B = CpuDevice>
+pub struct Storage<T, B = DeviceCpuSerial>
 where
     B: DeviceRawVecAPI<T>,
 {

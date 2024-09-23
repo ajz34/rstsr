@@ -20,7 +20,8 @@ pub use crate::storage::device::*;
 pub use crate::storage::matmul::*;
 pub use crate::storage::operators::*;
 
-pub use crate::cpu_backend::device::*;
+pub use crate::device_cpu_serial::device::*;
+pub use crate::DeviceCpu;
 
 #[allow(unused_imports)]
 pub(crate) use crate::dev_utilities::*;

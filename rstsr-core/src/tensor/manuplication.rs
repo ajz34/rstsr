@@ -569,8 +569,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::storage::Storage;
     use crate::Tensor;
-    use crate::{cpu_backend::device::CpuDevice, storage::Storage};
 
     #[test]
     fn test_to_shape_assume_contig() {
@@ -586,9 +586,9 @@ mod tests {
     // }
     #[test]
     fn test_flip() {
-        let device = CpuDevice {};
+        let device = DeviceCpu {};
         let a = Tensor::<f64, _>::new(
-            Storage::<f64, CpuDevice>::new(
+            Storage::<f64, DeviceCpu>::new(
                 (0..24).map(|v| v as f64).collect::<Vec<_>>(),
                 device.clone(),
             )

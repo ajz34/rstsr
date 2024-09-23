@@ -3,7 +3,7 @@ use crate::prelude_dev::*;
 // this value is used to determine whether to use contiguous inner iteration
 const CONTIG_SWITCH: usize = 16;
 
-impl<T, DC, DA> OpAssignArbitaryAPI<T, DC, DA> for CpuDevice
+impl<T, DC, DA> OpAssignArbitaryAPI<T, DC, DA> for DeviceCpuSerial
 where
     T: Clone,
     DC: DimAPI,
@@ -52,7 +52,7 @@ where
     }
 }
 
-impl<T, D> OpAssignAPI<T, D> for CpuDevice
+impl<T, D> OpAssignAPI<T, D> for DeviceCpuSerial
 where
     T: Clone,
     D: DimAPI,

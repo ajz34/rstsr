@@ -2,7 +2,7 @@ use crate::prelude_dev::*;
 
 macro_rules! impl_op_mutc_refa_refb_operator {
     ($DeviceOpAPI:ident, $Op:ident, $func:expr) => {
-        impl<TA, TB, TC, D> $DeviceOpAPI<TA, TB, TC, D> for CpuDevice
+        impl<TA, TB, TC, D> $DeviceOpAPI<TA, TB, TC, D> for DeviceCpuSerial
         where
             TA: Clone + $Op<TB, Output = TC>,
             TB: Clone,

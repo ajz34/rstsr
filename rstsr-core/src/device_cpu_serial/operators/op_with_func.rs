@@ -54,7 +54,7 @@ where
 
 /* #region op_func */
 
-impl<TA, TB, TC, D, F> DeviceOp_MutC_RefA_RefB_API<TA, TB, TC, D, F> for CpuDevice
+impl<TA, TB, TC, D, F> DeviceOp_MutC_RefA_RefB_API<TA, TB, TC, D, F> for DeviceCpuSerial
 where
     TA: Clone,
     TB: Clone,
@@ -64,11 +64,11 @@ where
 {
     fn op_mutc_refa_refb_func(
         &self,
-        c: &mut Storage<TC, CpuDevice>,
+        c: &mut Storage<TC, DeviceCpuSerial>,
         lc: &Layout<D>,
-        a: &Storage<TA, CpuDevice>,
+        a: &Storage<TA, DeviceCpuSerial>,
         la: &Layout<D>,
-        b: &Storage<TB, CpuDevice>,
+        b: &Storage<TB, DeviceCpuSerial>,
         lb: &Layout<D>,
         f: &mut F,
     ) -> Result<()> {
@@ -99,7 +99,7 @@ where
     }
 }
 
-impl<TA, TB, TC, D, F> DeviceOp_MutC_RefA_NumB_API<TA, TB, TC, D, F> for CpuDevice
+impl<TA, TB, TC, D, F> DeviceOp_MutC_RefA_NumB_API<TA, TB, TC, D, F> for DeviceCpuSerial
 where
     TA: Clone,
     TC: Clone,
@@ -108,9 +108,9 @@ where
 {
     fn op_mutc_refa_numb_func(
         &self,
-        c: &mut Storage<TC, CpuDevice>,
+        c: &mut Storage<TC, DeviceCpuSerial>,
         lc: &Layout<D>,
-        a: &Storage<TA, CpuDevice>,
+        a: &Storage<TA, DeviceCpuSerial>,
         la: &Layout<D>,
         b: TB,
         f: &mut F,
@@ -140,7 +140,7 @@ where
     }
 }
 
-impl<TA, TB, TC, D, F> DeviceOp_MutC_NumA_RefB_API<TA, TB, TC, D, F> for CpuDevice
+impl<TA, TB, TC, D, F> DeviceOp_MutC_NumA_RefB_API<TA, TB, TC, D, F> for DeviceCpuSerial
 where
     TB: Clone,
     TC: Clone,
@@ -149,10 +149,10 @@ where
 {
     fn op_mutc_numa_refb_func(
         &self,
-        c: &mut Storage<TC, CpuDevice>,
+        c: &mut Storage<TC, DeviceCpuSerial>,
         lc: &Layout<D>,
         a: TA,
-        b: &Storage<TB, CpuDevice>,
+        b: &Storage<TB, DeviceCpuSerial>,
         lb: &Layout<D>,
         f: &mut F,
     ) -> Result<()> {
@@ -181,7 +181,7 @@ where
     }
 }
 
-impl<TA, TB, D, F> DeviceOp_MutA_RefB_API<TA, TB, D, F> for CpuDevice
+impl<TA, TB, D, F> DeviceOp_MutA_RefB_API<TA, TB, D, F> for DeviceCpuSerial
 where
     TA: Clone,
     TB: Clone,
@@ -190,9 +190,9 @@ where
 {
     fn op_muta_refb_func(
         &self,
-        a: &mut Storage<TA, CpuDevice>,
+        a: &mut Storage<TA, DeviceCpuSerial>,
         la: &Layout<D>,
-        b: &Storage<TB, CpuDevice>,
+        b: &Storage<TB, DeviceCpuSerial>,
         lb: &Layout<D>,
         f: &mut F,
     ) -> Result<()> {
@@ -221,7 +221,7 @@ where
     }
 }
 
-impl<TA, TB, D, F> DeviceOp_MutA_NumB_API<TA, TB, D, F> for CpuDevice
+impl<TA, TB, D, F> DeviceOp_MutA_NumB_API<TA, TB, D, F> for DeviceCpuSerial
 where
     TA: Clone,
     D: DimAPI,
@@ -229,7 +229,7 @@ where
 {
     fn op_muta_numb_func(
         &self,
-        a: &mut Storage<TA, CpuDevice>,
+        a: &mut Storage<TA, DeviceCpuSerial>,
         la: &Layout<D>,
         b: TB,
         f: &mut F,
@@ -254,13 +254,13 @@ where
     }
 }
 
-impl<T, D, F> DeviceOp_MutA_API<T, D, F> for CpuDevice
+impl<T, D, F> DeviceOp_MutA_API<T, D, F> for DeviceCpuSerial
 where
     T: Clone,
     D: DimAPI,
     F: FnMut(&mut T) + ?Sized,
 {
-    fn op_muta_func(&self, a: &mut Storage<T, CpuDevice>, la: &Layout<D>, f: &mut F) -> Result<()> {
+    fn op_muta_func(&self, a: &mut Storage<T, DeviceCpuSerial>, la: &Layout<D>, f: &mut F) -> Result<()> {
         let layout = translate_to_col_major_unary(la, TensorIterOrder::K)?;
         let (layout_contig, size_contig) = translate_to_col_major_with_contig(&[&layout]);
 
@@ -281,7 +281,7 @@ where
     }
 }
 
-impl<T, D> OpSumAPI<T, D> for CpuDevice
+impl<T, D> OpSumAPI<T, D> for DeviceCpuSerial
 where
     T: Zero + core::ops::Add<Output = T> + Clone,
     D: DimAPI,
