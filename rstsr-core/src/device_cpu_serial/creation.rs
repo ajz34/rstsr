@@ -1,12 +1,6 @@
 use crate::prelude_dev::*;
 use num::{complex::ComplexFloat, Float, Num};
 
-#[test]
-fn test() {
-    let t = Storage::<f64, DeviceCpuSerial> { rawvec: vec![], device: DeviceCpuSerial {} };
-    println!("{:?}", t);
-}
-
 impl<T> DeviceCreationAnyAPI<T> for DeviceCpuSerial
 where
     T: Clone + Debug,
@@ -52,7 +46,7 @@ where
     }
 
     fn arange_int_impl(&self, len: usize) -> Result<Storage<T, DeviceCpuSerial>> {
-        let mut rawvec = vec![];
+        let mut rawvec = Vec::with_capacity(len);
         let mut v = T::zero();
         for _ in 0..len {
             rawvec.push(v.clone());
@@ -73,10 +67,7 @@ where
         end: T,
         n: usize,
         endpoint: bool,
-    ) -> Result<Storage<T, DeviceCpuSerial>>
-    where
-        T: ComplexFloat,
-    {
+    ) -> Result<Storage<T, DeviceCpuSerial>> {
         // handle special cases
         if n == 0 {
             return Ok(Storage::<T, DeviceCpuSerial> { rawvec: vec![], device: self.clone() });

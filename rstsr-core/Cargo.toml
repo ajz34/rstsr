@@ -8,18 +8,18 @@ num = { workspace = true }
 thiserror = { workspace = true }
 itertools = { workspace = true }
 half = { workspace = true }
+rayon = { workspace = true, optional = true }
 
 [dev-dependencies]
 anyhow = { workspace = true }
 rand = { workspace = true }
 itertools = { workspace = true }
 approx = { workspace = true }
-rayon = { workspace = true }
 ndarray = { workspace = true }
 
 [features]
 default = ["c_prefer"]
 std = []
 c_prefer = []
-cuda = []
+rayon = ["dep:rayon"]
 

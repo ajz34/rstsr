@@ -4,9 +4,6 @@ extern crate std;
 use crate::prelude_dev::*;
 use core::convert::Infallible;
 
-#[cfg(feature = "cuda")]
-use crate::cuda_backend::error::CudaError;
-
 #[non_exhaustive]
 #[derive(Debug)]
 pub enum Error {
@@ -21,6 +18,7 @@ pub enum Error {
     Infallible,
 
     DeviceError(String),
+    RayonError(String),
 
     Miscellaneous(String),
 }
@@ -39,6 +37,13 @@ pub type Result<T> = core::result::Result<T, Error>;
 impl From<Infallible> for Error {
     fn from(_: Infallible) -> Self {
         Error::Infallible
+    }
+}
+
+#[cfg(feature = "rayon")]
+impl From<rayon::ThreadPoolBuildError> for Error {
+    fn from(e: rayon::ThreadPoolBuildError) -> Self {
+        Error::RayonError(format!("{:?}", e))
     }
 }
 

@@ -20,6 +20,8 @@ pub use tensorbase::{Tensor, TensorBase, TensorCow, TensorView, TensorViewMut};
 
 pub mod format;
 
+#[cfg(feature = "rayon")]
+pub mod device_cpu_rayon;
 pub mod device_cpu_serial;
 
 mod dev_utilities;
