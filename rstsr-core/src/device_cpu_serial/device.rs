@@ -65,6 +65,19 @@ where
 
 impl<T> DeviceAPI<T> for DeviceCpuSerial where T: Clone {}
 
+// following implementation is not only for DeviceCpuSerial, but for all devices
+// on CPU
+impl<T, B1, B2> DeviceStorageConversionAPI<B2> for Storage<T, B1>
+where
+    B1: DeviceStorageAPI<T, RawVec = Vec<T>>,
+    B2: DeviceStorageAPI<T, RawVec = Vec<T>>,
+{
+    type T = T;
+    fn into_device(self, device: &B2) -> Result<Storage<T, B2>> {
+        Ok(Storage::<T, B2>::new(self.rawvec, device.clone()))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -11,7 +11,6 @@ half = { workspace = true }
 rayon = { workspace = true, optional = true }
 
 [dev-dependencies]
-anyhow = { workspace = true }
 rand = { workspace = true }
 itertools = { workspace = true }
 approx = { workspace = true }

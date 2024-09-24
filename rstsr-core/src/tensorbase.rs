@@ -101,3 +101,13 @@ pub type Tensor<T, D, B = DeviceCpu> = TensorBase<DataOwned<Storage<T, B>>, D>;
 pub type TensorView<'a, T, D, B = DeviceCpu> = TensorBase<DataRef<'a, Storage<T, B>>, D>;
 pub type TensorViewMut<'a, T, D, B = DeviceCpu> = TensorBase<DataRefMut<'a, Storage<T, B>>, D>;
 pub type TensorCow<'a, T, D, B = DeviceCpu> = TensorBase<DataCow<'a, Storage<T, B>>, D>;
+
+impl<T, D, B> Tensor<T, D, B>
+where
+    D: DimAPI,
+    B: DeviceAPI<T>,
+{
+    pub fn into_data(self) -> DataOwned<Storage<T, B>> {
+        self.data
+    }
+}

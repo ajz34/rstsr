@@ -29,6 +29,7 @@ pub(crate) use crate::dev_utilities::*;
 pub use crate::tensor::asarray::*;
 pub use crate::tensor::creation::*;
 pub use crate::tensor::data::*;
+pub use crate::tensor::device_conversion::*;
 pub use crate::tensor::manuplication::*;
 pub use crate::tensor::ownership_conversion::*;
 

@@ -123,3 +123,11 @@ impl DeviceId {
         Self(COUNTER.fetch_add(1, atomic::Ordering::Relaxed))
     }
 }
+
+/// Conversion API for device storage.
+pub trait DeviceStorageConversionAPI<B> {
+    type T;
+    fn into_device(self, device: &B) -> Result<Storage<Self::T, B>>
+    where
+        B: DeviceRawVecAPI<Self::T>;
+}
