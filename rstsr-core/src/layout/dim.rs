@@ -28,6 +28,8 @@ pub trait DimBaseAPI:
     + PartialEq
     + Clone
     + TryFrom<Vec<usize>>
+    + Send
+    + Sync
 {
     type Stride: AsMut<[isize]>
         + AsRef<[isize]>

@@ -63,7 +63,6 @@ where
     T: ComplexFloat + Clone + Debug + Send + Sync,
     DeviceCpuRayon: DeviceRawVecAPI<T, RawVec = Vec<T>>,
 {
-    #[allow(clippy::uninit_vec)]
     fn linspace_impl(
         &self,
         start: T,
@@ -82,15 +81,14 @@ where
             true => (end - start) / T::from(n - 1).unwrap(),
             false => (end - start) / T::from(n).unwrap(),
         };
+
         let mut rawvec: Vec<T> = Vec::with_capacity(n);
-        unsafe {
-            rawvec.set_len(n);
-        }
         let pool = self.get_pool(0).unwrap();
         pool.install(|| {
-            rawvec.par_iter_mut().enumerate().for_each(|(idx, x)| {
-                *x = start + step * T::from(idx).unwrap();
-            });
+            (0..n)
+                .into_par_iter()
+                .map(|idx| start + step * T::from(idx).unwrap())
+                .collect_into_vec(&mut rawvec)
         });
         Ok(Storage::<T, DeviceCpuRayon> { rawvec, device: self.clone() })
     }
@@ -101,7 +99,6 @@ where
     T: Float + Clone + Debug + Send + Sync,
     DeviceCpuRayon: DeviceRawVecAPI<T, RawVec = Vec<T>>,
 {
-    #[allow(clippy::uninit_vec)]
     fn arange_impl(&self, start: T, end: T, step: T) -> Result<Storage<T, Self>> {
         rstsr_assert!(step != T::zero(), InvalidValue)?;
         let n = ((end - start) / step).ceil();
@@ -109,15 +106,12 @@ where
         let n = n.to_usize().unwrap();
 
         let mut rawvec: Vec<T> = Vec::with_capacity(n);
-        unsafe {
-            rawvec.set_len(n);
-        }
-
         let pool = self.get_pool(0).unwrap();
         pool.install(|| {
-            rawvec.par_iter_mut().enumerate().for_each(|(idx, x)| {
-                *x = start + step * T::from(idx).unwrap();
-            });
+            (0..n)
+                .into_par_iter()
+                .map(|idx| start + step * T::from(idx).unwrap())
+                .collect_into_vec(&mut rawvec)
         });
         if rawvec.last().is_some_and(|&v| v == end) {
             rawvec.pop();

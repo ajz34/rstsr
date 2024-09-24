@@ -24,6 +24,9 @@ where
     size: usize,
 }
 
+unsafe impl<D> Send for Layout<D> where D: DimBaseAPI {}
+unsafe impl<D> Sync for Layout<D> where D: DimBaseAPI {}
+
 /* #endregion */
 
 /* #region Layout */

@@ -53,6 +53,34 @@ where
             offset_end,
         });
     }
+
+    pub fn split_at(&self, index: usize) -> Result<(Self, Self)> {
+        let Self { layout, index_start, iter_start, offset_start, index_end, iter_end, offset_end } =
+            self.clone();
+        let shape = layout.shape();
+        let iter_ins = iter_start + index;
+        let index_ins = unsafe { shape.unravel_index_c(iter_ins) };
+        let offset_ins = unsafe { layout.index_uncheck(index_ins.as_ref()) };
+        let split_lhs = Self {
+            layout: layout.clone(),
+            index_start,
+            iter_start,
+            offset_start,
+            index_end: index_ins.clone(),
+            iter_end: iter_ins,
+            offset_end: offset_ins,
+        };
+        let split_rhs = Self {
+            layout: layout.clone(),
+            index_start: index_ins,
+            iter_start: iter_ins,
+            offset_start: offset_ins,
+            index_end,
+            iter_end,
+            offset_end,
+        };
+        return Ok((split_lhs, split_rhs));
+    }
 }
 
 impl<D> IterLayoutRowMajor<D>
