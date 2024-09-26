@@ -2,11 +2,11 @@ use crate::prelude_dev::*;
 
 /* #region op_func */
 
-pub fn op_mutc_refa_refb_func<RA, RB, RC, DA, DB, DC, TA, TB, TC, B, F>(
+pub fn op_mutc_refa_refb_func<RA, RB, RC, DA, DB, DC, TA, TB, TC, B>(
     c: &mut TensorBase<RC, DC>,
     a: &TensorBase<RA, DA>,
     b: &TensorBase<RB, DB>,
-    f: &mut F,
+    f: impl FnMut(&mut TC, &TA, &TB),
 ) -> Result<()>
 where
     // lifetime and data constraints
@@ -20,8 +20,7 @@ where
     // broadcast constraints
     DC: DimMaxAPI<DA, Max = DC> + DimMaxAPI<DB, Max = DC>,
     // operation constraints
-    B: DeviceOp_MutC_RefA_RefB_API<TA, TB, TC, DC, F>,
-    F: FnMut(&mut TC, &TA, &TB) + ?Sized,
+    B: DeviceOp_MutC_RefA_RefB_API<TA, TB, TC, DC>,
 {
     rstsr_assert!(c.device().same_device(a.device()), DeviceMismatch)?;
     rstsr_assert!(c.device().same_device(b.device()), DeviceMismatch)?;
@@ -42,10 +41,10 @@ where
     device.op_mutc_refa_refb_func(storage_c, &lc_b, storage_a, &la_b, storage_b, &lb_b, f)
 }
 
-pub fn op_refa_refb_func<RA, RB, DA, DB, DC, TA, TB, TC, B, F>(
+pub fn op_refa_refb_func<RA, RB, DA, DB, DC, TA, TB, TC, B>(
     a: &TensorBase<RA, DA>,
     b: &TensorBase<RB, DB>,
-    f: &mut F,
+    f: impl FnMut(&mut TC, &TA, &TB),
 ) -> Result<Tensor<TC, DC, B>>
 where
     // lifetime and data constraints
@@ -58,9 +57,8 @@ where
     // broadcast constraints
     DA: DimMaxAPI<DB, Max = DC>,
     // operation constraints
-    B: DeviceOp_MutC_RefA_RefB_API<TA, TB, TC, DC, F>,
+    B: DeviceOp_MutC_RefA_RefB_API<TA, TB, TC, DC>,
     B: DeviceCreationAnyAPI<TC>,
-    F: FnMut(&mut TC, &TA, &TB) + ?Sized,
 {
     rstsr_assert!(a.device().same_device(b.device()), DeviceMismatch)?;
     let la = a.layout();
@@ -88,10 +86,10 @@ where
     Tensor::new(DataOwned::from(storage_c), lc)
 }
 
-pub fn op_muta_refb_func<RA, RB, DA, DB, TA, TB, B, F>(
+pub fn op_muta_refb_func<RA, RB, DA, DB, TA, TB, B>(
     a: &mut TensorBase<RA, DA>,
     b: &TensorBase<RB, DB>,
-    f: &mut F,
+    f: impl FnMut(&mut TA, &TB),
 ) -> Result<()>
 where
     // lifetime and data constraints
@@ -103,8 +101,7 @@ where
     // broadcast constraints
     DA: DimMaxAPI<DB, Max = DA>,
     // operation constraints
-    B: DeviceOp_MutA_RefB_API<TA, TB, DA, F>,
-    F: FnMut(&mut TA, &TB) + ?Sized,
+    B: DeviceOp_MutA_RefB_API<TA, TB, DA>,
 {
     rstsr_assert!(a.device().same_device(b.device()), DeviceMismatch)?;
     let la = a.layout();
@@ -120,13 +117,12 @@ where
     device.op_muta_refb_func(storage_a, &la_b, storage_b, &lb_b, f)
 }
 
-pub fn op_muta_func<R, T, D, B, F>(a: &mut TensorBase<R, D>, f: &mut F) -> Result<()>
+pub fn op_muta_func<R, T, D, B>(a: &mut TensorBase<R, D>, f: impl FnMut(&mut T)) -> Result<()>
 where
     R: DataMutAPI<Data = Storage<T, B>>,
     D: DimAPI,
     B: DeviceAPI<T>,
-    B: DeviceOp_MutA_API<T, D, F>,
-    F: FnMut(&mut T) + ?Sized,
+    B: DeviceOp_MutA_API<T, D>,
 {
     let la = a.layout().clone();
     let device = a.device().clone();

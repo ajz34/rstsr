@@ -54,18 +54,17 @@ where
 
 /* #region op_func definition */
 
-pub fn op_mutc_refa_refb_func_cpu_serial<TA, TB, TC, D, F>(
+pub fn op_mutc_refa_refb_func_cpu_serial<TA, TB, TC, D>(
     c: &mut [TC],
     lc: &Layout<D>,
     a: &[TA],
     la: &Layout<D>,
     b: &[TB],
     lb: &Layout<D>,
-    f: &mut F,
+    mut f: impl FnMut(&mut TC, &TA, &TB),
 ) -> Result<()>
 where
     D: DimAPI,
-    F: FnMut(&mut TC, &TA, &TB) + ?Sized,
 {
     // re-align layouts
     let layouts_full = translate_to_col_major(&[lc, la, lb], TensorIterOrder::K)?;
@@ -93,17 +92,16 @@ where
     return Ok(());
 }
 
-pub fn op_mutc_refa_numb_func_cpu_serial<TA, TB, TC, D, F>(
+pub fn op_mutc_refa_numb_func_cpu_serial<TA, TB, TC, D>(
     c: &mut [TC],
     lc: &Layout<D>,
     a: &[TA],
     la: &Layout<D>,
     b: TB,
-    f: &mut F,
+    mut f: impl FnMut(&mut TC, &TA, &TB),
 ) -> Result<()>
 where
     D: DimAPI,
-    F: FnMut(&mut TC, &TA, &TB) + ?Sized,
 {
     // re-align layouts
     let layouts_full = translate_to_col_major(&[lc, la], TensorIterOrder::K)?;
@@ -129,17 +127,16 @@ where
     return Ok(());
 }
 
-pub fn op_mutc_numa_refb_func_cpu_serial<TA, TB, TC, D, F>(
+pub fn op_mutc_numa_refb_func_cpu_serial<TA, TB, TC, D>(
     c: &mut [TC],
     lc: &Layout<D>,
     a: TA,
     b: &[TB],
     lb: &Layout<D>,
-    f: &mut F,
+    mut f: impl FnMut(&mut TC, &TA, &TB),
 ) -> Result<()>
 where
     D: DimAPI,
-    F: FnMut(&mut TC, &TA, &TB) + ?Sized,
 {
     // re-align layouts
     let layouts_full = translate_to_col_major(&[lc, lb], TensorIterOrder::K)?;
@@ -165,16 +162,15 @@ where
     return Ok(());
 }
 
-pub fn op_muta_refb_func_cpu_serial<TA, TB, D, F>(
+pub fn op_muta_refb_func_cpu_serial<TA, TB, D>(
     a: &mut [TA],
     la: &Layout<D>,
     b: &[TB],
     lb: &Layout<D>,
-    f: &mut F,
+    mut f: impl FnMut(&mut TA, &TB),
 ) -> Result<()>
 where
     D: DimAPI,
-    F: FnMut(&mut TA, &TB) + ?Sized,
 {
     // re-align layouts
     let layouts_full = translate_to_col_major(&[la, lb], TensorIterOrder::K)?;
@@ -200,15 +196,14 @@ where
     return Ok(());
 }
 
-pub fn op_muta_numb_func_cpu_serial<TA, TB, D, F>(
+pub fn op_muta_numb_func_cpu_serial<TA, TB, D>(
     a: &mut [TA],
     la: &Layout<D>,
     b: TB,
-    f: &mut F,
+    mut f: impl FnMut(&mut TA, &TB),
 ) -> Result<()>
 where
     D: DimAPI,
-    F: FnMut(&mut TA, &TB) + ?Sized,
 {
     let layout = translate_to_col_major_unary(la, TensorIterOrder::G)?;
     let (layout_contig, size_contig) = translate_to_col_major_with_contig(&[&layout]);
@@ -229,10 +224,13 @@ where
     return Ok(());
 }
 
-pub fn op_muta_func_cpu_serial<T, D, F>(a: &mut [T], la: &Layout<D>, f: &mut F) -> Result<()>
+pub fn op_muta_func_cpu_serial<T, D>(
+    a: &mut [T],
+    la: &Layout<D>,
+    mut f: impl FnMut(&mut T),
+) -> Result<()>
 where
     D: DimAPI,
-    F: FnMut(&mut T) + ?Sized,
 {
     let layout = translate_to_col_major_unary(la, TensorIterOrder::G)?;
     let (layout_contig, size_contig) = translate_to_col_major_with_contig(&[&layout]);
@@ -253,13 +251,12 @@ where
     return Ok(());
 }
 
-impl<TA, TB, TC, D, F> DeviceOp_MutC_RefA_RefB_API<TA, TB, TC, D, F> for DeviceCpuSerial
+impl<TA, TB, TC, D> DeviceOp_MutC_RefA_RefB_API<TA, TB, TC, D> for DeviceCpuSerial
 where
     TA: Clone,
     TB: Clone,
     TC: Clone,
     D: DimAPI,
-    F: FnMut(&mut TC, &TA, &TB) + ?Sized,
 {
     fn op_mutc_refa_refb_func(
         &self,
@@ -269,18 +266,17 @@ where
         la: &Layout<D>,
         b: &Storage<TB, DeviceCpuSerial>,
         lb: &Layout<D>,
-        f: &mut F,
+        f: impl FnMut(&mut TC, &TA, &TB),
     ) -> Result<()> {
         op_mutc_refa_refb_func_cpu_serial(c.rawvec_mut(), lc, a.rawvec(), la, b.rawvec(), lb, f)
     }
 }
 
-impl<TA, TB, TC, D, F> DeviceOp_MutC_RefA_NumB_API<TA, TB, TC, D, F> for DeviceCpuSerial
+impl<TA, TB, TC, D> DeviceOp_MutC_RefA_NumB_API<TA, TB, TC, D> for DeviceCpuSerial
 where
     TA: Clone,
     TC: Clone,
     D: DimAPI,
-    F: FnMut(&mut TC, &TA, &TB) + ?Sized,
 {
     fn op_mutc_refa_numb_func(
         &self,
@@ -289,18 +285,17 @@ where
         a: &Storage<TA, DeviceCpuSerial>,
         la: &Layout<D>,
         b: TB,
-        f: &mut F,
+        f: impl FnMut(&mut TC, &TA, &TB),
     ) -> Result<()> {
         op_mutc_refa_numb_func_cpu_serial(c.rawvec_mut(), lc, a.rawvec(), la, b, f)
     }
 }
 
-impl<TA, TB, TC, D, F> DeviceOp_MutC_NumA_RefB_API<TA, TB, TC, D, F> for DeviceCpuSerial
+impl<TA, TB, TC, D> DeviceOp_MutC_NumA_RefB_API<TA, TB, TC, D> for DeviceCpuSerial
 where
     TB: Clone,
     TC: Clone,
     D: DimAPI,
-    F: FnMut(&mut TC, &TA, &TB) + ?Sized,
 {
     fn op_mutc_numa_refb_func(
         &self,
@@ -309,18 +304,17 @@ where
         a: TA,
         b: &Storage<TB, DeviceCpuSerial>,
         lb: &Layout<D>,
-        f: &mut F,
+        f: impl FnMut(&mut TC, &TA, &TB),
     ) -> Result<()> {
         op_mutc_numa_refb_func_cpu_serial(c.rawvec_mut(), lc, a, b.rawvec(), lb, f)
     }
 }
 
-impl<TA, TB, D, F> DeviceOp_MutA_RefB_API<TA, TB, D, F> for DeviceCpuSerial
+impl<TA, TB, D> DeviceOp_MutA_RefB_API<TA, TB, D> for DeviceCpuSerial
 where
     TA: Clone,
     TB: Clone,
     D: DimAPI,
-    F: FnMut(&mut TA, &TB) + ?Sized,
 {
     fn op_muta_refb_func(
         &self,
@@ -328,40 +322,38 @@ where
         la: &Layout<D>,
         b: &Storage<TB, DeviceCpuSerial>,
         lb: &Layout<D>,
-        f: &mut F,
+        f: impl FnMut(&mut TA, &TB),
     ) -> Result<()> {
         op_muta_refb_func_cpu_serial(a.rawvec_mut(), la, b.rawvec(), lb, f)
     }
 }
 
-impl<TA, TB, D, F> DeviceOp_MutA_NumB_API<TA, TB, D, F> for DeviceCpuSerial
+impl<TA, TB, D> DeviceOp_MutA_NumB_API<TA, TB, D> for DeviceCpuSerial
 where
     TA: Clone,
     D: DimAPI,
-    F: FnMut(&mut TA, &TB) + ?Sized,
 {
     fn op_muta_numb_func(
         &self,
         a: &mut Storage<TA, DeviceCpuSerial>,
         la: &Layout<D>,
         b: TB,
-        f: &mut F,
+        f: impl FnMut(&mut TA, &TB),
     ) -> Result<()> {
         op_muta_numb_func_cpu_serial(a.rawvec_mut(), la, b, f)
     }
 }
 
-impl<T, D, F> DeviceOp_MutA_API<T, D, F> for DeviceCpuSerial
+impl<T, D> DeviceOp_MutA_API<T, D> for DeviceCpuSerial
 where
     T: Clone,
     D: DimAPI,
-    F: FnMut(&mut T) + ?Sized,
 {
     fn op_muta_func(
         &self,
         a: &mut Storage<T, DeviceCpuSerial>,
         la: &Layout<D>,
-        f: &mut F,
+        f: impl FnMut(&mut T),
     ) -> Result<()> {
         op_muta_func_cpu_serial(a.rawvec_mut(), la, f)
     }

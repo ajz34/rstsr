@@ -12,14 +12,14 @@ const PARALLEL_SWITCH: usize = 256;
 // iteration is parallelized.
 
 #[allow(clippy::too_many_arguments)]
-pub fn op_mutc_refa_refb_func_cpu_rayon<TA, TB, TC, D, F>(
+pub fn op_mutc_refa_refb_func_cpu_rayon<TA, TB, TC, D>(
     c: &mut [TC],
     lc: &Layout<D>,
     a: &[TA],
     la: &Layout<D>,
     b: &[TB],
     lb: &Layout<D>,
-    f: &mut F,
+    f: impl Fn(&mut TC, &TA, &TB) + Sync + Send,
     nthreads: usize,
 ) -> Result<()>
 where
@@ -27,7 +27,6 @@ where
     TB: Send + Sync,
     TC: Send + Sync,
     D: DimAPI,
-    F: Fn(&mut TC, &TA, &TB) + ?Sized + Send + Sync,
 {
     // determine whether to use parallel iteration
     let size = lc.size();
