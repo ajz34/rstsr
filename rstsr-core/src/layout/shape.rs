@@ -214,12 +214,14 @@ impl DimShapeAPI for IxD {
     unsafe fn unravel_index_f(&self, index: usize) -> Self {
         let mut index = index;
         let mut result = self.new_shape();
-        for i in 0..(self.ndim() - 1) {
-            let dim = self[i];
-            result[i] = index % dim;
-            index /= dim;
+        if self.ndim() >= 1 {
+            for i in 0..(self.ndim() - 1) {
+                let dim = self[i];
+                result[i] = index % dim;
+                index /= dim;
+            }
+            result[self.ndim() - 1] = index;
         }
-        result[self.ndim() - 1] = index;
         return result;
     }
 
@@ -227,12 +229,14 @@ impl DimShapeAPI for IxD {
     unsafe fn unravel_index_c(&self, index: usize) -> Self {
         let mut index = index;
         let mut result = self.new_shape();
-        for i in (1..self.ndim()).rev() {
-            let dim = self[i];
-            result[i] = index % dim;
-            index /= dim;
+        if self.ndim() >= 1 {
+            for i in (1..self.ndim()).rev() {
+                let dim = self[i];
+                result[i] = index % dim;
+                index /= dim;
+            }
+            result[0] = index;
         }
-        result[0] = index;
         return result;
     }
 }

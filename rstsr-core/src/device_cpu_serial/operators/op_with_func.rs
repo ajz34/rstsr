@@ -52,7 +52,206 @@ where
     acc
 }
 
-/* #region op_func */
+/* #region op_func definition */
+
+pub fn op_mutc_refa_refb_func_cpu_serial<TA, TB, TC, D, F>(
+    c: &mut [TC],
+    lc: &Layout<D>,
+    a: &[TA],
+    la: &Layout<D>,
+    b: &[TB],
+    lb: &Layout<D>,
+    f: &mut F,
+) -> Result<()>
+where
+    D: DimAPI,
+    F: FnMut(&mut TC, &TA, &TB) + ?Sized,
+{
+    // re-align layouts
+    let layouts_full = translate_to_col_major(&[lc, la, lb], TensorIterOrder::K)?;
+    let layouts_full_ref = layouts_full.iter().collect_vec();
+    let (layouts_contig, size_contig) = translate_to_col_major_with_contig(&layouts_full_ref);
+
+    // contiguous iteration if possible, otherwise use iterator of layout
+    if size_contig >= CONTIG_SWITCH {
+        let iter_c = IterLayoutColMajor::new(&layouts_contig[0])?;
+        let iter_a = IterLayoutColMajor::new(&layouts_contig[1])?;
+        let iter_b = IterLayoutColMajor::new(&layouts_contig[2])?;
+        for (idx_c, idx_a, idx_b) in izip!(iter_c, iter_a, iter_b) {
+            for i in 0..size_contig {
+                f(&mut c[idx_c + i], &a[idx_a + i], &b[idx_b + i]);
+            }
+        }
+    } else {
+        let iter_c = IterLayoutColMajor::new(&layouts_full[0])?;
+        let iter_a = IterLayoutColMajor::new(&layouts_full[1])?;
+        let iter_b = IterLayoutColMajor::new(&layouts_full[2])?;
+        for (idx_c, idx_a, idx_b) in izip!(iter_c, iter_a, iter_b) {
+            f(&mut c[idx_c], &a[idx_a], &b[idx_b]);
+        }
+    }
+    return Ok(());
+}
+
+pub fn op_mutc_refa_numb_func_cpu_serial<TA, TB, TC, D, F>(
+    c: &mut [TC],
+    lc: &Layout<D>,
+    a: &[TA],
+    la: &Layout<D>,
+    b: TB,
+    f: &mut F,
+) -> Result<()>
+where
+    D: DimAPI,
+    F: FnMut(&mut TC, &TA, &TB) + ?Sized,
+{
+    // re-align layouts
+    let layouts_full = translate_to_col_major(&[lc, la], TensorIterOrder::K)?;
+    let layouts_full_ref = layouts_full.iter().collect_vec();
+    let (layouts_contig, size_contig) = translate_to_col_major_with_contig(&layouts_full_ref);
+
+    // contiguous iteration if possible, otherwise use iterator of layout
+    if size_contig >= CONTIG_SWITCH {
+        let iter_c = IterLayoutColMajor::new(&layouts_contig[0])?;
+        let iter_a = IterLayoutColMajor::new(&layouts_contig[1])?;
+        for (idx_c, idx_a) in izip!(iter_c, iter_a) {
+            for i in 0..size_contig {
+                f(&mut c[idx_c + i], &a[idx_a + i], &b);
+            }
+        }
+    } else {
+        let iter_c = IterLayoutColMajor::new(&layouts_full[0])?;
+        let iter_a = IterLayoutColMajor::new(&layouts_full[1])?;
+        for (idx_c, idx_a) in izip!(iter_c, iter_a) {
+            f(&mut c[idx_c], &a[idx_a], &b);
+        }
+    }
+    return Ok(());
+}
+
+pub fn op_mutc_numa_refb_func_cpu_serial<TA, TB, TC, D, F>(
+    c: &mut [TC],
+    lc: &Layout<D>,
+    a: TA,
+    b: &[TB],
+    lb: &Layout<D>,
+    f: &mut F,
+) -> Result<()>
+where
+    D: DimAPI,
+    F: FnMut(&mut TC, &TA, &TB) + ?Sized,
+{
+    // re-align layouts
+    let layouts_full = translate_to_col_major(&[lc, lb], TensorIterOrder::K)?;
+    let layouts_full_ref = layouts_full.iter().collect_vec();
+    let (layouts_contig, size_contig) = translate_to_col_major_with_contig(&layouts_full_ref);
+
+    // contiguous iteration if possible, otherwise use iterator of layout
+    if size_contig >= CONTIG_SWITCH {
+        let iter_c = IterLayoutColMajor::new(&layouts_contig[0])?;
+        let iter_b = IterLayoutColMajor::new(&layouts_contig[1])?;
+        for (idx_c, idx_b) in izip!(iter_c, iter_b) {
+            for i in 0..size_contig {
+                f(&mut c[idx_c + i], &a, &b[idx_b + i]);
+            }
+        }
+    } else {
+        let iter_c = IterLayoutColMajor::new(&layouts_full[0])?;
+        let iter_b = IterLayoutColMajor::new(&layouts_full[1])?;
+        for (idx_c, idx_b) in izip!(iter_c, iter_b) {
+            f(&mut c[idx_c], &a, &b[idx_b]);
+        }
+    }
+    return Ok(());
+}
+
+pub fn op_muta_refb_func_cpu_serial<TA, TB, D, F>(
+    a: &mut [TA],
+    la: &Layout<D>,
+    b: &[TB],
+    lb: &Layout<D>,
+    f: &mut F,
+) -> Result<()>
+where
+    D: DimAPI,
+    F: FnMut(&mut TA, &TB) + ?Sized,
+{
+    // re-align layouts
+    let layouts_full = translate_to_col_major(&[la, lb], TensorIterOrder::K)?;
+    let layouts_full_ref = layouts_full.iter().collect_vec();
+    let (layouts_contig, size_contig) = translate_to_col_major_with_contig(&layouts_full_ref);
+
+    // contiguous iteration if possible, otherwise use iterator of layout
+    if size_contig >= CONTIG_SWITCH {
+        let iter_a = IterLayoutColMajor::new(&layouts_contig[0])?;
+        let iter_b = IterLayoutColMajor::new(&layouts_contig[1])?;
+        for (idx_a, idx_b) in izip!(iter_a, iter_b) {
+            for i in 0..size_contig {
+                f(&mut a[idx_a + i], &b[idx_b + i]);
+            }
+        }
+    } else {
+        let iter_a = IterLayoutColMajor::new(&layouts_full[0])?;
+        let iter_b = IterLayoutColMajor::new(&layouts_full[1])?;
+        for (idx_a, idx_b) in izip!(iter_a, iter_b) {
+            f(&mut a[idx_a], &b[idx_b]);
+        }
+    }
+    return Ok(());
+}
+
+pub fn op_muta_numb_func_cpu_serial<TA, TB, D, F>(
+    a: &mut [TA],
+    la: &Layout<D>,
+    b: TB,
+    f: &mut F,
+) -> Result<()>
+where
+    D: DimAPI,
+    F: FnMut(&mut TA, &TB) + ?Sized,
+{
+    let layout = translate_to_col_major_unary(la, TensorIterOrder::G)?;
+    let (layout_contig, size_contig) = translate_to_col_major_with_contig(&[&layout]);
+
+    if size_contig >= CONTIG_SWITCH {
+        let iter_a = IterLayoutColMajor::new(&layout_contig[0])?;
+        for idx_a in iter_a {
+            for i in 0..size_contig {
+                f(&mut a[idx_a + i], &b);
+            }
+        }
+    } else {
+        let iter_a = IterLayoutColMajor::new(&layout)?;
+        for idx_a in iter_a {
+            f(&mut a[idx_a], &b);
+        }
+    }
+    return Ok(());
+}
+
+pub fn op_muta_func_cpu_serial<T, D, F>(a: &mut [T], la: &Layout<D>, f: &mut F) -> Result<()>
+where
+    D: DimAPI,
+    F: FnMut(&mut T) + ?Sized,
+{
+    let layout = translate_to_col_major_unary(la, TensorIterOrder::G)?;
+    let (layout_contig, size_contig) = translate_to_col_major_with_contig(&[&layout]);
+
+    if size_contig >= CONTIG_SWITCH {
+        let iter_a = IterLayoutColMajor::new(&layout_contig[0])?;
+        for idx_a in iter_a {
+            for i in 0..size_contig {
+                f(&mut a[idx_a + i]);
+            }
+        }
+    } else {
+        let iter_a = IterLayoutColMajor::new(&layout)?;
+        for idx_a in iter_a {
+            f(&mut a[idx_a]);
+        }
+    }
+    return Ok(());
+}
 
 impl<TA, TB, TC, D, F> DeviceOp_MutC_RefA_RefB_API<TA, TB, TC, D, F> for DeviceCpuSerial
 where
@@ -72,30 +271,7 @@ where
         lb: &Layout<D>,
         f: &mut F,
     ) -> Result<()> {
-        // re-align layouts
-        let layouts_full = translate_to_col_major(&[lc, la, lb], TensorIterOrder::K)?;
-        let layouts_full_ref = layouts_full.iter().collect_vec();
-        let (layouts_contig, size_contig) = translate_to_col_major_with_contig(&layouts_full_ref);
-
-        // contiguous iteration if possible, otherwise use iterator of layout
-        if size_contig >= CONTIG_SWITCH {
-            let iter_c = IterLayoutColMajor::new(&layouts_contig[0])?;
-            let iter_a = IterLayoutColMajor::new(&layouts_contig[1])?;
-            let iter_b = IterLayoutColMajor::new(&layouts_contig[2])?;
-            for (idx_c, idx_a, idx_b) in izip!(iter_c, iter_a, iter_b) {
-                for i in 0..size_contig {
-                    f(&mut c.rawvec[idx_c + i], &a.rawvec[idx_a + i], &b.rawvec[idx_b + i]);
-                }
-            }
-        } else {
-            let iter_c = IterLayoutColMajor::new(&layouts_full[0])?;
-            let iter_a = IterLayoutColMajor::new(&layouts_full[1])?;
-            let iter_b = IterLayoutColMajor::new(&layouts_full[2])?;
-            for (idx_c, idx_a, idx_b) in izip!(iter_c, iter_a, iter_b) {
-                f(&mut c.rawvec[idx_c], &a.rawvec[idx_a], &b.rawvec[idx_b]);
-            }
-        }
-        return Ok(());
+        op_mutc_refa_refb_func_cpu_serial(c.rawvec_mut(), lc, a.rawvec(), la, b.rawvec(), lb, f)
     }
 }
 
@@ -115,28 +291,7 @@ where
         b: TB,
         f: &mut F,
     ) -> Result<()> {
-        // re-align layouts
-        let layouts_full = translate_to_col_major(&[lc, la], TensorIterOrder::K)?;
-        let layouts_full_ref = layouts_full.iter().collect_vec();
-        let (layouts_contig, size_contig) = translate_to_col_major_with_contig(&layouts_full_ref);
-
-        // contiguous iteration if possible, otherwise use iterator of layout
-        if size_contig >= CONTIG_SWITCH {
-            let iter_c = IterLayoutColMajor::new(&layouts_contig[0])?;
-            let iter_a = IterLayoutColMajor::new(&layouts_contig[1])?;
-            for (idx_c, idx_a) in izip!(iter_c, iter_a) {
-                for i in 0..size_contig {
-                    f(&mut c.rawvec[idx_c + i], &a.rawvec[idx_a + i], &b);
-                }
-            }
-        } else {
-            let iter_c = IterLayoutColMajor::new(&layouts_full[0])?;
-            let iter_a = IterLayoutColMajor::new(&layouts_full[1])?;
-            for (idx_c, idx_a) in izip!(iter_c, iter_a) {
-                f(&mut c.rawvec[idx_c], &a.rawvec[idx_a], &b);
-            }
-        }
-        return Ok(());
+        op_mutc_refa_numb_func_cpu_serial(c.rawvec_mut(), lc, a.rawvec(), la, b, f)
     }
 }
 
@@ -156,28 +311,7 @@ where
         lb: &Layout<D>,
         f: &mut F,
     ) -> Result<()> {
-        // re-align layouts
-        let layouts_full = translate_to_col_major(&[lc, lb], TensorIterOrder::K)?;
-        let layouts_full_ref = layouts_full.iter().collect_vec();
-        let (layouts_contig, size_contig) = translate_to_col_major_with_contig(&layouts_full_ref);
-
-        // contiguous iteration if possible, otherwise use iterator of layout
-        if size_contig >= CONTIG_SWITCH {
-            let iter_c = IterLayoutColMajor::new(&layouts_contig[0])?;
-            let iter_b = IterLayoutColMajor::new(&layouts_contig[1])?;
-            for (idx_c, idx_b) in izip!(iter_c, iter_b) {
-                for i in 0..size_contig {
-                    f(&mut c.rawvec[idx_c + i], &a, &b.rawvec[idx_b + i]);
-                }
-            }
-        } else {
-            let iter_c = IterLayoutColMajor::new(&layouts_full[0])?;
-            let iter_b = IterLayoutColMajor::new(&layouts_full[1])?;
-            for (idx_c, idx_b) in izip!(iter_c, iter_b) {
-                f(&mut c.rawvec[idx_c], &a, &b.rawvec[idx_b]);
-            }
-        }
-        return Ok(());
+        op_mutc_numa_refb_func_cpu_serial(c.rawvec_mut(), lc, a, b.rawvec(), lb, f)
     }
 }
 
@@ -196,28 +330,7 @@ where
         lb: &Layout<D>,
         f: &mut F,
     ) -> Result<()> {
-        // re-align layouts
-        let layouts_full = translate_to_col_major(&[la, lb], TensorIterOrder::K)?;
-        let layouts_full_ref = layouts_full.iter().collect_vec();
-        let (layouts_contig, size_contig) = translate_to_col_major_with_contig(&layouts_full_ref);
-
-        // contiguous iteration if possible, otherwise use iterator of layout
-        if size_contig >= CONTIG_SWITCH {
-            let iter_a = IterLayoutColMajor::new(&layouts_contig[0])?;
-            let iter_b = IterLayoutColMajor::new(&layouts_contig[1])?;
-            for (idx_a, idx_b) in izip!(iter_a, iter_b) {
-                for i in 0..size_contig {
-                    f(&mut a.rawvec[idx_a + i], &b.rawvec[idx_b + i]);
-                }
-            }
-        } else {
-            let iter_a = IterLayoutColMajor::new(&layouts_full[0])?;
-            let iter_b = IterLayoutColMajor::new(&layouts_full[1])?;
-            for (idx_a, idx_b) in izip!(iter_a, iter_b) {
-                f(&mut a.rawvec[idx_a], &b.rawvec[idx_b]);
-            }
-        }
-        return Ok(());
+        op_muta_refb_func_cpu_serial(a.rawvec_mut(), la, b.rawvec(), lb, f)
     }
 }
 
@@ -234,23 +347,7 @@ where
         b: TB,
         f: &mut F,
     ) -> Result<()> {
-        let layout = translate_to_col_major_unary(la, TensorIterOrder::K)?;
-        let (layout_contig, size_contig) = translate_to_col_major_with_contig(&[&layout]);
-
-        if size_contig >= CONTIG_SWITCH {
-            let iter_a = IterLayoutColMajor::new(&layout_contig[0])?;
-            for idx_a in iter_a {
-                for i in 0..size_contig {
-                    f(&mut a.rawvec[idx_a + i], &b);
-                }
-            }
-        } else {
-            let iter_a = IterLayoutColMajor::new(&layout)?;
-            for idx_a in iter_a {
-                f(&mut a.rawvec[idx_a], &b);
-            }
-        }
-        return Ok(());
+        op_muta_numb_func_cpu_serial(a.rawvec_mut(), la, b, f)
     }
 }
 
@@ -260,24 +357,13 @@ where
     D: DimAPI,
     F: FnMut(&mut T) + ?Sized,
 {
-    fn op_muta_func(&self, a: &mut Storage<T, DeviceCpuSerial>, la: &Layout<D>, f: &mut F) -> Result<()> {
-        let layout = translate_to_col_major_unary(la, TensorIterOrder::K)?;
-        let (layout_contig, size_contig) = translate_to_col_major_with_contig(&[&layout]);
-
-        if size_contig >= CONTIG_SWITCH {
-            let iter_a = IterLayoutColMajor::new(&layout_contig[0])?;
-            for idx_a in iter_a {
-                for i in 0..size_contig {
-                    f(&mut a.rawvec[idx_a + i]);
-                }
-            }
-        } else {
-            let iter_a = IterLayoutColMajor::new(&layout)?;
-            for idx_a in iter_a {
-                f(&mut a.rawvec[idx_a]);
-            }
-        }
-        return Ok(());
+    fn op_muta_func(
+        &self,
+        a: &mut Storage<T, DeviceCpuSerial>,
+        la: &Layout<D>,
+        f: &mut F,
+    ) -> Result<()> {
+        op_muta_func_cpu_serial(a.rawvec_mut(), la, f)
     }
 }
 

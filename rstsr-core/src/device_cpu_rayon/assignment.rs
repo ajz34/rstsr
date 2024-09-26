@@ -11,6 +11,9 @@ const CONTIG_SWITCH: usize = 16;
 // Actual switch value is PARALLEL_SWITCH * RAYON_NUM_THREADS.
 // Since current task is not intensive to each element, this value is large.
 const PARALLEL_SWITCH: usize = 256;
+// For assignment, it is fully memory bounded; contiguous assignment is better
+// handled by serial code. So we only do parallel in outer iteration
+// (non-contiguous part).
 
 pub fn assign_arbitary_cpu_rayon<T, DC, DA>(
     c: &mut [T],
@@ -33,15 +36,11 @@ where
     // actual parallel iteration
     if lc.c_contig() && la.c_contig() || lc.f_contig() && la.f_contig() {
         // contiguous case
+        // we do not perform parallel for this case
         let offset_c = lc.offset();
         let offset_a = la.offset();
         let size = lc.size();
-        (0..size).into_par_iter().for_each(|idx| unsafe {
-            let idx_c = offset_c + idx;
-            let idx_a = offset_a + idx;
-            let c_ptr = c.as_ptr() as *mut T;
-            *c_ptr.add(idx_c) = a[idx_a].clone();
-        });
+        c[offset_c..(offset_c + size)].clone_from_slice(&a[offset_a..(offset_a + size)]);
     } else {
         // determine order by layout preference
         let order = {
@@ -100,26 +99,14 @@ where
             let c_ptr = c.as_ptr() as *mut T;
             *c_ptr.add(idx_c) = a[idx_a].clone();
         });
-    } else if size_contig < PARALLEL_SWITCH * nthreads {
-        // contiguous region is not large enough
-        // outer iteration is parallel, inner iteration is serial
+    } else {
+        // parallel for outer iteration
         let iter_c = IterLayoutColMajor::new(&layouts_contig[0])?;
         let iter_a = IterLayoutColMajor::new(&layouts_contig[1])?;
         (iter_c, iter_a).into_par_iter().for_each(|(idx_c, idx_a)| unsafe {
-            let c_ptr = c.as_ptr() as *mut T;
+            let c_ptr = c.as_ptr().add(idx_c) as *mut T;
             (0..size_contig).for_each(|idx| {
-                *c_ptr.add(idx_c + idx) = a[idx_a + idx].clone();
-            })
-        });
-    } else {
-        // contiguous region is large enough
-        // both outer and inner iteration are parallel
-        let iter_c = IterLayoutColMajor::new(&layouts_contig[0])?;
-        let iter_a = IterLayoutColMajor::new(&layouts_contig[1])?;
-        (iter_c, iter_a).into_par_iter().for_each(|(idx_c, idx_a)| {
-            (0..size_contig).into_par_iter().for_each(|idx| unsafe {
-                let c_ptr = c.as_ptr() as *mut T;
-                *c_ptr.add(idx_c + idx) = a[idx_a + idx].clone();
+                *c_ptr.add(idx) = a[idx_a + idx].clone();
             })
         });
     }
@@ -149,24 +136,13 @@ where
             let c_ptr = c.as_ptr() as *mut T;
             *c_ptr.add(idx_c) = fill.clone();
         });
-    } else if size_contig < PARALLEL_SWITCH * nthreads {
-        // contiguous region is not large enough
-        // outer iteration is parallel, inner iteration is serial
+    } else {
+        // parallel for outer iteration
         let iter_c = IterLayoutColMajor::new(&layouts_contig[0])?;
         (iter_c).into_par_iter().for_each(|idx_c| unsafe {
-            let c_ptr = c.as_ptr() as *mut T;
+            let c_ptr = c.as_ptr().add(idx_c) as *mut T;
             (0..size_contig).for_each(|idx| {
-                *c_ptr.add(idx_c + idx) = fill.clone();
-            })
-        });
-    } else {
-        // contiguous region is large enough
-        // both outer and inner iteration are parallel
-        let iter_c = IterLayoutColMajor::new(&layouts_contig[0])?;
-        (iter_c).into_par_iter().for_each(|idx_c| {
-            (0..size_contig).into_par_iter().for_each(|idx| unsafe {
-                let c_ptr = c.as_ptr() as *mut T;
-                *c_ptr.add(idx_c + idx) = fill.clone();
+                *c_ptr.add(idx) = fill.clone();
             })
         });
     }
