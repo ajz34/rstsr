@@ -1,4 +1,4 @@
-use crate::device_cpu_rayon::device::DeviceCpuRayon;
+use crate::device_cpu_faer::device::DeviceCpuRayon;
 use crate::device_cpu_serial::operators::op_with_func::*;
 use crate::prelude_dev::*;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};

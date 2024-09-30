@@ -3,7 +3,7 @@ use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use crate::device_cpu_serial::assignment::*;
 use crate::prelude_dev::*;
 
-use super::device::DeviceCpuRayon;
+use super::device::{DeviceCpuFaer, DeviceCpuRayon};
 
 // this value is used to determine whether to use contiguous inner iteration
 const CONTIG_SWITCH: usize = 16;
@@ -164,7 +164,7 @@ where
     return Ok(());
 }
 
-impl<T, DC, DA> OpAssignArbitaryAPI<T, DC, DA> for DeviceCpuRayon
+impl<T, DC, DA> OpAssignArbitaryAPI<T, DC, DA> for DeviceCpuFaer
 where
     T: Clone + Send + Sync,
     DC: DimAPI,
@@ -184,7 +184,7 @@ where
     }
 }
 
-impl<T, D> OpAssignAPI<T, D> for DeviceCpuRayon
+impl<T, D> OpAssignAPI<T, D> for DeviceCpuFaer
 where
     T: Clone + Send + Sync,
     D: DimAPI,

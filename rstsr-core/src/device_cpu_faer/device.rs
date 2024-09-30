@@ -1,5 +1,13 @@
 use crate::prelude_dev::*;
 
+/* #region base rayon device */
+
+/// This is base device for Parallel CPU device.
+///
+/// This device is not intended to be used directly, but to be used as a base.
+/// Possible inherited devices could be Faer or Blas.
+/// 
+/// This device is intended not to implement `DeviceAPI<T>`.
 #[derive(Clone, Debug)]
 pub struct DeviceCpuRayon {
     num_threads: usize,
@@ -44,14 +52,57 @@ impl DeviceBaseAPI for DeviceCpuRayon {
     }
 }
 
-impl<T> DeviceRawVecAPI<T> for DeviceCpuRayon
+/* #endregion */
+
+/* #region device Faer */
+
+#[derive(Clone, Debug)]
+pub struct DeviceCpuFaer {
+    base: DeviceCpuRayon,
+}
+
+impl DeviceCpuFaer {
+    pub fn new(num_threads: usize) -> Self {
+        DeviceCpuFaer { base: DeviceCpuRayon::new(num_threads) }
+    }
+
+    pub fn var_num_threads(&self) -> usize {
+        self.base.var_num_threads()
+    }
+
+    pub fn set_num_threads(&mut self, num_threads: usize) {
+        self.base.set_num_threads(num_threads);
+    }
+
+    pub fn get_num_threads(&self) -> usize {
+        self.base.get_num_threads()
+    }
+
+    pub fn get_pool(&self, n: usize) -> Result<rayon::ThreadPool> {
+        self.base.get_pool(n)
+    }
+}
+
+impl Default for DeviceCpuFaer {
+    fn default() -> Self {
+        DeviceCpuFaer::new(0)
+    }
+}
+
+impl DeviceBaseAPI for DeviceCpuFaer {
+    fn same_device(&self, other: &Self) -> bool {
+        self.var_num_threads() == other.var_num_threads()
+    }
+}
+
+impl<T> DeviceRawVecAPI<T> for DeviceCpuFaer
 where
     T: Clone,
 {
     type RawVec = Vec<T>;
 }
 
-impl<T> DeviceStorageAPI<T> for DeviceCpuRayon
+impl<T> DeviceStorageAPI<T> for DeviceCpuFaer
 where
     T: Clone,
 {
@@ -92,7 +143,7 @@ where
     }
 }
 
-impl<T> DeviceAPI<T> for DeviceCpuRayon where T: Clone {}
+impl<T> DeviceAPI<T> for DeviceCpuFaer where T: Clone {}
 
 #[cfg(test)]
 mod test {
@@ -101,12 +152,12 @@ mod test {
     #[test]
     fn test_device_conversion() {
         let device_serial = DeviceCpuSerial {};
-        let device_rayon = DeviceCpuRayon::new(0);
+        let device_faer = DeviceCpuFaer::new(0);
         let a = Tensor::linspace(1.0, 5.0, 5, &device_serial);
-        let b = a.into_device(&device_rayon).unwrap();
+        let b = a.into_device(&device_faer).unwrap();
         println!("{:?}", b);
         let a = Tensor::linspace(1.0, 5.0, 5, &device_serial);
-        let b = a.view().into_device(&device_rayon).unwrap();
+        let b = a.view().into_device(&device_faer).unwrap();
         println!("{:?}", b);
     }
 }
