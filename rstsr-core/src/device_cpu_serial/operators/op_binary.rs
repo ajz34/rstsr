@@ -15,7 +15,7 @@ macro_rules! impl_op_muta_refb_assign {
                 b: &Storage<TB, DeviceCpuSerial>,
                 lb: &Layout<D>,
             ) -> Result<()> {
-                self.op_muta_refb_func(a, la, b, lb, $func)
+                self.op_muta_refb_func(a, la, b, lb, &mut $func)
             }
 
             fn op_muta_numb(
@@ -24,7 +24,7 @@ macro_rules! impl_op_muta_refb_assign {
                 la: &Layout<D>,
                 b: TB,
             ) -> Result<()> {
-                self.op_muta_numb_func(a, la, b, $func)
+                self.op_muta_numb_func(a, la, b, &mut $func)
             }
         }
     };
@@ -61,7 +61,7 @@ macro_rules! impl_op_muta_refb_l_consume {
                 b: &Storage<TB, DeviceCpuSerial>,
                 lb: &Layout<D>,
             ) -> Result<()> {
-                self.op_muta_refb_func(a, la, b, lb, $func)
+                self.op_muta_refb_func(a, la, b, lb, &mut $func)
             }
 
             fn op_muta_numb(
@@ -70,7 +70,7 @@ macro_rules! impl_op_muta_refb_l_consume {
                 la: &Layout<D>,
                 b: TB,
             ) -> Result<()> {
-                self.op_muta_numb_func(a, la, b, $func)
+                self.op_muta_numb_func(a, la, b, &mut $func)
             }
         }
     };
@@ -107,7 +107,7 @@ macro_rules! impl_op_muta_refb_r_consume {
                 a: &Storage<TA, DeviceCpuSerial>,
                 la: &Layout<D>,
             ) -> Result<()> {
-                self.op_muta_refb_func(b, lb, a, la, $func)
+                self.op_muta_refb_func(b, lb, a, la, &mut $func)
             }
 
             fn op_muta_numb(
@@ -116,7 +116,7 @@ macro_rules! impl_op_muta_refb_r_consume {
                 lb: &Layout<D>,
                 a: TA,
             ) -> Result<()> {
-                self.op_muta_numb_func(b, lb, a, $func)
+                self.op_muta_numb_func(b, lb, a, &mut $func)
             }
         }
     };
@@ -156,14 +156,14 @@ macro_rules! impl_op_muta_refb_unary {
             where
                 TB: $Op<Output = TA>,
             {
-                self.op_muta_refb_func(a, la, b, lb, $func)
+                self.op_muta_refb_func(a, la, b, lb, &mut $func)
             }
 
             fn op_muta(&self, a: &mut Storage<TA, DeviceCpuSerial>, la: &Layout<D>) -> Result<()>
             where
                 TA: $Op<Output = TA>,
             {
-                self.op_muta_func(a, la, $func_inplace)
+                self.op_muta_func(a, la, &mut $func_inplace)
             }
         }
     };
