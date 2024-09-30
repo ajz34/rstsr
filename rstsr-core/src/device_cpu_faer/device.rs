@@ -6,7 +6,7 @@ use crate::prelude_dev::*;
 ///
 /// This device is not intended to be used directly, but to be used as a base.
 /// Possible inherited devices could be Faer or Blas.
-/// 
+///
 /// This device is intended not to implement `DeviceAPI<T>`.
 #[derive(Clone, Debug)]
 pub struct DeviceCpuRayon {
@@ -34,7 +34,7 @@ impl DeviceCpuRayon {
     }
 
     pub fn get_pool(&self, n: usize) -> Result<rayon::ThreadPool> {
-        rstsr_pattern!(n, 0..self.get_num_threads(), RayonError, "Specified too much threads.")?;
+        rstsr_pattern!(n, 0..=self.get_num_threads(), RayonError, "Specified too much threads.")?;
         let nthreads = if n == 0 { self.get_num_threads() } else { n };
         rayon::ThreadPoolBuilder::new().num_threads(nthreads).build().map_err(Error::from)
     }

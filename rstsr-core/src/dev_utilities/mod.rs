@@ -6,12 +6,17 @@ use crate::prelude_dev::*;
 ///
 /// This function assumes c-contiguous iteration, and will not check two
 /// dimensions are broadcastable.
-pub(crate) fn allclose_f64<RA, RB, DA, DB>(a: &TensorBase<RA, DA>, b: &TensorBase<RB, DB>) -> bool
+pub(crate) fn allclose_f64<RA, RB, DA, DB, BA, BB>(
+    a: &TensorBase<RA, DA>,
+    b: &TensorBase<RB, DB>,
+) -> bool
 where
-    RA: DataAPI<Data = Storage<f64, DeviceCpuSerial>>,
-    RB: DataAPI<Data = Storage<f64, DeviceCpuSerial>>,
+    RA: DataAPI<Data = Storage<f64, BA>>,
+    RB: DataAPI<Data = Storage<f64, BB>>,
     DA: DimAPI,
     DB: DimAPI,
+    BA: DeviceAPI<f64, RawVec = Vec<f64>>,
+    BB: DeviceAPI<f64, RawVec = Vec<f64>>,
 {
     let la = a.layout().reverse_axes();
     let lb = b.layout().reverse_axes();

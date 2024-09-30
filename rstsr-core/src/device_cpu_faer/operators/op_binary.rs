@@ -1,11 +1,12 @@
+use crate::device_cpu_faer::device::DeviceCpuFaer;
 use crate::prelude_dev::*;
 
 macro_rules! impl_op_muta_refb_assign {
     ($DeviceOpAPI:ident, $Op:ident, $func:expr) => {
-        impl<TA, TB, D> $DeviceOpAPI<TA, TB, D> for DeviceCpuSerial
+        impl<TA, TB, D> $DeviceOpAPI<TA, TB, D> for DeviceCpuFaer
         where
-            TA: Clone + $Op<TB>,
-            TB: Clone,
+            TA: Clone + Send + Sync + $Op<TB>,
+            TB: Clone + Send + Sync,
             D: DimAPI,
         {
             fn op_muta_refb(
@@ -18,12 +19,7 @@ macro_rules! impl_op_muta_refb_assign {
                 self.op_muta_refb_func(a, la, b, lb, &mut $func)
             }
 
-            fn op_muta_numb(
-                &self,
-                a: &mut Storage<TA, Self>,
-                la: &Layout<D>,
-                b: TB,
-            ) -> Result<()> {
+            fn op_muta_numb(&self, a: &mut Storage<TA, Self>, la: &Layout<D>, b: TB) -> Result<()> {
                 self.op_muta_numb_func(a, la, b, &mut $func)
             }
         }
@@ -48,10 +44,10 @@ mod impl_op_muta_refb_assign {
 
 macro_rules! impl_op_muta_refb_l_consume {
     ($DeviceOpAPI:ident, $Op:ident, $func:expr) => {
-        impl<TA, TB, D> $DeviceOpAPI<TA, TB, D> for DeviceCpuSerial
+        impl<TA, TB, D> $DeviceOpAPI<TA, TB, D> for DeviceCpuFaer
         where
-            TA: Clone + $Op<TB, Output = TA>,
-            TB: Clone,
+            TA: Clone + Send + Sync + $Op<TB, Output = TA>,
+            TB: Clone + Send + Sync,
             D: DimAPI,
         {
             fn op_muta_refb(
@@ -64,12 +60,7 @@ macro_rules! impl_op_muta_refb_l_consume {
                 self.op_muta_refb_func(a, la, b, lb, &mut $func)
             }
 
-            fn op_muta_numb(
-                &self,
-                a: &mut Storage<TA, Self>,
-                la: &Layout<D>,
-                b: TB,
-            ) -> Result<()> {
+            fn op_muta_numb(&self, a: &mut Storage<TA, Self>, la: &Layout<D>, b: TB) -> Result<()> {
                 self.op_muta_numb_func(a, la, b, &mut $func)
             }
         }
@@ -94,10 +85,10 @@ mod impl_op_muta_refb_l_consume {
 
 macro_rules! impl_op_muta_refb_r_consume {
     ($DeviceOpAPI:ident, $Op:ident, $func:expr) => {
-        impl<TA, TB, D> $DeviceOpAPI<TA, TB, D> for DeviceCpuSerial
+        impl<TA, TB, D> $DeviceOpAPI<TA, TB, D> for DeviceCpuFaer
         where
-            TA: Clone + $Op<TB, Output = TB>,
-            TB: Clone,
+            TA: Clone + Send + Sync + $Op<TB, Output = TB>,
+            TB: Clone + Send + Sync,
             D: DimAPI,
         {
             fn op_muta_refb(
@@ -110,12 +101,7 @@ macro_rules! impl_op_muta_refb_r_consume {
                 self.op_muta_refb_func(b, lb, a, la, &mut $func)
             }
 
-            fn op_muta_numb(
-                &self,
-                b: &mut Storage<TB, Self>,
-                lb: &Layout<D>,
-                a: TA,
-            ) -> Result<()> {
+            fn op_muta_numb(&self, b: &mut Storage<TB, Self>, lb: &Layout<D>, a: TA) -> Result<()> {
                 self.op_muta_numb_func(b, lb, a, &mut $func)
             }
         }
@@ -140,10 +126,10 @@ mod impl_op_muta_refb_r_consume {
 
 macro_rules! impl_op_muta_refb_unary {
     ($DeviceOpAPI:ident, $Op:ident, $op_muta_refb_func:ident, $func:expr, $func_inplace:expr) => {
-        impl<TA, TB, D> $DeviceOpAPI<TA, TB, D> for DeviceCpuSerial
+        impl<TA, TB, D> $DeviceOpAPI<TA, TB, D> for DeviceCpuFaer
         where
-            TA: Clone,
-            TB: Clone,
+            TA: Clone + Send + Sync,
+            TB: Clone + Send + Sync,
             D: DimAPI,
         {
             fn op_muta_refb(
