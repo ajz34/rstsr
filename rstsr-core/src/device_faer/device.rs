@@ -1,69 +1,13 @@
 use crate::prelude_dev::*;
 
-/* #region base rayon device */
-
-/// This is base device for Parallel CPU device.
-///
-/// This device is not intended to be used directly, but to be used as a base.
-/// Possible inherited devices could be Faer or Blas.
-///
-/// This device is intended not to implement `DeviceAPI<T>`.
 #[derive(Clone, Debug)]
-pub struct DeviceCpuRayon {
-    num_threads: usize,
-}
-
-impl DeviceCpuRayon {
-    pub fn new(num_threads: usize) -> Self {
-        DeviceCpuRayon { num_threads }
-    }
-
-    pub fn var_num_threads(&self) -> usize {
-        self.num_threads
-    }
-
-    pub fn set_num_threads(&mut self, num_threads: usize) {
-        self.num_threads = num_threads;
-    }
-
-    pub fn get_num_threads(&self) -> usize {
-        match self.num_threads {
-            0 => rayon::current_num_threads(),
-            _ => rayon::current_num_threads().max(self.num_threads),
-        }
-    }
-
-    pub fn get_pool(&self, n: usize) -> Result<rayon::ThreadPool> {
-        rstsr_pattern!(n, 0..=self.get_num_threads(), RayonError, "Specified too much threads.")?;
-        let nthreads = if n == 0 { self.get_num_threads() } else { n };
-        rayon::ThreadPoolBuilder::new().num_threads(nthreads).build().map_err(Error::from)
-    }
-}
-
-impl Default for DeviceCpuRayon {
-    fn default() -> Self {
-        DeviceCpuRayon::new(0)
-    }
-}
-
-impl DeviceBaseAPI for DeviceCpuRayon {
-    fn same_device(&self, other: &Self) -> bool {
-        self.num_threads == other.num_threads
-    }
-}
-
-/* #endregion */
-
-/* #region device Faer */
-
-#[derive(Clone, Debug)]
-pub struct DeviceCpuFaer {
+pub struct DeviceFaer {
     base: DeviceCpuRayon,
 }
 
-impl DeviceCpuFaer {
+impl DeviceFaer {
     pub fn new(num_threads: usize) -> Self {
-        DeviceCpuFaer { base: DeviceCpuRayon::new(num_threads) }
+        DeviceFaer { base: DeviceCpuRayon::new(num_threads) }
     }
 
     pub fn var_num_threads(&self) -> usize {
@@ -83,26 +27,26 @@ impl DeviceCpuFaer {
     }
 }
 
-impl Default for DeviceCpuFaer {
+impl Default for DeviceFaer {
     fn default() -> Self {
-        DeviceCpuFaer::new(0)
+        DeviceFaer::new(0)
     }
 }
 
-impl DeviceBaseAPI for DeviceCpuFaer {
+impl DeviceBaseAPI for DeviceFaer {
     fn same_device(&self, other: &Self) -> bool {
         self.var_num_threads() == other.var_num_threads()
     }
 }
 
-impl<T> DeviceRawVecAPI<T> for DeviceCpuFaer
+impl<T> DeviceRawVecAPI<T> for DeviceFaer
 where
     T: Clone,
 {
     type RawVec = Vec<T>;
 }
 
-impl<T> DeviceStorageAPI<T> for DeviceCpuFaer
+impl<T> DeviceStorageAPI<T> for DeviceFaer
 where
     T: Clone,
 {
@@ -143,7 +87,7 @@ where
     }
 }
 
-impl<T> DeviceAPI<T> for DeviceCpuFaer where T: Clone {}
+impl<T> DeviceAPI<T> for DeviceFaer where T: Clone {}
 
 #[cfg(test)]
 mod test {
@@ -152,7 +96,7 @@ mod test {
     #[test]
     fn test_device_conversion() {
         let device_serial = DeviceCpuSerial {};
-        let device_faer = DeviceCpuFaer::new(0);
+        let device_faer = DeviceFaer::new(0);
         let a = Tensor::linspace(1.0, 5.0, 5, &device_serial);
         let b = a.into_device(&device_faer).unwrap();
         println!("{:?}", b);

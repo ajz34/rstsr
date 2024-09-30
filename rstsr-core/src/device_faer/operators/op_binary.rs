@@ -1,9 +1,8 @@
-use crate::device_cpu_faer::device::DeviceCpuFaer;
 use crate::prelude_dev::*;
 
 macro_rules! impl_op_muta_refb_assign {
     ($DeviceOpAPI:ident, $Op:ident, $func:expr) => {
-        impl<TA, TB, D> $DeviceOpAPI<TA, TB, D> for DeviceCpuFaer
+        impl<TA, TB, D> $DeviceOpAPI<TA, TB, D> for DeviceFaer
         where
             TA: Clone + Send + Sync + $Op<TB>,
             TB: Clone + Send + Sync,
@@ -44,7 +43,7 @@ mod impl_op_muta_refb_assign {
 
 macro_rules! impl_op_muta_refb_l_consume {
     ($DeviceOpAPI:ident, $Op:ident, $func:expr) => {
-        impl<TA, TB, D> $DeviceOpAPI<TA, TB, D> for DeviceCpuFaer
+        impl<TA, TB, D> $DeviceOpAPI<TA, TB, D> for DeviceFaer
         where
             TA: Clone + Send + Sync + $Op<TB, Output = TA>,
             TB: Clone + Send + Sync,
@@ -85,7 +84,7 @@ mod impl_op_muta_refb_l_consume {
 
 macro_rules! impl_op_muta_refb_r_consume {
     ($DeviceOpAPI:ident, $Op:ident, $func:expr) => {
-        impl<TA, TB, D> $DeviceOpAPI<TA, TB, D> for DeviceCpuFaer
+        impl<TA, TB, D> $DeviceOpAPI<TA, TB, D> for DeviceFaer
         where
             TA: Clone + Send + Sync + $Op<TB, Output = TB>,
             TB: Clone + Send + Sync,
@@ -126,7 +125,7 @@ mod impl_op_muta_refb_r_consume {
 
 macro_rules! impl_op_muta_refb_unary {
     ($DeviceOpAPI:ident, $Op:ident, $op_muta_refb_func:ident, $func:expr, $func_inplace:expr) => {
-        impl<TA, TB, D> $DeviceOpAPI<TA, TB, D> for DeviceCpuFaer
+        impl<TA, TB, D> $DeviceOpAPI<TA, TB, D> for DeviceFaer
         where
             TA: Clone + Send + Sync,
             TB: Clone + Send + Sync,

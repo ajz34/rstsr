@@ -6,4 +6,6 @@ pub mod device;
 pub mod matmul;
 pub mod operators;
 
+pub use assignment::*;
 pub use device::*;
+pub use operators::*;

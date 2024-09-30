@@ -1,9 +1,8 @@
-use crate::device_cpu_faer::device::DeviceCpuFaer;
 use crate::prelude_dev::*;
 
 macro_rules! impl_op_mutc_refa_refb_operator {
     ($DeviceOpAPI:ident, $Op:ident, $func:expr) => {
-        impl<TA, TB, TC, D> $DeviceOpAPI<TA, TB, TC, D> for DeviceCpuFaer
+        impl<TA, TB, TC, D> $DeviceOpAPI<TA, TB, TC, D> for DeviceFaer
         where
             TA: Clone + Send + Sync + $Op<TB, Output = TC>,
             TB: Clone + Send + Sync,
@@ -70,7 +69,7 @@ mod test {
     #[test]
     fn test_add() {
         let device_serial = DeviceCpuSerial;
-        let device_faer = DeviceCpuFaer::default();
+        let device_faer = DeviceFaer::default();
         let a1 = Tensor::linspace(1., 1024. * 1024., 1024 * 1024, &device_serial);
         let a1 = a1.into_shape_assume_contig([1024, 1024]).unwrap();
         let b1 = Tensor::linspace(1., 1024. * 1024., 1024 * 1024, &device_serial);

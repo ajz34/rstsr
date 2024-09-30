@@ -23,8 +23,9 @@ pub mod format;
 #[cfg(feature = "rayon")]
 pub mod feature_rayon;
 
-#[cfg(feature = "rayon")]
-pub mod device_cpu_faer;
+#[cfg(feature = "faer")]
+pub mod device_faer;
+
 pub mod device_cpu_serial;
 
 mod dev_utilities;

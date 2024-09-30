@@ -20,7 +20,9 @@ pub use crate::storage::device::*;
 pub use crate::storage::matmul::*;
 pub use crate::storage::operators::*;
 
+pub use crate::device_cpu_serial::assignment::*;
 pub use crate::device_cpu_serial::device::*;
+pub use crate::device_cpu_serial::op_with_func::*;
 pub use crate::DeviceCpu;
 
 #[allow(unused_imports)]
@@ -32,6 +34,16 @@ pub use crate::tensor::data::*;
 pub use crate::tensor::device_conversion::*;
 pub use crate::tensor::manuplication::*;
 pub use crate::tensor::ownership_conversion::*;
+
+#[cfg(feature = "rayon")]
+pub use crate::feature_rayon::assignment::*;
+#[cfg(feature = "rayon")]
+pub use crate::feature_rayon::device::*;
+#[cfg(feature = "rayon")]
+pub use crate::feature_rayon::op_with_func::*;
+
+#[cfg(feature = "faer")]
+pub use crate::device_faer::device::*;
 
 pub use crate::{Tensor, TensorBase, TensorCow, TensorView, TensorViewMut};
 
