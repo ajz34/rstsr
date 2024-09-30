@@ -34,6 +34,7 @@ where
     }
 
     // actual parallel iteration
+    let pool = DeviceCpuRayon::new(nthreads).get_pool(nthreads)?;
     if lc.c_contig() && la.c_contig() || lc.f_contig() && la.f_contig() {
         // contiguous case
         // we do not perform parallel for this case
@@ -61,9 +62,11 @@ where
         let iter_c = IterLayoutColMajor::new(&lc)?;
         let iter_a = IterLayoutColMajor::new(&la)?;
         // iterate and assign
-        (iter_c, iter_a).into_par_iter().for_each(|(idx_c, idx_a)| unsafe {
-            let c_ptr = c.as_ptr() as *mut T;
-            *c_ptr.add(idx_c) = a[idx_a].clone();
+        pool.install(|| {
+            (iter_c, iter_a).into_par_iter().for_each(|(idx_c, idx_a)| unsafe {
+                let c_ptr = c.as_ptr() as *mut T;
+                *c_ptr.add(idx_c) = a[idx_a].clone();
+            });
         });
     }
     return Ok(());
@@ -86,28 +89,34 @@ where
         return assign_cpu_serial(c, lc, a, la);
     }
 
-    // actual parallel iteration
+    // re-align layouts
     let layouts_full = translate_to_col_major(&[lc, la], TensorIterOrder::K)?;
     let layouts_full_ref = layouts_full.iter().collect_vec();
     let (layouts_contig, size_contig) = translate_to_col_major_with_contig(&layouts_full_ref);
 
+    // actual parallel iteration
+    let pool = DeviceCpuRayon::new(nthreads).get_pool(nthreads)?;
     if size_contig < CONTIG_SWITCH {
         // not possible for contiguous assign
         let iter_c = IterLayoutColMajor::new(&layouts_full[0])?;
         let iter_a = IterLayoutColMajor::new(&layouts_full[1])?;
-        (iter_c, iter_a).into_par_iter().for_each(|(idx_c, idx_a)| unsafe {
-            let c_ptr = c.as_ptr() as *mut T;
-            *c_ptr.add(idx_c) = a[idx_a].clone();
+        pool.install(|| {
+            (iter_c, iter_a).into_par_iter().for_each(|(idx_c, idx_a)| unsafe {
+                let c_ptr = c.as_ptr() as *mut T;
+                *c_ptr.add(idx_c) = a[idx_a].clone();
+            });
         });
     } else {
         // parallel for outer iteration
         let iter_c = IterLayoutColMajor::new(&layouts_contig[0])?;
         let iter_a = IterLayoutColMajor::new(&layouts_contig[1])?;
-        (iter_c, iter_a).into_par_iter().for_each(|(idx_c, idx_a)| unsafe {
-            let c_ptr = c.as_ptr().add(idx_c) as *mut T;
-            (0..size_contig).for_each(|idx| {
-                *c_ptr.add(idx) = a[idx_a + idx].clone();
-            })
+        pool.install(|| {
+            (iter_c, iter_a).into_par_iter().for_each(|(idx_c, idx_a)| unsafe {
+                let c_ptr = c.as_ptr().add(idx_c) as *mut T;
+                (0..size_contig).for_each(|idx| {
+                    *c_ptr.add(idx) = a[idx_a + idx].clone();
+                })
+            });
         });
     }
     return Ok(());
@@ -124,26 +133,32 @@ where
         return fill_cpu_serial(c, lc, fill);
     }
 
-    // actual parallel iteration
+    // re-align layouts
     let layouts_full = [translate_to_col_major_unary(lc, TensorIterOrder::G)?];
     let layouts_full_ref = layouts_full.iter().collect_vec();
     let (layouts_contig, size_contig) = translate_to_col_major_with_contig(&layouts_full_ref);
 
+    // actual parallel iteration
+    let pool = DeviceCpuRayon::new(nthreads).get_pool(nthreads)?;
     if size_contig < CONTIG_SWITCH {
         // not possible for contiguous fill
         let iter_c = IterLayoutColMajor::new(&layouts_full[0])?;
-        (iter_c).into_par_iter().for_each(|idx_c| unsafe {
-            let c_ptr = c.as_ptr() as *mut T;
-            *c_ptr.add(idx_c) = fill.clone();
+        pool.install(|| {
+            (iter_c).into_par_iter().for_each(|idx_c| unsafe {
+                let c_ptr = c.as_ptr() as *mut T;
+                *c_ptr.add(idx_c) = fill.clone();
+            });
         });
     } else {
         // parallel for outer iteration
         let iter_c = IterLayoutColMajor::new(&layouts_contig[0])?;
-        (iter_c).into_par_iter().for_each(|idx_c| unsafe {
-            let c_ptr = c.as_ptr().add(idx_c) as *mut T;
-            (0..size_contig).for_each(|idx| {
-                *c_ptr.add(idx) = fill.clone();
-            })
+        pool.install(|| {
+            (iter_c).into_par_iter().for_each(|idx_c| unsafe {
+                let c_ptr = c.as_ptr().add(idx_c) as *mut T;
+                (0..size_contig).for_each(|idx| {
+                    *c_ptr.add(idx) = fill.clone();
+                })
+            });
         });
     }
     return Ok(());
