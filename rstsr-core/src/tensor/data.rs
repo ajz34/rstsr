@@ -67,6 +67,13 @@ impl<'a, S> DataRef<'a, S> {
     }
 }
 
+impl<'a, S> DataRefMut<'a, S> {
+    #[inline]
+    pub fn from_manually_drop(data: ManuallyDrop<S>) -> Self {
+        DataRefMut::ManuallyDropOwned(data)
+    }
+}
+
 pub trait DataAPI {
     type Data: Clone;
     fn storage(&self) -> &Self::Data;

@@ -17,6 +17,7 @@ half = { version = "2.4", features = ["num-traits"] }
 # optional dependencies
 rayon = { version = "1.10" }
 faer = { version = "0.19" }
+faer-ext = { version = "0.3" }
 # dev dependencies
 anyhow = { version = "1.0" }
 rand = { version = "0.8" }

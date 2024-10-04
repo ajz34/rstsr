@@ -8,5 +8,6 @@ pub mod matmul;
 pub mod operators;
 pub mod ownership_conversion;
 pub mod device_conversion;
+pub mod ext_conversion;
 
 pub use data::*;
