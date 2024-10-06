@@ -19,7 +19,9 @@ pub fn gemm_naive_rayon<TA, TB, TC>(
     lb: &Layout<Ix2>,
     alpha: TC,
     beta: TC,
-) where
+    nthreads: usize,
+) -> Result<()>
+where
     TA: Clone + Send + Sync + Mul<TB, Output = TC>,
     TB: Clone + Send + Sync,
     TC: Clone + Send + Sync + Mul<TC, Output = TC> + Add<TC, Output = TC> + Zero,
@@ -28,92 +30,29 @@ pub fn gemm_naive_rayon<TA, TB, TC>(
     let sc = lc.shape();
     let sa = la.shape();
     let sb = lb.shape();
-    debug_assert_eq!(sc[0], sa[0]);
-    debug_assert_eq!(sa[1], sb[0]);
-    debug_assert_eq!(sc[1], sb[1]);
+    rstsr_assert_eq!(sc[0], sa[0], InvalidLayout)?;
+    rstsr_assert_eq!(sa[1], sb[0], InvalidLayout)?;
+    rstsr_assert_eq!(sc[1], sb[1], InvalidLayout)?;
     let (m, n, k) = (sc[0], sc[1], sa[1]);
 
-    (0..n).into_par_iter().for_each(|j| {
-        (0..m).into_par_iter().for_each(|i| unsafe {
-            let ptr_c = c.as_ptr().offset(lc.index_uncheck(&[i, j])) as *mut TC;
-            *ptr_c = (*ptr_c).clone() * beta.clone()
-                + (0..k).fold(TC::zero(), |acc, p| {
-                    let val_a = a[la.index_uncheck(&[i, p]) as usize].clone();
-                    let val_b = b[lb.index_uncheck(&[p, j]) as usize].clone();
-                    acc + val_a * val_b
-                }) * alpha.clone();
+    let pool = DeviceCpuRayon::new(nthreads).get_pool(nthreads)?;
+    pool.install(|| {
+        (0..n).into_par_iter().for_each(|j| {
+            (0..m).into_par_iter().for_each(|i| unsafe {
+                let ptr_c = c.as_ptr().offset(lc.index_uncheck(&[i, j])) as *mut TC;
+                *ptr_c = (*ptr_c).clone() * beta.clone()
+                    + (0..k).fold(TC::zero(), |acc, p| {
+                        let val_a = a[la.index_uncheck(&[i, p]) as usize].clone();
+                        let val_b = b[lb.index_uncheck(&[p, j]) as usize].clone();
+                        acc + val_a * val_b
+                    }) * alpha.clone();
+            });
         });
     });
+    return Ok(());
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn gemv_naive_rayon<TA, TB, TC>(
-    c: &mut [TC],
-    lc: &Layout<Ix1>,
-    a: &[TA],
-    la: &Layout<Ix2>,
-    b: &[TB],
-    lb: &Layout<Ix1>,
-    alpha: TC,
-    beta: TC,
-) where
-    TA: Clone + Send + Sync + Mul<TB, Output = TC>,
-    TB: Clone + Send + Sync,
-    TC: Clone + Send + Sync + Mul<TC, Output = TC> + Add<TC, Output = TC> + Zero,
-{
-    // shape check
-    let sc = lc.shape();
-    let sa = la.shape();
-    let sb = lb.shape();
-    debug_assert_eq!(sc[0], sa[0]);
-    debug_assert_eq!(sa[1], sb[0]);
-    let (n, k) = (sa[0], sa[1]);
-
-    (0..n).into_par_iter().for_each(|i| unsafe {
-        let ptr_c = c.as_ptr().offset(lc.index_uncheck(&[i])) as *mut TC;
-        *ptr_c = (*ptr_c).clone() * beta.clone()
-            + (0..k).fold(TC::zero(), |acc, p| {
-                let val_a = a[la.index_uncheck(&[i, p]) as usize].clone();
-                let val_b = b[lb.index_uncheck(&[p]) as usize].clone();
-                acc + val_a * val_b
-            }) * alpha.clone();
-    });
-}
-
-#[allow(clippy::too_many_arguments)]
-pub fn gevm_naive_rayon<TA, TB, TC>(
-    c: &mut [TC],
-    lc: &Layout<Ix1>,
-    a: &[TA],
-    la: &Layout<Ix1>,
-    b: &[TB],
-    lb: &Layout<Ix2>,
-    alpha: TC,
-    beta: TC,
-) where
-    TA: Clone + Send + Sync + Mul<TB, Output = TC>,
-    TB: Clone + Send + Sync,
-    TC: Clone + Send + Sync + Mul<TC, Output = TC> + Add<TC, Output = TC> + Zero,
-{
-    // shape check
-    let sc = lc.shape();
-    let sa = la.shape();
-    let sb = lb.shape();
-    debug_assert_eq!(sc[0], sb[1]);
-    debug_assert_eq!(sa[0], sb[0]);
-    let (n, k) = (sb[1], sb[0]);
-
-    (0..n).into_par_iter().for_each(|i| unsafe {
-        let ptr_c = c.as_ptr().offset(lc.index_uncheck(&[i])) as *mut TC;
-        *ptr_c = (*ptr_c).clone() * beta.clone()
-            + (0..k).fold(TC::zero(), |acc, p| {
-                let val_a = a[la.index_uncheck(&[p]) as usize].clone();
-                let val_b = b[lb.index_uncheck(&[p, i]) as usize].clone();
-                acc + val_a * val_b
-            }) * alpha.clone();
-    });
-}
-
 pub fn inner_dot_naive_rayon<TA, TB, TC>(
     c: &mut TC,
     a: &[TA],
@@ -122,6 +61,7 @@ pub fn inner_dot_naive_rayon<TA, TB, TC>(
     lb: &Layout<Ix1>,
     alpha: TC,
     beta: TC,
+    nthreads: usize,
 ) -> Result<()>
 where
     TA: Clone + Send + Sync + Mul<TB, Output = TC>,
@@ -134,17 +74,21 @@ where
     rstsr_assert_eq!(sa[0], sb[0], InvalidLayout)?;
     let n = sa[0];
 
-    let c_innerdot = (0..n)
-        .into_par_iter()
-        .fold(
-            || TC::zero(),
-            |acc, i| unsafe {
-                acc + a[la.index_uncheck(&[i]) as usize].clone()
-                    * b[lb.index_uncheck(&[i]) as usize].clone()
-            },
-        )
-        .reduce_with(|a, b| a + b)
-        .unwrap_or(TC::zero());
+    let pool = DeviceCpuRayon::new(nthreads).get_pool(nthreads)?;
+
+    let c_innerdot = pool.install(|| {
+        (0..n)
+            .into_par_iter()
+            .fold(
+                || TC::zero(),
+                |acc, i| unsafe {
+                    acc + a[la.index_uncheck(&[i]) as usize].clone()
+                        * b[lb.index_uncheck(&[i]) as usize].clone()
+                },
+            )
+            .reduce_with(|a, b| a + b)
+            .unwrap_or(TC::zero())
+    });
     *c = c_innerdot * alpha + c.clone() * beta;
     return Ok(());
 }

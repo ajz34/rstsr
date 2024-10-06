@@ -2,7 +2,9 @@
 //! implemented elsewhere.
 
 pub mod assignment;
+pub mod conversion;
 pub mod creation;
 pub mod device;
+pub mod matmul;
+pub mod matmul_impl;
 pub mod operators;
-pub mod conversion;

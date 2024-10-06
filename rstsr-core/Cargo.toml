@@ -11,6 +11,7 @@ half = { workspace = true }
 rayon = { workspace = true, optional = true }
 faer = { workspace = true, optional = true }
 faer-ext = { workspace = true, optional = true }
+faer-entity = { workspace = true, optional = true }
 
 [dev-dependencies]
 rand = { workspace = true }
@@ -23,4 +24,4 @@ default = ["c_prefer"]
 std = []
 c_prefer = []
 rayon = ["dep:rayon"]
-faer = ["rayon", "dep:faer", "dep:faer-ext"]
+faer = ["rayon", "dep:faer", "dep:faer-ext", "dep:faer-entity"]
