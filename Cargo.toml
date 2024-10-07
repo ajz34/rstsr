@@ -24,6 +24,7 @@ anyhow = { version = "1.0" }
 rand = { version = "0.8" }
 approx = { version = "0.5" }
 ndarray = { version = "0.15" }
+criterion = { version = "0.5" }
 
 [profile.dev]
 opt-level = 3

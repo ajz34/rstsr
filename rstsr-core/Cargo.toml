@@ -18,6 +18,7 @@ rand = { workspace = true }
 itertools = { workspace = true }
 approx = { workspace = true }
 ndarray = { workspace = true }
+criterion = { workspace = true }
 
 [features]
 default = ["c_prefer"]
@@ -25,3 +26,7 @@ std = []
 c_prefer = []
 rayon = ["dep:rayon"]
 faer = ["rayon", "dep:faer", "dep:faer-ext", "dep:faer-entity"]
+
+[[bench]]
+name = "faer_gemm"
+harness = false
