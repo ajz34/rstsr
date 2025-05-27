@@ -1,8 +1,35 @@
-[coverage]
-features = "default"
+[core_no_default]
+profile = "coverage"
+no-default-features = true
+target-dir = "coverage"
+skip-clean = true
+packages = ["rstsr-core", "rstsr-common"]
+run-types = ["Lib", "Tests"]
+
+[core_faer_row]
+features = "default faer linalg"
 profile = "coverage"
 target-dir = "coverage"
 skip-clean = true
+packages = ["rstsr-core", "rstsr-common", "rstsr-linalg-traits"]
+run-types = ["Lib", "Tests"]
+
+[core_faer_col]
+features = "faer col_major rayon linalg"
+no-default-features = true
+profile = "coverage"
+target-dir = "coverage"
+skip-clean = true
+packages = ["rstsr-core", "rstsr-common"]
+run-types = ["Lib", "Tests"]
+
+[openblas]
+features = "openmp linalg"
+profile = "coverage"
+target-dir = "coverage"
+skip-clean = true
+packages = ["rstsr-openblas"]
+run-types = ["Lib", "Tests"]
 
 [report]
 out = ["Html", "Lcov"]
