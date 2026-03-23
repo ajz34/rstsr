@@ -148,6 +148,9 @@ pub mod rstsr_funcs {
 pub mod rstsr_macros {
     pub use crate::{allclose, tensor_from_nested};
     pub use rstsr_common::prelude::rstsr_macros::*;
+
+    // manuplication
+    pub use crate::reshape;
 }
 
 // final re-exports

@@ -20,7 +20,7 @@
         - Pass-by-value returning [`TensorCow`], decorated with `change_` prefix;
         - Pass-by-value returning [`Tensor`], decorated with `into_` prefix;
         - Pass-by-reference returning [`TensorView`], decorated with `to_` prefix or none;
-        - [`reshape`] and [`to_layout`] fits into this category.
+        - [`reshape`](reshape!) and [`to_layout`] fits into this category.
 
 ## Tensor Structure and Ownership
 
@@ -204,7 +204,7 @@ Device is designed to be able extended by other crates. The above devices [`Devi
 
 | Type | Identifier | Minimal Description |
 |--|--|--|
-| assoc/fn | [`reshape`] <br/> [`into_shape`] <br/> [`change_shape`] | Reshapes an array without changing its data. |
+| assoc/fn/macro | [`reshape`](reshape!) <br/> [`into_shape`] <br/> [`change_shape`] | Reshapes an array without changing its data. |
 | assoc/fn | [`to_layout`] <br/> [`into_layout`] <br/> [`change_layout`] | Convert tensor to the other layout. |
 | assoc/fn | [`to_contig`] <br/> [`into_contig`] <br/> [`change_contig`] | Convert tensor to contiguous layout (C or F order). |
 | assoc/fn | [`to_prefer`] <br/> [`into_prefer`] <br/> [`change_prefer`] | Convert tensor to preferred layout only if not already contiguous. |

@@ -461,3 +461,24 @@ mod docs_reshape {
         assert_ne!(a_ptr, b_ptr); // layout-compatible, but input tensor is not compact (216 < 288)
     }
 }
+
+#[cfg(test)]
+mod macro_reshape {
+    use super::*;
+    static FUNC: &str = "macro_reshape";
+
+    #[test]
+    // #[rustfmt::skip]
+    fn basic() {
+        crate::specify_test!("basic");
+
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        let a = rt::arange((6, &device));
+        let v = rt::reshape!(a, [2, 3]);
+        println!("v: {:?}", v);
+        let v = rt::reshape!(a, [3, 2], order = ColMajor);
+        println!("v: {:?}", v);
+    }
+}

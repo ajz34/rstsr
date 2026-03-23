@@ -44,7 +44,7 @@ For NumPy users, in this meantime, [fullfillment for Array API standard](`array_
 |--|--|
 | suffix `API` | Traits. <br/> To avoid naming collision with structs or other crates. <br/> Example: [`DeviceAPI`], [`AsArrayAPI`]  |
 | suffix `_f` | Fallible functions. <br/> Those functions pairs with a function that panics when error. <br/> Example: [`zeros_f`], [`sin_f`], [`reshape_f`] |
-| prefix `to_` or no prefix <br/> (manuplication functions) | Ensures that input is reference. <br/> Example: [`reshape`], [`transpose`], [`to_dim`] |
+| prefix `to_` or no prefix <br/> (manuplication functions) | Ensures that input is reference. <br/> Example: [`reshape`](reshape!), [`transpose`], [`to_dim`] |
 | prefix `into_` <br/> (some manuplication functions) | Only changes layout, and does not change data with its lifetime and mutability. <br/> Example: [`into_broadcast`], [`into_transpose`], [`into_dyn`] |
 | prefix `into_` <br/> output is always [`Tensor`] <br/> (some manuplication functions) | Give owned tensor. <br/> This special case will occur when there is possiblity to generate a new tensor by manuplication function. For these cases, prefix `to_` and `change_` will give output [`TensorCow`], prefix `into_` will give [`Tensor`]. <br/> Example: [`into_shape`], [`into_layout`] |
 | prefix `change_` <br/> output is always [`TensorCow`] <br/> (some manuplication functions) | Give copy-on-write tensor by consuming input. <br/> This special case will occur when there is possiblity to generate a new tensor by manuplication function. <br/> Example: [`change_shape`], [`change_layout`] |
