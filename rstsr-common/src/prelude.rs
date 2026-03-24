@@ -26,9 +26,14 @@ pub mod rstsr_macros {
 
 // final re-exports
 
-pub use rstsr_macros::*;
+// Only structs and traits are re-exported at this level. Functions and macros may clash with other
+// crates / usual functions.
 pub use rstsr_structs::*;
 pub use rstsr_traits::*;
+
+// For macros, the `slice!` is useful and should be exported at this level. Other macros can be
+// called by `rt::macro_name!` instead.
+pub use rstsr_macros::slice;
 
 pub mod rt {
     pub use super::rstsr_macros;
