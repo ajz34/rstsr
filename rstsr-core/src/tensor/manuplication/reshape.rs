@@ -110,7 +110,7 @@ where
 /// Reshapes the given tensor to the specified shape, with argument specifying the order and whether
 /// to copy data.
 ///
-/// See also [`reshape_with_args`].
+/// See also [`reshape`].
 pub fn change_shape_with_args_f<'a, R, T, B, D>(
     tensor: TensorAny<R, T, B, D>,
     shape: impl TryInto<AxesIndex<isize>, Error: Into<Error>>,
@@ -168,7 +168,7 @@ where
 /// Reshapes the given tensor to the specified shape, with argument specifying the order and whether
 /// to copy data.
 ///
-/// See also [`reshape_with_args`].
+/// See also [`reshape`].
 pub fn change_shape_with_args<'a, R, T, B, D>(
     tensor: TensorAny<R, T, B, D>,
     shape: impl TryInto<AxesIndex<isize>, Error: Into<Error>>,
@@ -185,7 +185,7 @@ where
 /// Reshapes the given tensor to the specified shape, with argument specifying the order and whether
 /// to copy data.
 ///
-/// See also [`reshape_with_args`].
+/// See also [`reshape`].
 pub fn into_shape_with_args_f<'a, R, T, B, D>(
     tensor: TensorAny<R, T, B, D>,
     shape: impl TryInto<AxesIndex<isize>, Error: Into<Error>>,
@@ -208,7 +208,7 @@ where
 /// Reshapes the given tensor to the specified shape, with argument specifying the order and whether
 /// to copy data.
 ///
-/// See also [`reshape_with_args`].
+/// See also [`reshape`].
 pub fn into_shape_with_args<'a, R, T, B, D>(
     tensor: TensorAny<R, T, B, D>,
     shape: impl TryInto<AxesIndex<isize>, Error: Into<Error>>,
@@ -231,7 +231,7 @@ where
 /// Reshapes the given tensor to the specified shape, with argument specifying the order and whether
 /// to copy data.
 ///
-/// See also [`reshape_with_args`].
+/// See also [`reshape`].
 pub fn reshape_with_args_f<'a, R, T, B, D>(
     tensor: &'a TensorAny<R, T, B, D>,
     shape: impl TryInto<AxesIndex<isize>, Error: Into<Error>>,
@@ -248,184 +248,7 @@ where
 /// Reshapes the given tensor to the specified shape, with argument specifying the order and whether
 /// to copy data.
 ///
-/// For usual users, please consider using [`reshape`] (take reference of tensor) or [`into_shape`]
-/// (take ownership of tensor) instead, which are simpler interfaces to reshaping.
-///
-/// <div class="warning">
-///
-/// **Row/Column Major Notice**
-///
-/// This function behaves differently on default orders ([`RowMajor`] and [`ColMajor`]) of device.
-///
-/// </div>
-///
-/// # Parameters
-///
-/// - `tensor`: [`TensorAny<R, T, B, D>`]
-///
-///   - The input tensor to be reshaped.
-///
-/// - `shape`: TryInto [`AxesIndex<isize>`]
-///
-///   - The new shape of the tensor.
-///   - Can be a single integer, or a list/tuple of integers.
-///   - Negative values are supported and indicate counting dimensions from the back.
-///   - Overloads:
-///
-///     - integer: 1-D shape with a single dimension.
-///     - vector/array/tuple of integers: N-D shape with N dimensions. For tuples,
-///       mixed-signed/unsigned integers are supported.
-///
-/// - `args`: Into [`ReshapeArgs`]
-///
-///   - `order`: The indexing order for **reading** (similar to changing the default-order of
-///     device). This also affects the order for writing. [`RowMajor`] and [`ColMajor`] are
-///     supported. By default, the device's default order is used.
-///   
-///   - `copy`: Whether to clone data when the new shape is not compatible with the original shape.
-///
-///     - True: The tensor will always be copied. The output tensor will be contiguous with the
-///       specified order.
-///     - False: Panic if the new shape is not compatible with the original shape.
-///     - None (default): The tensor will be copied only if necessary. If copied, the output tensor
-///       will be contiguous with the specified order. Copy will be avoided if the new shape is
-///       compatible with the original layout, even if the tensor is not contiguous.
-///   
-///   - Overloads:
-///
-///     - copy: [`bool`]
-///     - copy: [`Option<bool>`] (None means default behavior)
-///     - order: [`TensorOrder`]
-///     - (order: [`TensorOrder`], copy: [`bool`])
-///     - (order: [`TensorOrder`], copy: [`Option<bool>`])
-///
-/// # Examples
-///
-/// You can specify the order for reading the tensor by argument `order`.
-///
-/// Following is an example of row-major reshape. This is independent to the original default-layout
-/// of device.
-///
-/// ```rust
-/// # use rstsr::prelude::*;
-/// # let mut device = DeviceCpu::default();
-/// # device.set_default_order(RowMajor);
-/// let a = rt::tensor_from_nested!([[0, 1, 2], [3, 4, 5]], &device);
-/// println!("{a}");
-/// // [[ 0 1 2]
-/// //  [ 3 4 5]]
-/// let a_row = rt::tensor_from_nested!([[0, 1], [2, 3], [4, 5]], &device);
-/// println!("{a_row}");
-/// // [[ 0 1]
-/// //  [ 2 3]
-/// //  [ 4 5]]
-/// ```
-///
-/// And here is an example of col-major reshape.
-///
-/// ```rust
-/// # use rstsr::prelude::*;
-/// # let mut device = DeviceCpu::default();
-/// # device.set_default_order(RowMajor);
-/// let a = rt::tensor_from_nested!([[0, 1, 2], [3, 4, 5]], &device);
-/// println!("{a}");
-/// // [[ 0 1 2]
-/// //  [ 3 4 5]]
-/// let a_col = rt::tensor_from_nested!([[0, 4], [3, 2], [1, 5]], &device);
-/// println!("{a_col}");
-/// // [[ 0 4]
-/// //  [ 3 2]
-/// //  [ 1 5]]
-/// ```
-///
-/// The following example shows that if `copy = false`, then an error will be raised when the new
-/// shape is not compatible with the original shape. Given a strided tensor:
-///
-/// ```rust
-/// # use rstsr::prelude::*;
-/// # let mut device = DeviceCpu::default();
-/// # device.set_default_order(RowMajor);
-/// // shape: (4, 6, 9), stride: (72, 9, 1), not c-contiguous
-/// // contiguous situation: (4, [6, 9]), or say the last two dimensions are contiguous
-/// let a = rt::arange((288, &device)).into_shape([4, 8, 9]).into_slice((.., 0..6, ..));
-/// assert_eq!(a.shape(), &[4, 6, 9]);
-/// assert_eq!(a.stride(), &[72, 9, 1]);
-/// assert!(!a.c_contig());
-/// ```
-///
-/// The following example shows the reshaping does not explicitly clones data, and `copy = false`
-/// does not raise error.
-///
-/// ```rust
-/// # use rstsr::prelude::*;
-/// # let mut device = DeviceCpu::default();
-/// # device.set_default_order(RowMajor);
-/// let a = rt::arange((288, &device)).into_shape([4, 8, 9]).into_slice((.., 0..6, ..));
-/// // split a single dimension into multiple dimensions
-/// assert!(a.reshape_with_args_f([2, 2, 6, 9], false).is_ok()); // (4, 6, 9) -> ([2, 2], 6, 9)
-/// assert!(a.reshape_with_args_f([4, 3, 2, 9], false).is_ok()); // (4, 6, 9) -> (4, [3, 2], 9)
-/// assert!(a.reshape_with_args_f([4, 2, 3, 3, 3], false).is_ok()); // (4, 6, 9) -> (4, [2, 3], [3, 3])
-///
-/// // merge contiguous dimensions into a single dimension
-/// assert!(a.reshape_with_args_f([4, 54], false).is_ok()); // (4, 6, 9) -> (4, 6 * 9)
-///
-/// // merge contiguous dimensions and then split
-/// assert!(a.reshape_with_args_f([4, 3, 6, 3], false).is_ok()); // (4, [6, 9]) -> (4, [3, 6, 3])
-/// ```
-///
-/// However, the following example will raise error due to shape-incompatible. Using `copy = None`
-/// or `copy = true` will work, but the data will be cloned.
-///
-/// ```rust
-/// # use rstsr::prelude::*;
-/// # let mut device = DeviceCpu::default();
-/// # device.set_default_order(RowMajor);
-/// let a = rt::arange((288, &device)).into_shape([4, 8, 9]).into_slice((.., 0..6, ..));
-/// // merge non-contiguous dimensions
-/// assert!(a.reshape_with_args_f([24, 9], false).is_err()); // (4, 6, 9) -> (4 * 6, 9)
-/// assert!(a.reshape_with_args_f([-1], false).is_err()); // (4, 6, 9) -> (4 * 6 * 9)
-/// assert!(a.reshape_with_args_f([12, 2, 9], false).is_err()); // (4, 6, 9) -> (4 * [3, 2], 9)
-/// ```
-///
-/// # Notes of API accordance
-///
-/// - Array-API: `reshape(x, /, shape, *, copy=None)` ([`reshape`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.reshape.html))
-/// - NumPy: `reshape(a, /, shape, order='C', *, copy=False)` ([`numpy.reshape`](https://numpy.org/doc/stable/reference/generated/numpy.reshape.html)):
-/// - RSTSR: `rt::reshape_with_args(tensor, shape, (order, copy))`
-/// - RSTSR: `rt::reshape(tensor, shape)`
-///
-/// Please note that the `order` argument in RSTSR does not support NumPy's `'A'` (order='A' means
-/// 'F' if the array is Fortran contiguous, 'C' otherwise in NumPy).
-///
-/// # See also
-///
-/// ## Similar function from other crates/libraries
-///
-/// - Python Array API standard: [`reshape`](https://data-apis.org/array-api/2024.12/API_specification/generated/array_api.reshape.html)
-/// - NumPy: [`reshape`](https://numpy.org/doc/stable/reference/generated/numpy.reshape.html)
-/// - ndarray: [`to_shape`](https://docs.rs/ndarray/latest/ndarray/struct.ArrayBase.html#method.to_shape)
-///
-/// ## Related functions in RSTSR
-///
-/// - [`reshape`]: simpler interface for reshaping.
-/// - [`reshapeable_without_copy`]: Check whether the layout is compatible with the new shape.
-/// - [`to_layout`]: Return a tensor with the specified layout.
-/// - [`to_contig`]: Return an owned contiguous tensor.
-///
-/// ## Variants of this function
-///
-/// - [`reshape_with_args`] / [`reshape_with_args_f`]: Taking reference and returning Cow.
-/// - [`into_shape_with_args`] / [`into_shape_with_args_f`]: Taking ownership and returning owned
-///   tensor.
-/// - [`change_shape_with_args`] / [`change_shape_with_args_f`]: Taking ownership and returning Cow.
-/// - [`to_shape_with_args`] / [`to_shape_with_args_f`]: Alias to [`reshape_with_args`] /
-///   [`reshape_with_args_f`].
-/// - Associated methods on [`TensorAny`]:
-///
-///   - [`Tensor::reshape_with_args`] / [`Tensor::reshape_with_args_f`]
-///   - [`Tensor::into_shape_with_args`] / [`Tensor::into_shape_with_args_f`]
-///   - [`Tensor::change_shape_with_args`] / [`Tensor::change_shape_with_args_f`]
-///   - [`Tensor::to_shape_with_args`] / [`Tensor::to_shape_with_args_f`]
+/// See also [`reshape`].
 pub fn reshape_with_args<'a, R, T, B, D>(
     tensor: &'a TensorAny<R, T, B, D>,
     shape: impl TryInto<AxesIndex<isize>, Error: Into<Error>>,
@@ -452,7 +275,7 @@ where
     /// Reshapes the given tensor to the specified shape, with argument specifying the order and
     /// whether to copy data.
     ///
-    /// # See also [`reshape_with_args`].
+    /// # See also [`reshape`].
     pub fn change_shape_with_args_f(
         self,
         shape: impl TryInto<AxesIndex<isize>, Error: Into<Error>>,
@@ -464,7 +287,7 @@ where
     /// Reshapes the given tensor to the specified shape, with argument specifying the order and
     /// whether to copy data.
     ///
-    /// # See also [`reshape_with_args`].
+    /// # See also [`reshape`].
     pub fn change_shape_with_args(
         self,
         shape: impl TryInto<AxesIndex<isize>, Error: Into<Error>>,
@@ -476,7 +299,7 @@ where
     /// Reshapes the given tensor to the specified shape, with argument specifying the order and
     /// whether to copy data.
     ///
-    /// # See also [`reshape_with_args`].
+    /// # See also [`reshape`].
     pub fn into_shape_with_args_f(
         self,
         shape: impl TryInto<AxesIndex<isize>, Error: Into<Error>>,
@@ -492,7 +315,7 @@ where
     /// Reshapes the given tensor to the specified shape, with argument specifying the order and
     /// whether to copy data.
     ///
-    /// # See also [`reshape_with_args`].
+    /// # See also [`reshape`].
     pub fn into_shape_with_args(
         self,
         shape: impl TryInto<AxesIndex<isize>, Error: Into<Error>>,
@@ -508,7 +331,7 @@ where
     /// Reshapes the given tensor to the specified shape, with argument specifying the order and
     /// whether to copy data.
     ///
-    /// # See also [`reshape_with_args`].
+    /// # See also [`reshape`].
     pub fn reshape_with_args(
         &'a self,
         shape: impl TryInto<AxesIndex<isize>, Error: Into<Error>>,
@@ -520,7 +343,7 @@ where
     /// Reshapes the given tensor to the specified shape, with argument specifying the order and
     /// whether to copy data.
     ///
-    /// # See also [`reshape_with_args`].
+    /// # See also [`reshape`].
     pub fn reshape_with_args_f(
         &'a self,
         shape: impl TryInto<AxesIndex<isize>, Error: Into<Error>>,
@@ -532,7 +355,7 @@ where
     /// Reshapes the given tensor to the specified shape, with argument specifying the order and
     /// whether to copy data.
     ///
-    /// # See also [`reshape_with_args`].
+    /// # See also [`reshape`].
     pub fn to_shape_with_args(
         &'a self,
         shape: impl TryInto<AxesIndex<isize>, Error: Into<Error>>,
@@ -544,7 +367,7 @@ where
     /// Reshapes the given tensor to the specified shape, with argument specifying the order and
     /// whether to copy data.
     ///
-    /// # See also [`reshape_with_args`].
+    /// # See also [`reshape`].
     pub fn to_shape_with_args_f(
         &'a self,
         shape: impl TryInto<AxesIndex<isize>, Error: Into<Error>>,
@@ -560,7 +383,7 @@ where
 
 /// Reshapes the given tensor to the specified shape.
 ///
-/// # See also [`reshape`], [`into_shape`], [`change_shape`] and [`reshape_with_args`].
+/// # See also [`reshape`].
 pub fn change_shape_f<'a, R, T, B, D>(
     tensor: TensorAny<R, T, B, D>,
     shape: impl TryInto<AxesIndex<isize>, Error: Into<Error>>,
@@ -575,52 +398,7 @@ where
 
 /// Reshapes the given tensor to the specified shape.
 ///
-/// This function is not intended to be used by usual users. Please consider using
-/// [`reshape`] (take reference of tensor) or [`into_shape`] (take ownership of tensor)
-/// instead.
-///
-/// <div class="warning">
-///
-/// **Row/Column Major Notice**
-///
-/// This function behaves differently on default orders ([`RowMajor`] and [`ColMajor`]) of device.
-///
-/// </div>
-///
-/// # Parameters
-///
-/// - `tensor`: [`TensorAny<R, T, B, D>`]
-///
-///   - The input tensor to be reshaped.
-///   - Ownership of input tensor is taken.
-///
-/// - `shape`: TryInto [`AxesIndex<isize>`]
-///
-///   - Position in the expanded axes where the new axis (or axes) is placed.
-///   - Can be a single integer, or a list/tuple of integers.
-///   - Negative values are supported and indicate counting dimensions from the back.
-///
-/// # Returns
-///
-/// - [`TensorCow<'a, T, B, IxD>`](TensorCow)
-///
-///   - The reshaped tensor.
-///   - This function will try to avoid data cloning if possible.
-///
-///     - If layout-compatible, depending on whether the input tensor is owned or other cases,
-///       either a view or owned tensor will be returned.
-///     - If layout-not-compatible, an owned tensor will be returned, cloning the data.
-///     - Cow (Clone-on-Write) semantics is used for representing either view or owned tensor.
-///
-/// This function is different to [`reshape`], in that it takes ownership of the input
-/// tensor.
-///
-/// This function is also different to [`into_shape`], in that it may return a view, if the input
-/// tensor also have the ownership of tensor view, and the layout is compatible.
-///
-/// # See also
-///
-/// Refer to [`reshape`] for more details and examples.
+/// # See also [`reshape`].
 pub fn change_shape<'a, R, T, B, D>(
     tensor: TensorAny<R, T, B, D>,
     shape: impl TryInto<AxesIndex<isize>, Error: Into<Error>>,
@@ -635,7 +413,7 @@ where
 
 /// Reshapes the given tensor to the specified shape.
 ///
-/// # See also [`reshape`], [`into_shape`], [`change_shape`] and [`reshape_with_args`].
+/// # See also [`reshape`].
 pub fn into_shape_f<'a, R, T, B, D>(
     tensor: TensorAny<R, T, B, D>,
     shape: impl TryInto<AxesIndex<isize>, Error: Into<Error>>,
@@ -656,109 +434,7 @@ where
 
 /// Reshapes the given tensor to the specified shape.
 ///
-/// <div class="warning">
-///
-/// **Row/Column Major Notice**
-///
-/// This function behaves differently on default orders ([`RowMajor`] and [`ColMajor`]) of device.
-///
-/// </div>
-///
-/// # Parameters
-///
-/// - `tensor`: [`TensorAny<R, T, B, D>`]
-///
-///   - The input tensor to be reshaped.
-///   - Ownership of input tensor is taken.
-///
-/// - `shape`: TryInto [`AxesIndex<isize>`]
-///
-///   - The new shape of the tensor.
-///   - Can be a single integer, or a list/tuple of integers.
-///   - Negative values are supported and indicate counting dimensions from the back.
-///   - Overloads:
-///     - integer: 1-D shape with a single dimension.
-///     - vector/array/tuple of integers: N-D shape with N dimensions. For tuples,
-///       mixed-signed/unsigned integers are supported.
-///
-/// # Returns
-///
-/// - [`Tensor<T, B, IxD>`]
-///
-///   - The reshaped tensor.
-///   - This function will try to avoid data cloning if possible, but with strict conditions:
-///
-///     - Layout-compatible after reshaping;
-///     - Input tensor owns the underlying data (i.e., not a view);
-///     - The input tensor is compact in memory (i.e., the underlying data does not have redundant
-///       elements; size of tensor exactly matches the length of underlying data).
-///
-/// This function is different to [`change_shape`](change_shape()) and [`reshape`], in
-/// that it takes ownership of the input tensor, and always returns an owned tensor.
-///
-/// # Examples
-///
-/// ```rust
-/// use rstsr::prelude::*;
-/// let a = rt::arange(6).into_shape([2, 3]);
-/// ```
-///
-/// # Elaborated examples
-///
-/// Here is some showcases that demonstrate when data cloning happens or not. All examples are
-/// row-major.
-///
-/// A first case is a tensor that is not fully contiguous (containing negative strides), but the
-/// tensor is compact (size of tensor is the same to the length of underlying data). In this case,
-/// if the new shape is compatible, no data cloning happens:
-///
-/// ```rust
-/// # use rstsr::prelude::*;
-/// # let mut device = DeviceCpu::default();
-/// # device.set_default_order(RowMajor);
-/// // shape: (4, 6, 9), stride: (-54, 9, 1), not c-contiguous
-/// // contiguous situation: (4, [6, 9]); the first dimension is reversed
-/// let a = rt::arange((216, &device)).into_shape([4, 6, 9]).into_flip(0);
-/// let a_ptr = a.raw().as_ptr();
-/// let b = a.into_shape([4, 54]);
-/// let b_ptr = b.raw().as_ptr();
-/// assert_eq!(a_ptr, b_ptr); // contiguous dims merged, no data clone happened
-/// ```
-///
-/// However, if the new shape is not compatible, data cloning will happen:
-///
-/// ```rust
-/// # use rstsr::prelude::*;
-/// # let mut device = DeviceCpu::default();
-/// # device.set_default_order(RowMajor);
-/// // shape: (4, 6, 9), stride: (-54, 9, 1), not c-contiguous
-/// // contiguous situation: (4, [6, 9]); the first dimension is reversed
-/// let a = rt::arange((216, &device)).into_shape([4, 6, 9]).into_flip(0);
-/// let a_ptr = a.raw().as_ptr();
-/// let b = a.into_shape([24, 9]);
-/// let b_ptr = b.raw().as_ptr();
-/// assert_ne!(a_ptr, b_ptr); // layout not compatible, data clone happened
-/// ```
-///
-/// Another case is a tensor that is not compact (size of tensor is less than the length of
-/// underlying data). In this case, even if the new shape is compatible, data cloning will happen:
-///
-/// ```rust
-/// # use rstsr::prelude::*;
-/// # let mut device = DeviceCpu::default();
-/// # device.set_default_order(RowMajor);
-/// // shape: (4, 6, 9), stride: (72, 9, 1), not c-contiguous
-/// // contiguous situation: (4, [6, 9]), or say the last two dimensions are contiguous
-/// let a = rt::arange((288, &device)).into_shape([4, 8, 9]).into_slice((.., 0..6, ..));
-/// let a_ptr = a.raw().as_ptr();
-/// let b = a.into_shape([4, 54]);
-/// let b_ptr = b.raw().as_ptr();
-/// assert_ne!(a_ptr, b_ptr); // layout-compatible, but input tensor is not compact (216 < 288)
-/// ```
-///
-/// # See also
-///
-/// Refer to [`reshape`] for more details and examples.
+/// # See also [`reshape`].
 pub fn into_shape<'a, R, T, B, D>(
     tensor: TensorAny<R, T, B, D>,
     shape: impl TryInto<AxesIndex<isize>, Error: Into<Error>>,
@@ -779,7 +455,7 @@ where
 
 /// Reshapes the given tensor to the specified shape.
 ///
-/// # See also [`reshape`], [`into_shape`], [`change_shape`] and [`reshape_with_args`].
+/// # See also [`reshape`].
 pub fn reshape_f<'a, R, T, B, D>(
     tensor: &'a TensorAny<R, T, B, D>,
     shape: impl TryInto<AxesIndex<isize>, Error: Into<Error>>,
@@ -810,7 +486,7 @@ pub use reshape_f as to_shape_f;
 
 /// Reshapes the given tensor to the specified shape.
 ///
-/// # See also [`reshape`], [`into_shape`], [`change_shape`] and [`reshape_with_args`].
+/// # See also [`reshape`].
 impl<'a, R, T, B, D> TensorAny<R, T, B, D>
 where
     R: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw> + DataIntoCowAPI<'a>,
@@ -820,7 +496,7 @@ where
 {
     /// Reshapes the given tensor to the specified shape.
     ///
-    /// # See also [`reshape`], [`into_shape`], [`change_shape`] and [`reshape_with_args`].
+    /// # See also [`reshape`].
     pub fn change_shape_f(
         self,
         shape: impl TryInto<AxesIndex<isize>, Error: Into<Error>>,
@@ -830,14 +506,14 @@ where
 
     /// Reshapes the given tensor to the specified shape.
     ///
-    /// # See also [`reshape`], [`into_shape`], [`change_shape`] and [`reshape_with_args`].
+    /// # See also [`reshape`].
     pub fn change_shape(self, shape: impl TryInto<AxesIndex<isize>, Error: Into<Error>>) -> TensorCow<'a, T, B, IxD> {
         change_shape(self, shape)
     }
 
     /// Reshapes the given tensor to the specified shape.
     ///
-    /// # See also [`reshape`], [`into_shape`], [`change_shape`] and [`reshape_with_args`].
+    /// # See also [`reshape`].
     pub fn into_shape_f(self, shape: impl TryInto<AxesIndex<isize>, Error: Into<Error>>) -> Result<Tensor<T, B, IxD>>
     where
         <B as DeviceRawAPI<T>>::Raw: Clone + 'a,
@@ -848,7 +524,7 @@ where
 
     /// Reshapes the given tensor to the specified shape.
     ///
-    /// # See also [`reshape`], [`into_shape`], [`change_shape`] and [`reshape_with_args`].
+    /// # See also [`reshape`].
     pub fn into_shape(self, shape: impl TryInto<AxesIndex<isize>, Error: Into<Error>>) -> Tensor<T, B, IxD>
     where
         <B as DeviceRawAPI<T>>::Raw: Clone + 'a,
@@ -859,7 +535,7 @@ where
 
     /// Reshapes the given tensor to the specified shape.
     ///
-    /// # See also [`reshape`], [`into_shape`], [`change_shape`] and [`reshape_with_args`].
+    /// # See also [`reshape`].
     pub fn to_shape_f(
         &'a self,
         shape: impl TryInto<AxesIndex<isize>, Error: Into<Error>>,
@@ -869,14 +545,14 @@ where
 
     /// Reshapes the given tensor to the specified shape.
     ///
-    /// # See also [`reshape`], [`into_shape`], [`change_shape`] and [`reshape_with_args`].
+    /// # See also [`reshape`].
     pub fn to_shape(&'a self, shape: impl TryInto<AxesIndex<isize>, Error: Into<Error>>) -> TensorCow<'a, T, B, IxD> {
         to_shape(self, shape)
     }
 
     /// Reshapes the given tensor to the specified shape.
     ///
-    /// # See also [`reshape`], [`into_shape`], [`change_shape`] and [`reshape_with_args`].
+    /// # See also [`reshape`].
     pub fn reshape_f(
         &'a self,
         shape: impl TryInto<AxesIndex<isize>, Error: Into<Error>>,
@@ -886,7 +562,7 @@ where
 
     /// Reshapes the given tensor to the specified shape.
     ///
-    /// # See also [`reshape`], [`into_shape`], [`change_shape`] and [`reshape_with_args`].
+    /// # See also [`reshape`].
     pub fn reshape(&'a self, shape: impl TryInto<AxesIndex<isize>, Error: Into<Error>>) -> TensorCow<'a, T, B, IxD> {
         reshape(self, shape)
     }
@@ -899,6 +575,175 @@ where
 #[doc = include_str!("doc_reshape.md")]
 #[macro_export]
 macro_rules! reshape {
+    /* #region change fallible */
+    // tensor, shape, order, copy
+    ($tensor:expr, shape = $shape:expr, order = $order:expr, copy = $copy:expr, change, fallible) => {
+        $tensor.change_shape_with_args_f($shape, ($order, $copy))
+    };
+    ($tensor:expr, $shape:expr, order = $order:expr, copy = $copy:expr, change, fallible) => {
+        $tensor.change_shape_with_args_f($shape, ($order, $copy))
+    };
+    ($tensor:expr, $shape:expr, $order:expr, copy = $copy:expr, change, fallible) => {
+        $tensor.change_shape_with_args_f($shape, ($order, $copy))
+    };
+
+    // tensor, shape, copy
+    ($tensor:expr, shape = $shape:expr, copy = $copy:expr, change, fallible) => {
+        $tensor.change_shape_with_args_f($shape, (None, $copy))
+    };
+    ($tensor:expr, $shape:expr, copy = $copy:expr, change, fallible) => {
+        $tensor.change_shape_with_args_f($shape, (None, $copy))
+    };
+
+    // tensor, shape, order
+    ($tensor:expr, shape = $shape:expr, order = $order:expr, change, fallible) => {
+        $tensor.change_shape_with_args_f($shape, ($order, None))
+    };
+    ($tensor:expr, $shape:expr, order = $order:expr, change, fallible) => {
+        $tensor.change_shape_with_args_f($shape, ($order, None))
+    };
+    ($tensor:expr, $shape:expr, $order:expr, change, fallible) => {
+        $tensor.change_shape_with_args_f($shape, ($order, None))
+    };
+    /* #endregion */
+
+    /* #region into fallible */
+    // tensor, shape, order, copy
+    ($tensor:expr, shape = $shape:expr, order = $order:expr, copy = $copy:expr, into, fallible) => {
+        $tensor.into_shape_with_args_f($shape, ($order, $copy))
+    };
+    ($tensor:expr, $shape:expr, order = $order:expr, copy = $copy:expr, into, fallible) => {
+        $tensor.into_shape_with_args_f($shape, ($order, $copy))
+    };
+    ($tensor:expr, $shape:expr, $order:expr, copy = $copy:expr, into, fallible) => {
+        $tensor.into_shape_with_args_f($shape, ($order, $copy))
+    };
+
+    // tensor, shape, copy
+    ($tensor:expr, shape = $shape:expr, copy = $copy:expr, into, fallible) => {
+        $tensor.into_shape_with_args_f($shape, (None, $copy))
+    };
+    ($tensor:expr, $shape:expr, copy = $copy:expr, into, fallible) => {
+        $tensor.into_shape_with_args_f($shape, (None, $copy))
+    };
+
+    // tensor, shape, order
+    ($tensor:expr, shape = $shape:expr, order = $order:expr, into, fallible) => {
+        $tensor.into_shape_with_args_f($shape, ($order, None))
+    };
+    ($tensor:expr, $shape:expr, order = $order:expr, into, fallible) => {
+        $tensor.into_shape_with_args_f($shape, ($order, None))
+    };
+    ($tensor:expr, $shape:expr, $order:expr, into, fallible) => {
+        $tensor.into_shape_with_args_f($shape, ($order, None))
+    };
+    /* #endregion */
+
+    /* #region to fallible */
+    // tensor, shape, order, copy
+    ($tensor:expr, shape = $shape:expr, order = $order:expr, copy = $copy:expr, fallible) => {
+        $tensor.reshape_with_args_f($shape, ($order, $copy))
+    };
+    ($tensor:expr, $shape:expr, order = $order:expr, copy = $copy:expr, fallible) => {
+        $tensor.reshape_with_args_f($shape, ($order, $copy))
+    };
+    ($tensor:expr, $shape:expr, $order:expr, copy = $copy:expr, fallible) => {
+        $tensor.reshape_with_args_f($shape, ($order, $copy))
+    };
+
+    // tensor, shape, copy
+    ($tensor:expr, shape = $shape:expr, copy = $copy:expr, fallible) => {
+        $tensor.reshape_with_args_f($shape, (None, $copy))
+    };
+    ($tensor:expr, $shape:expr, copy = $copy:expr, fallible) => {
+        $tensor.reshape_with_args_f($shape, (None, $copy))
+    };
+
+    // tensor, shape, order
+    ($tensor:expr, shape = $shape:expr, order = $order:expr, fallible) => {
+        $tensor.reshape_with_args_f($shape, ($order, None))
+    };
+    ($tensor:expr, $shape:expr, order = $order:expr, fallible) => {
+        $tensor.reshape_with_args_f($shape, ($order, None))
+    };
+    ($tensor:expr, $shape:expr, $order:expr, fallible) => {
+        $tensor.reshape_with_args_f($shape, ($order, None))
+    };
+
+    // tensor, shape
+    ($tensor:expr, shape = $shape:expr, fallible) => {
+        $tensor.reshape_f($shape)
+    };
+    ($tensor:expr, $shape:expr, fallible) => {
+        $tensor.reshape_f($shape)
+    };
+    /* #endregion */
+
+    /* #region change */
+    // tensor, shape, order, copy
+    ($tensor:expr, shape = $shape:expr, order = $order:expr, copy = $copy:expr, change) => {
+        $tensor.change_shape_with_args($shape, ($order, $copy))
+    };
+    ($tensor:expr, $shape:expr, order = $order:expr, copy = $copy:expr, change) => {
+        $tensor.change_shape_with_args($shape, ($order, $copy))
+    };
+    ($tensor:expr, $shape:expr, $order:expr, copy = $copy:expr, change) => {
+        $tensor.change_shape_with_args($shape, ($order, $copy))
+    };
+
+    // tensor, shape, copy
+    ($tensor:expr, shape = $shape:expr, copy = $copy:expr, change) => {
+        $tensor.change_shape_with_args($shape, (None, $copy))
+    };
+    ($tensor:expr, $shape:expr, copy = $copy:expr, change) => {
+        $tensor.change_shape_with_args($shape, (None, $copy))
+    };
+
+    // tensor, shape, order
+    ($tensor:expr, shape = $shape:expr, order = $order:expr, change) => {
+        $tensor.change_shape_with_args($shape, ($order, None))
+    };
+    ($tensor:expr, $shape:expr, order = $order:expr, change) => {
+        $tensor.change_shape_with_args($shape, ($order, None))
+    };
+    ($tensor:expr, $shape:expr, $order:expr, change) => {
+        $tensor.change_shape_with_args($shape, ($order, None))
+    };
+    /* #endregion */
+
+    /* #region into */
+    // tensor, shape, order, copy
+    ($tensor:expr, shape = $shape:expr, order = $order:expr, copy = $copy:expr, into) => {
+        $tensor.into_shape_with_args($shape, ($order, $copy))
+    };
+    ($tensor:expr, $shape:expr, order = $order:expr, copy = $copy:expr, into) => {
+        $tensor.into_shape_with_args($shape, ($order, $copy))
+    };
+    ($tensor:expr, $shape:expr, $order:expr, copy = $copy:expr, into) => {
+        $tensor.into_shape_with_args($shape, ($order, $copy))
+    };
+
+    // tensor, shape, copy
+    ($tensor:expr, shape = $shape:expr, copy = $copy:expr, into) => {
+        $tensor.into_shape_with_args($shape, (None, $copy))
+    };
+    ($tensor:expr, $shape:expr, copy = $copy:expr, into) => {
+        $tensor.into_shape_with_args($shape, (None, $copy))
+    };
+
+    // tensor, shape, order
+    ($tensor:expr, shape = $shape:expr, order = $order:expr, into) => {
+        $tensor.into_shape_with_args($shape, ($order, None))
+    };
+    ($tensor:expr, $shape:expr, order = $order:expr, into) => {
+        $tensor.into_shape_with_args($shape, ($order, None))
+    };
+    ($tensor:expr, $shape:expr, $order:expr, into) => {
+        $tensor.into_shape_with_args($shape, ($order, None))
+    };
+    /* #endregion */
+
+    /* #region to */
     // tensor, shape, order, copy
     ($tensor:expr, shape = $shape:expr, order = $order:expr, copy = $copy:expr) => {
         $tensor.reshape_with_args($shape, ($order, $copy))
@@ -935,7 +780,7 @@ macro_rules! reshape {
     };
     ($tensor:expr, $shape:expr) => {
         $tensor.reshape($shape)
-    };
+    }; /* #endregion */
 }
 
 /* #endregion */

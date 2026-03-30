@@ -480,5 +480,7 @@ mod macro_reshape {
         println!("v: {:?}", v);
         let v = rt::reshape!(a, [3, 2], order = ColMajor);
         println!("v: {:?}", v);
+        let v = rt::reshape!(a, [3, 2], fallible);
+        println!("v: {:?}", v);
     }
 }

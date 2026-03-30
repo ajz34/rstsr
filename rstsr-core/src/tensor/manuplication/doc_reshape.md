@@ -5,10 +5,20 @@ Reshapes the given tensor to the specified shape.
 # let device = DeviceCpuSerial::default();
 # let tensor = rt::arange((6, &device));
 # let shape = [2, 3];
-rt::reshape!(tensor, shape, order = None, copy = None);
+rt::reshape!(tensor, shape, order = None, copy = None); // -> TensorCow
+# let tensor = rt::arange((6, &device));
+# let shape = [2, 3];
+rt::reshape!(tensor, shape, order = None, copy = None, into); // -> Tensor
+# let tensor = rt::arange((6, &device));
+# let shape = [2, 3];
+rt::reshape!(tensor, shape, order = None, copy = None, change); // -> TensorCow
+# let tensor = rt::arange((6, &device));
+# let shape = [2, 3];
+// fallible also applies to reshape/into_shape/change_shape variants
+rt::reshape!(tensor, shape, order = None, copy = None, fallible); // -> Result<TensorCow>
 ```
 
-This function is better to be used as associated method `tensor.reshape(shape)` in most cases. We provide the macro for full overloads.
+We provide the macro [`reshape!`](crate::prelude::rt::reshape!) for full overloads. However, this function is better to be used as associated method `tensor.reshape(shape)` in most cases.
 
 ---
 
@@ -20,13 +30,17 @@ This function behaves differently on default orders ([`RowMajor`] and [`ColMajor
 
 </div>
 
-# Function Signature
+# Function signature
 
 ## Parameters
 
-- `tensor`: [`&TensorAny<R, T, B, D>`](TensorAny)
+- `tensor`
 
   **The input tensor to be reshaped.**
+
+  - `reshape`: [`&TensorAny<R, T, B, D>`](TensorAny) (borrowed)
+  - `into_shape`: [`TensorAny<R, T, B, D>`](TensorAny) (consumes ownership)
+  - `change_shape`: [`TensorAny<R, T, B, D>`](TensorAny) (consumes ownership)
 
 - `shape`: TryInto [`AxesIndex<isize>`]
 
@@ -45,6 +59,8 @@ This function behaves differently on default orders ([`RowMajor`] and [`ColMajor
 
   **Read the elements of input tensor in the specified order.**
 
+  *This parameter only works in function [`reshape_with_args`] and macro [`reshape!`](crate::prelude::rt::reshape!).*
+
   Valid values for `order` are:
   - `None` (default): use the default order of device.
   - `RowMajor`: read the elements in row-major order (C-contiguous).
@@ -56,6 +72,8 @@ This function behaves differently on default orders ([`RowMajor`] and [`ColMajor
 - `copy`: into [`Option<bool>`](bool)
 
   **Determine whether to copy the data during reshape.**
+
+  *This parameter only works in function [`reshape_with_args`] and macro [`reshape!`](crate::prelude::rt::reshape!).*
 
   Valid values for `copy` are:
   - `true`: always copy data, and return an owned tensor with contiguous memory layout (order specified by user or device's default).
@@ -69,11 +87,11 @@ This function behaves differently on default orders ([`RowMajor`] and [`ColMajor
 
 ## Returns
 
-- [`TensorCow<'a, T, B, IxD>`](TensorCow)
-
-  The reshaped tensor.
+The reshaped tensor.
   
-  This function will try to avoid data cloning if possible.
+This function will try to avoid data cloning, reusing owned data or returning a view if possible.
+
+- `reshape`: [`TensorCow<'a, T, B, IxD>`](TensorCow)
 
   - If shape compatible, a view will be returned.
   - If shape not-compatible, an owned tensor will be returned, cloning the data.
@@ -83,7 +101,18 @@ This function behaves differently on default orders ([`RowMajor`] and [`ColMajor
   - Use `tensor.view()` to get a view of the output tensor for future usage.
   - Use `tensor.into_owned()` to get an owned tensor; if the output tensor is already owned, then no cloning will occur; if the output tensor is a view, then cloning will occur.
 
-## Major variants and overloads
+- `into_shape`: [`Tensor<T, B, IxD>`](Tensor)
+
+  - If shape compatible and input tensor owns data, then the input tensor will be returned without cloning, only changing the layout of tensor.
+  - Otherwise, an owned tensor will be returned, cloning the data.
+
+- `change_shape`: [`TensorCow<'a, T, B, IxD>`](TensorCow)
+
+  - If shape compatible and input tensor owns data, then a view will be returned, sharing the same data with input tensor.
+  - If shape compatible but input tensor does not own data, then a view will be returned, borrowing the data from input tensor.
+  - If shape not-compatible, an owned tensor will be returned, cloning the data.
+
+## Argument overloads
 
 ```rust
 # use rstsr::prelude::*;
@@ -117,13 +146,15 @@ rt::reshape_with_args(&tensor, shape, order);
 rt::reshape_with_args(&tensor, shape, copy);
 ```
 
-| type | function |
-| --- | --- |
-| macro    | [`reshape!`](crate::prelude::reshape!) |
-| fn       | [`reshape`] |
-| assoc fn | [`TensorAny::reshape`] |
-| fn       | [`reshape_with_args`] |
-| assoc fn | [`TensorAny::reshape_with_args`] |
+## Function variants
+
+| type | to-variant | into-variant | change-variant |
+|-|-|-|-|
+| macro    | [`reshape!`](crate::prelude::rt::reshape!) | [`reshape!`](crate::prelude::rt::reshape!) | [`reshape!`](crate::prelude::rt::reshape!) |
+| fn       | [`reshape`]<br>[`reshape_with_args`] | [`into_shape`]<br>[`into_shape_with_args`] | [`change_shape`]<br>[`change_shape_with_args`] |
+| assoc fn | [`TensorAny::reshape`]<br>[`TensorAny::reshape_with_args`] | [`TensorAny::into_shape`]<br>[`TensorAny::into_shape_with_args`] | [`TensorAny::change_shape`]<br>[`TensorAny::change_shape_with_args`] |
+
+For fallible variants, add suffix `_f` to the function name, or add `fallible` to the macro. Fallible versiion will return [`Result`].
 
 # Examples
 
@@ -213,12 +244,12 @@ let a = rt::arange((6, &device)).into_shape([2, 3]);
 # Notes of API accordance
 
 - Array-API: `reshape(x, /, shape, *, copy=None)` ([`reshape`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.reshape.html))
-- NumPy: `reshape(a, /, shape, order='C', *, copy=False)` ([`numpy.reshape`](https://numpy.org/doc/stable/reference/generated/numpy.reshape.html)):
+- NumPy: `reshape(a, /, shape, order='C', *, copy=None)` ([`numpy.reshape`](https://numpy.org/doc/stable/reference/generated/numpy.reshape.html)):
+- RSTSR: `rt::reshape!(tensor, shape, order = None, copy = None)`
 - RSTSR: `rt::reshape_with_args(tensor, shape, (order, copy))`
 - RSTSR: `rt::reshape(tensor, shape)`
 
-Please note this function does not support `order` and `copy` arguments in NumPy's `reshape`.
-You can use function [`reshape_with_args`] to specify these arguments.
+Please note that the `order` argument in RSTSR does not support NumPy's `'A'` (order='A' means 'F' if the array is Fortran contiguous, 'C' otherwise in NumPy).
 
 # Elaborated examples
 
@@ -381,11 +412,93 @@ assert!(a.reshape([4, 54]).is_owned()); // (4, 6, 9) -> (4, 6 * 9)
 assert!(!a.reshape([24, 9]).is_owned()); // ([4, 6], 9) -> (4 * 6, 9)
 ```
 
-You can also use function [`reshape_with_args`]`(shape, copy)` to specify whether to copy data
-when the new shape is not compatible with the original shape.
+## Reshape with specified order and copy
 
-Also, you can use function [`reshapeable_without_copy`] to check whether the tensor can be
-reshaped to the new shape without copying data.
+You can specify the order for reading the tensor by argument `order`.
+
+Following is an example of row-major reshape. This is independent to the original default-layout
+of device.
+
+```rust
+# use rstsr::prelude::*;
+# let mut device = DeviceCpu::default();
+# device.set_default_order(RowMajor);
+let a = rt::tensor_from_nested!([[0, 1, 2], [3, 4, 5]], &device);
+println!("{a}");
+// [[ 0 1 2]
+//  [ 3 4 5]]
+let a_row = rt::tensor_from_nested!([[0, 1], [2, 3], [4, 5]], &device);
+println!("{a_row}");
+// [[ 0 1]
+//  [ 2 3]
+//  [ 4 5]]
+```
+
+And here is an example of col-major reshape.
+
+```rust
+# use rstsr::prelude::*;
+# let mut device = DeviceCpu::default();
+# device.set_default_order(RowMajor);
+let a = rt::tensor_from_nested!([[0, 1, 2], [3, 4, 5]], &device);
+println!("{a}");
+// [[ 0 1 2]
+//  [ 3 4 5]]
+let a_col = rt::tensor_from_nested!([[0, 4], [3, 2], [1, 5]], &device);
+println!("{a_col}");
+// [[ 0 4]
+//  [ 3 2]
+//  [ 1 5]]
+```
+
+The following example shows that if `copy = false`, then an error will be raised when the new
+shape is not compatible with the original shape. Given a strided tensor:
+
+```rust
+# use rstsr::prelude::*;
+# let mut device = DeviceCpu::default();
+# device.set_default_order(RowMajor);
+// shape: (4, 6, 9), stride: (72, 9, 1), not c-contiguous
+// contiguous situation: (4, [6, 9]), or say the last two dimensions are contiguous
+let a = rt::arange((288, &device)).into_shape([4, 8, 9]).into_slice((.., 0..6, ..));
+assert_eq!(a.shape(), &[4, 6, 9]);
+assert_eq!(a.stride(), &[72, 9, 1]);
+assert!(!a.c_contig());
+```
+
+The following example shows the reshaping does not explicitly clones data, and `copy = false`
+does not raise error.
+
+```rust
+# use rstsr::prelude::*;
+# let mut device = DeviceCpu::default();
+# device.set_default_order(RowMajor);
+let a = rt::arange((288, &device)).into_shape([4, 8, 9]).into_slice((.., 0..6, ..));
+// split a single dimension into multiple dimensions
+assert!(a.reshape_with_args_f([2, 2, 6, 9], false).is_ok()); // (4, 6, 9) -> ([2, 2], 6, 9)
+assert!(a.reshape_with_args_f([4, 3, 2, 9], false).is_ok()); // (4, 6, 9) -> (4, [3, 2], 9)
+assert!(a.reshape_with_args_f([4, 2, 3, 3, 3], false).is_ok()); // (4, 6, 9) -> (4, [2, 3], [3, 3])
+
+// merge contiguous dimensions into a single dimension
+assert!(a.reshape_with_args_f([4, 54], false).is_ok()); // (4, 6, 9) -> (4, 6 * 9)
+
+// merge contiguous dimensions and then split
+assert!(a.reshape_with_args_f([4, 3, 6, 3], false).is_ok()); // (4, [6, 9]) -> (4, [3, 6, 3])
+```
+
+However, the following example will raise error due to shape-incompatible. Using `copy = None`
+or `copy = true` will work, but the data will be cloned.
+
+```rust
+# use rstsr::prelude::*;
+# let mut device = DeviceCpu::default();
+# device.set_default_order(RowMajor);
+let a = rt::arange((288, &device)).into_shape([4, 8, 9]).into_slice((.., 0..6, ..));
+// merge non-contiguous dimensions
+assert!(a.reshape_with_args_f([24, 9], false).is_err()); // (4, 6, 9) -> (4 * 6, 9)
+assert!(a.reshape_with_args_f([-1], false).is_err()); // (4, 6, 9) -> (4 * 6 * 9)
+assert!(a.reshape_with_args_f([12, 2, 9], false).is_err()); // (4, 6, 9) -> (4 * [3, 2], 9)
+```
 
 # See also
 
@@ -397,21 +510,6 @@ reshaped to the new shape without copying data.
 
 ## Related functions in RSTSR
 
-- [`reshape_with_args`]: Reshape with advanced arguments for controlling the order for reading
-  the tensor, and whether to copy data.
 - [`reshapeable_without_copy`]: Check whether the layout is compatible with the new shape.
 - [`to_layout`]: Return a tensor with the specified layout.
 - [`to_contig`]: Return an owned contiguous tensor.
-
-## Variants of this function
-
-- [`reshape`] / [`reshape_f`]: Taking reference and returning Cow.
-- [`into_shape`] / [`into_shape_f`]: Taking ownership and returning owned tensor.
-- [`change_shape`] / [`change_shape_f`]: Taking ownership and returning Cow.
-- [`to_shape`] / [`to_shape_f`]: Alias to [`reshape`] / [`reshape_f`].
-- Associated methods on [`TensorAny`]:
-
-  - [`TensorAny::reshape`] / [`TensorAny::reshape_f`]
-  - [`TensorAny::into_shape`] / [`TensorAny::into_shape_f`]
-  - [`TensorAny::change_shape`] / [`TensorAny::change_shape_f`]
-  - [`TensorAny::to_shape`] / [`TensorAny::to_shape_f`]
