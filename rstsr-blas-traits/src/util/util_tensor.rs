@@ -6,6 +6,23 @@ use rstsr_core::prelude_dev::*;
 pub type TensorMutable1<'a, T, B> = TensorMutable<'a, T, B, Ix1>;
 pub type TensorMutable2<'a, T, B> = TensorMutable<'a, T, B, Ix2>;
 
+/// Convert a view/mut tensor reference to a mutable tensor.
+///
+/// # Note on preferred/contiguous layout
+///
+/// Given matrix A of shape `[m, n]`,
+/// - C-contiguous stride is `[n, 1]`, and F-contiguous stride is `[1, m]`.
+/// - C-preferred stride is `[lda, 1]` (where `lda >= n`), and F-preferred stride is `[1, lda]`
+///   (where `lda >= m`). `lda` is the leading dimension.
+///
+/// The mutable tensor will be in either row-major or col-major.
+/// - If input is view (non-mutable), it will always be converted to contiguous owned tensor with
+///   the default layout;
+/// - If input is mutable, and already in the preferred layout (either C/F-prefer), it will be used
+///   as is;
+/// - If input is mutable, but not in the preferred layout, a temporary contiguous owned tensor with
+///   the preferred layout will be created. The computation will use this temporary tensor, and the
+///   result will be copied back to the original tensor (manually by caller).
 pub fn overwritable_convert<T, B, D>(a: TensorReference<'_, T, B, D>) -> Result<TensorMutable<'_, T, B, D>>
 where
     T: Clone,
@@ -31,6 +48,8 @@ where
     Ok(a)
 }
 
+/// Same as `overwritable_convert`, but allows caller to specify the preferred layout (row-major or
+/// column-major).
 pub fn overwritable_convert_with_order<T, B, D>(
     a: TensorReference<'_, T, B, D>,
     order: FlagOrder,
@@ -58,6 +77,18 @@ where
 
 /* #region flip */
 
+/// Helper function to flip the transpose flag and tensor layout.
+///
+/// This function is intended to be used in BLAS/LAPACK operations that have `trans` option, to
+/// avoid unnecessary memory allocation and transposition.
+///
+/// - If the input tensor is already in the preferred layout, it will be used as is.
+/// - If the input tensor is not in the preferred layout, it will perform flip to both the tensor
+///   and the transpose flag, try to see if the flipped layout is in the preferred layout.
+///   - If the flipped layout is in the preferred layout, it will return view of the original tensor
+///     with flipped layout (without allocating new tensor).
+///   - If the flipped layout is still not in the preferred layout, it will allocate a new tensor
+///     with the preferred layout, and return it.
 pub fn flip_trans<T, B>(
     order: FlagOrder,
     trans: FlagTrans,
