@@ -29,6 +29,13 @@ Following has directory `../`, where the relative path is from working directory
     - kimi* (eg. kimi-k2.5): growth@moonshot.cn
   - Model name should include the version or details, such as `qwen3.5-plus`, `glm-5`, which can be inferred by Claude Code's `/model` property.
 - Commit starts with main crate that be affected, for example `rstsr-core: add reshape function`. Prefer to add more details in commit message body.
+- Example co-author format:
+  ```
+  some commit message
+
+  Co-authored-by: Claude Code <noreply@anthropic.com>
+  Co-authored-by: glm-5 <service@zhipuai.cn>
+  ```
 
 ## Pull Request Convention
 
