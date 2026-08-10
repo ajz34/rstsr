@@ -12,5 +12,9 @@ readme = "readme.md"
 
 [dependencies]
 hdf5-metno = { workspace = true }
+tempfile = { workspace = true }
 rstsr-core = { workspace = true }
 rstsr-common = { workspace = true }
+
+[dev-dependencies]
+rstsr = { path = "../../rstsr", default-features = false }
