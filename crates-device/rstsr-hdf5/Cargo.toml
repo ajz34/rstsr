@@ -1,0 +1,16 @@
+[package]
+name = "rstsr-hdf5"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+license.workspace = true
+readme = "readme.md"
+
+[dependencies]
+hdf5-metno = { workspace = true }
+rstsr-core = { workspace = true }
+rstsr-common = { workspace = true }

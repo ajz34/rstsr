@@ -20,6 +20,7 @@ pub enum RSTSRError {
     DeviceMismatch(String),
     UnImplemented(String),
     MemoryError(String),
+    IOError(String),
 
     TryFromIntError(String),
     Infallible,

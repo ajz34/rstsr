@@ -14,6 +14,7 @@ members = [
     "crates-device/rstsr-blis",
     "crates-device/rstsr-aocl",
     "crates-device/rstsr-kml",
+    "crates-device/rstsr-hdf5",
     "crates-plugin/rstsr-tblis",
 ]
 
@@ -44,6 +45,7 @@ rstsr-mkl = { path = "./crates-device/rstsr-mkl", default-features = false, vers
 rstsr-blis = { path = "./crates-device/rstsr-blis", default-features = false, version = "0.7.9" }
 rstsr-aocl = { path = "./crates-device/rstsr-aocl", default-features = false, version = "0.7.9" }
 rstsr-kml = { path = "./crates-device/rstsr-kml", default-features = false, version = "0.7.9" }
+rstsr-hdf5 = { path = "./crates-device/rstsr-hdf5", default-features = false, version = "0.7.9" }
 # members (plugin)
 rstsr-tblis = { path = "./crates-plugin/rstsr-tblis", default-features = false, version = "0.7.9" }
 # develop dependencies that should not publish
@@ -70,6 +72,7 @@ faer = { version = "0.22", default-features = false, features = ["rayon", "linal
 faer-ext = { version = "0.6" }
 tblis = { version = "0.2" }
 opt-einsum-path = { version = "0.2", features = ["par_rand"] }
+hdf5-metno = { version = "0.14" }
 # dev dependencies
 npyz = { version = "0.8", features = ["complex"] }
 anyhow = { version = "1.0" }

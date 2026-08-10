@@ -1,0 +1,150 @@
+use crate::prelude_dev::*;
+use std::path::Path;
+
+#[derive(Clone, Debug)]
+pub struct DeviceHDF5 {
+    default_order: FlagOrder,
+    h5file: H5File,
+    dataset_path: String,
+}
+
+impl DeviceHDF5 {
+    pub fn new(filename: impl AsRef<Path>, mode: H5OpenMode, dataset_path: impl AsRef<str>) -> Self {
+        Self::new_f(filename, mode, dataset_path).rstsr_unwrap()
+    }
+
+    pub fn new_f(filename: impl AsRef<Path>, mode: H5OpenMode, dataset_path: impl AsRef<str>) -> Result<Self> {
+        let h5file =
+            H5File::open_as(filename, mode).map_err(|e| rstsr_error!(IOError, "Failed to open HDF5 file: {e}"))?;
+        let dataset_path = dataset_path.as_ref();
+        // if read-only mode but dataset_path does not exist, return error
+        if h5file.is_read_only() {
+            h5file
+                .group(dataset_path)
+                .map_err(|e| rstsr_error!(IOError, "Failed to open HDF5 group '{dataset_path}': {e}"))?;
+        }
+        Ok(Self { default_order: FlagOrder::C, h5file, dataset_path: dataset_path.to_string() })
+    }
+
+    pub fn h5file(&self) -> &H5File {
+        &self.h5file
+    }
+
+    pub fn dataset(&self) -> H5Dataset {
+        self.dataset_f().rstsr_unwrap()
+    }
+
+    pub fn dataset_f(&self) -> Result<H5Dataset> {
+        self.h5file
+            .dataset(&self.dataset_path)
+            .map_err(|e| rstsr_error!(IOError, "Failed to open HDF5 dataset '{}': {e}", self.dataset_path))
+    }
+
+    pub fn dataset_path(&self) -> &str {
+        &self.dataset_path
+    }
+}
+
+impl DeviceBaseAPI for DeviceHDF5 {
+    fn same_device(&self, other: &Self) -> bool {
+        self.default_order() == other.default_order()
+            && self.h5file.id() == other.h5file.id()
+            && self.dataset_path == other.dataset_path
+    }
+
+    fn default_order(&self) -> FlagOrder {
+        self.default_order
+    }
+
+    fn set_default_order(&mut self, order: FlagOrder) {
+        self.default_order = order;
+    }
+}
+
+impl<T> DeviceRawAPI<T> for DeviceHDF5 {
+    type Raw = H5Dataset;
+}
+
+impl<T: H5Type + Copy> DeviceStorageAPI<T> for DeviceHDF5 {
+    fn len<R>(storage: &Storage<R, T, Self>) -> usize
+    where
+        R: DataAPI<Data = Self::Raw>,
+    {
+        storage.raw().shape().iter().product()
+    }
+
+    fn to_cpu_vec<R>(storage: &Storage<R, T, Self>) -> Result<Vec<T>>
+    where
+        Self::Raw: Clone,
+        R: DataAPI<Data = Self::Raw>,
+    {
+        let dataset = storage.raw();
+        verify_dataset_type::<T>(dataset)?;
+        dataset.read_raw::<T>().map_err(|e| rstsr_error!(IOError, "Failed to read HDF5 dataset into Vec: {e}"))
+    }
+
+    fn into_cpu_vec<R>(storage: Storage<R, T, Self>) -> Result<Vec<T>>
+    where
+        Self::Raw: Clone,
+        R: DataCloneAPI<Data = Self::Raw>,
+    {
+        storage.to_cpu_vec()
+    }
+
+    fn get_index<R>(_storage: &Storage<R, T, Self>, _index: usize) -> T
+    where
+        T: Clone,
+        R: DataAPI<Data = Self::Raw>,
+    {
+        rstsr_raise!(UnImplemented, "get_index is not implemented for DeviceHDF5").rstsr_unwrap()
+    }
+
+    fn get_index_ptr<R>(_storage: &Storage<R, T, Self>, _index: usize) -> *const T
+    where
+        R: DataAPI<Data = Self::Raw>,
+    {
+        rstsr_raise!(UnImplemented, "get_index_ptr is not implemented for DeviceHDF5").rstsr_unwrap()
+    }
+
+    fn get_index_mut_ptr<R>(_storage: &mut Storage<R, T, Self>, _index: usize) -> *mut T
+    where
+        R: DataMutAPI<Data = Self::Raw>,
+    {
+        rstsr_raise!(UnImplemented, "get_index_mut_ptr is not implemented for DeviceHDF5").rstsr_unwrap()
+    }
+
+    fn set_index<R>(_storage: &mut Storage<R, T, Self>, _index: usize, _value: T)
+    where
+        R: DataMutAPI<Data = Self::Raw>,
+    {
+        rstsr_raise!(UnImplemented, "set_index is not implemented for DeviceHDF5").rstsr_unwrap()
+    }
+}
+
+#[test]
+fn playground() {
+    // open hdf5 file from /home/a/rstsr_pack/tmp/play.h5
+    let file_handle = H5File::open_as("/home/a/rstsr_pack/tmp/play.h5", H5OpenMode::ReadWrite).unwrap();
+    println!("File handle: {:?}", file_handle.id());
+
+    // use to_cpu_vec for dataset "/b/0"
+    let device = DeviceHDF5::new_f("/home/a/rstsr_pack/tmp/play.h5", H5OpenMode::ReadWrite, "/b/0").unwrap();
+    let dataset = device.dataset();
+    println!("Dataset '/b/0' shape: {:?}", dataset.shape());
+    let vec: Vec<i64> =
+        DeviceHDF5::to_cpu_vec(&Storage::new(DataOwned::from(dataset.clone()), device.clone())).unwrap();
+    println!("Dataset '/b/0' data: {:?}", vec);
+}
+
+#[test]
+fn playground_dtype_mismatch() {
+    // dataset "/b/0" is int64 (i64); reading it as f64 has the same size but a
+    // different dtype, and must be rejected rather than reinterpreting bytes.
+    let device = DeviceHDF5::new_f("/home/a/rstsr_pack/tmp/play.h5", H5OpenMode::ReadWrite, "/b/0").unwrap();
+    let dataset = device.dataset();
+    let storage = Storage::new(DataOwned::from(dataset.clone()), device.clone());
+    let result: Result<Vec<f64>> = DeviceHDF5::to_cpu_vec(&storage);
+    let err = result.unwrap_err();
+    println!("dtype mismatch error: {err}");
+    assert!(err.to_string().contains("dtype mismatch"), "got: {err}");
+}
