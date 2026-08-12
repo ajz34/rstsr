@@ -187,6 +187,7 @@ fn playground() {
 }
 
 #[test]
+#[should_panic(expected = "Dataset type mismatch")]
 fn playground_dtype_mismatch() {
     // dataset "/b/0" is int64 (i64); reading it as f64 has the same size but a
     // different dtype, and must be rejected rather than reinterpreting bytes.
