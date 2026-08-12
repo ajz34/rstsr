@@ -73,6 +73,7 @@ faer-ext = { version = "0.6" }
 tblis = { version = "0.2" }
 opt-einsum-path = { version = "0.2", features = ["par_rand"] }
 hdf5-metno = { version = "0.14" }
+hdf5-sys = { package = "hdf5-metno-sys", version = "0.12" }
 tempfile = { version = "3.27" }
 # dev dependencies
 npyz = { version = "0.8", features = ["complex"] }

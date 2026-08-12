@@ -12,6 +12,7 @@ readme = "readme.md"
 
 [dependencies]
 hdf5-metno = { workspace = true }
+hdf5-sys = { workspace = true }
 tempfile = { workspace = true }
 rstsr-core = { workspace = true }
 rstsr-common = { workspace = true }
