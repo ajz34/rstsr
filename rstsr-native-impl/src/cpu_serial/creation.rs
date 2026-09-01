@@ -1,6 +1,6 @@
 use crate::prelude_dev::*;
 use core::ops::*;
-use num::{FromPrimitive, ToPrimitive};
+use num::{Float, FromPrimitive, ToPrimitive};
 
 /* #region arange */
 
@@ -29,7 +29,7 @@ where
     // We just try to convert to isize. We believe it's really rare case that usize is used in arange;
     // and anyway, fallback is always available with efficiency loss.
     let (start_, end_, step_) = (start.to_isize()?, end.to_isize()?, step.to_isize()?);
-    let n = ((end_ - start_) as f64 / step_ as f64).ceil().to_isize()?;
+    let n = Float::ceil((end_ - start_) as f64 / step_ as f64).to_isize()?;
 
     // The unwrap here is probably safe, since start/end/nstep are all checked.
     // `Some(map(option.unwrap).collect())` is much faster than `map(option).collect()` in this case, so
@@ -51,7 +51,7 @@ where
     T: PartialOrd + Clone + Add<Output = T> + ToPrimitive + FromPrimitive,
 {
     let (start_, end_, step_) = (start.to_f64()?, end.to_f64()?, step.to_f64()?);
-    let n = ((end_ - start_) / step_).ceil().to_usize()?;
+    let n = Float::ceil((end_ - start_) / step_).to_usize()?;
     let mut result: Vec<T> = (0..n).map(|i| T::from_f64(start_ + i as f64 * step_).unwrap()).collect();
 
     // the interval may be open on the right, so we need to pop the last element if it's out of range.

@@ -1,4 +1,4 @@
-use std::mem::MaybeUninit;
+use core::mem::MaybeUninit;
 
 /// Sets the value of the current object to `val`.
 ///
