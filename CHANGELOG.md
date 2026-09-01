@@ -1,5 +1,42 @@
 # Changelog
 
+## v0.8.0 -- 2026-09-01
+
+Behavior change
+
+- The `openmp` feature of rstsr-openblas is now a default feature, and `rstsr`
+  default features propagate it whenever the `openblas` feature is on. (RESTGroup/rstsr#94)
+  Default-feature builds must now link an OpenMP runtime (`gomp`/`omp`);
+  pthread-built OpenBLAS libraries remain compatible. Opt out with
+  `default-features = false, features = ["linalg"]`.
+  This default-feature change is the main motivation for the minor version bump.
+
+Enhancement
+
+- Add `ExtNum::ext_sign` following NumPy `np.sign` semantics: `-1`/`0`/`1` for
+  signed integers (comparison form, no overflow at the type minimum), `0`/`1` for
+  unsigned integers, NaN/±inf and signed-zero handling for floats, `z / |z|` for
+  complex, and the same rules for `f16`/`bf16`. (RESTGroup/rstsr#93)
+  `rt::sign` now accepts integer dtypes, and the previous `x / |x|` formula
+  divergences are fixed: `sign(±inf)` no longer returns NaN, and `sign(-0.0)`
+  returns `+0.0`.
+
+API breaking changes (user should not feel that)
+
+- `ExtNum` gained the new required method `ext_sign`; crates implementing `ExtNum`
+  themselves must add it. The closed `ExtNum` type set also replaces the open
+  `ComplexFloat` bound as the fallback for `rt::sign`, so not all `ComplexFloat`
+  types remain accepted. (RESTGroup/rstsr#93)
+
+Bug Fix
+
+- Fix `OpenBLASConfig::get_parallel` panicking when both `openmp` and
+  `dynamic_loading` were disabled, even on pthread builds; it now panics only
+  when the library itself reports an OpenMP build. (RESTGroup/rstsr#94)
+- Fix `no_std` builds: use rstsr-cblas-base 0.1.2 (which fixes its own `no_std`
+  support), and replace `std` float operations and imports with `core`/`alloc`
+  equivalents via the `num` crate. (RESTGroup/rstsr#96)
+
 ## v0.7.10 -- 2026-08-14
 
 API breaking changes (user should not feel that)
