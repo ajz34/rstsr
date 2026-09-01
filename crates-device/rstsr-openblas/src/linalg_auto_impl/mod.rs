@@ -1,3 +1,5 @@
+pub mod batched_matmul;
+pub mod batched_matmul_strided;
 pub mod cholesky;
 pub mod det;
 pub mod eigh;

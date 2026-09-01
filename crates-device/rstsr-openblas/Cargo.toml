@@ -35,6 +35,11 @@ ilp64 = ["rstsr-openblas-ffi/ilp64", "rstsr-blas-traits/ilp64"]
 linalg = ["dep:rstsr-linalg-traits"]
 sci = ["dep:rstsr-sci-traits"]
 
+# batched GEMM extensions (OpenBLAS >= 0.3.26 for gemm_batch, >= 0.3.34 for gemm_batch_strided)
+# not enabled by default: may introduce after OpenBLAS #5979, #5980 fixed (>= 0.3.35).
+use_batched_gemm = []
+use_batched_gemm_strided = []
+
 # use openmp for linking
 openmp = []
 # use lapacke instead of lapack for linalg functions

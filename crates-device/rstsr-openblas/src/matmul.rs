@@ -136,6 +136,43 @@ where
     };
 
     // handle broadcasted cases
+    // try batched GEMM acceleration first: strided batched (uniformly-strided
+    // batches, stride 0 allowed for broadcast), then grouped/pointer-based
+    // (any batch layout); fall back to the per-slice loop below otherwise
+    #[cfg(feature = "use_batched_gemm_strided")]
+    {
+        let handled = crate::batched_gemm_impl::batched_matmul_strided_try(
+            c,
+            &lc.to_dim()?,
+            a,
+            &la.to_dim()?,
+            b,
+            &lb.to_dim()?,
+            alpha.clone(),
+            beta.clone(),
+            nthreads,
+        )?;
+        if handled {
+            return Ok(());
+        }
+    }
+    #[cfg(feature = "use_batched_gemm")]
+    {
+        let handled = crate::batched_gemm_impl::batched_matmul_grouped_try(
+            c,
+            &lc.to_dim()?,
+            a,
+            &la.to_dim()?,
+            b,
+            &lb.to_dim()?,
+            alpha.clone(),
+            beta.clone(),
+            nthreads,
+        )?;
+        if handled {
+            return Ok(());
+        }
+    }
     let cfg = layout_matmul_dyn_row_major_with_lc(&la.to_dim()?, &lb.to_dim()?, &lc.to_dim()?)?;
     // rules 1 and 2 are handled above as fast paths; only the broadcasted
     // rules (3..7) reach here.

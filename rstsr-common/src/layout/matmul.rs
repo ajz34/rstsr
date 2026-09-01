@@ -420,6 +420,150 @@ pub fn layout_matmul_dyn_row_major_with_lc(
     }
 }
 
+/* #region batched flat stride */
+
+/// Flat (iteration) order in which a batch layout reduces to a single stride.
+///
+/// `RowMajor` means the last batch dim varies fastest (the flat index is
+/// `i0 * (n1 * .. * nk) + .. + ik`); `ColMajor` means the first dim varies
+/// fastest. See [`batched_flat_stride`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BatchedFlatOrder {
+    RowMajor,
+    ColMajor,
+}
+
+/// Check whether a batch (rest) layout is *uniformly-strided*: whether the
+/// offset of each batch element can be written as `l.offset() + flat * stride`
+/// for one constant `stride` and a flat enumeration of the multi-index in
+/// exactly one of the two orders.
+///
+/// Returns `(order, stride)`. A `stride == 0` means every batch element
+/// aliases the same matrix (the fully-broadcast case); the order is then
+/// irrelevant. Returns `None` for a *scattered* batch (e.g. strides from a
+/// `::2` slice of an outer batch dim, or mixed-stride broadcast), which
+/// requires a pointer-array batched interface instead.
+///
+/// # Note
+///
+/// When several operands enter one strided batched GEMM call, all operands
+/// with nonzero stride must share the same [`BatchedFlatOrder`], since the
+/// backend pairs the `i`-th matrix of each operand by linear position.
+pub fn batched_flat_stride(l: &Layout<IxD>) -> Option<(BatchedFlatOrder, usize)> {
+    let shape: &[usize] = l.shape().as_ref();
+    let stride: &[isize] = l.stride().as_ref();
+    let n = l.ndim();
+    if n == 0 || l.size() == 0 {
+        return Some((BatchedFlatOrder::RowMajor, 0));
+    }
+
+    // row-major flat order (last dim fastest): stride[j] == S * prod(shape[j+1..])
+    let rm = (|| -> Option<usize> {
+        let s = *stride.last().unwrap();
+        if s < 0 {
+            return None;
+        }
+        let s = s as usize;
+        let mut acc = 1usize;
+        for j in (0..n).rev() {
+            if stride[j] != (s * acc) as isize {
+                return None;
+            }
+            acc = acc.checked_mul(shape[j])?;
+        }
+        Some(s)
+    })();
+    // col-major flat order (first dim fastest): stride[j] == S * prod(shape[..j])
+    let cm = (|| -> Option<usize> {
+        let s = stride[0];
+        if s < 0 {
+            return None;
+        }
+        let s = s as usize;
+        let mut acc = 1usize;
+        for j in 0..n {
+            if stride[j] != (s * acc) as isize {
+                return None;
+            }
+            acc = acc.checked_mul(shape[j])?;
+        }
+        Some(s)
+    })();
+
+    match (rm, cm) {
+        (Some(s), Some(_)) => Some((BatchedFlatOrder::RowMajor, s)),
+        (Some(s), None) => Some((BatchedFlatOrder::RowMajor, s)),
+        (None, Some(s)) => Some((BatchedFlatOrder::ColMajor, s)),
+        (None, None) => None,
+    }
+}
+
+/* #endregion */
+
+/* #region batched gemm canonicalization */
+
+/// Canonicalize one matrix piece for gemm: `f_prefer` keeps it, `c_prefer`
+/// transposes it, anything else is not gemm-expressible without a copy.
+pub fn batched_canon_one(l: &Layout<Ix2>) -> Option<(FlagTrans, Layout<Ix2>)> {
+    if l.f_prefer() {
+        Some((FlagTrans::N, l.clone()))
+    } else if l.c_prefer() {
+        Some((FlagTrans::T, l.reverse_axes()))
+    } else {
+        None
+    }
+}
+
+/// Canonicalize the three matrix pieces for one batched gemm call. When the
+/// output piece is only c-prefer, compute `C^T = B^T A^T` instead by swapping
+/// the operands (returning `swapped == true`); the caller must then also swap
+/// the operand data, rest layouts, and trans roles accordingly.
+/// Canonicalized pieces for one batched gemm call:
+/// `(transa, la, transb, lb, lc, swapped)`.
+pub type BatchedCanonMatmul = (FlagTrans, Layout<Ix2>, FlagTrans, Layout<Ix2>, Layout<Ix2>, bool);
+
+pub fn batched_canon_matmul(
+    la_matmul: &Layout<Ix2>,
+    lb_matmul: &Layout<Ix2>,
+    lc_matmul: &Layout<Ix2>,
+) -> Option<BatchedCanonMatmul> {
+    if lc_matmul.f_prefer() {
+        let (ta, la) = batched_canon_one(la_matmul)?;
+        let (tb, lb) = batched_canon_one(lb_matmul)?;
+        Some((ta, la, tb, lb, lc_matmul.clone(), false))
+    } else if lc_matmul.c_prefer() {
+        let (tb, lb) = batched_canon_one(&lb_matmul.reverse_axes())?;
+        let (ta, la) = batched_canon_one(&la_matmul.reverse_axes())?;
+        Some((tb, lb, ta, la, lc_matmul.reverse_axes(), true))
+    } else {
+        None
+    }
+}
+
+/// Matrix dims `(m, n, k)` for a gemm call from the canonical pieces: `lc`
+/// is the canonical (f-prefer) output piece `[m, n]`; `la` is the canonical
+/// A-role piece, `[m, k]` when `ta` is `N` and `[k, m]` when `ta` is `T`.
+pub fn batched_dims(ta: FlagTrans, la: &Layout<Ix2>, lc: &Layout<Ix2>) -> (usize, usize, usize) {
+    let m = lc.shape()[0];
+    let n = lc.shape()[1];
+    let k = match ta {
+        FlagTrans::N => la.shape()[1],
+        _ => la.shape()[0],
+    };
+    (m, n, k)
+}
+
+/// Leading dimension of an f-prefer matrix piece (col-major convention).
+pub fn batched_ld(l: &Layout<Ix2>) -> usize {
+    if l.shape()[1] != 1 {
+        l.stride()[1] as usize
+    } else {
+        l.shape()[0]
+    }
+}
+
+/* #endregion */
+
 fn layout_matmul_dyn_col_major(la: &Layout<IxD>, lb: &Layout<IxD>) -> Result<LayoutMatMulConfig<IxD, IxD>> {
     // For col-major, we re-use the row-major implementation via the identity
     //     C[t, m, n] = A[t, m, k] @ B[t, k, n]   (row-major)

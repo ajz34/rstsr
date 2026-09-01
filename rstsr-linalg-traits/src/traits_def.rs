@@ -18,6 +18,8 @@ use rstsr_core::prelude_dev::*;
    [SolveTriangularAPI] [solve_triangular] [solve_triangular_f];
    [SVDAPI            ] [svd             ] [svd_f             ];
    [SVDvalsAPI        ] [svdvals         ] [svdvals_f         ];
+   [BatchedMatmulAPI       ] [batched_matmul       ] [batched_matmul_f       ];
+   [BatchedMatmulStridedAPI] [batched_matmul_strided] [batched_matmul_strided_f];
 )]
 pub trait LinalgAPI<Inp> {
     type Out;
@@ -44,6 +46,8 @@ pub trait LinalgAPI<Inp> {
    [SolveTriangularAPI] [solve_triangular] [solve_triangular_f];
    [SVDAPI            ] [svd             ] [svd_f             ];
    [SVDvalsAPI        ] [svdvals         ] [svdvals_f         ];
+   [BatchedMatmulAPI       ] [batched_matmul       ] [batched_matmul_f       ];
+   [BatchedMatmulStridedAPI] [batched_matmul_strided] [batched_matmul_strided_f];
 )]
 pub fn func_f<Args, Inp>(args: Args) -> Result<<Args as LinalgAPI<Inp>>::Out>
 where
@@ -66,6 +70,8 @@ where
    [SolveTriangularAPI] [solve_triangular] [solve_triangular_f];
    [SVDAPI            ] [svd             ] [svd_f             ];
    [SVDvalsAPI        ] [svdvals         ] [svdvals_f         ];
+   [BatchedMatmulAPI       ] [batched_matmul       ] [batched_matmul_f       ];
+   [BatchedMatmulStridedAPI] [batched_matmul_strided] [batched_matmul_strided_f];
 )]
 pub fn func<Args, Inp>(args: Args) -> <Args as LinalgAPI<Inp>>::Out
 where

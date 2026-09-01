@@ -10,6 +10,9 @@ pub mod prelude_dev;
 pub mod rayon_auto_impl;
 pub mod threading;
 
+#[cfg(any(feature = "use_batched_gemm", feature = "use_batched_gemm_strided"))]
+pub mod batched_gemm_impl;
+
 pub mod driver_impl;
 #[cfg(feature = "linalg")]
 pub mod linalg_auto_impl;

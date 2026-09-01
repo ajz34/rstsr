@@ -257,4 +257,70 @@ mod test {
         let s = rt::linalg::svdvals(a.view());
         assert!((fingerprint(&s) - 32.27742168207757).abs() < 1e-8);
     }
+    #[test]
+    fn test_batched_matmul() {
+        use rstsr_core::tensor::exports::linspace;
+        use rstsr_openblas::prelude_dev::allclose_f64;
+        let device = DeviceBLAS::default();
+        let a = linspace((0.0, 1.0, 4 * 8 * 16, &device)).into_shape([4, 8, 16]);
+        let b = linspace((1.0, 2.0, 4 * 16 * 8, &device)).into_shape([4, 16, 8]);
+
+        // agrees with the broadcasted matmul
+        let c = rt::linalg::batched_matmul((a.view(), b.view()));
+        let c_ref = &a % &b;
+        assert!(allclose_f64(&c, &c_ref));
+
+        // mismatched batch shapes must be an error
+        let b2 = linspace((1.0, 2.0, 2 * 16 * 8, &device)).into_shape([2, 16, 8]);
+        assert!(rt::linalg::batched_matmul_f((a.view(), b2.view())).is_err());
+    }
+
+    #[cfg(feature = "use_batched_gemm_strided")]
+    #[test]
+    fn test_batched_matmul_strided() {
+        use rstsr_core::tensor::exports::linspace;
+        use rstsr_openblas::prelude_dev::allclose_f64;
+        let device = DeviceBLAS::default();
+        let a = linspace((0.0, 1.0, 4 * 8 * 16, &device)).into_shape([4, 8, 16]);
+        let b = linspace((1.0, 2.0, 4 * 16 * 8, &device)).into_shape([4, 16, 8]);
+
+        // agrees with the broadcasted matmul
+        let c = rt::linalg::batched_matmul_strided((a.view(), b.view()));
+        let c_ref = &a % &b;
+        assert!(allclose_f64(&c, &c_ref));
+    }
+
+    #[cfg(feature = "use_batched_gemm_strided")]
+    #[test]
+    fn test_batched_gemm_builders() {
+        use rstsr_blas_traits::prelude::{BatchedGEMM, BatchedGEMMStrided};
+        use rstsr_core::tensor::exports::linspace;
+        use rstsr_openblas::prelude_dev::allclose_f64;
+
+        let device = DeviceBLAS::default();
+        let a = linspace((0.0, 1.0, 4 * 8 * 16, &device)).into_shape([4, 8, 16]);
+        let b = linspace((1.0, 2.0, 4 * 16 * 8, &device)).into_shape([4, 16, 8]);
+        let c_ref = &a % &b;
+
+        // grouped builder accepts any batch layout
+        let c1 = BatchedGEMM::default()
+            .a(a.view())
+            .b(b.view())
+            .build()
+            .unwrap()
+            .run()
+            .unwrap();
+        assert!(allclose_f64(&c1, &c_ref));
+
+        // strided builder requires uniformly-strided batches (satisfied here)
+        let c2 = BatchedGEMMStrided::default()
+            .a(a.view())
+            .b(b.view())
+            .build()
+            .unwrap()
+            .run()
+            .unwrap();
+        assert!(allclose_f64(&c2, &c_ref));
+    }
+
 }
