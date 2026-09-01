@@ -1,4 +1,7 @@
 #![doc = include_str!("../readme.md")]
+#![cfg_attr(not(test), no_std)]
+
+extern crate alloc;
 
 mod ext_float;
 mod ext_num;

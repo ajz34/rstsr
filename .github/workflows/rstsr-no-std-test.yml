@@ -1,0 +1,30 @@
+name: rstsr no_std builds
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+
+jobs:
+  # Build the core rstsr crates for bare-metal (no std library) targets.
+  # The facade `-p rstsr` pulls in rstsr-core, rstsr-common, rstsr-dtype-traits
+  # and rstsr-native-impl, so one build covers the whole no_std dependency chain.
+  # `--no-default-features` is required: default features enable std/backtrace
+  # and std-only backends (faer, rayon, openblas).
+  no-std-build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - thumbv7em-none-eabi # 32-bit ARM Cortex-M4/M7, soft-float
+          - aarch64-unknown-none # 64-bit ARM, bare-metal
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          targets: ${{ matrix.target }}
+      - name: Build rstsr (row-major, no_std)
+        run: cargo build --target ${{ matrix.target }} --package rstsr --no-default-features --features row_major

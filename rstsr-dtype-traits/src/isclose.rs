@@ -1,4 +1,6 @@
 use crate::*;
+use alloc::format;
+use alloc::string::String;
 use core::ops::*;
 use derive_builder::Builder;
 
@@ -15,6 +17,7 @@ use derive_builder::Builder;
 ///
 /// [`isclose`](isclose())
 #[derive(Builder, Clone, PartialEq, Eq, Debug)]
+#[builder(no_std)]
 pub struct IsCloseArgs<TE: 'static> {
     /// Relative tolerance. For type [f64], the default is `1.0e-5`.
     #[builder(default = "default_rtol()?")]

@@ -22,7 +22,7 @@ serde = { workspace = true }
 rstsr-core = { path = "../rstsr-core", default-features = false }
 
 [features]
-std = []
+std = ["serde/std"]
 backtrace = ["std"]
 rayon = ["dep:rayon"]
 

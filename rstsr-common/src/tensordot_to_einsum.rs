@@ -11,8 +11,9 @@ use crate::prelude_dev::*;
 ///
 /// # Example
 /// ```
-/// let s = tensordot_to_einsum_str(2, 2, (vec![1], vec![0]));
-/// assert_eq!(s, "ba,ac->bc");  // equivalent to "ik,kj->ij"
+/// # use rstsr_common::tensordot_to_einsum::tensordot_to_einsum_str;
+/// let s = tensordot_to_einsum_str(2, 2, (vec![1], vec![0])).unwrap();
+/// assert_eq!(s, "ba, ac -> bc");  // equivalent to "ik,kj->ij"
 /// ```
 #[allow(clippy::needless_range_loop)]
 pub fn tensordot_to_einsum_str(
@@ -49,10 +50,10 @@ pub fn tensordot_to_einsum_str(
     };
 
     // Axis bounds are already guaranteed by the branches above:
-    //  - `Pair` runs each side through `normalize_axes_index(.., dim, ..)`, which folds negative axes
-    //    and rejects any out-of-range axis with `AxisError`.
-    //  - `Val(n)` constructs `(dim_a - n..dim_a)` / `(0..n)`, both in-bounds because the `n > dim_a ||
-    //    n > dim_b` check above returns `InvalidLayout` first.
+    //  - `Pair` runs each side through `normalize_axes_index(.., dim, ..)`, which folds negative
+    //    axes and rejects any out-of-range axis with `AxisError`.
+    //  - `Val(n)` constructs `(dim_a - n..dim_a)` / `(0..n)`, both in-bounds because the `n > dim_a
+    //    || n > dim_b` check above returns `InvalidLayout` first.
     // The `assert_eq!(axes_a.len(), axes_b.len(), …)` and per-axis bounds asserts
     // that previously lived here were dead defensive code (they could never fire
     // after the validation above) *and* they panicked inside a `Result`-returning

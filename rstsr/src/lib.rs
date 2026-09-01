@@ -1,5 +1,6 @@
 #![doc = include_str!("../notes_to_api_doc.md")]
 #![doc = include_str!("../readme.md")]
+#![cfg_attr(not(test), no_std)]
 pub mod prelude;
 
 #[allow(unused_imports)]

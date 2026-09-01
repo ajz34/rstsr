@@ -1,5 +1,5 @@
 use crate::prelude_dev::*;
-use num::ToPrimitive;
+use num::{Float as NumFloat, ToPrimitive};
 
 /* #region pack_tri */
 
@@ -112,7 +112,7 @@ where
                 // check last two dimensions are equal
                 let (lb_rest, lb_inner) = lb.dim_split_at(-1)?;
                 let n_tp: usize = lb_inner.shape()[0];
-                let n: usize = (2 * n_tp).to_f64().unwrap().sqrt().floor().to_usize().unwrap();
+                let n: usize = NumFloat::floor(NumFloat::sqrt((2 * n_tp).to_f64().unwrap())).to_usize().unwrap();
                 rstsr_assert_eq!(
                     n * (n + 1) / 2,
                     n_tp,
@@ -129,7 +129,7 @@ where
                 // check first two dimensions are equal
                 let (lb_inner, lb_rest) = lb.dim_split_at(1)?;
                 let n_tp: usize = lb_inner.shape()[0];
-                let n: usize = (2 * n_tp).to_f64().unwrap().sqrt().floor().to_usize().unwrap();
+                let n: usize = NumFloat::floor(NumFloat::sqrt((2 * n_tp).to_f64().unwrap())).to_usize().unwrap();
                 rstsr_assert_eq!(
                     n * (n + 1) / 2,
                     n_tp,
