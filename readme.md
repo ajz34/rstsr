@@ -10,7 +10,7 @@
 
 | Resources | Badges |
 |--|--|
-| User Document | [![User Documentation](https://readthedocs.org/projects/rstsr-book/badge/?version=latest)](https://rstsr-book.readthedocs.io/latest/) |
+| User Document | [![User Documentation](https://img.shields.io/badge/docs-github_pages-blue)](https://restgroup.github.io/rstsr-book/) |
 | API Document | [![API Documentation](https://docs.rs/rstsr/badge.svg)](https://docs.rs/rstsr) |
 | Crate | [![Crate](https://img.shields.io/crates/v/rstsr.svg)](https://crates.io/crates/rstsr) |
 
@@ -152,9 +152,7 @@ You are welcomed to raise problems or suggestions in github repo issues or discu
 
 ## For AI Code Agents
 
-Shared coding-agent instructions live in `.claude.rstsr/` (`CLAUDE.md`, with `AGENTS.md` symlinked to it). Local agent state and per-developer configs are gitignored; see `.claude.rstsr/README.md` for details.
+Shared coding-agent instructions (instructions entry, skills, rules) live in the sibling repository [rstsr-agents](https://github.com/RESTGroup/rstsr-agents) and are consumed through symlinks (`.claude`, `.agents`, `CLAUDE.md`, `AGENTS.md`). Local agent state and per-developer configurations are gitignored (the `*.local` convention); setup is documented in the `README.md` of rstsr-agents.
 
-Following tasks are important for code-agent setup, and these will not git tracked.
-- You can symlink `.claude.rstsr` to `.claude` or `.agents` for your need.
-- You can symlink `.claude.rstsr/CLAUDE.md` to `AGENTS.md` at project root for your need.
+The symlinks are not git-tracked. In the standard pack layout (rstsr, rstsr-book, rstsr-ffi, rstsr-agents as sibling directories), run `../rstsr-agents/skills/agent-setup/scripts/link.sh` in this directory once (the `agent-setup` skill). Standalone checkouts and per-agent notes are covered by the same README.
 

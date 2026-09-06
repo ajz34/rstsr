@@ -13,6 +13,10 @@ Usage:
 The tracked surface (manipulation) is embedded in SURFACE below. To extend
 coverage to another rstsr category, add (relpath, class, method) tuples and
 their METADATA.
+
+The checkout location is per-developer (recorded in AGENTS.local.md, see the
+core-numpy-sync skill); this script takes it as an argument and never writes it
+into committed files. The CSV/diff headers are maintained by hand (skill step 6).
 """
 
 import argparse
@@ -257,6 +261,22 @@ def _index_file(tree, source):
     return out
 
 
+def _warn_on_tag_mismatch(root, pinned):
+    """Warn (stderr) if the checkout is not exactly at the pinned version tag."""
+    import subprocess
+    try:
+        out = subprocess.run(
+            ["git", "-C", str(root), "describe", "--tags", "--exact-match"],
+            capture_output=True, text=True, timeout=10,
+        )
+    except Exception:
+        return
+    tag = out.stdout.strip()
+    if out.returncode == 0 and tag and tag != pinned:
+        print(f"warning: checkout tag {tag!r} != PINNED_VERSION {pinned!r}; "
+              f"results reflect the checkout, not the pin", file=sys.stderr)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("numpy_root")
@@ -264,6 +284,7 @@ def main():
                     help="print only path::class::method line sha256")
     args = ap.parse_args()
     root = Path(args.numpy_root)
+    _warn_on_tag_mismatch(root, PINNED_VERSION)
 
     # group surface by file to parse each once
     by_file = {}
