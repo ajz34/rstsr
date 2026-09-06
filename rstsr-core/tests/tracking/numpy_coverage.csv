@@ -1,5 +1,5 @@
 # NumPy coverage checklist (rstsr-core) — full core_func surface.
-# Pinned NumPy: v2.5.2 · Checkout: ../other-repos/numpy (tag v2.5.2)
+# Pinned NumPy: v2.5.2 · local checkout expected at tag v2.5.2 (location is per-developer: AGENTS.local.md / skill core-numpy-sync)
 # status: transferred | partial | todo | not-applicable
 # numpy_source_hash = sha256[:12] of the NumPy test function source at the pinned
 #   version (recompute via `python3 sync_numpy.py <numpy_root>`). Changed hash on a
