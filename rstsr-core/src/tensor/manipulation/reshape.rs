@@ -258,6 +258,8 @@ where
 ///
 /// </div>
 ///
+///
+/// See [`order_semantics`](crate::order_semantics) for the two device default orders.
 /// # Parameters
 ///
 /// - `tensor`: [`TensorAny<R, T, B, D>`]
@@ -586,6 +588,8 @@ where
 ///
 /// </div>
 ///
+///
+/// See [`order_semantics`](crate::order_semantics) for the two device default orders.
 /// # Parameters
 ///
 /// - `tensor`: [`TensorAny<R, T, B, D>`]
@@ -595,7 +599,7 @@ where
 ///
 /// - `shape`: TryInto [`AxesIndex<isize>`]
 ///
-///   - Position in the expanded axes where the new axis (or axes) is placed.
+///   - The new shape of the tensor.
 ///   - Can be a single integer, or a list/tuple of integers.
 ///   - Negative values are supported and indicate counting dimensions from the back.
 ///
@@ -663,6 +667,8 @@ where
 ///
 /// </div>
 ///
+///
+/// See [`order_semantics`](crate::order_semantics) for the two device default orders.
 /// # Parameters
 ///
 /// - `tensor`: [`TensorAny<R, T, B, D>`]
@@ -804,6 +810,8 @@ where
 ///
 /// </div>
 ///
+///
+/// See [`order_semantics`](crate::order_semantics) for the two device default orders.
 /// # Parameters
 ///
 /// - `tensor`: [`&TensorAny<R, T, B, D>`](TensorAny)
@@ -928,7 +936,7 @@ where
 ///
 /// # Elaborated examples
 ///
-/// ## Difference between [RowMajor] and [ColMajor]
+/// ## Difference between [`RowMajor`] and [`ColMajor`]
 ///
 /// Tensor can be uniquely iterated (into a 1-dimension vector), for either row-major or
 /// column-major order.

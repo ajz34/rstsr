@@ -71,6 +71,8 @@ where
 ///
 /// </div>
 ///
+///
+/// See [`order_semantics`](crate::order_semantics) for the two device default orders.
 /// <div class="warning">
 ///
 /// **Different Signature Convention to [`reshape`]**
@@ -79,7 +81,6 @@ where
 /// function returns a view instead of copy-on-write tensor.
 ///
 /// </div>
-///
 /// # Parameters
 ///
 /// - `tensor`: [`&TensorAny<R, T, B, D>`](TensorAny)
@@ -286,7 +287,6 @@ where
 /// which provides the same functionality with a more consistent API.
 ///
 /// </div>
-///
 /// # Parameters
 ///
 /// - `tensor`: [`&TensorAny<R, T, B, D>`](TensorAny)

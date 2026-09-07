@@ -157,3 +157,91 @@ values - e.g. `diag([[1, 2], [3, 4], [5, 6]], k=-2)` returned `[]` instead of `[
 `d_diag` formula `(d1 - |offset|).min(d2)` was already correct; only the range check
 was wrong. Found by the `test_diag_bounds` parity test; fixed by changing the range
 to `(-d1+1..0)`.
+
+## `eye` under ColMajor returned the transposed shape (FIXED)
+
+- **numpy:** `np.eye(N, M=None, k=0, order='C'/'F')` keeps shape `(N, M)`; only the storage order changes.
+- **rstsr:** entry_row_cpu::doc_draft::creation::test_creation::doc_eye (col-major case)
+- **tag:** col-major-transfer
+- **status:** fixed
+
+With a device whose default order is `ColMajor`, `rt::eye((n_rows, n_cols, k, &device))`
+returned a tensor of shape `(n_cols, n_rows)` with F-contiguous layout: the shape
+arguments were transposed, so the col-major result was a *different function* from the
+row-major one (NumPy's `order='F'` only changes the memory order, never the shape).
+Fixed in `EyeAPI::eye_f` (`rstsr-core/src/tensor/creation.rs`): the layout is now
+`[n_rows, n_cols].f()` under ColMajor, so the logical content (shape `(n_rows, n_cols)`,
+ones on the k-th diagonal) is identical under both orders and only the layout differs -
+matching NumPy. The `eye` docstring and its `doc_eye` twin document/assert the
+same-shape F-contiguous behavior. While verifying the neighborhood, `diag`/`diagonal`
+were checked for the same class of issue and found correct: both route through
+`Layout::diagonal`, which reads axis strides directly and is order-independent
+(twins `doc_diag` / `doc_diagonal` now carry F-contiguous input/output cases).
+
+## `meshgrid` `copy = false` now returns views (FIXED)
+
+- **numpy:** `np.meshgrid(*xi, indexing=..., copy=False)` returns broadcast *views* sharing the inputs' memory.
+- **rstsr:** entry_row_cpu::doc_draft::creation::test_creation::doc_meshgrid (copy = false case);
+  core_func::creation_from_tensor::test_meshgrid::custom_meshgrid::test_copy_false_shares_memory
+- **tag:** bug
+- **status:** fixed
+
+With `copy = false`, rstsr's `meshgrid` still returned owned tensors: each grid was
+materialized by `into_shape_f` on a view (always an owned copy), then broadcast by
+`broadcast_arrays_f` into owned stride-0 grids; the flag only skipped an extra
+contiguity pass. Fixed by building each grid layout-only from its input: the input's
+own stride is kept on its grid axis and all other axes get stride 0, so no data is
+moved. Because a view cannot borrow from a consumed value, the reference-input
+overloads (`Vec<&TensorAny>`, `[&TensorAny; N]`, ...) now return
+`Vec<TensorCow<'a, T, B, IxD>>` - `copy = true` gives fresh owned contiguous grids
+(as before), `copy = false` gives true NumPy-style views over the inputs' memory.
+The by-value owned overloads (`Vec<Tensor>`, `[Tensor; N]`) keep returning
+`Vec<Tensor<T, B, IxD>>`, whose `copy = false` grids are owned stride-0 tensors
+aliasing the inputs' own storages (also removing the intermediate reshape copy the
+old path made). `&Vec<TensorAny>` forms forward and convert into owned grids as
+before. NumPy's `test_writeback` (L2851, `copy = True` grids are writable fresh
+copies, inputs untouched) is now ported; the view-sharing case is covered by a
+custom supplement. Note NumPy's `copy=False` grids are still read-only-shimmed in
+rstsr (immutable views); writing through them requires `into_owned` first.
+
+## `to_contig` no-copy check aligned with the NumPy-style flags (FIXED)
+
+- **numpy:** `np.ascontiguousarray` uses the `C_CONTIGUOUS` flag, which ignores
+  size-1 dimensions, so a padded-singleton contiguous array (e.g. shape `[3,1]`
+  stride `[1,3]` sliced from an F-stored parent) is returned as a **view**.
+- **rstsr:** entry_row_cpu::doc_draft::manipulation::test_to_contig::doc_to_contig::test_doc_padded_singleton
+- **tag:** bug
+- **status:** fixed
+
+rstsr `to_contig` decided view-vs-copy by exact layout equality
+(`to_layout.rs:20`), which was stricter than both NumPy's contiguity flag and
+rstsr's own `c_contig()` (`layoutbase.rs:202`, which agrees with NumPy). A
+padded-singleton contiguous tensor was therefore **copied** by rstsr but
+**viewed** by NumPy; output values were identical, only ownership differed. Fixed
+by maintainer decision: `change_contig_f` now decides the view path via
+`c_contig()`/`f_contig()` (NumPy-style flags), and a viewed result has its
+singleton-axis strides reset so the layout becomes the usual contiguous one over
+the same elements. `to_prefer` already used the flags for its fast path and is
+unchanged; the exact-equality check in `change_layout_f`/`to_layout` (explicit
+target layout) is intentionally kept. The padded-singleton case is now covered by
+a twin (`doc_to_contig::test_doc_padded_singleton`) and a docstring example.
+
+## `broadcast_arrays` now returns views for reference inputs (FIXED)
+
+- **numpy:** `np.broadcast_arrays` returns views sharing the inputs' memory.
+- **rstsr:** entry_row_cpu::core_func::manipulation::test_broadcast::numpy_broadcast_arrays::test_broadcast_arrays_reference_inputs;
+  doc_draft::manipulation::test_broadcast::doc_broadcast::doc_broadcast_arrays_views
+- **tag:** intentional
+- **status:** fixed
+
+rstsr `broadcast_arrays` only accepted consumed tensors
+(`Vec<TensorAny>`) and returned owned stride-0 tensors aliasing the inputs'
+storages; obtaining views required hand-building a vector of views first (the
+docstring even said so). By maintainer decision, reference-input overloads were
+added: `Vec<&'a TensorAny>` (also `&Vec<...>` and `[&TensorAny; N]`) now return
+`Vec<TensorView<'a, T, B, IxD>>` - broadcast views sharing the inputs' memory, as
+in NumPy. `TensorView` was chosen over `TensorCow` because the function has no
+copy flag: the reference-input result is always a view, so the `Cow` owned branch
+would be unreachable (`Cow` remains right for `meshgrid`, whose `copy` flag
+switches at runtime). The by-value form keeps its previous behavior (consumed
+inputs, owned stride-0 outputs, zero copy).

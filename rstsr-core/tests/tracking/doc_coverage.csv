@@ -1,0 +1,64 @@
+# Doc coverage checklist (rstsr-core API docstrings) — drives the API doc campaign
+# (rstsr-agents/plans/2026-09-api-doc-campaign.md). Policy: skill api-doc-conventions (rstsr-agents/skills/api-doc-conventions/SKILL.md).
+# Granularity: module-level; per-item rows may be added inside a batch.
+# tier:   full | minimal | na      (policy §1; minimal = summary + see-also only)
+# status: done    — complies with the policy
+#         postfix — documented before the policy existed: substantive content exists,
+#                   but a policy-compliance pass is pending (row/col one-liners on
+#                   order-independent functions, heading/link/section-order drift,
+#                   output-string assertions in doc_draft twins)
+#         partial — some content, below full-tier shape (uplift needed)
+#         todo    — (near-)zero documentation
+#         na      — out of campaign scope
+# batch:  campaign batch number (plan §Batches), 0 for foundations, P for the postfix pass, na for out-of-campaign
+module,category,tier,status,batch,notes
+tensor/manipulation/transpose.rs,manipulation,full,done,P,order one-liner added (postfix)
+tensor/manipulation/reshape.rs,manipulation,full,done,P,bare links fixed; order_semantics linked (postfix)
+tensor/manipulation/broadcast.rs,manipulation,full,done,P,bare links fixed; order_semantics linked (postfix); broadcast_arrays reference overloads return TensorView (see numpy_differences_resolved.md)
+tensor/manipulation/expand_dims.rs,manipulation,full,done,P,order one-liner added (postfix)
+tensor/manipulation/flip.rs,manipulation,full,done,P,order one-liner added; Panics placement verified after Examples (postfix)
+tensor/manipulation/into_compatible_shape.rs,manipulation,full,done,P,order_semantics linked (postfix)
+tensor/manipulation/into_dim.rs,manipulation,full,done,P,variants remain minimal per §2 (postfix)
+tensor/manipulation/moveaxis.rs,manipulation,full,done,P,order one-liner added (postfix)
+tensor/manipulation/squeeze.rs,manipulation,full,done,P,order one-liner added; Panics moved after Examples (postfix)
+tensor/manipulation/to_contig.rs,manipulation,full,done,P,# Arguments renamed; order one-liner added (postfix); view check aligned with c_contig()/f_contig() + singleton stride reset (see numpy_differences_resolved.md)
+tensor/manipulation/to_layout.rs,manipulation,full,done,P,headings renamed; stale example output corrected; order one-liner added (postfix)
+tensor/asarray.rs,creation,full,done,P,order_semantics linked (postfix)
+tensor/linalg/vecdot.rs,linalg,full,done,P,See also fixed (batch 3); order one-liner added (postfix)
+tensor/linalg/matrix_transpose.rs,linalg,full,done,P,order one-liner added (postfix)
+tensor/linalg/matmul.rs,linalg,full,done,3,matmul/matmul_from/matmul_with_output full; %-as-matmul documented; _f and methods minimal; vecdot See-Also drift fixed
+tensor/creation.rs,creation,full,done,1,uplifted (anchors+overloads+row/col notices+examples+accordance); eye col-major shape divergence fixed (see numpy_differences_resolved.md)
+tensor/creation_from_tensor.rs,creation,full,done,1,uplifted; concat link typo fixed; API traits documented minimally; meshgrid copy=false view semantics fixed (see numpy_differences_resolved.md)
+tensor/indexing.rs,indexing,full,done,2,anchors slice/diagonal (+DiagonalArgs floor); variants and i/i_mut minimal; twins in doc_draft/indexing
+tensor/adv_indexing.rs,indexing,full,done,2,index_select/take/bool_select full tier; _f and method forms minimal
+tensor/reduction.rs,reduction,full,done,6,module docs carry family table + order notice + examples; allclose anchor full; twins extended (argmax/allclose/count_nonzero)
+tensor/operators/,operators,full,done,5,documented via module docs per policy §9 (macro-generated surface); % -as-matmul warning; op_* module floors; twins extended
+tensor/map_elementwise.rs,utility,full,done,4,map anchor full; mapv/mapi minimal-plus; mapb/mapvi/mapvb and *_fnmut minimal with see-alsos
+tensor/ownership_conversion.rs,utility,full,done,4,view/view_mut/into_cow/into_owned/into_shared/to_owned/to_vec/into_vec/to_scalar full or full-lite; keep_layout and force_mut minimal-plus
+tensor/iterator_axes.rs,utility,full,done,4,axes_iter anchor + axes_iter_mut minimal-plus; indexed variants and iterator types floored; order notice
+tensor/iterator_elem.rs,utility,full,done,4,iter anchor full; iter_mut/indexed_iter minimal-plus; with_order variants minimal; order notice
+tensor/assignment.rs,utility,full,done,4,assign (b, broadcast) and fill (a) full; traits and methods minimal
+tensor/tensor2_impl.rs,utility,full,done,4,module //! + nrow/ncol/ld docs
+tensor/tensor_mutable.rs,utility,full,done,4,module + enum + variant docs (utility surface is small)
+tensor/tensor_view_list.rs,utility,full,done,4,module + trait docs pre-exist (floor satisfied)
+tensor/device_conversion.rs,utility,full,done,4,module //! + TensorDeviceChangeAPI trait/method docs
+tensor/ext_conversion.rs,utility,full,done,4,module //! pre-existed; IntoRSTSR trait doc
+tensor/pack_array.rs,utility,full,done,4,module //! + into_pack_array/into_unpack_array method docs
+tensorbase.rs,types,na,done,0,type floor done (module //! + TensorBase/TensorAny/aliases); Layout lives in rstsr-common, out of scope
+tensor/mod.rs,modules,na,done,0,//! added
+tensor/reduction.rs#mod,modules,na,done,0,//! added (same file as reduction row above)
+tensor/indexing.rs#mod,modules,na,done,0,//! added
+tensor/linalg/mod.rs,modules,na,done,0,//! added
+tensor/operators/mod.rs,modules,na,done,0,//! added (generation-pattern doc; anchors come in batch 5)
+operators/ops/mod.rs,modules,na,done,0,//! added (generation-pattern doc)
+format/mod.rs,modules,na,done,0,//! added
+prelude.rs,modules,na,done,0,//! added (describes exports)
+prelude_dev.rs,modules,na,done,0,//! added (describes exports)
+src/docs/order_semantics.md,modules,na,done,0,created + wired as pub mod; examples twin-tested in tests/doc_draft/docs/test_order_semantics.rs
+storage/,internals,minimal,done,na,module //! present (batch 0 scope); item docs stay opportunistic (binding-on-touch)
+device_cpu_serial/,internals,minimal,done,na,module //! present; item docs stay opportunistic
+device_faer/,internals,minimal,done,na,module //! present; item docs stay opportunistic
+feature_rayon/,internals,minimal,done,na,module //! present; item docs stay opportunistic
+format/,internals,minimal,done,na,module //! added (format/mod.rs); item docs stay opportunistic
+src/docs/api_specification.md,docs,na,na,na,API index; maintained on API-surface change only
+src/docs/array_api_standard.md,docs,na,na,na,conformance matrix; maintained on API-surface change only

@@ -16,6 +16,8 @@ use crate::prelude_dev::*;
 ///
 /// </div>
 ///
+///
+/// See [`order_semantics`](crate::order_semantics) for the two device default orders.
 /// # Parameters
 ///
 /// - `shapes`: A slice of shapes, where each shape is [`IxD`] (`Vec<usize>`).
@@ -133,25 +135,43 @@ pub fn broadcast_shapes_f(shapes: &[IxD], order: FlagOrder) -> Result<IxD> {
 ///
 /// </div>
 ///
+///
+/// See [`order_semantics`](crate::order_semantics) for the two device default orders.
+/// # Overloads Table
+///
+/// Reference-input forms output views sharing the inputs' memory,
+/// `Vec<TensorView<'a, T, B, IxD>>`:
+///
+/// - `broadcast_arrays(tensors: Vec<&'a TensorAny<R, T, B, IxD>>) -> Vec<TensorView<'a, T, B,
+///   IxD>>`
+/// - `broadcast_arrays(tensors: &Vec<&'a TensorAny<R, T, B, IxD>>) -> Vec<TensorView<'a, T, B,
+///   IxD>>`
+/// - `broadcast_arrays(tensors: [&'a TensorAny<R, T, B, IxD>; N]) -> Vec<TensorView<'a, T, B,
+///   IxD>>`
+///
+/// By-value forms consume the inputs and output `Vec<TensorAny<R, T, B, IxD>>` (owned stride-0
+/// tensors aliasing the inputs' own storages):
+///
+/// - `broadcast_arrays(tensors: Vec<TensorAny<R, T, B, IxD>>) -> Vec<TensorAny<R, T, B, IxD>>`
+/// - `broadcast_arrays(tensors: [TensorAny<R, T, B, IxD>; N]) -> Vec<TensorAny<R, T, B, IxD>>`
+///
+/// All forms only accept dynamic shape tensors ([`IxD`]).
+///
 /// # Parameters
 ///
-/// - `tensors`: [`Vec<TensorAny<R, T, B, IxD>>`](TensorAny)
-///
-///   - The tensors to be broadcasted.
-///   - All tensors must be on the same device, and share the same ownerships.
-///   - This function takes ownership of the input tensors. If you want to obtain broadcasted views,
-///     you need to create a new vector of views first.
-///   - This function only accepts dynamic shape tensors ([`IxD`]).
+/// - `tensors`: the tensors to be broadcasted; all must share one device and dtype.
 ///
 /// # Returns
 ///
-/// - [`Vec<TensorAny<R, T, B, IxD>>`](TensorAny)
+/// - By-value inputs: [`Vec<TensorAny<R, T, B, IxD>>`](TensorAny)
 ///
 ///   - A vector of broadcasted tensors. Each tensor has the same shape after broadcasting.
 ///   - The ownership of the underlying data is moved from the input tensors to the output tensors.
 ///   - The tensors are typically not contiguous (with zero strides at the broadcasted axes).
 ///     Writing values to broadcasted tensors is dangerous, but RSTSR will generally not panic on
 ///     this behavior. Perform [`to_contig`] afterwards if requires owned contiguous tensors.
+/// - Reference inputs: `Vec<TensorView<'a, T, B, IxD>>` - broadcast views (stride-0 axes) over the
+///   inputs' memory; no data is copied.
 ///
 /// # Examples
 ///
@@ -178,9 +198,28 @@ pub fn broadcast_shapes_f(shapes: &[IxD], order: FlagOrder) -> Result<IxD> {
 /// //  [ 5 5 5]]
 /// ```
 ///
-/// Please note that the above code only works in [RowMajor].
+/// With reference inputs, the results are views sharing the inputs' memory:
 ///
-/// For [ColMajor] order, the broadcasting will fail, because the broadcasting rules are applied
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let a = rt::asarray((vec![1, 2, 3], &device)).into_shape([3]);
+/// let b = rt::asarray((vec![4, 5], &device)).into_shape([2, 1]);
+/// let result = rt::broadcast_arrays([&a, &b]);
+/// println!("broadcasted a:\n{:}", result[0]);
+/// // [[ 1 2 3]
+/// //  [ 1 2 3]]
+/// println!("{:?}", result[0].layout());
+/// // 2-Dim (dyn), contiguous: Custom
+/// // shape: [2, 3], stride: [0, 1], offset: 0
+/// # assert_eq!(result[0].stride(), &[0, 1]);
+/// # assert_eq!(result[1].stride(), &[1, 0]);
+/// ```
+///
+/// Please note that the above code only works in [`RowMajor`].
+///
+/// For [`ColMajor`] order, the broadcasting will fail, because the broadcasting rules are applied
 /// differently, shapes are incompatible (for col-major, broadcast comparison starts from left
 /// instead of row-major's right):
 ///
@@ -193,7 +232,7 @@ pub fn broadcast_shapes_f(shapes: &[IxD], order: FlagOrder) -> Result<IxD> {
 /// let result = rt::broadcast_arrays(vec![a, b]);
 /// ```
 ///
-/// You need to make the following changes to let [ColMajor] case work:
+/// You need to make the following changes to let [`ColMajor`] case work:
 ///
 /// ```rust
 /// # use rstsr::prelude::*;
@@ -225,41 +264,124 @@ pub fn broadcast_shapes_f(shapes: &[IxD], order: FlagOrder) -> Result<IxD> {
 /// ## Variants of this function
 ///
 /// - [`broadcast_arrays_f`]: Fallible version, actual implementation.
-pub fn broadcast_arrays<R, T, B>(tensors: Vec<TensorAny<R, T, B, IxD>>) -> Vec<TensorAny<R, T, B, IxD>>
+pub fn broadcast_arrays<Args, Inp>(args: Args) -> Args::Out
 where
-    R: DataAPI<Data = B::Raw>,
-    B: DeviceAPI<T>,
+    Args: BroadcastArraysAPI<Inp>,
 {
-    broadcast_arrays_f(tensors).rstsr_unwrap()
+    Args::broadcast_arrays(args)
 }
 
 /// Broadcasts any number of arrays against each other.
 ///
 /// See also [`broadcast_arrays`].
-pub fn broadcast_arrays_f<R, T, B>(tensors: Vec<TensorAny<R, T, B, IxD>>) -> Result<Vec<TensorAny<R, T, B, IxD>>>
+pub fn broadcast_arrays_f<Args, Inp>(args: Args) -> Result<Args::Out>
+where
+    Args: BroadcastArraysAPI<Inp>,
+{
+    Args::broadcast_arrays_f(args)
+}
+
+/// API trait backing [`broadcast_arrays`].
+pub trait BroadcastArraysAPI<Inp> {
+    type Out;
+
+    fn broadcast_arrays_f(self) -> Result<Self::Out>;
+    fn broadcast_arrays(self) -> Self::Out
+    where
+        Self: Sized,
+    {
+        Self::broadcast_arrays_f(self).rstsr_unwrap()
+    }
+}
+
+impl<R, T, B> BroadcastArraysAPI<()> for Vec<TensorAny<R, T, B, IxD>>
 where
     R: DataAPI<Data = B::Raw>,
     B: DeviceAPI<T>,
 {
-    // fast return if there is only zero/one tensor
-    if tensors.len() <= 1 {
-        return Ok(tensors);
+    type Out = Vec<TensorAny<R, T, B, IxD>>;
+
+    fn broadcast_arrays_f(self) -> Result<Self::Out> {
+        let tensors = self;
+        // fast return if there is only zero/one tensor
+        if tensors.len() <= 1 {
+            return Ok(tensors);
+        }
+        let device_b = tensors[0].device().clone();
+        let default_order = device_b.default_order();
+        let mut shape_b = tensors[0].shape().clone();
+        for tensor in tensors.iter().skip(1) {
+            rstsr_assert!(device_b.same_device(tensor.device()), DeviceMismatch)?;
+            let shape = tensor.shape();
+            let (shape, _, _) = broadcast_shape(shape, &shape_b, default_order)?;
+            shape_b = shape;
+        }
+        let mut tensors_new = Vec::with_capacity(tensors.len());
+        for tensor in tensors {
+            let tensor = into_broadcast_f(tensor, shape_b.clone())?;
+            tensors_new.push(tensor);
+        }
+        return Ok(tensors_new);
     }
-    let device_b = tensors[0].device().clone();
-    let default_order = device_b.default_order();
-    let mut shape_b = tensors[0].shape().clone();
-    for tensor in tensors.iter().skip(1) {
-        rstsr_assert!(device_b.same_device(tensor.device()), DeviceMismatch)?;
-        let shape = tensor.shape();
-        let (shape, _, _) = broadcast_shape(shape, &shape_b, default_order)?;
-        shape_b = shape;
+}
+
+impl<'a, R, T, B> BroadcastArraysAPI<()> for Vec<&'a TensorAny<R, T, B, IxD>>
+where
+    R: DataAPI<Data = B::Raw>,
+    B: DeviceAPI<T>,
+{
+    type Out = Vec<TensorView<'a, T, B, IxD>>;
+
+    fn broadcast_arrays_f(self) -> Result<Self::Out> {
+        // views of the inputs; the core implementation above is layout-only
+        // and instantiates with R = DataRef<'a>, so no data is copied
+        let views = self
+            .into_iter()
+            .map(|tensor| {
+                let tensor_ref: &'a TensorAny<R, T, B, IxD> = tensor;
+                tensor_ref.view().into_dim::<IxD>()
+            })
+            .collect::<Vec<_>>();
+        broadcast_arrays_f(views)
     }
-    let mut tensors_new = Vec::with_capacity(tensors.len());
-    for tensor in tensors {
-        let tensor = into_broadcast_f(tensor, shape_b.clone())?;
-        tensors_new.push(tensor);
+}
+
+// implementation for reference tensors
+impl<'a, R, T, B> BroadcastArraysAPI<()> for &Vec<&'a TensorAny<R, T, B, IxD>>
+where
+    R: DataAPI<Data = B::Raw>,
+    B: DeviceAPI<T>,
+{
+    type Out = Vec<TensorView<'a, T, B, IxD>>;
+
+    fn broadcast_arrays_f(self) -> Result<Self::Out> {
+        BroadcastArraysAPI::broadcast_arrays_f(self.to_vec())
     }
-    return Ok(tensors_new);
+}
+
+impl<'a, R, T, B, const N: usize> BroadcastArraysAPI<()> for [&'a TensorAny<R, T, B, IxD>; N]
+where
+    R: DataAPI<Data = B::Raw>,
+    B: DeviceAPI<T>,
+{
+    type Out = Vec<TensorView<'a, T, B, IxD>>;
+
+    fn broadcast_arrays_f(self) -> Result<Self::Out> {
+        BroadcastArraysAPI::broadcast_arrays_f(self.to_vec())
+    }
+}
+
+// implementation for owned tensors consumed by value from an array
+impl<R, T, B, const N: usize> BroadcastArraysAPI<()> for [TensorAny<R, T, B, IxD>; N]
+where
+    R: DataAPI<Data = B::Raw>,
+    B: DeviceAPI<T>,
+{
+    type Out = Vec<TensorAny<R, T, B, IxD>>;
+
+    fn broadcast_arrays_f(self) -> Result<Self::Out> {
+        BroadcastArraysAPI::broadcast_arrays_f(Vec::from(self))
+    }
 }
 
 /* #endregion */
@@ -303,6 +425,8 @@ where
 ///
 /// </div>
 ///
+///
+/// See [`order_semantics`](crate::order_semantics) for the two device default orders.
 /// # Parameters
 ///
 /// - `tensor`: [`&TensorAny<R, T, B, D>`](TensorAny)

@@ -124,17 +124,6 @@ NumPy has no `order` parameter on broadcast. rstsr's ColMajor broadcast is an rs
 extension exercised by the rstsr-only `test_broadcast_shapes_col_major` case. Row-major
 behavior matches NumPy exactly.
 
-## `broadcast_arrays` returns owned stride-0 tensors, not writeable views
-
-- **numpy:** `broadcast_arrays` returns writeable views.
-- **rstsr:** core_func::manipulation::test_broadcast::numpy_broadcast_arrays
-- **tag:** intentional
-- **status:** open
-
-rstsr `broadcast_arrays` takes ownership and returns owned `TensorAny` tensors with
-stride-0 axes (writeable but dangerous, as the docs warn), vs NumPy's writeable views.
-Semantically aligned (both "writeable but dangerous"); the API shape differs.
-
 ## `broadcast_shapes` signature takes `&[IxD], order`, not varargs
 
 - **numpy:** `np.broadcast_shapes(*shapes)` varargs.
@@ -143,23 +132,6 @@ Semantically aligned (both "writeable but dangerous"); the API shape differs.
 - **status:** open
 
 API-shape difference; results are identical for the row-major cases.
-
-## `to_contig` no-copy check is exact-layout-equality (stricter than NumPy flags)
-
-- **numpy:** `np.ascontiguousarray` uses the C_CONTIGUOUS flag, which ignores
-  size-1 dimensions, so a padded-singleton C-contiguous array (e.g. shape `[3,1]`
-  stride `[1,5]`) is returned as a **view**.
-- **rstsr:** core_func::manipulation::test_to_contig (custom)
-- **tag:** intentional
-- **status:** open
-
-rstsr `to_contig` decides view-vs-copy by exact layout equality
-(`to_layout.rs:20`), which is stricter than both NumPy's contiguity flag and rstsr's
-own `c_contig()` (`layoutbase.rs:202`, which agrees with NumPy). A
-padded-singleton C-contiguous tensor is therefore **copied** by rstsr but **viewed**
-by NumPy. Output values are identical; only ownership differs. No existing test
-constructs a padded-singleton case, so this is currently untested. Worth either
-documenting or aligning `to_contig` with `c_contig()`.
 
 ## `np.flip(a)` default `axis=None` vs rstsr explicit-`None` argument
 
@@ -214,20 +186,6 @@ mixed-dtype `test_return_type` case is therefore not-applicable.
 
 API-shape difference; values match. rstsr `unstack` returns `Vec<TensorView>`; NumPy
 returns a tuple.
-
-## Reductions have no `keepdims` parameter
-
-- **numpy:** `_core/tests/test_numeric.py::TestNonarrayArgs::test_sum` (L320) uses
-  `np.sum(m, axis=1, keepdims=True)`; reductions across NumPy support `keepdims=`.
-- **rstsr:** entry_row_cpu::core_func::reduction::test_sum::numpy_sum::test_numeric
-- **tag:** intentional
-- **status:** open
-
-rstsr `sum_axes`/`mean_axes`/etc. always **drop** the reduced axes (output rank =
-input rank − #axes); there is no `keepdims` argument. The `None`-axis form
-(`xxx_axes(None)`) reduces all axes to a 0-d tensor. Parity tests assert the
-axis-dropped result; the NumPy `keepdims` shape is reached by a follow-up
-`expand_dims`/`reshape` if needed. Reduction **values** match NumPy exactly.
 
 ## Statistical reductions require a `Float` input (no int→float promotion)
 

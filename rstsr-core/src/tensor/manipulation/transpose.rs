@@ -30,6 +30,8 @@ where
 /// - For an n-D array, if axes are given, their order indicates how the axes are permuted (see
 ///   Examples).
 ///
+/// This function behaves identically under [`RowMajor`] and [`ColMajor`] device default orders.
+///
 /// # Parameters
 ///
 /// - `tensor`: [`&TensorAny<R, T, B, D>`](TensorAny)
