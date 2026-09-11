@@ -439,7 +439,12 @@ where
 
 /* #region reduce unraveled axes */
 
-pub fn reduce_all_unraveled_arg_cpu_rayon<T, D, Fcomp, Feq>(
+/// Original closure-based fold over [`IndexedIterLayout`] (row-major):
+/// implementation core of the general [`reduce_all_unraveled_arg_cpu_rayon`]
+/// and strided/non-contiguous fallback of
+/// [`reduce_all_unraveled_arg_cmp_cpu_rayon`].
+#[inline]
+fn reduce_all_unraveled_arg_fold_cpu_rayon<T, D, Fcomp, Feq>(
     a: &[T],
     la: &Layout<D>,
     f_comp: Fcomp,
@@ -453,11 +458,6 @@ where
     Feq: Fn(Option<T>, T) -> Option<bool> + Send + Sync,
 {
     rstsr_assert!(la.size() > 0, InvalidLayout, "empty sequence is not allowed for reduce_arg.")?;
-
-    let size = la.size();
-    if size < PARALLEL_SWITCH {
-        return reduce_all_unraveled_arg_cpu_serial(a, la, f_comp, f_eq);
-    }
 
     let fold_func = |acc: Option<(D, T)>, (cur_idx, cur_offset): (D, usize)| -> Option<(D, T)> {
         let cur_val = a[cur_offset].clone();
@@ -511,6 +511,302 @@ where
     Ok(acc.unwrap().0)
 }
 
+/// Contiguous fast path of [`reduce_all_unraveled_arg_cmp_cpu_rayon`]: split the
+/// buffer into contiguous chunks, run the serial 8-lane scan
+/// ([`arg_contig_cpu_serial`]) per chunk, then combine deterministically
+/// (collect preserves chunk order; greater value wins, ties keep the smaller
+/// index, NaN never wins) — exactly the serial fold's outcome, independent of
+/// thread count and scheduling.
+///
+/// Kept out-of-line so that the strided fallback below compiles exactly like
+/// the pre-existing closure fold (code-layout hygiene: the fallback must not
+/// regress).
+// `x == x` self-comparison is the generic NaN check (false iff NaN); the
+// lint's usual "equal operands is a bug" reading does not apply here.
+#[allow(clippy::eq_op)]
+#[inline(never)]
+fn reduce_all_unraveled_arg_contig_cpu_rayon<T, D>(
+    a: &[T],
+    la: &Layout<D>,
+    cmp: ArgCmp,
+    pool: Option<&ThreadPool>,
+) -> Result<D>
+where
+    T: Clone + PartialOrd + Send + Sync,
+    D: DimAPI,
+{
+    let size = la.size();
+    let offset = la.offset();
+    let xs = &a[offset..offset + size];
+
+    // first-element NaN poisoning is decided ONCE for the whole buffer (the
+    // per-chunk scans are seeded with this guaranteed-comparable element, so
+    // a NaN inside a chunk can never block its chunk result)
+    if !(xs[0] == xs[0]) {
+        // safety: index 0 of any non-empty shape (`size > 0` asserted by the
+        // caller) is always in bounds for `unravel_index_c` (no bounds-check)
+        return Ok(unsafe { la.shape().unravel_index_c(0) });
+    }
+
+    let nthreads = match pool {
+        Some(pool) => pool.current_num_threads(),
+        None => rayon::current_num_threads(),
+    };
+    let nchunks = (nthreads * 4).clamp(1, size / 8);
+    let chunk_len = size / nchunks;
+    let task = || {
+        let partials: Vec<(T, usize)> = (0..nchunks)
+            .into_par_iter()
+            .map(|ci| {
+                let start = ci * chunk_len;
+                let end = if ci == nchunks - 1 { size } else { start + chunk_len };
+                let sub = &xs[start..end];
+                // seed every chunk with the global first element; a chunk
+                // index of usize::MAX means "nothing beat the global seed",
+                // i.e. the chunk best is the seed itself (global index 0)
+                let (val, li) = arg_contig_seeded_cpu_serial(sub, cmp, &xs[0]);
+                let gidx = if li == usize::MAX { 0 } else { start + li };
+                (val, gidx)
+            })
+            .collect();
+        let (mut best_val, mut best_idx) = (&partials[0].0, partials[0].1);
+        for (val, idx) in partials.iter().skip(1) {
+            let better = match cmp {
+                ArgCmp::Max => val > best_val || (val == best_val && *idx < best_idx),
+                ArgCmp::Min => val < best_val || (val == best_val && *idx < best_idx),
+            };
+            if better {
+                best_val = val;
+                best_idx = *idx;
+            }
+        }
+        best_idx
+    };
+    let flat = match pool {
+        None => task(),
+        Some(pool) => pool.install(task),
+    };
+    // safety: same contract as the serial contiguous path — `flat` is a
+    // c-order position of `la.shape()` with `flat < size` and `size > 0`
+    Ok(unsafe { la.shape().unravel_index_c(flat) })
+}
+
+/// Argmin/argmax-specialized fast path of
+/// [`reduce_all_unraveled_arg_cpu_rayon`]: contiguous layouts are split into
+/// chunks scanned by the serial 8-lane kernel and combined deterministically;
+/// strided/broadcast layouts fall back to the original closure fold
+/// (comparison direction selected by `cmp`).
+pub fn reduce_all_unraveled_arg_cmp_cpu_rayon<T, D>(
+    a: &[T],
+    la: &Layout<D>,
+    cmp: ArgCmp,
+    pool: Option<&ThreadPool>,
+) -> Result<D>
+where
+    T: Clone + PartialOrd + Send + Sync,
+    D: DimAPI,
+{
+    rstsr_assert!(la.size() > 0, InvalidLayout, "empty sequence is not allowed for reduce_arg.")?;
+
+    let size = la.size();
+    if size < PARALLEL_SWITCH {
+        return reduce_all_unraveled_arg_cmp_cpu_serial(a, la, cmp);
+    }
+
+    if la.c_contig() {
+        return reduce_all_unraveled_arg_contig_cpu_rayon(a, la, cmp, pool);
+    }
+
+    // strided / broadcast fallback: original closure fold, comparison
+    // direction selected by `cmp`
+    match cmp {
+        ArgCmp::Max => {
+            let f_comp = |x: Option<T>, y: T| -> Option<bool> {
+                if let Some(x) = x {
+                    Some(y > x)
+                } else {
+                    Some(true)
+                }
+            };
+            let f_eq = |x: Option<T>, y: T| -> Option<bool> {
+                if let Some(x) = x {
+                    Some(y == x)
+                } else {
+                    Some(false)
+                }
+            };
+            reduce_all_unraveled_arg_fold_cpu_rayon(a, la, f_comp, f_eq, pool)
+        },
+        ArgCmp::Min => {
+            let f_comp = |x: Option<T>, y: T| -> Option<bool> {
+                if let Some(x) = x {
+                    Some(y < x)
+                } else {
+                    Some(true)
+                }
+            };
+            let f_eq = |x: Option<T>, y: T| -> Option<bool> {
+                if let Some(x) = x {
+                    Some(y == x)
+                } else {
+                    Some(false)
+                }
+            };
+            reduce_all_unraveled_arg_fold_cpu_rayon(a, la, f_comp, f_eq, pool)
+        },
+    }
+}
+
+/// Argmin/argmax-specialized variant of
+/// [`reduce_axes_unraveled_arg_cpu_rayon`] (see
+/// [`reduce_all_unraveled_arg_cmp_cpu_rayon`]).
+pub fn reduce_axes_unraveled_arg_cmp_cpu_rayon<T, D>(
+    a: &[T],
+    la: &Layout<D>,
+    axes: &[isize],
+    cmp: ArgCmp,
+    pool: Option<&ThreadPool>,
+) -> Result<(Vec<IxD>, Layout<IxD>, Layout<IxD>)>
+where
+    T: Clone + PartialOrd + Send + Sync,
+    D: DimAPI,
+{
+    // determine whether to use parallel iteration
+    let size = la.size();
+    if size < PARALLEL_SWITCH {
+        return reduce_axes_unraveled_arg_cmp_cpu_serial(a, la, axes, cmp);
+    }
+
+    // split the layout into axes (to be summed) and the rest
+    let (layout_axes, layout_rest) = la.dim_split_axes(axes)?;
+    let layout_axes = translate_to_col_major_unary(&layout_axes, TensorIterOrder::default())?;
+
+    // generate layout for result (from layout_rest)
+    let layout_out = layout_for_array_copy(&layout_rest, TensorIterOrder::default())?;
+
+    // generate layouts for actual evaluation
+    let layouts_swapped = translate_to_col_major(&[&layout_out, &layout_rest], TensorIterOrder::default())?;
+    let layout_out_swapped = &layouts_swapped[0];
+    let layout_rest_swapped = &layouts_swapped[1];
+
+    // iterate both layout_rest and layout_out
+    let iter_out_swapped = IterLayoutRowMajor::new(layout_out_swapped)?;
+    let iter_rest_swapped = IterLayoutRowMajor::new(layout_rest_swapped)?;
+
+    // prepare output
+    let len_out = layout_out.size();
+    let mut out: Vec<MaybeUninit<IxD>> = unsafe { uninitialized_vec(len_out)? };
+    let out_ptr = AtomicPtr::new(out.as_mut_ptr());
+
+    // actual evaluation
+    let task = || {
+        (iter_out_swapped, iter_rest_swapped).into_par_iter().try_for_each(|(idx_out, idx_rest)| -> Result<()> {
+            let out_ptr = out_ptr.load(Ordering::Relaxed);
+            // let out_ptr = out_ptr.get();
+            let mut layout_inner = layout_axes.clone();
+            unsafe { layout_inner.set_offset(idx_rest) };
+            let acc = reduce_all_unraveled_arg_cmp_cpu_rayon(a, &layout_inner, cmp, pool)?;
+            unsafe { *out_ptr.add(idx_out) = MaybeUninit::new(acc) };
+            Ok(())
+        })
+    };
+    match pool {
+        None => task()?,
+        Some(pool) => pool.install(task)?,
+    };
+    let out = unsafe { transmute::<Vec<MaybeUninit<IxD>>, Vec<IxD>>(out) };
+    // returns (indices, layout_axes, layout_out): each index in `out` is an
+    // unraveled position within `layout_axes` (the reduced-axes space, possibly
+    // greedy-reordered by `translate_to_col_major_unary`), *not* within
+    // `layout_out`. Callers that ravel the indices must use `layout_axes.shape()`.
+    Ok((out, layout_axes, layout_out))
+}
+
+/// Argmin/argmax-specialized variant of [`reduce_all_arg_cpu_rayon`] (see
+/// [`reduce_all_unraveled_arg_cmp_cpu_rayon`]).
+pub fn reduce_all_arg_cmp_cpu_rayon<T, D>(
+    a: &[T],
+    la: &Layout<D>,
+    cmp: ArgCmp,
+    order: FlagOrder,
+    pool: Option<&ThreadPool>,
+) -> Result<usize>
+where
+    T: Clone + PartialOrd + Send + Sync,
+    D: DimAPI,
+{
+    let idx = reduce_all_unraveled_arg_cmp_cpu_rayon(a, la, cmp, pool)?;
+    let pseudo_shape = la.shape();
+    let pseudo_layout = match order {
+        RowMajor => pseudo_shape.c(),
+        ColMajor => pseudo_shape.f(),
+    };
+    unsafe { Ok(pseudo_layout.index_uncheck(idx.as_ref()) as usize) }
+}
+
+/// Argmin/argmax-specialized variant of [`reduce_axes_arg_cpu_rayon`] (see
+/// [`reduce_all_unraveled_arg_cmp_cpu_rayon`]).
+pub fn reduce_axes_arg_cmp_cpu_rayon<T, D>(
+    a: &[T],
+    la: &Layout<D>,
+    axes: &[isize],
+    cmp: ArgCmp,
+    order: FlagOrder,
+    pool: Option<&ThreadPool>,
+) -> Result<(Vec<usize>, Layout<IxD>)>
+where
+    T: Clone + PartialOrd + Send + Sync,
+    D: DimAPI,
+{
+    let (idx, layout_axes, layout) = reduce_axes_unraveled_arg_cmp_cpu_rayon(a, la, axes, cmp, pool)?;
+    // each index in `idx` is an unraveled position within the reduced-axes space
+    // (`layout_axes`), so the raveling pseudo-layout must use `layout_axes.shape()`,
+    // not the output layout's shape. Using the output shape indexed out of bounds
+    // for ndim >= 3 (the reduced space has rank 1 but the output has rank ndim - 1).
+    let pseudo_shape = layout_axes.shape();
+    let pseudo_layout = match order {
+        RowMajor => pseudo_shape.c(),
+        ColMajor => pseudo_shape.f(),
+    };
+    let task = || idx.into_par_iter().map(|x| unsafe { pseudo_layout.index_uncheck(x.as_ref()) as usize }).collect();
+    let out = match pool {
+        None => task(),
+        Some(pool) => pool.install(task),
+    };
+    Ok((out, layout))
+}
+
+// General closure-based arg-reduction API (restored): kept for arbitrary
+// comparison/equality semantics, e.g. future non-standard arg-reductions.
+// argmin/argmax call sites use the `*_arg_cmp_*` specializations above, which
+// share the same fold core for the strided/non-contiguous path.
+
+/// General closure-based arg-reduction over all axes, unraveled index output.
+/// See [`reduce_all_unraveled_arg_cpu_serial`] for the closure contract; for
+/// plain argmin/argmax prefer [`reduce_all_unraveled_arg_cmp_cpu_rayon`].
+pub fn reduce_all_unraveled_arg_cpu_rayon<T, D, Fcomp, Feq>(
+    a: &[T],
+    la: &Layout<D>,
+    f_comp: Fcomp,
+    f_eq: Feq,
+    pool: Option<&ThreadPool>,
+) -> Result<D>
+where
+    T: Clone + Send + Sync,
+    D: DimAPI,
+    Fcomp: Fn(Option<T>, T) -> Option<bool> + Send + Sync,
+    Feq: Fn(Option<T>, T) -> Option<bool> + Send + Sync,
+{
+    let size = la.size();
+    if size < PARALLEL_SWITCH {
+        return reduce_all_unraveled_arg_cpu_serial(a, la, f_comp, f_eq);
+    }
+    reduce_all_unraveled_arg_fold_cpu_rayon(a, la, f_comp, f_eq, pool)
+}
+
+/// General closure-based arg-reduction over given axes, unraveled index
+/// output. For plain argmin/argmax prefer
+/// [`reduce_axes_unraveled_arg_cmp_cpu_rayon`].
 pub fn reduce_axes_unraveled_arg_cpu_rayon<T, D, Fcomp, Feq>(
     a: &[T],
     la: &Layout<D>,
@@ -576,6 +872,8 @@ where
     Ok((out, layout_axes, layout_out))
 }
 
+/// General closure-based arg-reduction over all axes, raveled index output.
+/// For plain argmin/argmax prefer [`reduce_all_arg_cmp_cpu_rayon`].
 pub fn reduce_all_arg_cpu_rayon<T, D, Fcomp, Feq>(
     a: &[T],
     la: &Layout<D>,
@@ -599,6 +897,8 @@ where
     unsafe { Ok(pseudo_layout.index_uncheck(idx.as_ref()) as usize) }
 }
 
+/// General closure-based arg-reduction over given axes, raveled index output.
+/// For plain argmin/argmax prefer [`reduce_axes_arg_cmp_cpu_rayon`].
 pub fn reduce_axes_arg_cpu_rayon<T, D, Fcomp, Feq>(
     a: &[T],
     la: &Layout<D>,
@@ -617,7 +917,7 @@ where
     let (idx, layout_axes, layout) = reduce_axes_unraveled_arg_cpu_rayon(a, la, axes, f_comp, f_eq, pool)?;
     // each index in `idx` is an unraveled position within the reduced-axes space
     // (`layout_axes`), so the raveling pseudo-layout must use `layout_axes.shape()`,
-    // not the output layout's shape. Using the output shape indexed out of bounds
+    // not the output layout's shape. Using the output shape here indexed out of bounds
     // for ndim >= 3 (the reduced space has rank 1 but the output has rank ndim - 1).
     let pseudo_shape = layout_axes.shape();
     let pseudo_layout = match order {

@@ -424,7 +424,139 @@ where
 
 /* #region reduce unraveled axes */
 
-pub fn reduce_all_unraveled_arg_cpu_serial<T, D, Fcomp, Feq>(
+/// Comparison direction for the argmin/argmax-specialized `*_arg_cmp_*`
+/// reduce kernels.
+///
+/// Every in-tree caller of the general closure-based `reduce_*_arg_*` API used
+/// exactly `y < x`/`y > x` as comparison and `y == x` as equality; for that
+/// case the direction is carried as this plain enum, which enables the
+/// contiguous 8-lane fast path ([`arg_contig_cpu_serial`]) — it cannot afford
+/// a per-element closure call. The general closure-based API
+/// (`reduce_all_unraveled_arg_cpu_serial` etc., taking `f_comp`/`f_eq`) is
+/// retained alongside for arbitrary (non-standard) comparison/equality
+/// semantics.
+///
+/// Note: the `*_arg_cmp_*` signatures are public API of the `rstsr-native-impl`
+/// crate (`cpu_serial::reduction` and `cpu_rayon::reduction` are public
+/// modules). The tensor-level API in `rstsr-core` is unchanged.
+#[derive(Clone, Copy, Debug)]
+pub enum ArgCmp {
+    Min,
+    Max,
+}
+
+/// Contiguous argmin/argmax scan with 8-lane unrolled `(value, index)`
+/// accumulators (ndarray `numeric_util`-style); returns the winning index.
+///
+/// Semantics — identical to a left-to-right fold over an ascending index
+/// order with the strict-comparison rule (locked by the T6 correctness gate
+/// of the rstsr efficiency campaign):
+///
+/// - the first element seeds the accumulator unconditionally;
+/// - only a strictly smaller (min) / larger (max) value replaces it;
+/// - ties keep the smaller index;
+/// - NaN never replaces anything (all comparisons are false), so a NaN at
+///   index 0 poisons the result to 0 and an all-NaN input yields 0.
+///
+/// Implementation note: only the *first* element may poison. It is detected
+/// generically via `xs[0] == xs[0]` (false iff NaN; non-float `PartialOrd`
+/// types are reflexive and always take the scan path), after which all eight
+/// lanes are seeded with that guaranteed-comparable first element — seeding
+/// lanes from `xs[0..8]` instead would let a NaN at positions 1..8 block its
+/// whole lane (`x > NaN` is false for every later element of that lane).
+// `x == x` self-comparison is the generic NaN check (false iff NaN); the
+// lint's usual "equal operands is a bug" reading does not apply here.
+#[allow(clippy::eq_op)]
+pub fn arg_contig_cpu_serial<T: Clone + PartialOrd>(xs: &[T], cmp: ArgCmp) -> usize {
+    if !(xs[0] == xs[0]) {
+        // NaN first element: nothing can ever strictly beat it -> index 0
+        return 0;
+    }
+    let (val, idx) = arg_contig_seeded_cpu_serial(xs, cmp, &xs[0]);
+    let _ = val;
+    if idx == usize::MAX {
+        // nothing strictly beat the seed: the maximum is the first element
+        0
+    } else {
+        idx
+    }
+}
+
+/// Core of the contiguous scan: all eight lanes are seeded with `seed`, which
+/// must be a comparable (non-NaN) value; the caller owns the first-element
+/// poisoning rule. Returns `(best_value, index)` where `index == usize::MAX`
+/// means "no element strictly beat `seed`". NaN elements of `xs` never enter
+/// the accumulators; equal values keep the earlier (smaller) index.
+pub fn arg_contig_seeded_cpu_serial<T: Clone + PartialOrd>(xs: &[T], cmp: ArgCmp, seed: &T) -> (T, usize) {
+    const NO_POS: usize = usize::MAX;
+
+    // eight independent (value, index) lanes so that the loop can be kept
+    // branch-predictable (LLVM lowers the per-lane updates to cmp+cmov)
+    let mut vs: [T; 8] = core::array::from_fn(|_| seed.clone());
+    let mut idx: [usize; 8] = [NO_POS; 8];
+    let mut chunks = xs.chunks_exact(8);
+    match cmp {
+        ArgCmp::Max => {
+            let mut base = 0;
+            for ch in chunks.by_ref() {
+                for l in 0..8 {
+                    if ch[l] > vs[l] {
+                        vs[l] = ch[l].clone();
+                        idx[l] = base + l;
+                    }
+                }
+                base += 8;
+            }
+            for (l, x) in chunks.remainder().iter().enumerate() {
+                if x > &vs[l] {
+                    vs[l] = x.clone();
+                    idx[l] = base + l;
+                }
+            }
+        },
+        ArgCmp::Min => {
+            let mut base = 0;
+            for ch in chunks.by_ref() {
+                for l in 0..8 {
+                    if ch[l] < vs[l] {
+                        vs[l] = ch[l].clone();
+                        idx[l] = base + l;
+                    }
+                }
+                base += 8;
+            }
+            for (l, x) in chunks.remainder().iter().enumerate() {
+                if x < &vs[l] {
+                    vs[l] = x.clone();
+                    idx[l] = base + l;
+                }
+            }
+        },
+    }
+
+    // combine lanes: strictly better value wins; on equality the smaller
+    // index wins (lane order is not index order); NaN never wins
+    let mut best_idx = idx[0];
+    let mut best_val = &vs[0];
+    for l in 1..8 {
+        let better = match cmp {
+            ArgCmp::Max => vs[l] > *best_val || (vs[l] == *best_val && idx[l] < best_idx),
+            ArgCmp::Min => vs[l] < *best_val || (vs[l] == *best_val && idx[l] < best_idx),
+        };
+        if better {
+            best_idx = idx[l];
+            best_val = &vs[l];
+        }
+    }
+    (best_val.clone(), best_idx)
+}
+
+/// Original closure-based fold over [`IndexedIterLayout`] (row-major):
+/// implementation core of the general [`reduce_all_unraveled_arg_cpu_serial`]
+/// and strided/non-contiguous fallback of
+/// [`reduce_all_unraveled_arg_cmp_cpu_serial`].
+#[inline]
+fn reduce_all_unraveled_arg_fold_cpu_serial<T, D, Fcomp, Feq>(
     a: &[T],
     la: &Layout<D>,
     f_comp: Fcomp,
@@ -478,6 +610,213 @@ where
     Ok(acc.unwrap().0)
 }
 
+/// Contiguous fast path of [`reduce_all_unraveled_arg_cmp_cpu_serial`].
+///
+/// Kept out-of-line so that the strided fallback below compiles exactly like
+/// the pre-existing closure fold (code-layout hygiene: the fallback must not
+/// regress).
+#[inline(never)]
+fn reduce_all_unraveled_arg_contig_cpu_serial<T, D>(a: &[T], la: &Layout<D>, cmp: ArgCmp) -> Result<D>
+where
+    T: Clone + PartialOrd,
+    D: DimAPI,
+{
+    // buffer position == row-major visit position for a c-contig layout, so
+    // the 8-lane scan reproduces the closure fold exactly (see
+    // `arg_contig_cpu_serial` for the semantics contract)
+    let offset = la.offset();
+    let size = la.size();
+    let flat = arg_contig_cpu_serial(&a[offset..offset + size], cmp);
+    // safety: `flat` indexes a c-order position of `la.shape()` with
+    // `flat < size` (result of a scan over exactly `size` elements) and
+    // `size > 0` is asserted by the caller, so `unravel_index_c` cannot go
+    // out of bounds (it does not bounds-check by contract)
+    Ok(unsafe { la.shape().unravel_index_c(flat) })
+}
+
+/// Argmin/argmax-specialized fast path of
+/// [`reduce_all_unraveled_arg_cpu_serial`]: dispatches to the contiguous
+/// 8-lane scan when the layout is c-contiguous, and falls back to the
+/// original closure fold (comparison direction selected by `cmp`) otherwise.
+pub fn reduce_all_unraveled_arg_cmp_cpu_serial<T, D>(
+    a: &[T],
+    la: &Layout<D>,
+    cmp: ArgCmp,
+) -> Result<D>
+where
+    T: Clone + PartialOrd,
+    D: DimAPI,
+{
+    rstsr_assert!(la.size() > 0, InvalidLayout, "empty sequence is not allowed for reduce_arg.")?;
+
+    if la.c_contig() {
+        return reduce_all_unraveled_arg_contig_cpu_serial(a, la, cmp);
+    }
+
+    // strided / broadcast fallback: original closure fold, comparison
+    // direction selected by `cmp`
+    match cmp {
+        ArgCmp::Max => {
+            let f_comp = |x: Option<T>, y: T| -> Option<bool> {
+                if let Some(x) = x {
+                    Some(y > x)
+                } else {
+                    Some(true)
+                }
+            };
+            let f_eq = |x: Option<T>, y: T| -> Option<bool> {
+                if let Some(x) = x {
+                    Some(y == x)
+                } else {
+                    Some(false)
+                }
+            };
+            reduce_all_unraveled_arg_fold_cpu_serial(a, la, f_comp, f_eq)
+        },
+        ArgCmp::Min => {
+            let f_comp = |x: Option<T>, y: T| -> Option<bool> {
+                if let Some(x) = x {
+                    Some(y < x)
+                } else {
+                    Some(true)
+                }
+            };
+            let f_eq = |x: Option<T>, y: T| -> Option<bool> {
+                if let Some(x) = x {
+                    Some(y == x)
+                } else {
+                    Some(false)
+                }
+            };
+            reduce_all_unraveled_arg_fold_cpu_serial(a, la, f_comp, f_eq)
+        },
+    }
+}
+
+/// Argmin/argmax-specialized variant of
+/// [`reduce_axes_unraveled_arg_cpu_serial`] (see
+/// [`reduce_all_unraveled_arg_cmp_cpu_serial`]).
+pub fn reduce_axes_unraveled_arg_cmp_cpu_serial<T, D>(
+    a: &[T],
+    la: &Layout<D>,
+    axes: &[isize],
+    cmp: ArgCmp,
+) -> Result<(Vec<IxD>, Layout<IxD>, Layout<IxD>)>
+where
+    T: Clone + PartialOrd,
+    D: DimAPI,
+{
+    rstsr_assert!(la.size() > 0, InvalidLayout, "empty sequence is not allowed for reduce_arg.")?;
+
+    // split the layout into axes (to be summed) and the rest
+    let (layout_axes, layout_rest) = la.dim_split_axes(axes)?;
+
+    // generate layout for result (from layout_rest)
+    let layout_out = layout_for_array_copy(&layout_rest, TensorIterOrder::default())?;
+
+    // generate layouts for actual evaluation
+    let layouts_swapped = translate_to_col_major(&[&layout_out, &layout_rest], TensorIterOrder::default())?;
+    let layout_out_swapped = &layouts_swapped[0];
+    let layout_rest_swapped = &layouts_swapped[1];
+
+    // iterate both layout_rest and layout_out
+    let iter_out_swapped = IterLayoutRowMajor::new(layout_out_swapped)?;
+    let iter_rest_swapped = IterLayoutRowMajor::new(layout_rest_swapped)?;
+
+    // inner layout is axes to be summed
+    let mut layout_inner = layout_axes.clone();
+
+    // prepare output
+    let len_out = layout_out.size();
+    let mut out: Vec<MaybeUninit<IxD>> = unsafe { uninitialized_vec(len_out)? };
+
+    // actual evaluation
+    izip!(iter_out_swapped, iter_rest_swapped).try_for_each(|(idx_out, idx_rest)| -> Result<()> {
+        unsafe { layout_inner.set_offset(idx_rest) };
+        let acc = reduce_all_unraveled_arg_cmp_cpu_serial(a, &layout_inner, cmp)?;
+        out[idx_out] = MaybeUninit::new(acc);
+        Ok(())
+    })?;
+    let out = unsafe { transmute::<Vec<MaybeUninit<IxD>>, Vec<IxD>>(out) };
+    // returns (indices, layout_axes, layout_out): each index in `out` is an
+    // unraveled position within `layout_axes` (the reduced-axes space), *not*
+    // within `layout_out`. Callers that ravel the indices must use
+    // `layout_axes.shape()`.
+    Ok((out, layout_axes, layout_out))
+}
+
+/// Argmin/argmax-specialized variant of [`reduce_all_arg_cpu_serial`] (see
+/// [`reduce_all_unraveled_arg_cmp_cpu_serial`]).
+pub fn reduce_all_arg_cmp_cpu_serial<T, D>(a: &[T], la: &Layout<D>, cmp: ArgCmp, order: FlagOrder) -> Result<usize>
+where
+    T: Clone + PartialOrd,
+    D: DimAPI,
+{
+    let idx = reduce_all_unraveled_arg_cmp_cpu_serial(a, la, cmp)?;
+    let pseudo_shape = la.shape();
+    let pseudo_layout = match order {
+        RowMajor => pseudo_shape.c(),
+        ColMajor => pseudo_shape.f(),
+    };
+    unsafe { Ok(pseudo_layout.index_uncheck(idx.as_ref()) as usize) }
+}
+
+/// Argmin/argmax-specialized variant of [`reduce_axes_arg_cpu_serial`] (see
+/// [`reduce_all_unraveled_arg_cmp_cpu_serial`]).
+pub fn reduce_axes_arg_cmp_cpu_serial<T, D>(
+    a: &[T],
+    la: &Layout<D>,
+    axes: &[isize],
+    cmp: ArgCmp,
+    order: FlagOrder,
+) -> Result<(Vec<usize>, Layout<IxD>)>
+where
+    T: Clone + PartialOrd,
+    D: DimAPI,
+{
+    let (idx, layout_axes, layout) = reduce_axes_unraveled_arg_cmp_cpu_serial(a, la, axes, cmp)?;
+    // each index in `idx` is an unraveled position within the reduced-axes space
+    // (`layout_axes`), so the raveling pseudo-layout must use `layout_axes.shape()`,
+    // not the output layout's shape. Using the output shape here indexed out of
+    // bounds for ndim >= 3 (the reduced space has rank 1 but the output has rank
+    // ndim - 1).
+    let pseudo_shape = layout_axes.shape();
+    let pseudo_layout = match order {
+        RowMajor => pseudo_shape.c(),
+        ColMajor => pseudo_shape.f(),
+    };
+    let out = idx.into_iter().map(|x| unsafe { pseudo_layout.index_uncheck(x.as_ref()) as usize }).collect();
+    Ok((out, layout))
+}
+
+// General closure-based arg-reduction API (restored): kept for arbitrary
+// comparison/equality semantics, e.g. future non-standard arg-reductions.
+// argmin/argmax call sites use the `*_arg_cmp_*` specializations above, which
+// share the same fold core for the strided/non-contiguous path.
+
+/// General closure-based arg-reduction over all axes, unraveled index output.
+/// `f_comp(acc, cur)` decides whether `cur` is accepted (`Some(true)`),
+/// `f_eq(acc, cur)` whether it ties (smaller index then wins); `None` from
+/// either skips the element. For plain argmin/argmax prefer the specialized
+/// [`reduce_all_unraveled_arg_cmp_cpu_serial`].
+pub fn reduce_all_unraveled_arg_cpu_serial<T, D, Fcomp, Feq>(
+    a: &[T],
+    la: &Layout<D>,
+    f_comp: Fcomp,
+    f_eq: Feq,
+) -> Result<D>
+where
+    T: Clone,
+    D: DimAPI,
+    Fcomp: Fn(Option<T>, T) -> Option<bool>,
+    Feq: Fn(Option<T>, T) -> Option<bool>,
+{
+    reduce_all_unraveled_arg_fold_cpu_serial(a, la, f_comp, f_eq)
+}
+
+/// General closure-based arg-reduction over given axes, unraveled index
+/// output. For plain argmin/argmax prefer
+/// [`reduce_axes_unraveled_arg_cmp_cpu_serial`].
 pub fn reduce_axes_unraveled_arg_cpu_serial<T, D, Fcomp, Feq>(
     a: &[T],
     la: &Layout<D>,
@@ -530,6 +869,8 @@ where
     Ok((out, layout_axes, layout_out))
 }
 
+/// General closure-based arg-reduction over all axes, raveled index output.
+/// For plain argmin/argmax prefer [`reduce_all_arg_cmp_cpu_serial`].
 pub fn reduce_all_arg_cpu_serial<T, D, Fcomp, Feq>(
     a: &[T],
     la: &Layout<D>,
@@ -552,6 +893,8 @@ where
     unsafe { Ok(pseudo_layout.index_uncheck(idx.as_ref()) as usize) }
 }
 
+/// General closure-based arg-reduction over given axes, raveled index output.
+/// For plain argmin/argmax prefer [`reduce_axes_arg_cmp_cpu_serial`].
 pub fn reduce_axes_arg_cpu_serial<T, D, Fcomp, Feq>(
     a: &[T],
     la: &Layout<D>,
