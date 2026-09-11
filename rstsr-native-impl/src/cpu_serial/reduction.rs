@@ -424,11 +424,259 @@ where
 
 /* #region reduce unraveled axes */
 
-pub fn reduce_all_unraveled_arg_cpu_serial<T, D, Fcomp, Feq>(
+/// Comparison and NaN policy for the argmin/argmax-family reduce kernels.
+///
+/// `Min`/`Max` follow the original rstsr fold semantics: NaN never wins an
+/// update, so a NaN at the first scanned position poisons the result and an
+/// all-NaN input yields 0. This deliberately DIVERGES from NumPy
+/// `np.argmin`/`np.argmax` (which return the first NaN at any position):
+/// making NaN win requires an unordered-aware compare per element
+/// (`!(x <= best)` needs a second, parity, flag check) or an extra scan
+/// pass, either of which de-vectorizes or doubles the cost of this
+/// auto-vectorized kernel (measured +55…+100% on small compute-bound
+/// inputs, +5…+18% on memory-bound ones). NumPy-style behavior remains
+/// available through [`ArgCmp::NanMin`]/[`ArgCmp::NanMax`]
+/// (`np.nanargmin`/`np.nanargmax` semantics: NaN elements are skipped, an
+/// all-NaN slice raises `InvalidValue`, "All-NaN slice encountered"), which
+/// shares the same fast kernel at no measurable cost on NaN-free input.
+///
+/// Non-floating element types have no NaN and behave identically under all
+/// policies. The general closure-based API (`reduce_*_arg_cpu_*`, taking
+/// `f_comp`/`f_eq`) is retained alongside for arbitrary (non-standard)
+/// comparison/equality semantics; the contiguous 8-lane fast path
+/// ([`arg_contig_cpu_serial`]) is only available through this enum — it
+/// cannot afford a per-element closure call.
+///
+/// Note: the `*_arg_cmp_*` signatures are public API of the `rstsr-native-impl`
+/// crate (`cpu_serial::reduction` and `cpu_rayon::reduction` are public
+/// modules). The tensor-level API in `rstsr-core` is unchanged.
+#[derive(Clone, Copy, Debug)]
+pub enum ArgCmp {
+    Min,
+    Max,
+    NanMin,
+    NanMax,
+}
+
+impl ArgCmp {
+    /// Whether NaN elements are skipped instead of winning
+    /// ([`ArgCmp::NanMin`]/[`ArgCmp::NanMax`]).
+    pub fn skip_nan(self) -> bool {
+        matches!(self, ArgCmp::NanMin | ArgCmp::NanMax)
+    }
+}
+
+/// Error message of every all-NaN slice in the `NanMin`/`NanMax` policies
+/// (mirrors NumPy's `ValueError("All-NaN slice encountered")`).
+pub const ARG_ALL_NAN_MSG: &str = "All-NaN slice encountered";
+
+/// acc-None fallback message of the closure fold (kept from the original
+/// `reduce_*_arg_*` implementation).
+pub(crate) const FOLD_INVALID_MSG: &str = "reduce_arg seems not returning a valid value.";
+
+/// Block size of the NaN pre-scan for the `Min`/`Max` policies: small enough
+/// Contiguous argmin/argmax-family scan; returns the winning flat index by
+/// [`ArgCmp`] policy.
+///
+/// Semantics — identical to a left-to-right fold over an ascending index
+/// order with the strict-comparison rule (locked by the T6 correctness gate
+/// of the rstsr efficiency campaign):
+///
+/// - `Min`/`Max`: the first element seeds the accumulator unconditionally; only a strictly smaller
+///   (min) / larger (max) value replaces it; ties keep the smaller index; NaN never wins an update,
+///   so a NaN at the first scanned position poisons the result to that position's index and an
+///   all-NaN input yields 0. Note: this DIVERGES from NumPy `np.argmin`/ `np.argmax` (first NaN at
+///   any position wins) — see [`ArgCmp`].
+/// - `NanMin`/`NanMax` (NumPy `np.nanargmin`/`np.nanargmax`): NaN elements never enter the
+///   accumulators; the seed is the first non-NaN element; an all-NaN input raises `InvalidValue`
+///   ([`ARG_ALL_NAN_MSG`]).
+///
+/// Implementation note: the 8-lane accumulators (ndarray
+/// `numeric_util`-style) are seeded by the caller with a guaranteed
+/// comparable element; seeding lanes from `xs[0..8]` instead would let a NaN
+/// at positions 1..8 block its whole lane (`x > NaN` is false for every
+/// later element of that lane).
+// `x == x` self-comparisons below are generic NaN checks (false iff NaN);
+// the lint's usual "equal operands is a bug" reading does not apply here.
+#[allow(clippy::eq_op)]
+pub fn arg_contig_cpu_serial<T: Clone + PartialOrd>(xs: &[T], cmp: ArgCmp) -> Result<usize> {
+    if cmp.skip_nan() {
+        // nanarg policy: seed with the first non-NaN element; all-NaN errors
+        let mut seed = None;
+        for (i, x) in xs.iter().enumerate() {
+            if x == x {
+                seed = Some(i);
+                break;
+            }
+        }
+        let j = match seed {
+            Some(j) => j,
+            None => rstsr_raise!(InvalidValue, "{}", ARG_ALL_NAN_MSG)?,
+        };
+        let (val, idx) = arg_contig_scan_cpu_serial(xs, cmp, &xs[j]);
+        let _ = val;
+        // nothing strictly beat the first non-NaN element: it is the extremum
+        return if idx == usize::MAX { Ok(j) } else { Ok(idx) };
+    }
+    if !(xs[0] == xs[0]) {
+        // NaN first element: nothing can ever strictly beat it -> index 0
+        return Ok(0);
+    }
+    let (val, idx) = arg_contig_scan_cpu_serial(xs, cmp, &xs[0]);
+    let _ = val;
+    if idx == usize::MAX {
+        // nothing strictly beat the seed: the extremum is the first element
+        Ok(0)
+    } else {
+        Ok(idx)
+    }
+}
+
+/// Core of the contiguous scan: all eight lanes are seeded with `seed`, which
+/// must be a comparable (non-NaN) value; the caller owns the NaN policy (the
+/// input must not contain NaN that should win). Returns `(best_value, index)`
+/// where `index == usize::MAX` means "no element strictly beat `seed`". NaN
+/// elements never win an update (their ordered compares are all false); equal
+/// values keep the earlier (smaller) index.
+pub fn arg_contig_scan_cpu_serial<T: Clone + PartialOrd>(xs: &[T], cmp: ArgCmp, seed: &T) -> (T, usize) {
+    const NO_POS: usize = usize::MAX;
+
+    // eight independent (value, index) lanes so that the loop can be kept
+    // branch-predictable (LLVM lowers the per-lane updates to cmp+cmov)
+    let mut vs: [T; 8] = core::array::from_fn(|_| seed.clone());
+    let mut idx: [usize; 8] = [NO_POS; 8];
+    let mut chunks = xs.chunks_exact(8);
+    match cmp {
+        ArgCmp::Max | ArgCmp::NanMax => {
+            let mut base = 0;
+            for ch in chunks.by_ref() {
+                for l in 0..8 {
+                    if ch[l] > vs[l] {
+                        vs[l] = ch[l].clone();
+                        idx[l] = base + l;
+                    }
+                }
+                base += 8;
+            }
+            for (l, x) in chunks.remainder().iter().enumerate() {
+                if x > &vs[l] {
+                    vs[l] = x.clone();
+                    idx[l] = base + l;
+                }
+            }
+        },
+        ArgCmp::Min | ArgCmp::NanMin => {
+            let mut base = 0;
+            for ch in chunks.by_ref() {
+                for l in 0..8 {
+                    if ch[l] < vs[l] {
+                        vs[l] = ch[l].clone();
+                        idx[l] = base + l;
+                    }
+                }
+                base += 8;
+            }
+            for (l, x) in chunks.remainder().iter().enumerate() {
+                if x < &vs[l] {
+                    vs[l] = x.clone();
+                    idx[l] = base + l;
+                }
+            }
+        },
+    }
+
+    // combine lanes: strictly better value wins; on equality the smaller
+    // index wins (lane order is not index order); NaN never wins
+    let mut best_idx = idx[0];
+    let mut best_val = &vs[0];
+    for l in 1..8 {
+        let better = match cmp {
+            ArgCmp::Max | ArgCmp::NanMax => vs[l] > *best_val || (vs[l] == *best_val && idx[l] < best_idx),
+            ArgCmp::Min | ArgCmp::NanMin => vs[l] < *best_val || (vs[l] == *best_val && idx[l] < best_idx),
+        };
+        if better {
+            best_idx = idx[l];
+            best_val = &vs[l];
+        }
+    }
+    (best_val.clone(), best_idx)
+}
+
+/* #region strided fallback comparison closures */
+
+// `x == x` self-comparisons below are generic NaN checks (false iff NaN).
+
+/// Plain argmax comparison (original `reduce_*_arg_*` semantics).
+#[inline]
+pub(crate) fn f_comp_std_max<T: PartialOrd>(x: Option<T>, y: T) -> Option<bool> {
+    match x {
+        Some(x) => Some(y > x),
+        None => Some(true),
+    }
+}
+
+/// Plain argmin comparison (mirror of [`f_comp_std_max`]).
+#[inline]
+pub(crate) fn f_comp_std_min<T: PartialOrd>(x: Option<T>, y: T) -> Option<bool> {
+    match x {
+        Some(x) => Some(y < x),
+        None => Some(true),
+    }
+}
+
+/// NumPy-nanargmax comparison: NaN current values are skipped entirely.
+#[inline]
+// `x == x` self-comparison is the generic NaN check (false iff NaN).
+#[allow(clippy::eq_op)]
+pub(crate) fn f_comp_nan_max<T: PartialOrd>(x: Option<T>, y: T) -> Option<bool> {
+    if !(y == y) {
+        return None;
+    }
+    match x {
+        Some(x) => Some(y > x),
+        None => Some(true),
+    }
+}
+
+/// NumPy-nanargmin comparison (mirror of [`f_comp_nan_max`]).
+#[inline]
+// `x == x` self-comparison is the generic NaN check (false iff NaN).
+#[allow(clippy::eq_op)]
+pub(crate) fn f_comp_nan_min<T: PartialOrd>(x: Option<T>, y: T) -> Option<bool> {
+    if !(y == y) {
+        return None;
+    }
+    match x {
+        Some(x) => Some(y < x),
+        None => Some(true),
+    }
+}
+
+/// Tie test of the fold: equal values resolve to the smaller index. A NaN
+/// current value never ties (the comparison closures filter it beforehand).
+#[inline]
+pub(crate) fn f_eq_std<T: PartialEq>(x: Option<T>, y: T) -> Option<bool> {
+    match x {
+        Some(x) => Some(y == x),
+        None => Some(false),
+    }
+}
+
+/* #endregion */
+
+/// Original closure-based fold over [`IndexedIterLayout`] (row-major):
+/// implementation core of the general [`reduce_all_unraveled_arg_cpu_serial`]
+/// and strided/non-contiguous fallback of
+/// [`reduce_all_unraveled_arg_cmp_cpu_serial`]. `invalid_msg` is the error
+/// raised when the fold ends without any accepted element (used to give the
+/// nanarg policies their "All-NaN slice encountered" message).
+#[inline]
+fn reduce_all_unraveled_arg_fold_cpu_serial<T, D, Fcomp, Feq>(
     a: &[T],
     la: &Layout<D>,
     f_comp: Fcomp,
     f_eq: Feq,
+    invalid_msg: &'static str,
 ) -> Result<D>
 where
     T: Clone,
@@ -473,11 +721,184 @@ where
     let iter_a = IndexedIterLayout::new(la, RowMajor)?;
     let acc = iter_a.into_iter().fold(None, fold_func);
     if acc.is_none() {
-        rstsr_raise!(InvalidValue, "reduce_arg seems not returning a valid value.")?;
+        rstsr_raise!(InvalidValue, "{}", invalid_msg)?;
     }
     Ok(acc.unwrap().0)
 }
 
+/// Contiguous fast path of [`reduce_all_unraveled_arg_cmp_cpu_serial`].
+///
+/// Kept out-of-line so that the strided fallback below compiles exactly like
+/// the pre-existing closure fold (code-layout hygiene: the fallback must not
+/// regress).
+#[inline(never)]
+fn reduce_all_unraveled_arg_contig_cpu_serial<T, D>(a: &[T], la: &Layout<D>, cmp: ArgCmp) -> Result<D>
+where
+    T: Clone + PartialOrd,
+    D: DimAPI,
+{
+    // buffer position == row-major visit position for a c-contig layout, so
+    // the 8-lane scan reproduces the closure fold exactly (see
+    // `arg_contig_cpu_serial` for the semantics contract)
+    let offset = la.offset();
+    let size = la.size();
+    let flat = arg_contig_cpu_serial(&a[offset..offset + size], cmp)?;
+    // safety: `flat` indexes a c-order position of `la.shape()` with
+    // `flat < size` (result of a scan over exactly `size` elements) and
+    // `size > 0` is asserted by the caller, so `unravel_index_c` cannot go
+    // out of bounds (it does not bounds-check by contract)
+    Ok(unsafe { la.shape().unravel_index_c(flat) })
+}
+
+/// Argmin/argmax-specialized fast path of
+/// [`reduce_all_unraveled_arg_cpu_serial`]: dispatches to the contiguous
+/// 8-lane scan when the layout is c-contiguous, and falls back to the
+/// original closure fold (comparison direction selected by `cmp`) otherwise.
+pub fn reduce_all_unraveled_arg_cmp_cpu_serial<T, D>(a: &[T], la: &Layout<D>, cmp: ArgCmp) -> Result<D>
+where
+    T: Clone + PartialOrd,
+    D: DimAPI,
+{
+    rstsr_assert!(la.size() > 0, InvalidLayout, "empty sequence is not allowed for reduce_arg.")?;
+
+    if la.c_contig() {
+        return reduce_all_unraveled_arg_contig_cpu_serial(a, la, cmp);
+    }
+
+    // strided / broadcast fallback: original closure fold, comparison and
+    // NaN policy selected by `cmp`
+    match cmp {
+        ArgCmp::Max => reduce_all_unraveled_arg_fold_cpu_serial(a, la, f_comp_std_max, f_eq_std, FOLD_INVALID_MSG),
+        ArgCmp::Min => reduce_all_unraveled_arg_fold_cpu_serial(a, la, f_comp_std_min, f_eq_std, FOLD_INVALID_MSG),
+        ArgCmp::NanMax => reduce_all_unraveled_arg_fold_cpu_serial(a, la, f_comp_nan_max, f_eq_std, ARG_ALL_NAN_MSG),
+        ArgCmp::NanMin => reduce_all_unraveled_arg_fold_cpu_serial(a, la, f_comp_nan_min, f_eq_std, ARG_ALL_NAN_MSG),
+    }
+}
+
+/// Argmin/argmax-specialized variant of
+/// [`reduce_axes_unraveled_arg_cpu_serial`] (see
+/// [`reduce_all_unraveled_arg_cmp_cpu_serial`]).
+pub fn reduce_axes_unraveled_arg_cmp_cpu_serial<T, D>(
+    a: &[T],
+    la: &Layout<D>,
+    axes: &[isize],
+    cmp: ArgCmp,
+) -> Result<(Vec<IxD>, Layout<IxD>, Layout<IxD>)>
+where
+    T: Clone + PartialOrd,
+    D: DimAPI,
+{
+    rstsr_assert!(la.size() > 0, InvalidLayout, "empty sequence is not allowed for reduce_arg.")?;
+
+    // split the layout into axes (to be summed) and the rest
+    let (layout_axes, layout_rest) = la.dim_split_axes(axes)?;
+
+    // generate layout for result (from layout_rest)
+    let layout_out = layout_for_array_copy(&layout_rest, TensorIterOrder::default())?;
+
+    // generate layouts for actual evaluation
+    let layouts_swapped = translate_to_col_major(&[&layout_out, &layout_rest], TensorIterOrder::default())?;
+    let layout_out_swapped = &layouts_swapped[0];
+    let layout_rest_swapped = &layouts_swapped[1];
+
+    // iterate both layout_rest and layout_out
+    let iter_out_swapped = IterLayoutRowMajor::new(layout_out_swapped)?;
+    let iter_rest_swapped = IterLayoutRowMajor::new(layout_rest_swapped)?;
+
+    // inner layout is axes to be summed
+    let mut layout_inner = layout_axes.clone();
+
+    // prepare output
+    let len_out = layout_out.size();
+    let mut out: Vec<MaybeUninit<IxD>> = unsafe { uninitialized_vec(len_out)? };
+
+    // actual evaluation
+    izip!(iter_out_swapped, iter_rest_swapped).try_for_each(|(idx_out, idx_rest)| -> Result<()> {
+        unsafe { layout_inner.set_offset(idx_rest) };
+        let acc = reduce_all_unraveled_arg_cmp_cpu_serial(a, &layout_inner, cmp)?;
+        out[idx_out] = MaybeUninit::new(acc);
+        Ok(())
+    })?;
+    let out = unsafe { transmute::<Vec<MaybeUninit<IxD>>, Vec<IxD>>(out) };
+    // returns (indices, layout_axes, layout_out): each index in `out` is an
+    // unraveled position within `layout_axes` (the reduced-axes space), *not*
+    // within `layout_out`. Callers that ravel the indices must use
+    // `layout_axes.shape()`.
+    Ok((out, layout_axes, layout_out))
+}
+
+/// Argmin/argmax-specialized variant of [`reduce_all_arg_cpu_serial`] (see
+/// [`reduce_all_unraveled_arg_cmp_cpu_serial`]).
+pub fn reduce_all_arg_cmp_cpu_serial<T, D>(a: &[T], la: &Layout<D>, cmp: ArgCmp, order: FlagOrder) -> Result<usize>
+where
+    T: Clone + PartialOrd,
+    D: DimAPI,
+{
+    let idx = reduce_all_unraveled_arg_cmp_cpu_serial(a, la, cmp)?;
+    let pseudo_shape = la.shape();
+    let pseudo_layout = match order {
+        RowMajor => pseudo_shape.c(),
+        ColMajor => pseudo_shape.f(),
+    };
+    unsafe { Ok(pseudo_layout.index_uncheck(idx.as_ref()) as usize) }
+}
+
+/// Argmin/argmax-specialized variant of [`reduce_axes_arg_cpu_serial`] (see
+/// [`reduce_all_unraveled_arg_cmp_cpu_serial`]).
+pub fn reduce_axes_arg_cmp_cpu_serial<T, D>(
+    a: &[T],
+    la: &Layout<D>,
+    axes: &[isize],
+    cmp: ArgCmp,
+    order: FlagOrder,
+) -> Result<(Vec<usize>, Layout<IxD>)>
+where
+    T: Clone + PartialOrd,
+    D: DimAPI,
+{
+    let (idx, layout_axes, layout) = reduce_axes_unraveled_arg_cmp_cpu_serial(a, la, axes, cmp)?;
+    // each index in `idx` is an unraveled position within the reduced-axes space
+    // (`layout_axes`), so the raveling pseudo-layout must use `layout_axes.shape()`,
+    // not the output layout's shape. Using the output shape here indexed out of
+    // bounds for ndim >= 3 (the reduced space has rank 1 but the output has rank
+    // ndim - 1).
+    let pseudo_shape = layout_axes.shape();
+    let pseudo_layout = match order {
+        RowMajor => pseudo_shape.c(),
+        ColMajor => pseudo_shape.f(),
+    };
+    let out = idx.into_iter().map(|x| unsafe { pseudo_layout.index_uncheck(x.as_ref()) as usize }).collect();
+    Ok((out, layout))
+}
+
+// General closure-based arg-reduction API (restored): kept for arbitrary
+// comparison/equality semantics, e.g. future non-standard arg-reductions.
+// argmin/argmax call sites use the `*_arg_cmp_*` specializations above, which
+// share the same fold core for the strided/non-contiguous path.
+
+/// General closure-based arg-reduction over all axes, unraveled index output.
+/// `f_comp(acc, cur)` decides whether `cur` is accepted (`Some(true)`),
+/// `f_eq(acc, cur)` whether it ties (smaller index then wins); `None` from
+/// either skips the element. For plain argmin/argmax prefer the specialized
+/// [`reduce_all_unraveled_arg_cmp_cpu_serial`].
+pub fn reduce_all_unraveled_arg_cpu_serial<T, D, Fcomp, Feq>(
+    a: &[T],
+    la: &Layout<D>,
+    f_comp: Fcomp,
+    f_eq: Feq,
+) -> Result<D>
+where
+    T: Clone,
+    D: DimAPI,
+    Fcomp: Fn(Option<T>, T) -> Option<bool>,
+    Feq: Fn(Option<T>, T) -> Option<bool>,
+{
+    reduce_all_unraveled_arg_fold_cpu_serial(a, la, f_comp, f_eq, FOLD_INVALID_MSG)
+}
+
+/// General closure-based arg-reduction over given axes, unraveled index
+/// output. For plain argmin/argmax prefer
+/// [`reduce_axes_unraveled_arg_cmp_cpu_serial`].
 pub fn reduce_axes_unraveled_arg_cpu_serial<T, D, Fcomp, Feq>(
     a: &[T],
     la: &Layout<D>,
@@ -530,6 +951,8 @@ where
     Ok((out, layout_axes, layout_out))
 }
 
+/// General closure-based arg-reduction over all axes, raveled index output.
+/// For plain argmin/argmax prefer [`reduce_all_arg_cmp_cpu_serial`].
 pub fn reduce_all_arg_cpu_serial<T, D, Fcomp, Feq>(
     a: &[T],
     la: &Layout<D>,
@@ -552,6 +975,8 @@ where
     unsafe { Ok(pseudo_layout.index_uncheck(idx.as_ref()) as usize) }
 }
 
+/// General closure-based arg-reduction over given axes, raveled index output.
+/// For plain argmin/argmax prefer [`reduce_axes_arg_cmp_cpu_serial`].
 pub fn reduce_axes_arg_cpu_serial<T, D, Fcomp, Feq>(
     a: &[T],
     la: &Layout<D>,
