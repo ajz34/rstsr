@@ -280,8 +280,7 @@ where
             // initialize sequential parts
             let mut vacc = vec![init(); size_mc];
             // iterate the reduction parts
-            // - chunk to contiguous output (current chunk size is small, but applicable to most
-            //   situations)
+            // - chunk to contiguous output (current chunk size is small, but applicable to most situations)
             const CHUNK: usize = 48;
             vacc.chunks_mut(CHUNK).enumerate().for_each(|(i_chunk, vacc_chunk)| {
                 let start = i_chunk * CHUNK;
@@ -482,15 +481,14 @@ pub(crate) const FOLD_INVALID_MSG: &str = "reduce_arg seems not returning a vali
 /// order with the strict-comparison rule (locked by the T6 correctness gate
 /// of the rstsr efficiency campaign):
 ///
-/// - `Min`/`Max`: the first element seeds the accumulator unconditionally;
-///   only a strictly smaller (min) / larger (max) value replaces it; ties
-///   keep the smaller index; NaN never wins an update, so a NaN at the first
-///   scanned position poisons the result to that position's index and an
-///   all-NaN input yields 0. Note: this DIVERGES from NumPy `np.argmin`/
-///   `np.argmax` (first NaN at any position wins) — see [`ArgCmp`].
-/// - `NanMin`/`NanMax` (NumPy `np.nanargmin`/`np.nanargmax`): NaN elements
-///   never enter the accumulators; the seed is the first non-NaN element; an
-///   all-NaN input raises `InvalidValue` ([`ARG_ALL_NAN_MSG`]).
+/// - `Min`/`Max`: the first element seeds the accumulator unconditionally; only a strictly smaller
+///   (min) / larger (max) value replaces it; ties keep the smaller index; NaN never wins an update,
+///   so a NaN at the first scanned position poisons the result to that position's index and an
+///   all-NaN input yields 0. Note: this DIVERGES from NumPy `np.argmin`/ `np.argmax` (first NaN at
+///   any position wins) — see [`ArgCmp`].
+/// - `NanMin`/`NanMax` (NumPy `np.nanargmin`/`np.nanargmax`): NaN elements never enter the
+///   accumulators; the seed is the first non-NaN element; an all-NaN input raises `InvalidValue`
+///   ([`ARG_ALL_NAN_MSG`]).
 ///
 /// Implementation note: the 8-lane accumulators (ndarray
 /// `numeric_util`-style) are seeded by the caller with a guaranteed
@@ -755,11 +753,7 @@ where
 /// [`reduce_all_unraveled_arg_cpu_serial`]: dispatches to the contiguous
 /// 8-lane scan when the layout is c-contiguous, and falls back to the
 /// original closure fold (comparison direction selected by `cmp`) otherwise.
-pub fn reduce_all_unraveled_arg_cmp_cpu_serial<T, D>(
-    a: &[T],
-    la: &Layout<D>,
-    cmp: ArgCmp,
-) -> Result<D>
+pub fn reduce_all_unraveled_arg_cmp_cpu_serial<T, D>(a: &[T], la: &Layout<D>, cmp: ArgCmp) -> Result<D>
 where
     T: Clone + PartialOrd,
     D: DimAPI,

@@ -146,11 +146,11 @@ pub mod rstsr_funcs {
         max_axes_f, max_f, mean, mean_all, mean_all_f, mean_axes, mean_axes_f, mean_f, min, min_all, min_all_f,
         min_axes, min_axes_f, min_f, nanargmax, nanargmax_all, nanargmax_all_f, nanargmax_axes, nanargmax_axes_f,
         nanargmax_f, nanargmin, nanargmin_all, nanargmin_all_f, nanargmin_axes, nanargmin_axes_f, nanargmin_f, prod,
-        prod_all, prod_all_f, prod_axes, prod_axes_f, prod_f, std, std_all,
-        std_all_f, std_axes, std_axes_f, std_f, sum, sum_all, sum_all_f, sum_axes, sum_axes_f, sum_f, unraveled_argmax,
-        unraveled_argmax_all, unraveled_argmax_all_f, unraveled_argmax_axes, unraveled_argmax_axes_f,
-        unraveled_argmax_f, unraveled_argmin, unraveled_argmin_all, unraveled_argmin_all_f, unraveled_argmin_axes,
-        unraveled_argmin_axes_f, unraveled_argmin_f, var, var_all, var_all_f, var_axes, var_axes_f, var_f,
+        prod_all, prod_all_f, prod_axes, prod_axes_f, prod_f, std, std_all, std_all_f, std_axes, std_axes_f, std_f,
+        sum, sum_all, sum_all_f, sum_axes, sum_axes_f, sum_f, unraveled_argmax, unraveled_argmax_all,
+        unraveled_argmax_all_f, unraveled_argmax_axes, unraveled_argmax_axes_f, unraveled_argmax_f, unraveled_argmin,
+        unraveled_argmin_all, unraveled_argmin_all_f, unraveled_argmin_axes, unraveled_argmin_axes_f,
+        unraveled_argmin_f, var, var_all, var_all_f, var_axes, var_axes_f, var_f,
     };
     // linalg (array-api's basic linalg operations, not the rstsr-linalg-traits)
     pub use crate::tensor::linalg::exports::{

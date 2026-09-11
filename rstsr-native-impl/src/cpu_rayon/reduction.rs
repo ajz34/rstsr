@@ -225,8 +225,7 @@ where
                 // initialize sequential parts
                 let mut vacc = vec![init(); size_mc];
                 // iterate the reduction parts
-                // - chunk to contiguous output (current chunk size is small, but applicable to most
-                //   situations)
+                // - chunk to contiguous output (current chunk size is small, but applicable to most situations)
                 // - sequential iteration in chunks for reduction (parallel it can lead to racing)
                 const CHUNK: usize = 64;
                 vacc.par_chunks_mut(CHUNK).enumerate().for_each(|(i_chunk, vacc_chunk)| {
@@ -523,11 +522,11 @@ where
 /// (collect preserves chunk order) — exactly the serial outcome, independent
 /// of thread count and scheduling, for every [`ArgCmp`] policy:
 ///
-/// - `Min`/`Max`: chunks are seeded with the global first element (checked
-///   non-NaN beforehand, mirroring the serial kernel's poisoning rule).
-/// - `NanMin`/`NanMax` (NumPy nanarg*): each chunk seeds at its own first
-///   non-NaN element; chunks without any non-NaN element contribute nothing;
-///   an all-NaN buffer raises `InvalidValue` ([`ARG_ALL_NAN_MSG`]).
+/// - `Min`/`Max`: chunks are seeded with the global first element (checked non-NaN beforehand,
+///   mirroring the serial kernel's poisoning rule).
+/// - `NanMin`/`NanMax` (NumPy nanarg*): each chunk seeds at its own first non-NaN element; chunks
+///   without any non-NaN element contribute nothing; an all-NaN buffer raises `InvalidValue`
+///   ([`ARG_ALL_NAN_MSG`]).
 ///
 /// Kept out-of-line so that the strided fallback below compiles exactly like
 /// the pre-existing closure fold (code-layout hygiene: the fallback must not
@@ -698,8 +697,12 @@ where
     match cmp {
         ArgCmp::Max => reduce_all_unraveled_arg_fold_cpu_rayon(a, la, f_comp_std_max, f_eq_std, FOLD_INVALID_MSG, pool),
         ArgCmp::Min => reduce_all_unraveled_arg_fold_cpu_rayon(a, la, f_comp_std_min, f_eq_std, FOLD_INVALID_MSG, pool),
-        ArgCmp::NanMax => reduce_all_unraveled_arg_fold_cpu_rayon(a, la, f_comp_nan_max, f_eq_std, ARG_ALL_NAN_MSG, pool),
-        ArgCmp::NanMin => reduce_all_unraveled_arg_fold_cpu_rayon(a, la, f_comp_nan_min, f_eq_std, ARG_ALL_NAN_MSG, pool),
+        ArgCmp::NanMax => {
+            reduce_all_unraveled_arg_fold_cpu_rayon(a, la, f_comp_nan_max, f_eq_std, ARG_ALL_NAN_MSG, pool)
+        },
+        ArgCmp::NanMin => {
+            reduce_all_unraveled_arg_fold_cpu_rayon(a, la, f_comp_nan_min, f_eq_std, ARG_ALL_NAN_MSG, pool)
+        },
     }
 }
 
