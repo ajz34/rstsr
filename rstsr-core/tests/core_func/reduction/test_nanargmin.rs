@@ -63,7 +63,7 @@ mod custom_nanargmin {
         // reducing all axes -> 0-D tensor with the flat index of 1.0.
         let s = b.nanargmin_axes(None);
         assert_eq!(s.shape().ndim(), 0);
-        assert_equal(&s, &rt::asarray((vec![2usize], &device)).into_shape([] as [usize; 0]), None);
+        assert_equal(&s, rt::asarray((vec![2usize], &device)).into_shape([] as [usize; 0]), None);
     }
 
     #[test]

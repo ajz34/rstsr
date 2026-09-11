@@ -110,7 +110,7 @@ mod custom_argmin_nan {
         // strided (transposed) layout takes the closure-fold fallback and
         // must agree: row-major scan of b.t() is [4, 5, 2, nan] -> 2.
         let b = rt::tensor_from_nested!([[4.0, 2.0], [5.0, f64::NAN]], &device);
-        assert_eq!(rt::argmin(&b.t()), 2);
+        assert_eq!(rt::argmin(b.t()), 2);
 
         // integer types have no NaN and are unaffected.
         let a = rt::tensor_from_nested!([3, 1, 2], &device);

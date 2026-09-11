@@ -63,7 +63,7 @@ mod custom_nanargmax {
         // reducing all axes -> 0-D tensor with the flat index of 2.0.
         let s = b.nanargmax_axes(None);
         assert_eq!(s.shape().ndim(), 0);
-        assert_equal(&s, &rt::asarray((vec![1usize], &device)).into_shape([] as [usize; 0]), None);
+        assert_equal(&s, rt::asarray((vec![1usize], &device)).into_shape([] as [usize; 0]), None);
     }
 
     #[test]
