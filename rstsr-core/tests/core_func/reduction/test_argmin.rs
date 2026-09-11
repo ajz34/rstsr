@@ -77,3 +77,43 @@ mod custom_argmin {
         }
     }
 }
+
+#[cfg(test)]
+mod custom_argmin_nan {
+    use super::*;
+    static FUNC: &str = "custom_argmin_nan";
+
+    #[test]
+    fn test_nan_skipped() {
+        // rstsr's argmin skips mid-stream NaNs (see the argmax twin for the
+        // NumPy-divergence note). Use rt::nanargmin for NumPy-nanarg
+        // semantics.
+        crate::specify_test!("test_nan_skipped");
+
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        let a = rt::tensor_from_nested!([3.0, f64::NAN, 1.0], &device);
+        assert_eq!(rt::argmin(&a), 2);
+
+        let a = rt::tensor_from_nested!([4.0, 2.0, f64::NAN, 5.0], &device);
+        assert_eq!(rt::argmin(&a), 1);
+
+        // NaN at the front poisons the accumulator -> 0 (no error).
+        let a = rt::tensor_from_nested!([f64::NAN, 3.0, 1.0], &device);
+        assert_eq!(rt::argmin(&a), 0);
+
+        // all-NaN -> 0 (no error).
+        let a = rt::tensor_from_nested!([f64::NAN, f64::NAN], &device);
+        assert_eq!(rt::argmin(&a), 0);
+
+        // strided (transposed) layout takes the closure-fold fallback and
+        // must agree: row-major scan of b.t() is [4, 5, 2, nan] -> 2.
+        let b = rt::tensor_from_nested!([[4.0, 2.0], [5.0, f64::NAN]], &device);
+        assert_eq!(rt::argmin(&b.t()), 2);
+
+        // integer types have no NaN and are unaffected.
+        let a = rt::tensor_from_nested!([3, 1, 2], &device);
+        assert_eq!(rt::argmin(&a), 1);
+    }
+}

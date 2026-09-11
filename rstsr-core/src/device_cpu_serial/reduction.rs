@@ -366,6 +366,52 @@ where
     }
 }
 
+impl<T, D> OpNanArgMinAPI<T, D> for DeviceCpuSerial
+where
+    T: Clone + PartialOrd,
+    D: DimAPI,
+{
+    type TOut = usize;
+
+    fn nanargmin_axes(
+        &self,
+        a: &Vec<T>,
+        la: &Layout<D>,
+        axes: &[isize],
+    ) -> Result<(Storage<DataOwned<Vec<usize>>, Self::TOut, Self>, Layout<IxD>)> {
+        let (out, layout_out) = reduce_axes_arg_cmp_cpu_serial(a, la, axes, ArgCmp::NanMin, RowMajor)?;
+        Ok((Storage::new(out.into(), self.clone()), layout_out))
+    }
+
+    fn nanargmin_all(&self, a: &Vec<T>, la: &Layout<D>) -> Result<Self::TOut> {
+        let result = reduce_all_arg_cmp_cpu_serial(a, la, ArgCmp::NanMin, RowMajor)?;
+        Ok(result)
+    }
+}
+
+impl<T, D> OpNanArgMaxAPI<T, D> for DeviceCpuSerial
+where
+    T: Clone + PartialOrd,
+    D: DimAPI,
+{
+    type TOut = usize;
+
+    fn nanargmax_axes(
+        &self,
+        a: &Vec<T>,
+        la: &Layout<D>,
+        axes: &[isize],
+    ) -> Result<(Storage<DataOwned<Vec<usize>>, Self::TOut, Self>, Layout<IxD>)> {
+        let (out, layout_out) = reduce_axes_arg_cmp_cpu_serial(a, la, axes, ArgCmp::NanMax, RowMajor)?;
+        Ok((Storage::new(out.into(), self.clone()), layout_out))
+    }
+
+    fn nanargmax_all(&self, a: &Vec<T>, la: &Layout<D>) -> Result<Self::TOut> {
+        let result = reduce_all_arg_cmp_cpu_serial(a, la, ArgCmp::NanMax, RowMajor)?;
+        Ok(result)
+    }
+}
+
 impl<D> OpAllAPI<bool, D> for DeviceCpuSerial
 where
     D: DimAPI,

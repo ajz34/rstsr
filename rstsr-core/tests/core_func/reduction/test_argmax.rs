@@ -78,3 +78,46 @@ mod custom_argmax {
         assert_eq!(b.argmax_axes(1).to_vec(), vec![2, 1, 0]);
     }
 }
+
+#[cfg(test)]
+mod custom_argmax_nan {
+    use super::*;
+    static FUNC: &str = "custom_argmax_nan";
+
+    #[test]
+    fn test_nan_skipped() {
+        // rstsr's argmax skips mid-stream NaNs (a NaN never wins an update);
+        // a NaN at the FIRST scanned position poisons the result to 0. This
+        // deliberately diverges from NumPy, where the first NaN at any
+        // position wins (np.argmax([1, nan, 3]) == 1); adopting that rule
+        // measurably de-vectorizes the arg kernel (see ArgCmp docs in
+        // rstsr-native-impl). Use rt::nanargmax for NumPy-nanarg semantics.
+        crate::specify_test!("test_nan_skipped");
+
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        let a = rt::tensor_from_nested!([1.0, f64::NAN, 3.0], &device);
+        assert_eq!(rt::argmax(&a), 2);
+
+        let a = rt::tensor_from_nested!([1.0, 5.0, f64::NAN, 2.0], &device);
+        assert_eq!(rt::argmax(&a), 1);
+
+        // NaN at the front poisons the accumulator -> 0 (no error).
+        let a = rt::tensor_from_nested!([f64::NAN, 5.0, 3.0], &device);
+        assert_eq!(rt::argmax(&a), 0);
+
+        // all-NaN -> 0 (no error).
+        let a = rt::tensor_from_nested!([f64::NAN, f64::NAN], &device);
+        assert_eq!(rt::argmax(&a), 0);
+
+        // strided (transposed) layout takes the closure-fold fallback and
+        // must agree: row-major scan of b.t() is [1, 3, 5, nan] -> 2.
+        let b = rt::tensor_from_nested!([[1.0, 5.0], [3.0, f64::NAN]], &device);
+        assert_eq!(rt::argmax(&b.t()), 2);
+
+        // integer types have no NaN and are unaffected.
+        let a = rt::tensor_from_nested!([1, 3, 2], &device);
+        assert_eq!(rt::argmax(&a), 1);
+    }
+}

@@ -1,3 +1,6 @@
+use crate::cpu_serial::reduction::{
+    f_comp_nan_max, f_comp_nan_min, f_comp_std_max, f_comp_std_min, f_eq_std, ARG_ALL_NAN_MSG, FOLD_INVALID_MSG,
+};
 use crate::prelude_dev::*;
 use core::mem::transmute;
 use core::sync::atomic::{AtomicPtr, Ordering};
@@ -442,13 +445,16 @@ where
 /// Original closure-based fold over [`IndexedIterLayout`] (row-major):
 /// implementation core of the general [`reduce_all_unraveled_arg_cpu_rayon`]
 /// and strided/non-contiguous fallback of
-/// [`reduce_all_unraveled_arg_cmp_cpu_rayon`].
+/// [`reduce_all_unraveled_arg_cmp_cpu_rayon`]. `invalid_msg` is the error
+/// raised when the fold ends without any accepted element (used to give the
+/// nanarg policies their "All-NaN slice encountered" message).
 #[inline]
 fn reduce_all_unraveled_arg_fold_cpu_rayon<T, D, Fcomp, Feq>(
     a: &[T],
     la: &Layout<D>,
     f_comp: Fcomp,
     f_eq: Feq,
+    invalid_msg: &'static str,
     pool: Option<&ThreadPool>,
 ) -> Result<D>
 where
@@ -506,17 +512,22 @@ where
         Some(pool) => pool.install(task),
     };
     if acc.is_none() {
-        rstsr_raise!(InvalidValue, "reduce_arg seems not returning a valid value.")?;
+        rstsr_raise!(InvalidValue, "{}", invalid_msg)?;
     }
     Ok(acc.unwrap().0)
 }
 
 /// Contiguous fast path of [`reduce_all_unraveled_arg_cmp_cpu_rayon`]: split the
 /// buffer into contiguous chunks, run the serial 8-lane scan
-/// ([`arg_contig_cpu_serial`]) per chunk, then combine deterministically
-/// (collect preserves chunk order; greater value wins, ties keep the smaller
-/// index, NaN never wins) — exactly the serial fold's outcome, independent of
-/// thread count and scheduling.
+/// ([`arg_contig_scan_cpu_serial`]) per chunk, then combine deterministically
+/// (collect preserves chunk order) — exactly the serial outcome, independent
+/// of thread count and scheduling, for every [`ArgCmp`] policy:
+///
+/// - `Min`/`Max`: chunks are seeded with the global first element (checked
+///   non-NaN beforehand, mirroring the serial kernel's poisoning rule).
+/// - `NanMin`/`NanMax` (NumPy nanarg*): each chunk seeds at its own first
+///   non-NaN element; chunks without any non-NaN element contribute nothing;
+///   an all-NaN buffer raises `InvalidValue` ([`ARG_ALL_NAN_MSG`]).
 ///
 /// Kept out-of-line so that the strided fallback below compiles exactly like
 /// the pre-existing closure fold (code-layout hygiene: the fallback must not
@@ -539,9 +550,73 @@ where
     let offset = la.offset();
     let xs = &a[offset..offset + size];
 
-    // first-element NaN poisoning is decided ONCE for the whole buffer (the
-    // per-chunk scans are seeded with this guaranteed-comparable element, so
-    // a NaN inside a chunk can never block its chunk result)
+    if cmp.skip_nan() {
+        // nanarg policy: per-chunk first-non-NaN seed; all-NaN buffer errors
+        let nthreads = match pool {
+            Some(pool) => pool.current_num_threads(),
+            None => rayon::current_num_threads(),
+        };
+        let nchunks = (nthreads * 4).clamp(1, size / 8);
+        let chunk_len = size / nchunks;
+        let task = || {
+            let partials: Vec<Option<(T, usize)>> = (0..nchunks)
+                .into_par_iter()
+                .map(|ci| {
+                    let start = ci * chunk_len;
+                    let end = if ci == nchunks - 1 { size } else { start + chunk_len };
+                    let sub = &xs[start..end];
+                    // find the chunk's first non-NaN element
+                    let mut seed = None;
+                    for (i, x) in sub.iter().enumerate() {
+                        if x == x {
+                            seed = Some(i);
+                            break;
+                        }
+                    }
+                    match seed {
+                        None => None,
+                        Some(s) => {
+                            let (val, li) = arg_contig_scan_cpu_serial(sub, cmp, &sub[s]);
+                            // nothing beat the chunk seed within the chunk:
+                            // the seed itself is the chunk extremum
+                            let gidx = if li == usize::MAX { start + s } else { start + li };
+                            Some((val, gidx))
+                        },
+                    }
+                })
+                .collect();
+            let mut best: Option<(T, usize)> = None;
+            for (val, idx) in partials.into_iter().flatten() {
+                let better = match &best {
+                    None => true,
+                    Some((bval, bidx)) => match cmp {
+                        ArgCmp::NanMax => val > *bval || (val == *bval && idx < *bidx),
+                        _ => val < *bval || (val == *bval && idx < *bidx),
+                    },
+                };
+                if better {
+                    best = Some((val, idx));
+                }
+            }
+            best.map(|(_, idx)| idx)
+        };
+        let flat = match pool {
+            None => task(),
+            Some(pool) => pool.install(task),
+        };
+        return match flat {
+            Some(flat) => {
+                // safety: `flat` is a c-order position of `la.shape()` with
+                // `flat < size` and `size > 0`
+                Ok(unsafe { la.shape().unravel_index_c(flat) })
+            },
+            None => rstsr_raise!(InvalidValue, "{}", ARG_ALL_NAN_MSG),
+        };
+    }
+
+    // Min/Max: the first-element poisoning rule is decided ONCE for the whole
+    // buffer (the per-chunk scans are seeded with this guaranteed-comparable
+    // element, so a NaN inside a chunk can never block its chunk result)
     if !(xs[0] == xs[0]) {
         // safety: index 0 of any non-empty shape (`size > 0` asserted by the
         // caller) is always in bounds for `unravel_index_c` (no bounds-check)
@@ -564,7 +639,7 @@ where
                 // seed every chunk with the global first element; a chunk
                 // index of usize::MAX means "nothing beat the global seed",
                 // i.e. the chunk best is the seed itself (global index 0)
-                let (val, li) = arg_contig_seeded_cpu_serial(sub, cmp, &xs[0]);
+                let (val, li) = arg_contig_scan_cpu_serial(sub, cmp, &xs[0]);
                 let gidx = if li == usize::MAX { 0 } else { start + li };
                 (val, gidx)
             })
@@ -573,7 +648,7 @@ where
         for (val, idx) in partials.iter().skip(1) {
             let better = match cmp {
                 ArgCmp::Max => val > best_val || (val == best_val && *idx < best_idx),
-                ArgCmp::Min => val < best_val || (val == best_val && *idx < best_idx),
+                _ => val < best_val || (val == best_val && *idx < best_idx),
             };
             if better {
                 best_val = val;
@@ -617,43 +692,14 @@ where
         return reduce_all_unraveled_arg_contig_cpu_rayon(a, la, cmp, pool);
     }
 
-    // strided / broadcast fallback: original closure fold, comparison
-    // direction selected by `cmp`
+    // strided / broadcast fallback: original closure fold, comparison and
+    // NaN policy selected by `cmp` (closure helpers shared with the serial
+    // device module)
     match cmp {
-        ArgCmp::Max => {
-            let f_comp = |x: Option<T>, y: T| -> Option<bool> {
-                if let Some(x) = x {
-                    Some(y > x)
-                } else {
-                    Some(true)
-                }
-            };
-            let f_eq = |x: Option<T>, y: T| -> Option<bool> {
-                if let Some(x) = x {
-                    Some(y == x)
-                } else {
-                    Some(false)
-                }
-            };
-            reduce_all_unraveled_arg_fold_cpu_rayon(a, la, f_comp, f_eq, pool)
-        },
-        ArgCmp::Min => {
-            let f_comp = |x: Option<T>, y: T| -> Option<bool> {
-                if let Some(x) = x {
-                    Some(y < x)
-                } else {
-                    Some(true)
-                }
-            };
-            let f_eq = |x: Option<T>, y: T| -> Option<bool> {
-                if let Some(x) = x {
-                    Some(y == x)
-                } else {
-                    Some(false)
-                }
-            };
-            reduce_all_unraveled_arg_fold_cpu_rayon(a, la, f_comp, f_eq, pool)
-        },
+        ArgCmp::Max => reduce_all_unraveled_arg_fold_cpu_rayon(a, la, f_comp_std_max, f_eq_std, FOLD_INVALID_MSG, pool),
+        ArgCmp::Min => reduce_all_unraveled_arg_fold_cpu_rayon(a, la, f_comp_std_min, f_eq_std, FOLD_INVALID_MSG, pool),
+        ArgCmp::NanMax => reduce_all_unraveled_arg_fold_cpu_rayon(a, la, f_comp_nan_max, f_eq_std, ARG_ALL_NAN_MSG, pool),
+        ArgCmp::NanMin => reduce_all_unraveled_arg_fold_cpu_rayon(a, la, f_comp_nan_min, f_eq_std, ARG_ALL_NAN_MSG, pool),
     }
 }
 
@@ -801,7 +847,7 @@ where
     if size < PARALLEL_SWITCH {
         return reduce_all_unraveled_arg_cpu_serial(a, la, f_comp, f_eq);
     }
-    reduce_all_unraveled_arg_fold_cpu_rayon(a, la, f_comp, f_eq, pool)
+    reduce_all_unraveled_arg_fold_cpu_rayon(a, la, f_comp, f_eq, FOLD_INVALID_MSG, pool)
 }
 
 /// General closure-based arg-reduction over given axes, unraveled index

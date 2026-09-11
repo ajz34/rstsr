@@ -7,6 +7,8 @@ pub mod test_count_nonzero;
 pub mod test_max;
 pub mod test_mean;
 pub mod test_min;
+pub mod test_nanargmax;
+pub mod test_nanargmin;
 pub mod test_prod;
 pub mod test_std;
 pub mod test_sum;
