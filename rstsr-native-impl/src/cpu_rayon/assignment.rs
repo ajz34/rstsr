@@ -16,26 +16,31 @@ const PARALLEL_SWITCH: usize = 16384;
         func_name_serial
         TypeC TypeA Types
         func_clone
+        oc_r2c oc_c2r
     ;
     [assign_arbitary_cpu_rayon]
         [assign_arbitary_cpu_serial]
         [T] [T] [T: Clone + Send + Sync]
         [*ci = ai.clone()]
+        [orderchange_out_r2c_ix2_promote_cpu_rayon] [orderchange_out_c2r_ix2_promote_cpu_rayon]
     ;
     [assign_arbitary_uninit_cpu_rayon]
         [assign_arbitary_uninit_cpu_serial]
         [MaybeUninit<T>] [T] [T: Clone + Send + Sync]
         [ci.write(ai.clone())]
+        [orderchange_out_r2c_ix2_uninit_promote_cpu_rayon] [orderchange_out_c2r_ix2_uninit_promote_cpu_rayon]
     ;
     [assign_arbitary_promote_cpu_rayon]
         [assign_arbitary_promote_cpu_serial]
         [TC] [TA] [TC: Clone + Send + Sync, TA: Clone + Send + Sync + DTypeCastAPI<TC>]
         [*ci = ai.clone().into_cast()]
+        [orderchange_out_r2c_ix2_promote_cpu_rayon] [orderchange_out_c2r_ix2_promote_cpu_rayon]
     ;
     [assign_arbitary_uninit_promote_cpu_rayon]
         [assign_arbitary_uninit_promote_cpu_serial]
         [MaybeUninit<TC>] [TA] [TC: Clone + Send + Sync, TA: Clone + Send + Sync + DTypeCastAPI<TC>]
         [ci.write(ai.clone().into_cast())]
+        [orderchange_out_r2c_ix2_uninit_promote_cpu_rayon] [orderchange_out_c2r_ix2_uninit_promote_cpu_rayon]
     ;
 )]
 pub fn func_name<Types, DC, DA>(
@@ -72,6 +77,23 @@ where
         });
         Ok(())
     } else {
+        // 2-D order-change fast path: blocked kernels with block-level rayon
+        // parallelism (see assign_arbitary_cpu_serial for the guard rationale;
+        // the kernels keep their own size < 16*BLOCK_SIZE^2 serial fallback).
+        // shape identity is required: shape-changing assigns (e.g. a reshape
+        // that re-lays out data) pass through the same kernels with different
+        // shapes, which the orderchange kernels cannot serve
+        if let (Ok(lc2), Ok(la2)) = (lc.to_dim::<Ix2>(), la.to_dim::<Ix2>()) {
+            if lc2.shape() == la2.shape() {
+                let sc = *lc2.stride();
+                let sa = *la2.stride();
+                if sa[1] == 1 && sc[0] == 1 {
+                    return oc_r2c(c, &lc2, a, &la2, pool);
+                } else if sa[0] == 1 && sc[1] == 1 {
+                    return oc_c2r(c, &lc2, a, &la2, pool);
+                }
+            }
+        }
         // determine order by layout preference
         let order = match default_order {
             RowMajor => TensorIterOrder::C,
@@ -97,26 +119,31 @@ where
         func_name_serial
         TypeC TypeA Types
         func_clone
+        oc_r2c oc_c2r
     ;
     [assign_cpu_rayon]
         [assign_cpu_serial]
         [T] [T] [T: Clone + Send + Sync]
         [*ci = ai.clone()]
+        [orderchange_out_r2c_ix2_promote_cpu_rayon] [orderchange_out_c2r_ix2_promote_cpu_rayon]
     ;
     [assign_uninit_cpu_rayon]
         [assign_uninit_cpu_serial]
         [MaybeUninit<T>] [T] [T: Clone + Send + Sync]
         [ci.write(ai.clone())]
+        [orderchange_out_r2c_ix2_uninit_promote_cpu_rayon] [orderchange_out_c2r_ix2_uninit_promote_cpu_rayon]
     ;
     [assign_promote_cpu_rayon]
         [assign_promote_cpu_serial]
         [TC] [TA] [TC: Clone + Send + Sync, TA: Clone + Send + Sync + DTypeCastAPI<TC>]
         [*ci = ai.clone().into_cast()]
+        [orderchange_out_r2c_ix2_promote_cpu_rayon] [orderchange_out_c2r_ix2_promote_cpu_rayon]
     ;
     [assign_uninit_promote_cpu_rayon]
         [assign_uninit_promote_cpu_serial]
         [MaybeUninit<TC>] [TA] [TC: Clone + Send + Sync, TA: Clone + Send + Sync + DTypeCastAPI<TC>]
         [ci.write(ai.clone().into_cast())]
+        [orderchange_out_r2c_ix2_uninit_promote_cpu_rayon] [orderchange_out_c2r_ix2_uninit_promote_cpu_rayon]
     ;
 )]
 pub fn func_name<Types, D>(
@@ -142,6 +169,22 @@ where
 
     // actual parallel iteration
     if size_contig < CONTIG_SWITCH {
+        // 2-D order-change fast path (see assign_arbitary_cpu_rayon); a
+        // contiguous pair never reaches this branch (contig branch above).
+        // shape identity is required: shape-changing assigns (e.g. a reshape
+        // that re-lays out data) pass through the same kernels with different
+        // shapes, which the orderchange kernels cannot serve
+        if let (Ok(lc2), Ok(la2)) = (lc.to_dim::<Ix2>(), la.to_dim::<Ix2>()) {
+            if lc2.shape() == la2.shape() {
+                let sc = *lc2.stride();
+                let sa = *la2.stride();
+                if sa[1] == 1 && sc[0] == 1 {
+                    return oc_r2c(c, &lc2, a, &la2, pool);
+                } else if sa[0] == 1 && sc[1] == 1 {
+                    return oc_c2r(c, &lc2, a, &la2, pool);
+                }
+            }
+        }
         // not possible for contiguous assign
         let lc = &layouts_full[0];
         let la = &layouts_full[1];
