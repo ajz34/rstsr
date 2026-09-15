@@ -225,8 +225,8 @@ where
     ///
     /// # Panics
     ///
-    /// - Panics if `axes` is out of range, or if the view is
-    ///   ManuallyDrop-backed (see [`TensorView::axes_iter_f`]).
+    /// - Panics if `axes` is out of range, or if the view is ManuallyDrop-backed (see
+    ///   [`TensorView::axes_iter_f`]).
     ///
     /// For a fallible version, use [`TensorView::axes_iter_f`].
     ///
@@ -847,11 +847,7 @@ where
         self.indexed_axes_iter_mut_with_order_f(axes, order)
     }
 
-    pub fn indexed_axes_iter_mut_with_order<I>(
-        self,
-        axes: I,
-        order: TensorIterOrder,
-    ) -> IndexedIterAxesMut<'a, T, B>
+    pub fn indexed_axes_iter_mut_with_order<I>(self, axes: I, order: TensorIterOrder) -> IndexedIterAxesMut<'a, T, B>
     where
         I: TryInto<AxesIndex<isize>, Error: Into<Error>>,
     {

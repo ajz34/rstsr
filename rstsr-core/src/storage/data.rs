@@ -140,7 +140,7 @@ impl<'a, T> DataRef<'a, Vec<T>> {
                 // (from_manually_drop contract); rebuilding the slice from its
                 // pointer and length is sound and does not drop the Vec.
                 unsafe { core::slice::from_raw_parts(ptr, len) }
-            }
+            },
         }
     }
 }
@@ -216,7 +216,7 @@ impl<'a, T> DataMut<'a, Vec<T>> {
                 // the fabricated Vec covers an 'a-valid, exclusively
                 // borrowable buffer; the Vec is never dropped.
                 unsafe { core::slice::from_raw_parts_mut(ptr, len) }
-            }
+            },
         }
     }
 }
