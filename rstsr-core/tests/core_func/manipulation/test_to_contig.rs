@@ -131,8 +131,8 @@ mod test_to_contig_behavior {
         assert!(contig_f.f_contig());
 
         // Both should have same values when iterated
-        let vec_c: Vec<_> = contig_c.iter().collect();
-        let vec_f: Vec<_> = contig_f.iter().collect();
+        let vec_c: Vec<_> = contig_c.view().iter().collect();
+        let vec_f: Vec<_> = contig_f.view().iter().collect();
         assert_eq!(vec_c, vec_f);
     }
 
@@ -239,8 +239,8 @@ mod test_to_contig_behavior {
 
         // Collect values
         let original_values: Vec<f64> = sliced.iter().copied().collect();
-        let c_values: Vec<f64> = contig_c.iter().copied().collect();
-        let f_values: Vec<f64> = contig_f.iter().copied().collect();
+        let c_values: Vec<f64> = contig_c.view().iter().copied().collect();
+        let f_values: Vec<f64> = contig_f.view().iter().copied().collect();
 
         assert_eq!(original_values, c_values);
         assert_eq!(original_values, f_values);

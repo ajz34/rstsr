@@ -151,15 +151,15 @@ Device is designed to be able extended by other crates. The above devices [`Devi
 | Type | Identifier | Minimal Description |
 |--|--|--|
 | module | [iterator_elem][rstsr_core::tensor::iterator_elem] | Tensor iterators that gives elements. |
-| assoc | [`iter`][TensorAny::iter] <br/> [`iter_mut`][TensorAny::iter_mut] | Iterate tensor by default ordering (c-prefer or f-prefer). |
-| assoc | [`iter_with_order`][TensorAny::iter_with_order] <br/> [`iter_mut_with_order`][TensorAny::iter_mut_with_order] | Iterate tensor with specified order. |
-| assoc | [`indexed_iter`][TensorAny::indexed_iter] <br/> [`indexed_iter_mut`][TensorAny::indexed_iter_mut] | Enumerate tensor by default ordering (c-prefer or f-prefer). |
-| assoc | [`indexed_iter_with_order`][TensorAny::indexed_iter_with_order] <br/> [`indexed_iter_mut_with_order`][TensorAny::indexed_iter_mut_with_order] | Enumerate tensor with specified order. |
+| assoc | [`iter`][TensorView::iter] <br/> [`iter_mut`][TensorMut::iter_mut] | Iterate tensor by default ordering (c-prefer or f-prefer). |
+| assoc | [`iter_with_order`][TensorView::iter_with_order] <br/> [`iter_mut_with_order`][TensorMut::iter_mut_with_order] | Iterate tensor with specified order. |
+| assoc | [`indexed_iter`][TensorView::indexed_iter] <br/> [`indexed_iter_mut`][TensorMut::indexed_iter_mut] | Enumerate tensor by default ordering (c-prefer or f-prefer). |
+| assoc | [`indexed_iter_with_order`][TensorView::indexed_iter_with_order] <br/> [`indexed_iter_mut_with_order`][TensorMut::indexed_iter_mut_with_order] | Enumerate tensor with specified order. |
 | module | [iterator_axes][rstsr_core::tensor::iterator_axes] | Axes iterators that gives smaller tensor views. |
-| assoc | [`axes_iter`][TensorAny::axes_iter] <br/> [`axes_iter_mut`][TensorAny::axes_iter_mut] | Iterate tensor by axes by default ordering (c-prefer or f-prefer). |
-| assoc | [`axes_iter_with_order`][TensorAny::axes_iter_with_order] <br/> [`axes_iter_mut_with_order`][TensorAny::axes_iter_mut_with_order] | Iterate tensor by axes with specified order. |
-| assoc | [`indexed_axes_iter`][TensorAny::indexed_axes_iter] <br/> [`indexed_axes_iter_mut`][TensorAny::indexed_axes_iter_mut] | Enumerate tensor by axes by default ordering (c-prefer or f-prefer). |
-| assoc | [`indexed_axes_iter_with_order`][TensorAny::indexed_axes_iter_with_order] <br/> [`indexed_axes_iter_mut_with_order`][TensorAny::indexed_axes_iter_mut_with_order] | Enumerate tensor by axes with specified order. |
+| assoc | [`axes_iter`][TensorView::axes_iter] <br/> [`axes_iter_mut`][TensorMut::axes_iter_mut] | Iterate tensor by axes by default ordering (c-prefer or f-prefer). |
+| assoc | [`axes_iter_with_order`][TensorView::axes_iter_with_order] <br/> [`axes_iter_mut_with_order`][TensorMut::axes_iter_mut_with_order] | Iterate tensor by axes with specified order. |
+| assoc | [`indexed_axes_iter`][TensorView::indexed_axes_iter] <br/> [`indexed_axes_iter_mut`][TensorMut::indexed_axes_iter_mut] | Enumerate tensor by axes by default ordering (c-prefer or f-prefer). |
+| assoc | [`indexed_axes_iter_with_order`][TensorView::indexed_axes_iter_with_order] <br/> [`indexed_axes_iter_mut_with_order`][TensorMut::indexed_axes_iter_mut_with_order] | Enumerate tensor by axes with specified order. |
 
 ### Mapping
 

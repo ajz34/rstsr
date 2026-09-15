@@ -44,8 +44,8 @@ mod doc_reshape {
         device.set_default_order(RowMajor);
         let a = rt::tensor_from_nested!([[0, 1, 2], [3, 4, 5]], &device);
         let b = a.reshape([3, 2]);
-        let a_vec = a.iter().collect::<Vec<_>>();
-        let b_vec = b.iter().collect::<Vec<_>>();
+        let a_vec = a.view().iter().collect::<Vec<_>>();
+        let b_vec = b.view().iter().collect::<Vec<_>>();
         // iterated sequence is the same
         assert_eq!(a_vec, b_vec);
 
@@ -53,8 +53,8 @@ mod doc_reshape {
         device.set_default_order(ColMajor);
         let a = rt::tensor_from_nested!([[0, 1, 2], [3, 4, 5]], &device);
         let b = a.reshape([3, 2]);
-        let a_c_vec = a.iter().collect::<Vec<_>>();
-        let b_c_vec = b.iter().collect::<Vec<_>>();
+        let a_c_vec = a.view().iter().collect::<Vec<_>>();
+        let b_c_vec = b.view().iter().collect::<Vec<_>>();
         // iterated sequence is the same
         assert_eq!(a_c_vec, b_c_vec);
         // iterated sequence is different from row-major
@@ -79,10 +79,10 @@ mod doc_reshape {
         let b_expected = rt::tensor_from_nested!([[0, 1], [2, 3], [4, 5]], &device);
         assert!(rt::allclose(&b, &b_expected, None));
 
-        let a_vec = a.iter().cloned().collect::<Vec<_>>();
+        let a_vec = a.view().iter().cloned().collect::<Vec<_>>();
         println!("{a_vec:?}");
         // [0, 1, 2, 3, 4, 5]
-        let b_vec = b.iter().cloned().collect::<Vec<_>>();
+        let b_vec = b.view().iter().cloned().collect::<Vec<_>>();
         println!("{b_vec:?}");
         // [0, 1, 2, 3, 4, 5]
         // iterated sequence is the same
@@ -108,10 +108,10 @@ mod doc_reshape {
         let b_expected = rt::tensor_from_nested!([[0, 4], [3, 2], [1, 5]], &device);
         assert!(rt::allclose(&b, &b_expected, None));
 
-        let a_vec = a.iter().cloned().collect::<Vec<_>>();
+        let a_vec = a.view().iter().cloned().collect::<Vec<_>>();
         println!("{a_vec:?}");
         // [0, 3, 1, 4, 2, 5]
-        let b_vec = b.iter().cloned().collect::<Vec<_>>();
+        let b_vec = b.view().iter().cloned().collect::<Vec<_>>();
         println!("{b_vec:?}");
         // [0, 3, 1, 4, 2, 5]
         // iterated sequence is the same

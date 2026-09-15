@@ -78,6 +78,15 @@ impl<'a, C> From<&'a C> for DataRef<'a, C> {
 }
 
 impl<C> DataRef<'_, C> {
+    /// Wraps data that this wrapper will own without managing.
+    ///
+    /// # Contract
+    ///
+    /// The wrapped data must remain valid for the lifetime `'a` declared on
+    /// the resulting [`DataRef`]. Construction sites rely on this: e.g.
+    /// `asarray` fabricates a `Vec` (via `from_raw_parts`) over a borrowed
+    /// slice, whose buffer stays valid for `'a`. The [`ManuallyDrop`]
+    /// wrapper guarantees the data is never freed here.
     #[inline]
     pub fn from_manually_drop(data: ManuallyDrop<C>) -> Self {
         DataRef::ManuallyDropOwned(data)
@@ -94,6 +103,48 @@ impl<C> DataRef<'_, C> {
     }
 }
 
+impl<'a, C> DataRef<'a, C> {
+    /// Returns the wrapped reference carrying the declared lifetime `'a`, or
+    /// `None` for a [`DataRef::ManuallyDropOwned`] wrapper.
+    ///
+    /// Only a true reference can be handed out persistently: for the
+    /// ManuallyDrop-owned variant the data lives inside the wrapper value
+    /// itself, so no `'a`-valid reference to it exists. Use
+    /// [`DataRef::as_slice_ref`] for the common `Vec`-buffer case.
+    #[inline]
+    pub fn try_as_true_ref(&self) -> Option<&'a C> {
+        match self {
+            DataRef::TrueRef(r) => Some(*r),
+            DataRef::ManuallyDropOwned(_) => None,
+        }
+    }
+}
+
+impl<'a, T> DataRef<'a, Vec<T>> {
+    /// Returns the slice over the underlying buffer, carrying `'a`.
+    ///
+    /// Sound for both variants: [`DataRef::TrueRef`] borrows the owner's
+    /// buffer directly; a [`DataRef::ManuallyDropOwned`] `Vec` is fabricated
+    /// over a buffer that stays valid for `'a` (the [`DataRef::from_manually_drop`]
+    /// contract), and the slice is re-derived from its pointer and length
+    /// while `self` is still alive. The wrapper value itself may be dropped
+    /// later — only the (never-freed) buffer is referenced.
+    #[inline]
+    pub fn as_slice_ref(&self) -> &'a [T] {
+        match self {
+            DataRef::TrueRef(r) => &r[..],
+            DataRef::ManuallyDropOwned(md) => {
+                let ptr = md.as_ptr();
+                let len = md.len();
+                // SAFETY: the Vec was fabricated over a buffer valid for 'a
+                // (from_manually_drop contract); rebuilding the slice from its
+                // pointer and length is sound and does not drop the Vec.
+                unsafe { core::slice::from_raw_parts(ptr, len) }
+            }
+        }
+    }
+}
+
 impl<'a, C> From<&'a mut C> for DataMut<'a, C> {
     #[inline]
     fn from(data: &'a mut C) -> Self {
@@ -102,6 +153,14 @@ impl<'a, C> From<&'a mut C> for DataMut<'a, C> {
 }
 
 impl<C> DataMut<'_, C> {
+    /// Wraps data that this wrapper will own without managing.
+    ///
+    /// # Contract
+    ///
+    /// The wrapped data must remain valid *and exclusively borrowable* for
+    /// the lifetime `'a` declared on the resulting [`DataMut`] (the mutable
+    /// counterpart of the [`DataRef::from_manually_drop`] contract). The
+    /// [`ManuallyDrop`] wrapper guarantees the data is never freed here.
     #[inline]
     pub fn from_manually_drop(data: ManuallyDrop<C>) -> Self {
         DataMut::ManuallyDropOwned(data)
@@ -115,6 +174,50 @@ impl<C> DataMut<'_, C> {
     #[inline]
     pub fn is_manually_drop_owned(&self) -> bool {
         matches!(self, DataMut::ManuallyDropOwned(_))
+    }
+}
+
+impl<'a, C> DataMut<'a, C> {
+    /// Consumes the wrapper and returns the exclusive reference carrying the
+    /// declared lifetime `'a`, or `None` for a [`DataMut::ManuallyDropOwned`]
+    /// wrapper.
+    ///
+    /// The receiver is consuming because a `&'a mut` cannot be reborrowed
+    /// out. Returning `None` (instead of laundering) keeps this persistently
+    /// sound: ManuallyDrop-owned data has no `'a`-valid exclusive reference
+    /// at the `C` level. Use [`DataMut::into_slice_mut`] for the `Vec`-buffer
+    /// case.
+    #[inline]
+    pub fn try_into_true_mut(self) -> Option<&'a mut C> {
+        match self {
+            DataMut::TrueRef(m) => Some(m),
+            DataMut::ManuallyDropOwned(_) => None,
+        }
+    }
+}
+
+impl<'a, T> DataMut<'a, Vec<T>> {
+    /// Consumes the wrapper and returns the mutable slice over the underlying
+    /// buffer, carrying `'a`.
+    ///
+    /// Sound for both variants (see [`DataRef::as_slice_ref`]): a
+    /// [`DataMut::ManuallyDropOwned`] `Vec` is fabricated over an
+    /// exclusively-borrowable, `'a`-valid buffer, and consuming `self`
+    /// transfers that exclusivity to the returned slice. The `Vec` itself is
+    /// never dropped.
+    #[inline]
+    pub fn into_slice_mut(self) -> &'a mut [T] {
+        match self {
+            DataMut::TrueRef(m) => &mut m[..],
+            DataMut::ManuallyDropOwned(mut md) => {
+                let ptr = md.as_mut_ptr();
+                let len = md.len();
+                // SAFETY: same contract as DataRef::as_slice_ref, exclusive:
+                // the fabricated Vec covers an 'a-valid, exclusively
+                // borrowable buffer; the Vec is never dropped.
+                unsafe { core::slice::from_raw_parts_mut(ptr, len) }
+            }
+        }
     }
 }
 

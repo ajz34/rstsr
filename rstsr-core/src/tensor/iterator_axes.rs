@@ -1,10 +1,10 @@
-//! Axis-wise iteration over tensors: [`TensorAny::axes_iter`],
-//! [`TensorAny::axes_iter_mut`], and their indexed variants.
+//! Axis-wise iteration over tensor views: [`TensorView::axes_iter`],
+//! [`TensorMut::axes_iter_mut`], and their indexed variants.
 //!
 //! Each step yields a view of the tensor with the iterated axes removed, so
 //! iteration along axis `i` of an N-D tensor yields views of dimensionality
 //! N-1. `axes_iter` traverses in the iterated axis's own (K) order;
-//! [`TensorAny::axes_iter_with_order`] pins the order explicitly, and the
+//! [`TensorView::axes_iter_with_order`] pins the order explicitly, and the
 //! `indexed_*` variants follow the device default order. See
 //! [`order_semantics`](crate::order_semantics).
 
@@ -29,6 +29,9 @@ where
     B: DeviceAPI<T>,
 {
     pub fn update_offset(&mut self, offset: usize) {
+        // SAFETY: `offset` comes from the `IterLayout` iterator over the iterated axes
+        // of the validated layout; inner layout + this offset addresses only elements
+        // of the original (in-bounds) tensor.
         unsafe { self.view.layout.set_offset(offset) };
     }
 }
@@ -42,6 +45,8 @@ where
     fn next(&mut self) -> Option<Self::Item> {
         self.axes_iter.next().map(|offset| {
             self.update_offset(offset);
+            // SAFETY: lifetime rewrite only — the iterator owns the `'a` shared borrow of
+            // the data; yielded views are immutable shares.
             unsafe { transmute(self.view.view()) }
         })
     }
@@ -54,6 +59,8 @@ where
     fn next_back(&mut self) -> Option<Self::Item> {
         self.axes_iter.next_back().map(|offset| {
             self.update_offset(offset);
+            // SAFETY: lifetime rewrite only — the iterator owns the `'a` shared borrow of
+            // the data; yielded views are immutable shares.
             unsafe { transmute(self.view.view()) }
         })
     }
@@ -74,6 +81,8 @@ where
 {
     fn split_at(self, index: usize) -> (Self, Self) {
         let (lhs_axes_iter, rhs_axes_iter) = self.axes_iter.split_at(index);
+        // SAFETY: lifetime rewrite to `'a`; the split halves share the iterator's
+        // immutable data borrow (rayon requires the halves to be `Send`).
         let view_lhs = unsafe { transmute(self.view.view()) };
         let lhs = IterAxesView { axes_iter: lhs_axes_iter, view: view_lhs };
         let rhs = IterAxesView { axes_iter: rhs_axes_iter, view: self.view };
@@ -81,12 +90,10 @@ where
     }
 }
 
-impl<'a, R, T, B, D> TensorAny<R, T, B, D>
+impl<'a, T, B, D> TensorView<'a, T, B, D>
 where
-    T: Clone,
-    R: DataCloneAPI<Data = B::Raw>,
     D: DimAPI,
-    B: DeviceAPI<T, Raw = Vec<T>> + 'a,
+    B: DeviceAPI<T, Raw = Vec<T>>,
 {
     pub fn axes_iter_with_order_f<I>(&self, axes: I, order: TensorIterOrder) -> Result<IterAxesView<'a, T, B>>
     where
@@ -124,6 +131,8 @@ where
             shape_axes.push(shape_full[idx as usize]);
             stride_axes.push(stride_full[idx as usize]);
         }
+        // SAFETY: `layout_axes` repeats selected (shape, stride) pairs of the validated
+        // full layout with the same offset — a subset of the original element set.
         let layout_axes = unsafe { Layout::new_unchecked(shape_axes, stride_axes, offset) };
 
         // get layout for inner view
@@ -135,13 +144,28 @@ where
                 stride_inner.push(stride_full[idx as usize]);
             }
         }
+        // SAFETY: `layout_inner` collects the (shape, stride) pairs of the non-iterated
+        // axes of the validated full layout — a subset of the original element set.
         let layout_inner = unsafe { Layout::new_unchecked(shape_inner, stride_inner, offset) };
 
         // create axes iter
+        // The inner view carries the view's inner lifetime `'a`: its data
+        // reference points into the *owner* the view borrows from, so the
+        // iterator (and the views it yields) stay valid as long as the owner,
+        // even if the view value itself is a temporary (e.g. `a.t()`).
         let axes_iter = IterLayout::<IxD>::new(&layout_axes, order)?;
-        let mut view = self.view().into_dyn();
-        view.layout = layout_inner.clone();
-        let iter = IterAxesView { axes_iter, view: unsafe { transmute(view) } };
+        let r = match self.data().try_as_true_ref() {
+            Some(r) => r,
+            None => rstsr_raise!(
+                UnImplemented,
+                "axes_iter is not supported on ManuallyDrop-backed views (e.g. views from `asarray` over a raw slice); take a view of an owning tensor first"
+            )?,
+        };
+        let storage = Storage::new(DataRef::TrueRef(r), self.device().clone());
+        // SAFETY: `layout_inner` is derived from `self`'s validated layout and
+        // the storage references the same data (see SAFETY note above).
+        let view = unsafe { TensorBase::new_unchecked(storage, layout_inner) };
+        let iter = IterAxesView { axes_iter, view };
         Ok(iter)
     }
 
@@ -159,13 +183,18 @@ where
         self.axes_iter_with_order_f(axes, order).rstsr_unwrap()
     }
 
-    /// Iterate over views of the tensor along the given axis.
+    /// Iterate over views of a tensor view along the given axis.
     ///
     /// Each step yields a view of dimensionality N-1 (the iterated axis is
     /// removed), sharing the original data. The number of steps equals the
     /// length of `axes`; traversal follows the iterated axis's own (K) order,
     /// which for the usual layouts matches the device default order (see
     /// [`order_semantics`](crate::order_semantics)).
+    ///
+    /// This method is defined on views only. For owned, arc or cow tensors,
+    /// take a view first, e.g. `a.view().axes_iter(0)`; the returned iterator
+    /// (and the views it yields) borrow the data owner through the view and
+    /// may outlive the view value itself.
     ///
     /// # Parameters
     ///
@@ -179,36 +208,37 @@ where
     /// # let mut device = DeviceCpu::default();
     /// # device.set_default_order(RowMajor);
     /// let a = rt::arange((6, &device)).into_shape([2, 3]);
-    /// for v in a.axes_iter(0) {
+    /// for v in a.view().axes_iter(0) {
     ///     println!("{v}");
     /// }
     /// // [ 0 1 2]
     /// // [ 3 4 5]
-    /// for v in a.axes_iter(-1) {
+    /// for v in a.view().axes_iter(-1) {
     ///     println!("{v}");
     /// }
     /// // [ 0 3]
     /// // [ 1 4]
     /// // [ 2 5]
-    /// # let rows: Vec<_> = a.axes_iter(0).map(|v| v.to_vec()).collect();
+    /// # let rows: Vec<_> = a.view().axes_iter(0).map(|v| v.to_vec()).collect();
     /// # assert_eq!(rows, vec![vec![0, 1, 2], vec![3, 4, 5]]);
     /// ```
     ///
     /// # Panics
     ///
-    /// - Panics if `axes` is out of range.
+    /// - Panics if `axes` is out of range, or if the view is
+    ///   ManuallyDrop-backed (see [`TensorView::axes_iter_f`]).
     ///
-    /// For a fallible version, use [`TensorAny::axes_iter_f`].
+    /// For a fallible version, use [`TensorView::axes_iter_f`].
     ///
     /// # See also
     ///
     /// ## Variants of this function
     ///
-    /// - [`TensorAny::axes_iter_f`]: fallible version.
-    /// - [`TensorAny::axes_iter_with_order`]: explicit traversal order.
-    /// - [`TensorAny::axes_iter_mut`]: mutable views.
-    /// - [`TensorAny::indexed_axes_iter`]: iteration with the axis position.
-    /// - [`TensorAny::iter`]: element-wise iteration.
+    /// - [`TensorView::axes_iter_f`]: fallible version.
+    /// - [`TensorView::axes_iter_with_order`]: explicit traversal order.
+    /// - [`TensorMut::axes_iter_mut`]: mutable views.
+    /// - [`TensorView::indexed_axes_iter`]: iteration with the axis position.
+    /// - [`TensorView::iter`]: element-wise iteration.
     pub fn axes_iter<I>(&self, axes: I) -> IterAxesView<'a, T, B>
     where
         I: TryInto<AxesIndex<isize>, Error: Into<Error>>,
@@ -235,6 +265,9 @@ where
     B: DeviceAPI<T>,
 {
     pub fn update_offset(&mut self, offset: usize) {
+        // SAFETY: `offset` comes from the `IterLayout` iterator over the iterated axes
+        // of the validated layout; inner layout + this offset addresses only elements
+        // of the original (in-bounds) tensor.
         unsafe { self.view.layout.set_offset(offset) };
     }
 }
@@ -248,6 +281,10 @@ where
     fn next(&mut self) -> Option<Self::Item> {
         self.axes_iter.next().map(|offset| {
             self.update_offset(offset);
+            // SAFETY: lifetime rewrite to `'a`; the iterator holds the unique `'a` mutable
+            // borrow, and successive views cover disjoint elements provided the iterated
+            // axes have non-zero strides (stride-0 mutable layouts are not producible by
+            // the safe `&mut` constructors used in practice).
             unsafe { transmute(self.view.view_mut()) }
         })
     }
@@ -260,6 +297,10 @@ where
     fn next_back(&mut self) -> Option<Self::Item> {
         self.axes_iter.next_back().map(|offset| {
             self.update_offset(offset);
+            // SAFETY: lifetime rewrite to `'a`; the iterator holds the unique `'a` mutable
+            // borrow, and successive views cover disjoint elements provided the iterated
+            // axes have non-zero strides (stride-0 mutable layouts are not producible by
+            // the safe `&mut` constructors used in practice).
             unsafe { transmute(self.view.view_mut()) }
         })
     }
@@ -280,6 +321,8 @@ where
 {
     fn split_at(mut self, index: usize) -> (Self, Self) {
         let (lhs_axes_iter, rhs_axes_iter) = self.axes_iter.clone().split_at(index);
+        // SAFETY: lifetime rewrite to `'a`; the two halves iterate disjoint offset
+        // ranges of the same unique mutable borrow.
         let view_lhs = unsafe { transmute(self.view.view_mut()) };
         let lhs = IterAxesMut { axes_iter: lhs_axes_iter, view: view_lhs };
         let rhs = IterAxesMut { axes_iter: rhs_axes_iter, view: self.view };
@@ -287,14 +330,12 @@ where
     }
 }
 
-impl<'a, R, T, B, D> TensorAny<R, T, B, D>
+impl<'a, T, B, D> TensorMut<'a, T, B, D>
 where
-    T: Clone,
-    R: DataMutAPI<Data = B::Raw>,
     D: DimAPI,
-    B: DeviceAPI<T, Raw = Vec<T>> + 'a,
+    B: DeviceAPI<T, Raw = Vec<T>>,
 {
-    pub fn axes_iter_mut_with_order_f<I>(&'a mut self, axes: I, order: TensorIterOrder) -> Result<IterAxesMut<'a, T, B>>
+    pub fn axes_iter_mut_with_order_f<I>(self, axes: I, order: TensorIterOrder) -> Result<IterAxesMut<'a, T, B>>
     where
         I: TryInto<AxesIndex<isize>, Error: Into<Error>>,
     {
@@ -330,6 +371,8 @@ where
             shape_axes.push(shape_full[idx as usize]);
             stride_axes.push(stride_full[idx as usize]);
         }
+        // SAFETY: `layout_axes` repeats selected (shape, stride) pairs of the validated
+        // full layout with the same offset — a subset of the original element set.
         let layout_axes = unsafe { Layout::new_unchecked(shape_axes, stride_axes, offset) };
 
         // get layout for inner view
@@ -341,32 +384,52 @@ where
                 stride_inner.push(stride_full[idx as usize]);
             }
         }
+        // SAFETY: `layout_inner` collects the (shape, stride) pairs of the non-iterated
+        // axes of the validated full layout — a subset of the original element set.
         let layout_inner = unsafe { Layout::new_unchecked(shape_inner, stride_inner, offset) };
 
         // create axes iter
+        // The receiver is consumed to move the view's inner `&'a mut` out,
+        // which lets `a.view_mut().axes_iter_mut(0)` work as a one-liner: the
+        // iterator (and the views it yields) borrow the data owner for `'a`.
         let axes_iter = IterLayout::<IxD>::new(&layout_axes, order)?;
-        let mut view = self.view_mut().into_dyn();
-        view.layout = layout_inner.clone();
+        let (storage, _) = self.into_raw_parts();
+        let (data, device) = storage.into_raw_parts();
+        let m = match data.try_into_true_mut() {
+            Some(m) => m,
+            None => rstsr_raise!(
+                UnImplemented,
+                "axes_iter_mut is not supported on ManuallyDrop-backed views (e.g. views from `asarray` over a raw mut slice); take a mutable view of an owning tensor first"
+            )?,
+        };
+        let storage = Storage::new(DataMut::TrueRef(m), device);
+        // SAFETY: `layout_inner` is derived from `self`'s validated layout and
+        // the storage references the same data (see SAFETY note above).
+        let view = unsafe { TensorBase::new_unchecked(storage, layout_inner) };
         let iter = IterAxesMut { axes_iter, view };
         Ok(iter)
     }
 
-    pub fn axes_iter_mut_f<I>(&'a mut self, axes: I) -> Result<IterAxesMut<'a, T, B>>
+    pub fn axes_iter_mut_f<I>(self, axes: I) -> Result<IterAxesMut<'a, T, B>>
     where
         I: TryInto<AxesIndex<isize>, Error: Into<Error>>,
     {
         self.axes_iter_mut_with_order_f(axes, TensorIterOrder::default())
     }
 
-    pub fn axes_iter_mut_with_order<I>(&'a mut self, axes: I, order: TensorIterOrder) -> IterAxesMut<'a, T, B>
+    pub fn axes_iter_mut_with_order<I>(self, axes: I, order: TensorIterOrder) -> IterAxesMut<'a, T, B>
     where
         I: TryInto<AxesIndex<isize>, Error: Into<Error>>,
     {
         self.axes_iter_mut_with_order_f(axes, order).rstsr_unwrap()
     }
 
-    /// Iterate over mutable views of the tensor along the given axis; see
-    /// [`TensorAny::axes_iter`].
+    /// Iterate over mutable views of a mutable tensor view along the given
+    /// axis; see [`TensorView::axes_iter`].
+    ///
+    /// This method is defined on mutable views only and consumes the view.
+    /// For owned tensors, take a mutable view first, e.g.
+    /// `a.view_mut().axes_iter_mut(0)`.
     ///
     /// # Examples
     ///
@@ -375,7 +438,7 @@ where
     /// # let mut device = DeviceCpu::default();
     /// # device.set_default_order(RowMajor);
     /// let mut b: Tensor<i32, _> = rt::zeros(([2, 3], &device));
-    /// for mut v in b.axes_iter_mut(0) {
+    /// for mut v in b.view_mut().axes_iter_mut(0) {
     ///     v += 1;
     /// }
     /// println!("{b}");
@@ -386,8 +449,8 @@ where
     ///
     /// # See also
     ///
-    /// [`TensorAny::axes_iter`].
-    pub fn axes_iter_mut<I>(&'a mut self, axes: I) -> IterAxesMut<'a, T, B>
+    /// [`TensorView::axes_iter`].
+    pub fn axes_iter_mut<I>(self, axes: I) -> IterAxesMut<'a, T, B>
     where
         I: TryInto<AxesIndex<isize>, Error: Into<Error>>,
     {
@@ -413,6 +476,9 @@ where
     B: DeviceAPI<T>,
 {
     pub fn update_offset(&mut self, offset: usize) {
+        // SAFETY: `offset` comes from the `IterLayout` iterator over the iterated axes
+        // of the validated layout; inner layout + this offset addresses only elements
+        // of the original (in-bounds) tensor.
         unsafe { self.view.layout.set_offset(offset) };
     }
 }
@@ -430,6 +496,8 @@ where
         };
         self.axes_iter.next().map(|offset| {
             self.update_offset(offset);
+            // SAFETY: lifetime rewrite only — the iterator owns the `'a` shared borrow;
+            // yielded views are immutable shares (indexed variant).
             (index, unsafe { transmute(self.view.view()) })
         })
     }
@@ -446,6 +514,8 @@ where
         };
         self.axes_iter.next_back().map(|offset| {
             self.update_offset(offset);
+            // SAFETY: lifetime rewrite only — the iterator owns the `'a` shared borrow;
+            // yielded views are immutable shares (indexed variant).
             (index, unsafe { transmute(self.view.view()) })
         })
     }
@@ -466,6 +536,8 @@ where
 {
     fn split_at(self, index: usize) -> (Self, Self) {
         let (lhs_axes_iter, rhs_axes_iter) = self.axes_iter.split_at(index);
+        // SAFETY: lifetime rewrite to `'a`; the split halves share the iterator's
+        // immutable data borrow (rayon requires the halves to be `Send`).
         let view_lhs = unsafe { transmute(self.view.view()) };
         let lhs = IndexedIterAxesView { axes_iter: lhs_axes_iter, view: view_lhs };
         let rhs = IndexedIterAxesView { axes_iter: rhs_axes_iter, view: self.view };
@@ -473,12 +545,10 @@ where
     }
 }
 
-impl<'a, R, T, B, D> TensorAny<R, T, B, D>
+impl<'a, T, B, D> TensorView<'a, T, B, D>
 where
-    T: Clone,
-    R: DataCloneAPI<Data = B::Raw>,
     D: DimAPI,
-    B: DeviceAPI<T, Raw = Vec<T>> + 'a,
+    B: DeviceAPI<T, Raw = Vec<T>>,
 {
     pub fn indexed_axes_iter_with_order_f<I>(
         &self,
@@ -526,6 +596,8 @@ where
             shape_axes.push(shape_full[idx as usize]);
             stride_axes.push(stride_full[idx as usize]);
         }
+        // SAFETY: `layout_axes` repeats selected (shape, stride) pairs of the validated
+        // full layout with the same offset — a subset of the original element set.
         let layout_axes = unsafe { Layout::new_unchecked(shape_axes, stride_axes, offset) };
 
         // get layout for inner view
@@ -537,13 +609,26 @@ where
                 stride_inner.push(stride_full[idx as usize]);
             }
         }
+        // SAFETY: `layout_inner` collects the (shape, stride) pairs of the non-iterated
+        // axes of the validated full layout — a subset of the original element set.
         let layout_inner = unsafe { Layout::new_unchecked(shape_inner, stride_inner, offset) };
 
         // create axes iter
+        // The inner view carries the view's inner lifetime `'a`;
+        // see `axes_iter_with_order_f` for the lifetime contract.
         let axes_iter = IterLayout::<IxD>::new(&layout_axes, order)?;
-        let mut view = self.view().into_dyn();
-        view.layout = layout_inner.clone();
-        let iter = IndexedIterAxesView { axes_iter, view: unsafe { transmute(view) } };
+        let r = match self.data().try_as_true_ref() {
+            Some(r) => r,
+            None => rstsr_raise!(
+                UnImplemented,
+                "indexed_axes_iter is not supported on ManuallyDrop-backed views (e.g. views from `asarray` over a raw slice); take a view of an owning tensor first"
+            )?,
+        };
+        let storage = Storage::new(DataRef::TrueRef(r), self.device().clone());
+        // SAFETY: `layout_inner` is derived from `self`'s validated layout and
+        // the storage references the same data (see SAFETY note above).
+        let view = unsafe { TensorBase::new_unchecked(storage, layout_inner) };
+        let iter = IndexedIterAxesView { axes_iter, view };
         Ok(iter)
     }
 
@@ -566,12 +651,12 @@ where
         self.indexed_axes_iter_with_order_f(axes, order).rstsr_unwrap()
     }
 
-    /// Iterate over (position, view) pairs along the given axis; see
-    /// [`TensorAny::axes_iter`].
+    /// Iterate over (position, view) pairs along the given axis of a tensor
+    /// view; see [`TensorView::axes_iter`] for the view-only policy.
     ///
     /// # See also
     ///
-    /// [`TensorAny::axes_iter`].
+    /// [`TensorView::axes_iter`].
     pub fn indexed_axes_iter<I>(&self, axes: I) -> IndexedIterAxesView<'a, T, B>
     where
         I: TryInto<AxesIndex<isize>, Error: Into<Error>>,
@@ -598,6 +683,9 @@ where
     B: DeviceAPI<T>,
 {
     pub fn update_offset(&mut self, offset: usize) {
+        // SAFETY: `offset` comes from the `IterLayout` iterator over the iterated axes
+        // of the validated layout; inner layout + this offset addresses only elements
+        // of the original (in-bounds) tensor.
         unsafe { self.view.layout.set_offset(offset) };
     }
 }
@@ -615,6 +703,8 @@ where
         };
         self.axes_iter.next().map(|offset| {
             self.update_offset(offset);
+            // SAFETY: lifetime rewrite of the tuple (same layout) to `'a`; see the mutable
+            // iterator SAFETY notes above.
             unsafe { transmute((index, self.view.view_mut())) }
         })
     }
@@ -631,6 +721,8 @@ where
         };
         self.axes_iter.next_back().map(|offset| {
             self.update_offset(offset);
+            // SAFETY: lifetime rewrite of the tuple (same layout) to `'a`; see the mutable
+            // iterator SAFETY notes above.
             unsafe { transmute((index, self.view.view_mut())) }
         })
     }
@@ -651,6 +743,8 @@ where
 {
     fn split_at(mut self, index: usize) -> (Self, Self) {
         let (lhs_axes_iter, rhs_axes_iter) = self.axes_iter.clone().split_at(index);
+        // SAFETY: lifetime rewrite to `'a`; the two halves iterate disjoint offset
+        // ranges of the same unique mutable borrow.
         let view_lhs = unsafe { transmute(self.view.view_mut()) };
         let lhs = IndexedIterAxesMut { axes_iter: lhs_axes_iter, view: view_lhs };
         let rhs = IndexedIterAxesMut { axes_iter: rhs_axes_iter, view: self.view };
@@ -658,15 +752,13 @@ where
     }
 }
 
-impl<'a, R, T, B, D> TensorAny<R, T, B, D>
+impl<'a, T, B, D> TensorMut<'a, T, B, D>
 where
-    T: Clone,
-    R: DataMutAPI<Data = B::Raw>,
     D: DimAPI,
-    B: DeviceAPI<T, Raw = Vec<T>> + 'a,
+    B: DeviceAPI<T, Raw = Vec<T>>,
 {
     pub fn indexed_axes_iter_mut_with_order_f<I>(
-        &'a mut self,
+        self,
         axes: I,
         order: TensorIterOrder,
     ) -> Result<IndexedIterAxesMut<'a, T, B>>
@@ -705,6 +797,8 @@ where
             shape_axes.push(shape_full[idx as usize]);
             stride_axes.push(stride_full[idx as usize]);
         }
+        // SAFETY: `layout_axes` repeats selected (shape, stride) pairs of the validated
+        // full layout with the same offset — a subset of the original element set.
         let layout_axes = unsafe { Layout::new_unchecked(shape_axes, stride_axes, offset) };
 
         // get layout for inner view
@@ -716,17 +810,32 @@ where
                 stride_inner.push(stride_full[idx as usize]);
             }
         }
+        // SAFETY: `layout_inner` collects the (shape, stride) pairs of the non-iterated
+        // axes of the validated full layout — a subset of the original element set.
         let layout_inner = unsafe { Layout::new_unchecked(shape_inner, stride_inner, offset) };
 
         // create axes iter
+        // The receiver is consumed to move the view's inner `&'a mut` out;
+        // see `axes_iter_mut_with_order_f` for the lifetime contract.
         let axes_iter = IterLayout::<IxD>::new(&layout_axes, order)?;
-        let mut view = self.view_mut().into_dyn();
-        view.layout = layout_inner.clone();
+        let (storage, _) = self.into_raw_parts();
+        let (data, device) = storage.into_raw_parts();
+        let m = match data.try_into_true_mut() {
+            Some(m) => m,
+            None => rstsr_raise!(
+                UnImplemented,
+                "indexed_axes_iter_mut is not supported on ManuallyDrop-backed views (e.g. views from `asarray` over a raw mut slice); take a mutable view of an owning tensor first"
+            )?,
+        };
+        let storage = Storage::new(DataMut::TrueRef(m), device);
+        // SAFETY: `layout_inner` is derived from `self`'s validated layout and
+        // the storage references the same data (see SAFETY note above).
+        let view = unsafe { TensorBase::new_unchecked(storage, layout_inner) };
         let iter = IndexedIterAxesMut { axes_iter, view };
         Ok(iter)
     }
 
-    pub fn indexed_axes_iter_mut_f<I>(&'a mut self, axes: I) -> Result<IndexedIterAxesMut<'a, T, B>>
+    pub fn indexed_axes_iter_mut_f<I>(self, axes: I) -> Result<IndexedIterAxesMut<'a, T, B>>
     where
         I: TryInto<AxesIndex<isize>, Error: Into<Error>>,
     {
@@ -739,7 +848,7 @@ where
     }
 
     pub fn indexed_axes_iter_mut_with_order<I>(
-        &'a mut self,
+        self,
         axes: I,
         order: TensorIterOrder,
     ) -> IndexedIterAxesMut<'a, T, B>
@@ -749,7 +858,10 @@ where
         self.indexed_axes_iter_mut_with_order_f(axes, order).rstsr_unwrap()
     }
 
-    pub fn indexed_axes_iter_mut<I>(&'a mut self, axes: I) -> IndexedIterAxesMut<'a, T, B>
+    /// Mutable iteration over (position, view) pairs along the given axis of
+    /// a mutable tensor view; see [`TensorView::indexed_axes_iter`] for the
+    /// view-only policy.
+    pub fn indexed_axes_iter_mut<I>(self, axes: I) -> IndexedIterAxesMut<'a, T, B>
     where
         I: TryInto<AxesIndex<isize>, Error: Into<Error>>,
     {
@@ -766,7 +878,7 @@ mod tests_serial {
     #[test]
     fn test_axes_iter() {
         let a = arange(120).into_shape([2, 3, 4, 5]);
-        let iter = a.axes_iter_f([0, 2]).unwrap();
+        let iter = a.view().axes_iter_f([0, 2]).unwrap();
 
         let res = iter
             .map(|view| {
@@ -793,7 +905,7 @@ mod tests_serial {
     #[test]
     fn test_axes_iter_mut() {
         let mut a = arange(120).into_shape([2, 3, 4, 5]);
-        let iter = a.axes_iter_mut_with_order_f([0, 2], TensorIterOrder::C).unwrap();
+        let iter = a.view_mut().axes_iter_mut_with_order_f([0, 2], TensorIterOrder::C).unwrap();
 
         let res = iter
             .map(|mut view| {
@@ -822,7 +934,7 @@ mod tests_serial {
     #[test]
     fn test_indexed_axes_iter() {
         let a = arange(120).into_shape([2, 3, 4, 5]);
-        let iter = a.indexed_axes_iter([0, 2]);
+        let iter = a.view().indexed_axes_iter([0, 2]);
 
         let res = iter
             .map(|(index, view)| {
@@ -875,7 +987,7 @@ mod tests_parallel {
     #[test]
     fn test_axes_iter() {
         let mut a = arange(65536).into_shape([16, 16, 16, 16]);
-        let iter = a.axes_iter_mut([0, 2]);
+        let iter = a.view_mut().axes_iter_mut([0, 2]);
 
         let res = iter
             .into_par_iter()
