@@ -58,8 +58,8 @@ mod test_to_layout_behavior {
         assert!(result.c_contig());
 
         // Values should be preserved
-        let expected: Vec<i32> = a.iter().copied().collect();
-        let actual: Vec<i32> = result.iter().copied().collect();
+        let expected: Vec<i32> = a.view().iter().copied().collect();
+        let actual: Vec<i32> = result.view().iter().copied().collect();
         assert_eq!(expected, actual);
     }
 

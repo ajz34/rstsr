@@ -18,6 +18,10 @@ pub trait ChangeableDefault {
 
 macro_rules! impl_changeable_default {
     ($struct:ty, $val:ident, $default:expr) => {
+        // SAFETY: the `static mut` is written only by `change_default` (unsafe, meant
+        // for process initialization before threads are spawned) and read by
+        // `get_default`; concurrent read/write would be a data race — documented API
+        // contract, not enforced here.
         static mut $val: $struct = $default;
 
         impl ChangeableDefault for $struct {
@@ -109,13 +113,13 @@ pub enum TensorIterOrder {
     /// - otherwise [`FlagOrder::default()`], which is defined by crate feature `f_prefer`.
     ///
     /// - safe for multi-array iteration like `get_iter(a, b)`
-    /// - not safe for cases like `a.iter().zip(b.iter())`
+    /// - not safe for cases like `a.view().iter().zip(b.view().iter())`
     #[serde(rename = "Auto")]
     A,
     /// Greedy when possible (reorder layouts during iteration).
     ///
     /// - safe for multi-array iteration like `get_iter(a, b)`
-    /// - not safe for cases like `a.iter().zip(b.iter())`
+    /// - not safe for cases like `a.view().iter().zip(b.view().iter())`
     /// - if it is used to create a new array, the stride of new array will be in K order
     #[serde(rename = "Greedy")]
     K,

@@ -1,5 +1,5 @@
-//! Element-wise iteration over tensors: [`TensorAny::iter`],
-//! [`TensorAny::iter_mut`], and their indexed variants.
+//! Element-wise iteration over tensor views: [`TensorView::iter`],
+//! [`TensorMut::iter_mut`], and their indexed variants.
 //!
 //! Iteration order follows the device default order ([`RowMajor`] iterates
 //! C-like, [`ColMajor`] F-like); see [`order_semantics`](crate::order_semantics).
@@ -59,20 +59,19 @@ where
     }
 }
 
-impl<'a, R, T, B, D> TensorAny<R, T, B, D>
+impl<'a, T, B, D> TensorView<'a, T, B, D>
 where
-    R: DataAPI<Data = B::Raw>,
     D: DimAPI,
-    B: DeviceAPI<T, Raw = Vec<T>> + 'a,
+    B: DeviceAPI<T, Raw = Vec<T>>,
 {
     pub fn iter_with_order_f(&self, order: TensorIterOrder) -> Result<IterVecView<'a, T, D>> {
+        // The returned iterator carries the view's inner lifetime `'a`: the
+        // underlying data reference points into the *owner* the view borrows
+        // from, so the iterator stays valid as long as the owner, even if the
+        // view value itself is a temporary (e.g. `a.t().iter()`).
         let layout_iter = IterLayout::new(self.layout(), order)?;
-        let raw = self.raw().as_ref();
-
-        // SAFETY: The lifetime of `raw` is guaranteed to be at least `'a`.
-        // transmute is to change the lifetime, not for type casting.
-        let iter = IterVecView { layout_iter, view: raw };
-        Ok(unsafe { transmute::<IterVecView<'_, T, D>, IterVecView<'_, T, D>>(iter) })
+        let raw = self.data().as_slice_ref();
+        Ok(IterVecView { layout_iter, view: raw })
     }
 
     pub fn iter_with_order(&self, order: TensorIterOrder) -> IterVecView<'a, T, D> {
@@ -88,12 +87,26 @@ where
         self.iter_with_order_f(order)
     }
 
-    /// Iterate over the elements of the tensor by reference.
+    /// Iterate over the elements of a tensor view by reference.
     ///
     /// Elements are yielded following the device default order: C-like
     /// (row-major) sequence under [`RowMajor`], F-like (column-major) under
     /// [`ColMajor`]; see [`order_semantics`](crate::order_semantics). Use
-    /// [`TensorAny::iter_with_order`] to pin the traversal order explicitly.
+    /// [`TensorView::iter_with_order`] to pin the traversal order explicitly.
+    ///
+    /// This method is defined on views only. For owned, arc or cow tensors,
+    /// take a view first, e.g. `a.view().iter()` or `a.t().iter()`; the
+    /// returned iterator borrows the data owner through the view and may
+    /// outlive the view value itself. Accordingly, an iterator cannot
+    /// outlive the data owner:
+    ///
+    /// ```rust,compile_fail
+    /// # use rstsr::prelude::*;
+    /// // the owned tensor is dropped at the end of this statement, so using
+    /// // the iterator afterwards would dangle — rejected at compile time
+    /// let it = rt::arange((6, &DeviceCpu::default())).view().iter();
+    /// let _v: Vec<i32> = it.cloned().collect();
+    /// ```
     ///
     /// # Examples
     ///
@@ -102,7 +115,7 @@ where
     /// # let mut device = DeviceCpu::default();
     /// # device.set_default_order(RowMajor);
     /// let a = rt::arange((6, &device)).into_shape([2, 3]);
-    /// let collected: Vec<i32> = a.iter().cloned().collect();
+    /// let collected: Vec<i32> = a.view().iter().cloned().collect();
     /// println!("{collected:?}");
     /// // [0, 1, 2, 3, 4, 5]
     /// # assert_eq!(collected, vec![0, 1, 2, 3, 4, 5]);
@@ -112,17 +125,17 @@ where
     ///
     /// - Panics if the iterator cannot be constructed for the given layout.
     ///
-    /// For a fallible version, use [`TensorAny::iter_f`].
+    /// For a fallible version, use [`TensorView::iter_f`].
     ///
     /// # See also
     ///
     /// ## Variants of this function
     ///
-    /// - [`TensorAny::iter_f`]: fallible version.
-    /// - [`TensorAny::iter_with_order`] / [`TensorAny::iter_with_order_f`]: explicit traversal
+    /// - [`TensorView::iter_f`]: fallible version.
+    /// - [`TensorView::iter_with_order`] / [`TensorView::iter_with_order_f`]: explicit traversal
     ///   order.
-    /// - [`TensorAny::iter_mut`]: mutable element iteration.
-    /// - [`TensorAny::indexed_iter`]: iteration with logical indices.
+    /// - [`TensorMut::iter_mut`]: mutable element iteration.
+    /// - [`TensorView::indexed_iter`]: iteration with logical indices.
     pub fn iter(&self) -> IterVecView<'a, T, D> {
         self.iter_f().rstsr_unwrap()
     }
@@ -148,6 +161,9 @@ where
     type Item = &'a mut T;
 
     fn next(&mut self) -> Option<Self::Item> {
+        // SAFETY: lifetime rewrite — each yielded `&mut T` points to a distinct
+        // element of the iterator's own `&mut [T]` (the standard owning-iterator
+        // pattern, cf. `slice::IterMut`).
         self.layout_iter.next().map(|offset| unsafe { transmute(&mut self.view[offset]) })
     }
 }
@@ -157,6 +173,9 @@ where
     D: DimDevAPI,
 {
     fn next_back(&mut self) -> Option<Self::Item> {
+        // SAFETY: lifetime rewrite — each yielded `&mut T` points to a distinct
+        // element of the iterator's own `&mut [T]` (the standard owning-iterator
+        // pattern, cf. `slice::IterMut`).
         self.layout_iter.next_back().map(|offset| unsafe { transmute(&mut self.view[offset]) })
     }
 }
@@ -181,6 +200,9 @@ where
         let cloned_view = unsafe {
             let len = self.view.len();
             let ptr = self.view.as_mut_ptr();
+            // SAFETY: duplicates the iterator's `&mut [T]` as a raw slice so both split
+            // halves can iterate; the two layout iterators visit disjoint offsets, and
+            // each half only accesses elements of its own iteration range.
             core::slice::from_raw_parts_mut(ptr, len)
         };
         let lhs = IterVecMut { layout_iter: lhs, view: cloned_view };
@@ -189,24 +211,28 @@ where
     }
 }
 
-impl<'a, R, T, B, D> TensorAny<R, T, B, D>
+impl<'a, T, B, D> TensorMut<'a, T, B, D>
 where
-    R: DataMutAPI<Data = B::Raw>,
     D: DimAPI,
-    B: DeviceAPI<T, Raw = Vec<T>> + 'a,
+    B: DeviceAPI<T, Raw = Vec<T>>,
 {
-    pub fn iter_mut_with_order_f(&'a mut self, order: TensorIterOrder) -> Result<IterVecMut<'a, T, D>> {
+    pub fn iter_mut_with_order_f(self, order: TensorIterOrder) -> Result<IterVecMut<'a, T, D>> {
+        // The receiver is consumed to move the view's inner `&'a mut` out,
+        // which lets `a.view_mut().iter_mut()` work as a one-liner: the
+        // returned iterator borrows the data owner for `'a`.
         let layout_iter = IterLayout::new(self.layout(), order)?;
-        let raw = self.raw_mut().as_mut();
+        let (storage, _) = self.into_raw_parts();
+        let (data, _device) = storage.into_raw_parts();
+        let raw = data.into_slice_mut();
         let iter = IterVecMut { layout_iter, view: raw };
         Ok(iter)
     }
 
-    pub fn iter_mut_with_order(&'a mut self, order: TensorIterOrder) -> IterVecMut<'a, T, D> {
+    pub fn iter_mut_with_order(self, order: TensorIterOrder) -> IterVecMut<'a, T, D> {
         self.iter_mut_with_order_f(order).rstsr_unwrap()
     }
 
-    pub fn iter_mut_f(&'a mut self) -> Result<IterVecMut<'a, T, D>> {
+    pub fn iter_mut_f(self) -> Result<IterVecMut<'a, T, D>> {
         let default_order = self.device().default_order();
         let order = match default_order {
             RowMajor => TensorIterOrder::C,
@@ -215,8 +241,13 @@ where
         self.iter_mut_with_order_f(order)
     }
 
-    /// Iterate over the elements of the tensor by mutable reference; see
-    /// [`TensorAny::iter`] for the traversal order.
+    /// Iterate over the elements of a mutable tensor view by mutable
+    /// reference; see [`TensorView::iter`] for the traversal order.
+    ///
+    /// This method is defined on mutable views only and consumes the view.
+    /// For owned tensors, take a mutable view first, e.g.
+    /// `a.view_mut().iter_mut()`; the returned iterator borrows the data
+    /// owner and may outlive the view value itself.
     ///
     /// # Examples
     ///
@@ -225,7 +256,7 @@ where
     /// # let mut device = DeviceCpu::default();
     /// # device.set_default_order(RowMajor);
     /// let mut b: Tensor<i32, _> = rt::zeros(([2, 2], &device));
-    /// for (i, x) in b.iter_mut().enumerate() {
+    /// for (i, x) in b.view_mut().iter_mut().enumerate() {
     ///     *x = i as i32;
     /// }
     /// println!("{b}");
@@ -238,10 +269,10 @@ where
     ///
     /// ## Variants of this function
     ///
-    /// - [`TensorAny::iter_mut_f`]: fallible version.
-    /// - [`TensorAny::iter_mut_with_order`]: explicit traversal order.
-    /// - [`TensorAny::iter`]: immutable element iteration.
-    pub fn iter_mut(&'a mut self) -> IterVecMut<'a, T, D> {
+    /// - [`TensorMut::iter_mut_f`]: fallible version.
+    /// - [`TensorMut::iter_mut_with_order`]: explicit traversal order.
+    /// - [`TensorView::iter`]: immutable element iteration.
+    pub fn iter_mut(self) -> IterVecMut<'a, T, D> {
         self.iter_mut_f().rstsr_unwrap()
     }
 }
@@ -308,11 +339,10 @@ where
     }
 }
 
-impl<'a, R, T, B, D> TensorAny<R, T, B, D>
+impl<'a, T, B, D> TensorView<'a, T, B, D>
 where
-    R: DataAPI<Data = B::Raw>,
     D: DimAPI,
-    B: DeviceAPI<T, Raw = Vec<T>> + 'a,
+    B: DeviceAPI<T, Raw = Vec<T>>,
 {
     pub fn indexed_iter_with_order_f(&self, order: TensorIterOrder) -> Result<IndexedIterVecView<'a, T, D>> {
         use TensorIterOrder::*;
@@ -321,13 +351,11 @@ where
             C | F => (),
             _ => rstsr_invalid!(order, "This function only accepts TensorIterOrder::C|F.",)?,
         };
+        // The iterator carries the view's inner lifetime `'a`;
+        // see `iter_with_order_f` for the lifetime contract.
         let layout_iter = IterLayout::<D>::new(self.layout(), order)?;
-        let raw = self.raw().as_ref();
-
-        // SAFETY: The lifetime of `raw` is guaranteed to be at least `'a`.
-        // transmute is to change the lifetime, not for type casting.
-        let iter = IndexedIterVecView { layout_iter, view: raw };
-        Ok(unsafe { transmute::<IndexedIterVecView<'_, T, D>, IndexedIterVecView<'_, T, D>>(iter) })
+        let raw = self.data().as_slice_ref();
+        Ok(IndexedIterVecView { layout_iter, view: raw })
     }
 
     pub fn indexed_iter_with_order(&self, order: TensorIterOrder) -> IndexedIterVecView<'a, T, D> {
@@ -343,8 +371,9 @@ where
         self.indexed_iter_with_order_f(order)
     }
 
-    /// Iterate over (index, element) pairs; see [`TensorAny::iter`] for the
-    /// traversal order.
+    /// Iterate over (index, element) pairs of a tensor view; see
+    /// [`TensorView::iter`] for the traversal order and the view-only
+    /// policy.
     ///
     /// # Examples
     ///
@@ -353,14 +382,14 @@ where
     /// # let mut device = DeviceCpu::default();
     /// # device.set_default_order(RowMajor);
     /// let a = rt::arange((6, &device)).into_shape([2, 3]);
-    /// let pairs: Vec<_> = a.indexed_iter().map(|(idx, v)| (idx.to_vec(), *v)).collect();
+    /// let pairs: Vec<_> = a.view().indexed_iter().map(|(idx, v)| (idx.to_vec(), *v)).collect();
     /// println!("{pairs:?}");
     /// // [([0, 0], 0), ([0, 1], 1), ([0, 2], 2), ([1, 0], 3), ([1, 1], 4), ([1, 2], 5)]
     /// ```
     ///
     /// # See also
     ///
-    /// [`TensorAny::iter`].
+    /// [`TensorView::iter`].
     pub fn indexed_iter(&self) -> IndexedIterVecView<'a, T, D> {
         self.indexed_iter_f().rstsr_unwrap()
     }
@@ -389,6 +418,8 @@ where
             IterLayout::ColMajor(iter_inner) => iter_inner.index_start().clone(),
             IterLayout::RowMajor(iter_inner) => iter_inner.index_start().clone(),
         };
+        // SAFETY: lifetime rewrite only (same type) — each yielded `&mut T` points to
+        // a distinct element of the iterator's own `&mut [T]`.
         self.layout_iter.next().map(|offset| (index, unsafe { transmute::<&mut T, &mut T>(&mut self.view[offset]) }))
     }
 }
@@ -404,6 +435,8 @@ where
         };
         self.layout_iter
             .next_back()
+            // SAFETY: lifetime rewrite only (same type) — each yielded `&mut T` points to
+            // a distinct element of the iterator's own `&mut [T]`.
             .map(|offset| (index, unsafe { transmute::<&mut T, &mut T>(&mut self.view[offset]) }))
     }
 }
@@ -426,6 +459,9 @@ where
         let cloned_view = unsafe {
             let len = self.view.len();
             let ptr = self.view.as_mut_ptr();
+            // SAFETY: duplicates the iterator's `&mut [T]` as a raw slice so both split
+            // halves can iterate; the two layout iterators visit disjoint offsets, and
+            // each half only accesses elements of its own iteration range.
             core::slice::from_raw_parts_mut(ptr, len)
         };
         let lhs = IndexedIterVecMut { layout_iter: lhs, view: cloned_view };
@@ -434,31 +470,34 @@ where
     }
 }
 
-impl<'a, R, T, B, D> TensorAny<R, T, B, D>
+impl<'a, T, B, D> TensorMut<'a, T, B, D>
 where
-    R: DataMutAPI<Data = B::Raw>,
     D: DimAPI,
-    B: DeviceAPI<T, Raw = Vec<T>> + 'a,
+    B: DeviceAPI<T, Raw = Vec<T>>,
 {
-    pub fn indexed_iter_mut_with_order_f(&'a mut self, order: TensorIterOrder) -> Result<IndexedIterVecMut<'a, T, D>> {
+    pub fn indexed_iter_mut_with_order_f(self, order: TensorIterOrder) -> Result<IndexedIterVecMut<'a, T, D>> {
         use TensorIterOrder::*;
         // this function only accepts c/f iter order currently
         match order {
             C | F => (),
             _ => rstsr_invalid!(order, "This function only accepts TensorIterOrder::C|F.",)?,
         };
+        // The receiver is consumed to move the view's inner `&'a mut` out;
+        // see `iter_mut_with_order_f` for the lifetime contract.
         let layout_iter = IterLayout::<D>::new(self.layout(), order)?;
-        let raw = self.raw_mut().as_mut();
+        let (storage, _) = self.into_raw_parts();
+        let (data, _device) = storage.into_raw_parts();
+        let raw = data.into_slice_mut();
 
         let iter = IndexedIterVecMut { layout_iter, view: raw };
         Ok(iter)
     }
 
-    pub fn indexed_iter_mut_with_order(&'a mut self, order: TensorIterOrder) -> IndexedIterVecMut<'a, T, D> {
+    pub fn indexed_iter_mut_with_order(self, order: TensorIterOrder) -> IndexedIterVecMut<'a, T, D> {
         self.indexed_iter_mut_with_order_f(order).rstsr_unwrap()
     }
 
-    pub fn indexed_iter_mut_f(&'a mut self) -> Result<IndexedIterVecMut<'a, T, D>> {
+    pub fn indexed_iter_mut_f(self) -> Result<IndexedIterVecMut<'a, T, D>> {
         let default_order = self.device().default_order();
         let order = match default_order {
             RowMajor => TensorIterOrder::C,
@@ -467,13 +506,14 @@ where
         self.indexed_iter_mut_with_order_f(order)
     }
 
-    /// Mutable iteration over (index, element) pairs; see
-    /// [`TensorAny::indexed_iter`] and [`TensorAny::iter`].
+    /// Mutable iteration over (index, element) pairs of a mutable tensor
+    /// view; see [`TensorView::indexed_iter`] and [`TensorView::iter`] for
+    /// the traversal order and the view-only policy.
     ///
     /// # See also
     ///
-    /// [`TensorAny::indexed_iter`].
-    pub fn indexed_iter_mut(&'a mut self) -> IndexedIterVecMut<'a, T, D> {
+    /// [`TensorView::indexed_iter`].
+    pub fn indexed_iter_mut(self) -> IndexedIterVecMut<'a, T, D> {
         self.indexed_iter_mut_f().rstsr_unwrap()
     }
 }
@@ -485,12 +525,90 @@ mod tests_serial {
     use super::*;
 
     #[test]
+    fn test_iter_correctness() {
+        // Soundness regression guard: `iter` used to `transmute` its borrow to
+        // an unrelated lifetime, which made `let it = { let t = tensor;
+        // t.iter() };` compile (use-after-free). Iteration is now view-only:
+        // the iterator borrows the data owner through the view's inner
+        // lifetime, and `iter` on an owned tensor no longer exists.
+        let t = arange(6);
+        let v: Vec<_> = t.view().iter().cloned().collect();
+        assert_eq!(v, vec![0, 1, 2, 3, 4, 5]);
+
+        let v: Vec<_> = t.view().iter().enumerate().map(|(i, x)| *x + i).collect();
+        assert_eq!(v, vec![0, 2, 4, 6, 8, 10]);
+
+        let v: Vec<_> = t.view().indexed_iter().map(|(_, x)| *x).collect();
+        assert_eq!(v, vec![0, 1, 2, 3, 4, 5]);
+    }
+
+    #[test]
+    fn test_iter_one_liner_on_view_temporary() {
+        // The one-liner over a view temporary is sound again (it was a
+        // compile error after tying the iterator to `&self`): the iterator
+        // borrows the owner `a` through the view's inner lifetime, so the
+        // dropped view temporary is irrelevant.
+        let a = arange(6).into_shape([3, 2]);
+        let it = a.t().iter();
+        let v: Vec<_> = it.cloned().collect();
+        #[cfg(not(feature = "col_major"))]
+        assert_eq!(v, vec![0, 2, 4, 1, 3, 5]);
+        #[cfg(feature = "col_major")]
+        assert_eq!(v, vec![0, 3, 1, 4, 2, 5]);
+
+        let it = a.view().iter();
+        let v: Vec<_> = it.cloned().collect();
+        assert_eq!(v, vec![0, 1, 2, 3, 4, 5]);
+
+        let mut b = arange(6usize);
+        let it = b.view_mut().iter_mut();
+        it.for_each(|x| *x += 1);
+        assert_eq!(b.reshape(-1).to_vec(), vec![1, 2, 3, 4, 5, 6]);
+    }
+
+    #[test]
+    fn test_iter_on_manually_drop_backed_view() {
+        // `asarray` over a slice produces a view holding a fabricated
+        // `Vec` (ManuallyDrop) over the borrowed buffer; iteration must
+        // still read the original slice through `'a`.
+        let buffer = [0, 1, 2, 3, 4, 5];
+        let t: TensorView<i32> = asarray((buffer.as_slice(), &DeviceCpu::default()));
+        let v: Vec<_> = t.iter().cloned().collect();
+        assert_eq!(v, vec![0, 1, 2, 3, 4, 5]);
+
+        let mut buffer = [0usize, 1, 2, 3];
+        {
+            let t: TensorMut<usize> = asarray((buffer.as_mut_slice(), &DeviceCpu::default()));
+            let it = t.iter_mut();
+            it.for_each(|x| *x += 1);
+        }
+        assert_eq!(buffer, [1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn test_axes_iter_correctness() {
+        let t = arange(6).into_shape([2, 3]);
+        let rows: Vec<Vec<_>> = t.view().axes_iter(0).map(|v| v.iter().cloned().collect()).collect();
+        #[cfg(not(feature = "col_major"))]
+        {
+            assert_eq!(rows, vec![vec![0, 1, 2], vec![3, 4, 5]]);
+        }
+        #[cfg(feature = "col_major")]
+        {
+            // column-major storage: t[i, j] = arange[i + 2 * j]
+            assert_eq!(rows, vec![vec![0, 2, 4], vec![1, 3, 5]]);
+        }
+    }
+
+    #[test]
     fn test_iter() {
         let a = arange(6).into_shape([3, 2]);
-        let iter = a.iter();
+        let iter = a.view().iter();
         let vec = iter.collect::<Vec<_>>();
         assert_eq!(vec, vec![&0, &1, &2, &3, &4, &5]);
 
+        // one-liner over a view temporary: sound, borrows `a` through the
+        // view's inner lifetime
         let iter_t = a.t().iter();
         let vec_t = iter_t.collect::<Vec<_>>();
         #[cfg(not(feature = "col_major"))]
@@ -510,7 +628,7 @@ mod tests_serial {
     #[test]
     fn test_mut_iter() {
         let mut a = arange(6usize).into_shape([3, 2]);
-        let iter = a.iter_mut();
+        let iter = a.view_mut().iter_mut();
         iter.for_each(|x| *x = 0);
         let a = a.reshape(-1).to_vec();
         assert_eq!(a, vec![0, 0, 0, 0, 0, 0]);
@@ -519,7 +637,7 @@ mod tests_serial {
     #[test]
     fn test_indexed_c_iter() {
         let a = arange(6).into_layout([3, 2].c());
-        let iter = a.indexed_iter_with_order(TensorIterOrder::C);
+        let iter = a.view().indexed_iter_with_order(TensorIterOrder::C);
         let vec = iter.collect::<Vec<_>>();
         #[cfg(not(feature = "col_major"))]
         assert_eq!(vec, vec![([0, 0], &0), ([0, 1], &1), ([1, 0], &2), ([1, 1], &3), ([2, 0], &4), ([2, 1], &5)]);
@@ -544,7 +662,7 @@ mod tests_parallel {
     #[test]
     fn test_iter() {
         let a = arange(16384).into_shape([128, 128]);
-        let iter = a.iter().into_par_iter();
+        let iter = a.view().iter().into_par_iter();
         let vec = iter.collect::<Vec<_>>();
         assert_eq!(vec[..6], vec![&0, &1, &2, &3, &4, &5]);
 
@@ -561,7 +679,7 @@ mod tests_parallel {
         let mut a = arange(16384).into_shape([128, 128]);
         let b = &a + 1;
 
-        let iter = a.iter_mut().into_par_iter();
+        let iter = a.view_mut().iter_mut().into_par_iter();
         iter.for_each(|x| *x += 1);
 
         assert_eq!(a.reshape(-1).to_vec(), b.reshape(-1).to_vec());

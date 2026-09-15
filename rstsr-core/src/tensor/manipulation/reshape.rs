@@ -131,6 +131,8 @@ where
             // shape does not need to be changed
             let (storage, _) = tensor.into_raw_parts();
             let layout = layout_new.into_dim::<IxD>()?;
+            // SAFETY: `layout_reshapeable` verified the new layout visits the same elements
+            // as the validated input layout.
             return unsafe { Ok(TensorBase::new_unchecked(storage, layout).into_cow()) };
         }
     }
@@ -160,7 +162,11 @@ where
         device.set_default_order(order);
         device.assign_arbitary_uninit(storage_new.raw_mut(), &layout_new, storage.raw(), &layout)?;
     }
+    // SAFETY: `assign_arbitary_uninit` above filled the fresh storage over the
+    // contiguous `layout_new` completely.
     let storage_new = unsafe { B::assume_init_impl(storage_new)? };
+    // SAFETY: fresh contiguous storage, fully written above; layout and storage
+    // match by construction.
     return unsafe { Ok(TensorBase::new_unchecked(storage_new, layout_new).into_cow()) };
 }
 
@@ -950,11 +956,11 @@ where
 /// # device.set_default_order(ColMajor);
 /// let a = rt::tensor_from_nested!([[0, 1, 2], [3, 4, 5]], &device);
 /// # let b = a.reshape([3, 2]);
-/// // note iteration order of associated method `iter` depends on `device.default_order()`
+/// // note iteration order of the view method `iter` depends on `device.default_order()`
 ///
 /// // let b = a.reshape(... SOME SHAPE ...);
-/// let a_vec = a.iter().collect::<Vec<_>>();
-/// let b_vec = b.iter().collect::<Vec<_>>();
+/// let a_vec = a.view().iter().collect::<Vec<_>>();
+/// let b_vec = b.view().iter().collect::<Vec<_>>();
 /// assert_eq!(a_vec, b_vec); // iterated sequence is the same
 /// ```
 ///
@@ -979,10 +985,10 @@ where
 /// //  [ 2 3]
 /// //  [ 4 5]]
 ///
-/// let a_vec = a.iter().cloned().collect::<Vec<_>>();
+/// let a_vec = a.view().iter().cloned().collect::<Vec<_>>();
 /// println!("{a_vec:?}");
 /// // [0, 1, 2, 3, 4, 5]
-/// let b_vec = b.iter().cloned().collect::<Vec<_>>();
+/// let b_vec = b.view().iter().cloned().collect::<Vec<_>>();
 /// println!("{b_vec:?}");
 /// // [0, 1, 2, 3, 4, 5]
 /// ```
@@ -1009,10 +1015,10 @@ where
 /// //  [ 3 2]
 /// //  [ 1 5]]
 ///
-/// let a_vec = a.iter().cloned().collect::<Vec<_>>();
+/// let a_vec = a.view().iter().cloned().collect::<Vec<_>>();
 /// println!("{a_vec:?}");
 /// // [0, 3, 1, 4, 2, 5]
-/// let b_vec = b.iter().cloned().collect::<Vec<_>>();
+/// let b_vec = b.view().iter().cloned().collect::<Vec<_>>();
 /// println!("{b_vec:?}");
 /// // [0, 3, 1, 4, 2, 5]
 /// ```
