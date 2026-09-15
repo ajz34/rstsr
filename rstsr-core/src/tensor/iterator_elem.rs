@@ -589,7 +589,15 @@ mod tests_serial {
     fn test_axes_iter_correctness() {
         let t = arange(6).into_shape([2, 3]);
         let rows: Vec<Vec<_>> = t.view().axes_iter(0).map(|v| v.iter().cloned().collect()).collect();
-        assert_eq!(rows, vec![vec![0, 1, 2], vec![3, 4, 5]]);
+        #[cfg(not(feature = "col_major"))]
+        {
+            assert_eq!(rows, vec![vec![0, 1, 2], vec![3, 4, 5]]);
+        }
+        #[cfg(feature = "col_major")]
+        {
+            // column-major storage: t[i, j] = arange[i + 2 * j]
+            assert_eq!(rows, vec![vec![0, 2, 4], vec![1, 3, 5]]);
+        }
     }
 
     #[test]
