@@ -436,14 +436,9 @@ where
 ///
 /// `Min`/`Max` follow the original rstsr fold semantics: NaN never wins an
 /// update, so a NaN at the first scanned position poisons the result and an
-/// all-NaN input yields 0. This deliberately DIVERGES from NumPy
-/// `np.argmin`/`np.argmax` (which return the first NaN at any position):
-/// making NaN win requires an unordered-aware compare per element
-/// (`!(x <= best)` needs a second, parity, flag check) or an extra scan
-/// pass, either of which de-vectorizes or doubles the cost of this
-/// auto-vectorized kernel (measured +55…+100% on small compute-bound
-/// inputs, +5…+18% on memory-bound ones). NumPy-style behavior remains
-/// available through [`ArgCmp::NanMin`]/[`ArgCmp::NanMax`]
+/// all-NaN input yields 0. This NaN handling is not a stable contract and
+/// may change toward NumPy conformance in a future version. NaN-skipping
+/// reductions are available now through [`ArgCmp::NanMin`]/[`ArgCmp::NanMax`]
 /// (`np.nanargmin`/`np.nanargmax` semantics: NaN elements are skipped, an
 /// all-NaN slice raises `InvalidValue`, "All-NaN slice encountered"), which
 /// shares the same fast kernel at no measurable cost on NaN-free input.
@@ -482,7 +477,6 @@ pub const ARG_ALL_NAN_MSG: &str = "All-NaN slice encountered";
 /// `reduce_*_arg_*` implementation).
 pub(crate) const FOLD_INVALID_MSG: &str = "reduce_arg seems not returning a valid value.";
 
-/// Block size of the NaN pre-scan for the `Min`/`Max` policies: small enough
 /// Contiguous argmin/argmax-family scan; returns the winning flat index by
 /// [`ArgCmp`] policy.
 ///
@@ -493,8 +487,7 @@ pub(crate) const FOLD_INVALID_MSG: &str = "reduce_arg seems not returning a vali
 /// - `Min`/`Max`: the first element seeds the accumulator unconditionally; only a strictly smaller
 ///   (min) / larger (max) value replaces it; ties keep the smaller index; NaN never wins an update,
 ///   so a NaN at the first scanned position poisons the result to that position's index and an
-///   all-NaN input yields 0. Note: this DIVERGES from NumPy `np.argmin`/ `np.argmax` (first NaN at
-///   any position wins) — see [`ArgCmp`].
+///   all-NaN input yields 0; this NaN handling is not a stable contract — see [`ArgCmp`].
 /// - `NanMin`/`NanMax` (NumPy `np.nanargmin`/`np.nanargmax`): NaN elements never enter the
 ///   accumulators; the seed is the first non-NaN element; an all-NaN input raises `InvalidValue`
 ///   ([`ARG_ALL_NAN_MSG`]).

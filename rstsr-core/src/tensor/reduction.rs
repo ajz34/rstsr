@@ -30,14 +30,11 @@
 //! arrangement ([`TensorIterOrder::K`]) regardless of the device default
 //! order. The arg* functions are order-independent: ties resolve to the first
 //! occurrence in row-major order, and the all-element forms return a
-//! row-major flat index even on a [`ColMajor`] device. The `argmin`/`argmax`
-//! families skip mid-stream NaNs (a NaN never wins an update; a NaN at the
-//! first scanned position yields that position's index, and an all-NaN input
-//! yields 0) — this diverges from NumPy's argmax/argmin, where the first NaN
-//! at any position wins. The `nanargmin`/`nanargmax` families follow NumPy's
-//! `nanarg*`: NaN elements are skipped wherever they appear, and an all-NaN
-//! input raises `InvalidValue` ("All-NaN slice encountered"). See
-//! [`order_semantics`](crate::order_semantics).
+//! row-major flat index even on a [`ColMajor`] device. The
+//! `nanargmin`/`nanargmax` families follow NumPy's `nanarg*`: NaN elements
+//! are skipped wherever they appear, and an all-NaN input raises
+//! `InvalidValue` ("All-NaN slice encountered"); use these for inputs that
+//! may contain NaN. See [`order_semantics`](crate::order_semantics).
 //!
 //! # Examples
 //!
