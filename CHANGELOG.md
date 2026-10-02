@@ -1,5 +1,144 @@
 # Changelog
 
+## v0.9.0 -- 2026-10-02
+
+v0.9 will mark as the final version of full human-driven. We will be more aggressive in
+leveraging AI-assisted development in future versions.
+
+API breaking changes
+
+- Element/axes iteration is now view-only: `iter` / `indexed_iter` / `axes_iter` /
+  `indexed_axes_iter` are methods of `TensorView` (iterators tied to the view's inner
+  data lifetime), and `iter_mut` / `indexed_iter_mut` / `axes_iter_mut` /
+  `indexed_axes_iter_mut` are consuming methods of `TensorMut`. Owned/arc/cow tensors
+  must call `.view()` / `.view_mut()` first; iterating an owned temporary is a compile
+  error. This removes an unsound lifetime transmute in `Tensor::iter` that could
+  reference freed data (use-after-free UB). (RESTGroup/rstsr#103)
+- `meshgrid` return types now split by input ownership: reference inputs
+  (`Vec<&TensorAny>`, arrays of references) return `Vec<TensorCow>`, where `copy = false`
+  yields true NumPy-style broadcast views over the inputs' memory (previously owned
+  copies were returned on all paths); by-value overloads now take concrete `Tensor`
+  inputs (the previous generic by-value form also accepted views inside the `Vec`; use
+  the reference forms instead). (RESTGroup/rstsr#99)
+
+New features
+
+- `rt::nanargmin` / `rt::nanargmax` (with `_f`, `_all`, `_axes` variants and `Tensor`
+  methods) following NumPy `nanarg*` semantics: NaN elements are skipped wherever they
+  appear, and an all-NaN slice raises `InvalidValue`; available on `DeviceCpuSerial`
+  and rayon devices, with new device traits `OpNanArgMinAPI` / `OpNanArgMaxAPI`.
+  (RESTGroup/rstsr#100)
+- `broadcast_arrays` with reference-input overloads returning stride-0 broadcast views
+  (no copy), as in NumPy; prelude-exported via `BroadcastArraysAPI`. (RESTGroup/rstsr#99)
+- New storage accessors with documented validity contracts:
+  `DataRef::try_as_true_ref` / `as_slice_ref`, `DataMut::try_into_true_mut` /
+  `into_slice_mut`. (RESTGroup/rstsr#103)
+
+Enhancement
+
+- Performance: 8-lane contiguous fast path for `argmin`/`argmax` (serial and rayon),
+  about 50x on large contiguous f64 inputs; the rayon variant combines chunk results
+  deterministically, fixing a pairing-order-dependent wrong index. (RESTGroup/rstsr#100)
+- Performance: blocked (64x64 tiled) 2-D iteration fast path for strided elementwise
+  kernels (`op_mutc_refa_refb_func`, `op_muta_refb_func`, serial and rayon), with
+  negative strides and non-zero offsets supported; strided `a + b^T` at 2048^2 is
+  about 3x faster. (RESTGroup/rstsr#101)
+- Performance: 2-D transpose-pattern assignments (equal-shape `a.t()`-pattern pairs,
+  fast strides exactly +1) are routed through cache-friendly blocked orderchange
+  kernels in `assign`/`assign_arbitary` (all promote/uninit/plain families, serial and
+  rayon). (RESTGroup/rstsr#102)
+- `Layout::check_strides` no longer allocates in the common case and raises
+  `InvalidLayout` on span overflow instead of wrapping in release mode.
+  (RESTGroup/rstsr#105)
+- The `uninitialized_vec` allocation family now has a written contract
+  (`alloc_vec_contract.md`, rustdoc-included on all three allocation functions).
+  (RESTGroup/rstsr#105)
+- Wholesale API documentation retrofit of rstsr-core: every docstring example is
+  verified as rustdoc doctests (now CI-gated) with `doc_draft` twin tests asserting
+  captured printed output. (RESTGroup/rstsr#99)
+
+Behavior change
+
+- Writes through broadcast (stride-0) layouts are now rejected on every write path
+  (in-place assign family, `mapi` family, matmul `*_with_output` drivers,
+  `op_with_func` drivers, `vecdot_from_f`, and the `iter_mut`/`axes_iter_mut`
+  constructors). Previously a broadcast output under rayon handed overlapping offsets
+  to different threads (data race), and the serial path silently aliased writes.
+  Constructing and reading a broadcast `TensorMut` stays legal; unary in-place ops on
+  owned broadcasted tensors fall back to producing a fresh output.
+  (RESTGroup/rstsr#105)
+- `to_contig` decides view-vs-copy by NumPy-style contiguity flags (`c_contig()` /
+  `f_contig()`) instead of exact layout equality; padded-singleton contiguous tensors
+  (e.g. shape `[3, 1]`, stride `[1, 3]`) are no longer copied. (RESTGroup/rstsr#99)
+
+API breaking changes (user should not feel that)
+
+- `Send`/`Sync` bounds of the storage wrappers `DataRef`/`DataCow`/`DataArc`/
+  `DataReference` tightened: a wrapper that can expose a shared reference is
+  `Send`/`Sync` only when `C: Send + Sync` (previously `DataRef<Cell<i32>>` could be
+  sent across threads). `IntoParallelIterator` for the axes parallel iterators
+  additionally requires `B::Raw: Sync`. (RESTGroup/rstsr#104)
+- `DeviceMatMulAPI` gains the required method `matmul_uninit` (write-only
+  `c = alpha * a @ b` into `MaybeUninit` storage), implemented by all in-repo devices.
+  (RESTGroup/rstsr#105)
+- `DimShapeAPI::unravel_index_f`/`unravel_index_c` and `Layout::index_uncheck` are no
+  longer `unsafe`; `ChangeableDefault::change_default` is now a safe fn (defaults
+  backed by `AtomicU8`); faer owned-`Mat` `into_rstsr` gained a `T: Clone` bound (it
+  now copies; see Bug Fix). `IntoRSTSR` is exported via the prelude `rstsr_traits`.
+  (RESTGroup/rstsr#105)
+
+Bug Fix
+
+- Fix heap out-of-bounds in `rt::full((layout, fill_value))` when the user-supplied
+  `Layout` has non-zero offset or negative strides; allocation now uses
+  `bounds_index()`, exactly like `empty`/`zeros`/`ones`/`uninit`. (RESTGroup/rstsr#104)
+- Fix allocation-size overflow in `aligned_uninitialized_vec` (`aligned_alloc` feature,
+  rstsr-common): the byte count is now `checked_mul`'d and raises `RuntimeError` on
+  overflow. (RESTGroup/rstsr#104)
+- Fix pointer-provenance UB in parallel kernels: the write-through
+  `c.as_ptr() as *mut` pattern is replaced by hoisted `AtomicPtr` at all rstsr-
+  native-impl rayon kernel sites and the rstsr-sci-traits cdist rayon kernels; the
+  batched-broadcast gemm parallel-outer branch and syrk write-back now derive
+  per-task pointers with unique provenance. (RESTGroup/rstsr#105)
+- Fix an unsound allocation re-home in faer owned-`Mat` `into_rstsr`
+  (`mem::forget` + `Vec::from_raw_parts` mismatched the dealloc layout on numeric
+  conversion); it now copies column-wise, and the zero-copy route is
+  `mat.as_ref().into_rstsr()` (a `TensorView`). (RESTGroup/rstsr#105)
+- Fix a data race on the process-wide `TensorIterOrder` default (was a `static mut`
+  read by safe code on effectively every tensor operation). (RESTGroup/rstsr#105)
+- Fix `axes_iter`/`axes_iter_mut` (and indexed variants) panicking on an empty axes
+  list; `axes_iter(())` now yields a single whole-tensor view, matching the NumPy
+  `ndindex()` convention. (RESTGroup/rstsr#105)
+- Fix naive matmul kernels violating the `beta = 0` non-read convention: a non-finite
+  value in `c` could propagate through `0 * c`. (RESTGroup/rstsr#105)
+- Fix `diag`/`concatenate` dropping uninitialized memory as `T` for allocatable
+  element types; both now use `uninit_impl` + `assign_uninit` + `assume_init_impl`.
+  (RESTGroup/rstsr#105)
+- Fix GEMM/SYHEMM/TRSM wrappers in rstsr-blas-traits passing allocation-base pointers
+  (ignoring `layout.offset()`) and hard-coded `ldc`/`ldb = m`: for f-prefer views with
+  non-zero offset or padded leading dimension, operands were read from a wrong window
+  and outputs written at the wrong stride (silently wrong results plus writes into
+  parent elements outside the view). (RESTGroup/rstsr#106)
+- Fix `driver_gesvd` order detection in rstsr-blas-traits: an inverted condition took
+  the col-major driver path for row-major input and vice versa. (RESTGroup/rstsr#106)
+- Fix GESVD/GESDD on empty matrices (`min(m, n) == 0`): both now return LAPACK-shaped
+  zero-filled factors directly, and `superb` is sized via `saturating_sub` (was
+  `usize` underflow). (RESTGroup/rstsr#106)
+- Fix `getrf` allocating `ipiv` with `n` entries (LAPACK contract is `min(m, n)`);
+  `getri` now rejects a short `ipiv` instead of reading out of bounds.
+  (RESTGroup/rstsr#106)
+- Fix ColMajor `eye` returning shape `(n_cols, n_rows)`; the layout is now
+  `[n_rows, n_cols].f()`, identical logical content under both orders.
+  (RESTGroup/rstsr#99)
+
+Dev infrastructure
+
+- Update agent-workflow references to the shared rstsr-agents workflow; NumPy tracking
+  headers are machine-independent (checkout location recorded per-developer in
+  `AGENTS.local.md`). (RESTGroup/rstsr#98)
+- CI: new doctest job for rstsr-core (`cargo test -p rstsr-core --doc --release`).
+  (RESTGroup/rstsr#99)
+
 ## v0.8.0 -- 2026-09-01
 
 Behavior change
