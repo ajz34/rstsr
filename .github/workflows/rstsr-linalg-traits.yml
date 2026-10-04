@@ -3,7 +3,7 @@ name: rstsr-lianlg-traits tests
 on:
   push:
     branches:
-    - master
+    - main
   pull_request:
 
 jobs:
