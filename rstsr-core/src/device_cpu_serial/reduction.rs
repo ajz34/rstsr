@@ -759,3 +759,141 @@ where
         unimplemented!("This function (`allclose_axes`) is not planned to be implemented yet.");
     }
 }
+
+impl<T, TS, TO, D> OpReduceCustomAPI<T, TS, TO, D> for DeviceCpuSerial
+where
+    T: Clone,
+    TO: Clone,
+    D: DimAPI,
+{
+    fn reduce_all_custom<FI, FF, FC, FO>(
+        &self,
+        a: &Vec<T>,
+        la: &Layout<D>,
+        f_init: FI,
+        f: FF,
+        f_sum: FC,
+        f_out: FO,
+    ) -> Result<TO>
+    where
+        TS: Clone,
+        FI: Fn() -> TS + Send + Sync,
+        FF: Fn(TS, T) -> TS + Send + Sync,
+        FC: Fn(TS, TS) -> TS + Send + Sync,
+        FO: Fn(TS) -> TO + Send + Sync,
+    {
+        reduce_all_cpu_serial(a, la, f_init, f, f_sum, f_out)
+    }
+
+    fn reduce_axes_custom<FI, FF, FC, FO>(
+        &self,
+        a: &Vec<T>,
+        la: &Layout<D>,
+        axes: &[isize],
+        f_init: FI,
+        f: FF,
+        f_sum: FC,
+        f_out: FO,
+    ) -> Result<(Storage<DataOwned<Vec<TO>>, TO, Self>, Layout<IxD>)>
+    where
+        TS: Clone,
+        TO: Clone,
+        FI: Fn() -> TS + Send + Sync,
+        FF: Fn(TS, T) -> TS + Send + Sync,
+        FC: Fn(TS, TS) -> TS + Send + Sync,
+        FO: Fn(TS) -> TO + Send + Sync,
+    {
+        let (out, layout_out) = reduce_axes_cpu_serial(a, &la.to_dim()?, axes, f_init, f, f_sum, f_out)?;
+        Ok((Storage::new(out.into(), self.clone()), layout_out))
+    }
+}
+
+impl<T, D> OpCumSumAPI<T, D> for DeviceCpuSerial
+where
+    T: Clone + Zero + Add<Output = T>,
+    D: DimAPI,
+{
+    type TOut = T;
+
+    fn cumulative_sum(
+        &self,
+        a: &Vec<T>,
+        la: &Layout<D>,
+        axis: isize,
+        include_initial: bool,
+    ) -> Result<(Storage<DataOwned<Vec<T>>, T, Self>, Layout<IxD>)> {
+        let f_init = T::zero;
+        let f = |acc, x| acc + x;
+        let f_out = |acc| acc;
+
+        let (out, layout_out) = cumulative_cpu_serial(a, &la.to_dim()?, axis, include_initial, f_init, f, f_out)?;
+        Ok((Storage::new(out.into(), self.clone()), layout_out))
+    }
+}
+
+impl<T, D> OpCumProdAPI<T, D> for DeviceCpuSerial
+where
+    T: Clone + One + Mul<Output = T>,
+    D: DimAPI,
+{
+    type TOut = T;
+
+    fn cumulative_prod(
+        &self,
+        a: &Vec<T>,
+        la: &Layout<D>,
+        axis: isize,
+        include_initial: bool,
+    ) -> Result<(Storage<DataOwned<Vec<T>>, T, Self>, Layout<IxD>)> {
+        let f_init = T::one;
+        let f = |acc, x| acc * x;
+        let f_out = |acc| acc;
+
+        let (out, layout_out) = cumulative_cpu_serial(a, &la.to_dim()?, axis, include_initial, f_init, f, f_out)?;
+        Ok((Storage::new(out.into(), self.clone()), layout_out))
+    }
+}
+
+impl<T, TOut, D> OpCumSumDtypeAPI<T, TOut, D> for DeviceCpuSerial
+where
+    T: Clone + DTypeCastAPI<TOut>,
+    TOut: Clone + Zero + Add<Output = TOut>,
+    D: DimAPI,
+{
+    fn cumulative_sum_dtype(
+        &self,
+        a: &Vec<T>,
+        la: &Layout<D>,
+        axis: isize,
+        include_initial: bool,
+    ) -> Result<(Storage<DataOwned<Vec<TOut>>, TOut, Self>, Layout<IxD>)> {
+        let f_init = TOut::zero;
+        let f = |acc, x: T| acc + x.into_cast();
+        let f_out = |acc| acc;
+
+        let (out, layout_out) = cumulative_cpu_serial(a, &la.to_dim()?, axis, include_initial, f_init, f, f_out)?;
+        Ok((Storage::new(out.into(), self.clone()), layout_out))
+    }
+}
+
+impl<T, TOut, D> OpCumProdDtypeAPI<T, TOut, D> for DeviceCpuSerial
+where
+    T: Clone + DTypeCastAPI<TOut>,
+    TOut: Clone + One + Mul<Output = TOut>,
+    D: DimAPI,
+{
+    fn cumulative_prod_dtype(
+        &self,
+        a: &Vec<T>,
+        la: &Layout<D>,
+        axis: isize,
+        include_initial: bool,
+    ) -> Result<(Storage<DataOwned<Vec<TOut>>, TOut, Self>, Layout<IxD>)> {
+        let f_init = TOut::one;
+        let f = |acc, x: T| acc * x.into_cast();
+        let f_out = |acc| acc;
+
+        let (out, layout_out) = cumulative_cpu_serial(a, &la.to_dim()?, axis, include_initial, f_init, f, f_out)?;
+        Ok((Storage::new(out.into(), self.clone()), layout_out))
+    }
+}

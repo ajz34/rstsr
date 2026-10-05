@@ -17,6 +17,18 @@
 //!   (anti-overflow semantics of array-api's `dtype=`), with no cast copy of the input;
 //! - fallible `_f` versions of all of the above.
 //!
+//! The expert-level [`reduce_all`] / [`reduce_axes`] / [`reduce_with_args`]
+//! functions expose the underlying fold machinery (init/fold/combine/finalize
+//! closures, generic accumulator and output types) for custom user
+//! reductions.
+//!
+//! The cumulative families ([`cumulative_sum`], [`cumulative_prod`]) are
+//! scans, not reductions: each output cell folds the elements *before* it
+//! along one axis, so the output keeps the input's shape (one larger along
+//! the scan axis with `include_initial`). [`CumulativeArgs`] groups the scan
+//! arguments, and `*_with_dtype` variants accumulate in an explicit output
+//! dtype.
+//!
 //! The arg* families (`argmin`, `argmax`, and their `unraveled_` variants from
 //! the `trait_reduction_arg!` macro) return element indices instead of values:
 //! the all-element forms return the flat (linear) index, and the `_axes`
@@ -32,9 +44,9 @@
 //!
 //! The note above applies to the arg* families and `_axes` result layouts
 //! only: value aggregations (`sum`, `mean`, `max`, ...) produce the same
-//! values under both orders, and `_axes` outputs keep the input's axis
-//! arrangement ([`TensorIterOrder::K`]) regardless of the device default
-//! order. The arg* functions are order-independent: ties resolve to the first
+//! values under both orders, and `_axes` / cumulative outputs keep the
+//! input's axis arrangement ([`TensorIterOrder::K`]) regardless of the
+//! device default order. The arg* functions are order-independent: ties resolve to the first
 //! occurrence in row-major order, and the all-element forms return a
 //! row-major flat index even on a [`ColMajor`] device. The
 //! `nanargmin`/`nanargmax` families follow NumPy's `nanarg*`: NaN elements
@@ -366,6 +378,116 @@ impl<const N: usize> From<([isize; N], bool)> for VarArgs {
         Self { axes: AxesIndex::Vec(axes.to_vec()), keepdims, correction: None }
     }
 }
+
+/* #endregion */
+
+/* #region cumulative args */
+
+/// Cumulative (scan) arguments: `axis` and `include_initial`.
+///
+/// Default (`CumulativeArgs::default()` or `()`): scan along the only axis of
+/// a **1-D** input (`axis = None`), without the initial value. `axis = None`
+/// is only valid for 1-D input; for anything else `axis` must be given, and
+/// zero-dimensional input is rejected.
+///
+/// # Parameters
+///
+/// - `axis`: the single axis to scan along; negative values count from the back. Unlike NumPy's
+///   `axis` keyword this is a struct field grouped with `include_initial`.
+/// - `include_initial`: if `true`, the initial value (additive identity `0` for [`cumulative_sum`],
+///   multiplicative identity `1` for [`cumulative_prod`]) is prepended along the scan axis, so the
+///   result size along that axis is `M + 1` instead of `M`.
+///
+/// # Notes of API accordance
+///
+/// - array-api: `cumulative_sum(x, /, *, axis=None, dtype=None, include_initial=False)` spells both
+///   as keyword arguments; RSTSR groups them into this struct (dtype selection is the separate
+///   `*_with_dtype` family).
+///
+/// # Examples
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let a = rt::tensor_from_nested!([1, 2, 3], &device);
+/// // default: axis = None (1-D only), include_initial = false
+/// let s = rt::cumulative_sum(&a, ());
+/// assert_eq!(s.to_vec(), vec![1, 3, 6]);
+/// // prepend the initial value 0
+/// let s = rt::cumulative_sum(&a, true);
+/// assert_eq!(s.to_vec(), vec![0, 1, 3, 6]);
+/// // explicit axis on a 2-D input
+/// let b = rt::tensor_from_nested!([[1, 2, 3], [4, 5, 6]], &device);
+/// let s = rt::cumulative_sum(&b, (1, true));
+/// assert_eq!(s.shape().to_vec(), vec![2, 4]);
+/// assert_eq!(s[[1, 3]], 15);
+/// ```
+// `Default` is derived (unlike [`ReduceArgs`]/[`VarArgs`]): the all-`None`/`false`
+// default here coincides with the derived one.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct CumulativeArgs {
+    pub axis: Option<isize>,
+    pub include_initial: bool,
+}
+
+impl From<()> for CumulativeArgs {
+    fn from(_: ()) -> Self {
+        Self::default()
+    }
+}
+
+/// `include_initial` shorthand: `cumulative_sum(&a, true)` prepends the initial value.
+impl From<bool> for CumulativeArgs {
+    fn from(include_initial: bool) -> Self {
+        Self { axis: None, include_initial }
+    }
+}
+
+impl From<isize> for CumulativeArgs {
+    fn from(axis: isize) -> Self {
+        Self { axis: Some(axis), include_initial: false }
+    }
+}
+
+impl From<Option<isize>> for CumulativeArgs {
+    fn from(axis: Option<isize>) -> Self {
+        Self { axis, include_initial: false }
+    }
+}
+
+impl From<(isize, bool)> for CumulativeArgs {
+    fn from((axis, include_initial): (isize, bool)) -> Self {
+        Self { axis: Some(axis), include_initial }
+    }
+}
+
+impl From<(Option<isize>, bool)> for CumulativeArgs {
+    fn from((axis, include_initial): (Option<isize>, bool)) -> Self {
+        Self { axis, include_initial }
+    }
+}
+
+/// `as isize` (not TryFrom): `From` is infallible by convention, so an
+/// out-of-range value must not panic here. Widened/negative values are
+/// rejected later by the axis validation.
+macro_rules! impl_cumulative_args_from_int {
+    ($($t: ty),* $(,)?) => {$(
+        impl From<$t> for CumulativeArgs {
+            fn from(axis: $t) -> Self {
+                Self::from(axis as isize)
+            }
+        }
+
+        impl From<($t, bool)> for CumulativeArgs {
+            fn from((axis, include_initial): ($t, bool)) -> Self {
+                Self::from((axis as isize, include_initial))
+            }
+        }
+    )*};
+}
+
+impl_cumulative_args_from_int!(i32, i64, usize);
 
 /* #endregion */
 
@@ -1034,6 +1156,716 @@ where
         B::TOut: Float + FromPrimitive + Send + Sync + 'static,
     {
         std_with_args(self, args)
+    }
+}
+
+/* #endregion */
+
+/* #region custom reduce */
+
+/// Reduces the whole input with user-provided fold closures; fallible version of [`reduce_all`].
+///
+/// See also [`reduce_all`].
+pub fn reduce_all_f<T, TS, TO, B, D, FI, FF, FC, FO>(
+    tensor: impl TensorViewAPI<Type = T, Backend = B, Dim = D>,
+    f_init: FI,
+    f: FF,
+    f_sum: FC,
+    f_out: FO,
+) -> Result<TO>
+where
+    D: DimAPI,
+    TS: Clone,
+    FI: Fn() -> TS + Send + Sync,
+    FF: Fn(TS, T) -> TS + Send + Sync,
+    FC: Fn(TS, TS) -> TS + Send + Sync,
+    FO: Fn(TS) -> TO + Send + Sync,
+    B: OpReduceCustomAPI<T, TS, TO, D>,
+{
+    let tensor = tensor.view();
+    tensor.device().reduce_all_custom(tensor.raw(), tensor.layout(), f_init, f, f_sum, f_out)
+}
+/// Reduces the whole input with user-provided fold closures.
+///
+/// The accumulator type `TS` and output type `TO` are both free; `f_out`
+/// converts the final accumulator into the output. `f_sum` combines two
+/// partial accumulators and must be associative (devices may chunk the input
+/// in any order, e.g. parallel reduction on the rayon device); within one
+/// output cell, elements visit `f` in row-major order.
+///
+/// This function behaves identically under [`RowMajor`] and [`ColMajor`] device default orders.
+///
+/// # Parameters
+///
+/// - `tensor`: [`&TensorAny<R, T, B, D>`](TensorAny), the input.
+/// - `f_init`: the initial accumulator (called once per output cell / chunk).
+/// - `f`: folds one element into the accumulator, e.g. `|acc, x| acc + x`.
+/// - `f_sum`: combines two accumulators (associative).
+/// - `f_out`: converts the finished accumulator into the output.
+///
+/// # Returns
+///
+/// The reduced scalar of type `TO`.
+///
+/// # Examples
+///
+/// The 3-norm of a vector, spelled with the fold machinery (a typical
+/// custom-reduction use case):
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let v = rt::tensor_from_nested!([1.0, 2.0, 2.0], &device);
+/// let p3 = rt::reduce_all(
+///     &v,
+///     || 0.0_f64,
+///     |acc, x| acc + x * x * x,
+///     |acc1, acc2| acc1 + acc2,
+///     |acc| acc.cbrt(),
+/// );
+/// println!("{}", p3);
+/// // 2.571281590658235
+/// # assert_eq!(p3, 2.571281590658235);
+/// ```
+///
+/// # Common reductions expressed via this function
+///
+/// Many built-in reduction families are fold closures underneath; the same
+/// spellings work for `rt::reduce_all` (whole input) and `rt::reduce_axes` /
+/// `rt::reduce_with_args` (per output cell along axes), with the closures
+/// unchanged:
+///
+/// | Built-in | `rt::reduce_all` spelling |
+/// |-|-|
+/// | [`sum`] | `reduce_all(&x, \|\| T::zero(), \|acc, x\| acc + x, \|a, b\| a + b, \|a\| a)` |
+/// | [`prod`] | `reduce_all(&x, \|\| T::one(), \|acc, x\| acc * x, \|a, b\| a * b, \|a\| a)` |
+/// | [`mean`] | tuple accumulator `\|\| (T::zero(), 0.0)`, fold `\|(s, n), x\| (s + x, n + 1.0)`, finalize `\|(s, n)\| s / n` |
+/// | [`var`] | tuple `(sum, sum-of-squares)` accumulator, finalize `\|(s1, s2), n\| s2 / n - (s1 / n) * (s1 / n)` |
+/// | [`max`] | init `\|\| f64::NEG_INFINITY`, fold/combine `\|acc, x\| acc.max(x)` (real floats) |
+/// | [`l2_norm`] | `reduce_all(&x, \|\| 0.0, \|acc, x\| acc + x * x, \|a, b\| a + b, \|a\| a.sqrt())` |
+/// | [`count_nonzero`] | init `\|\| 0_usize`, fold `\|acc, x\| acc + (x != 0) as usize` |
+/// | [`all`] / [`any`] | `reduce_all(&x, \|\| true, \|acc, x\| acc && x, \|a, b\| a && b, \|a\| a)` |
+///
+/// Prefer the built-ins in production code: they document intent, and folds
+/// without an identity element (e.g. `max`, with init `-inf`) return the init
+/// value on empty input where a built-in may raise instead.
+///
+/// # Notes of API accordance
+///
+/// - array-api: no direct counterpart (this is an expert-level extension surface).
+///   `rt::reduce_all`/`rt::reduce_axes` mirror the internal reduction kernels that power the other
+///   reduction families.
+///
+/// # Panics
+///
+/// Panics if the closures' requirements are violated at the device level
+/// (e.g. the rayon pool is poisoned).
+///
+/// For a fallible version, use [`reduce_all_f`].
+///
+/// # See also
+///
+/// ## Related functions in RSTSR
+///
+/// - [`reduce_axes`], [`reduce_with_args`]: axes / keepdims forms
+/// - [`sum`]: the built-in specialization
+///
+/// ## Variants of this function
+///
+/// - [`reduce_axes`], [`reduce_with_args`]
+/// - [`reduce_all_f`]: fallible version
+pub fn reduce_all<T, TS, TO, B, D, FI, FF, FC, FO>(
+    tensor: impl TensorViewAPI<Type = T, Backend = B, Dim = D>,
+    f_init: FI,
+    f: FF,
+    f_sum: FC,
+    f_out: FO,
+) -> TO
+where
+    D: DimAPI,
+    TS: Clone,
+    FI: Fn() -> TS + Send + Sync,
+    FF: Fn(TS, T) -> TS + Send + Sync,
+    FC: Fn(TS, TS) -> TS + Send + Sync,
+    FO: Fn(TS) -> TO + Send + Sync,
+    B: OpReduceCustomAPI<T, TS, TO, D>,
+{
+    reduce_all_f(tensor, f_init, f, f_sum, f_out).rstsr_unwrap()
+}
+/// Reduces along the given axes with user-provided fold closures; fallible version of
+/// [`reduce_axes`].
+///
+/// See also [`reduce_axes`].
+pub fn reduce_axes_f<T, TS, TO, B, D, FI, FF, FC, FO>(
+    tensor: impl TensorViewAPI<Type = T, Backend = B, Dim = D>,
+    axes: impl TryInto<AxesIndex<isize>, Error: Into<Error>>,
+    f_init: FI,
+    f: FF,
+    f_sum: FC,
+    f_out: FO,
+) -> Result<Tensor<TO, B, IxD>>
+where
+    D: DimAPI,
+    TS: Clone,
+    TO: Clone,
+    FI: Fn() -> TS + Send + Sync,
+    FF: Fn(TS, T) -> TS + Send + Sync,
+    FC: Fn(TS, TS) -> TS + Send + Sync,
+    FO: Fn(TS) -> TO + Send + Sync,
+    B: OpReduceCustomAPI<T, TS, TO, D> + DeviceCreationAnyAPI<TO>,
+{
+    let axes = axes.try_into().map_err(Into::into)?;
+    let tensor = tensor.view();
+
+    match axes {
+        AxesIndex::None => {
+            let val = tensor.device().reduce_all_custom(tensor.raw(), tensor.layout(), f_init, f, f_sum, f_out)?;
+            let storage = tensor.device().outof_cpu_vec(vec![val])?;
+            let layout = Layout::new(vec![], vec![], 0)?;
+            Tensor::new_f(storage, layout)
+        },
+        axes => {
+            let (storage, layout) = tensor.device().reduce_axes_custom(
+                tensor.raw(),
+                tensor.layout(),
+                axes.as_ref(),
+                f_init,
+                f,
+                f_sum,
+                f_out,
+            )?;
+            Tensor::new_f(storage, layout)
+        },
+    }
+}
+/// Reduces along the given axes with user-provided fold closures.
+///
+/// See also [`reduce_all`]; `AxesIndex::None` reduces everything into a 0-D
+/// tensor. `f_sum` must be associative (see [`reduce_all`]).
+///
+/// For a fallible version, use [`reduce_axes_f`].
+pub fn reduce_axes<T, TS, TO, B, D, FI, FF, FC, FO>(
+    tensor: impl TensorViewAPI<Type = T, Backend = B, Dim = D>,
+    axes: impl TryInto<AxesIndex<isize>, Error: Into<Error>>,
+    f_init: FI,
+    f: FF,
+    f_sum: FC,
+    f_out: FO,
+) -> Tensor<TO, B, IxD>
+where
+    D: DimAPI,
+    TS: Clone,
+    TO: Clone,
+    FI: Fn() -> TS + Send + Sync,
+    FF: Fn(TS, T) -> TS + Send + Sync,
+    FC: Fn(TS, TS) -> TS + Send + Sync,
+    FO: Fn(TS) -> TO + Send + Sync,
+    B: OpReduceCustomAPI<T, TS, TO, D> + DeviceCreationAnyAPI<TO>,
+{
+    reduce_axes_f(tensor, axes, f_init, f, f_sum, f_out).rstsr_unwrap()
+}
+/// Reduces with user-provided fold closures and [`ReduceArgs`]; fallible version of
+/// [`reduce_with_args`].
+///
+/// See also [`reduce_with_args`].
+pub fn reduce_with_args_f<T, TS, TO, B, D, FI, FF, FC, FO>(
+    tensor: impl TensorViewAPI<Type = T, Backend = B, Dim = D>,
+    args: impl Into<ReduceArgs>,
+    f_init: FI,
+    f: FF,
+    f_sum: FC,
+    f_out: FO,
+) -> Result<Tensor<TO, B, IxD>>
+where
+    D: DimAPI,
+    TS: Clone,
+    TO: Clone,
+    FI: Fn() -> TS + Send + Sync,
+    FF: Fn(TS, T) -> TS + Send + Sync,
+    FC: Fn(TS, TS) -> TS + Send + Sync,
+    FO: Fn(TS) -> TO + Send + Sync,
+    B: OpReduceCustomAPI<T, TS, TO, D> + DeviceCreationAnyAPI<TO>,
+{
+    let ReduceArgs { axes, keepdims } = args.into();
+    let tensor = tensor.view();
+
+    match axes {
+        AxesIndex::None => {
+            let val = tensor.device().reduce_all_custom(tensor.raw(), tensor.layout(), f_init, f, f_sum, f_out)?;
+            let storage = tensor.device().outof_cpu_vec(vec![val])?;
+            let out_layout = reduce_layout_whole(tensor.layout().ndim(), keepdims)?;
+            Tensor::new_f(storage, out_layout)
+        },
+        axes => {
+            let (storage, out_layout) = tensor.device().reduce_axes_custom(
+                tensor.raw(),
+                tensor.layout(),
+                axes.as_ref(),
+                f_init,
+                f,
+                f_sum,
+                f_out,
+            )?;
+            let out_layout = reduce_layout_keepdims(out_layout, &axes, tensor.layout().ndim(), keepdims)?;
+            Tensor::new_f(storage, out_layout)
+        },
+    }
+}
+/// Reduces with user-provided fold closures, [`ReduceArgs`] grouping `axes` and `keepdims`.
+///
+/// See also [`reduce_all`]; the args follow the same conventions as
+/// `sum_with_args` (`()` = whole reduction, `(axes, keepdims)` pairs, ...).
+///
+/// For a fallible version, use [`reduce_with_args_f`].
+pub fn reduce_with_args<T, TS, TO, B, D, FI, FF, FC, FO>(
+    tensor: impl TensorViewAPI<Type = T, Backend = B, Dim = D>,
+    args: impl Into<ReduceArgs>,
+    f_init: FI,
+    f: FF,
+    f_sum: FC,
+    f_out: FO,
+) -> Tensor<TO, B, IxD>
+where
+    D: DimAPI,
+    TS: Clone,
+    TO: Clone,
+    FI: Fn() -> TS + Send + Sync,
+    FF: Fn(TS, T) -> TS + Send + Sync,
+    FC: Fn(TS, TS) -> TS + Send + Sync,
+    FO: Fn(TS) -> TO + Send + Sync,
+    B: OpReduceCustomAPI<T, TS, TO, D> + DeviceCreationAnyAPI<TO>,
+{
+    reduce_with_args_f(tensor, args, f_init, f, f_sum, f_out).rstsr_unwrap()
+}
+
+/* #endregion */
+
+/* #region cumulative */
+
+/// Resolves [`CumulativeArgs`] into a raw `(axis, include_initial)` pair:
+/// rejects 0-D input and `axis = None` on non-1-D input (array-api contract).
+fn prepare_cumulative_args(ndim: usize, args: CumulativeArgs) -> Result<(isize, bool)> {
+    let CumulativeArgs { axis, include_initial } = args;
+    rstsr_assert!(ndim > 0, InvalidValue, "zero-dimensional input is not supported for cumulative functions")?;
+    let axis = match axis {
+        Some(axis) => axis,
+        None if ndim == 1 => -1,
+        None => {
+            rstsr_raise!(InvalidValue, "axis is required for cumulative functions when input is not one-dimensional")?
+        },
+    };
+    Ok((axis, include_initial))
+}
+
+/// Calculates the cumulative sum of elements along an axis; fallible version of
+/// [`cumulative_sum`].
+///
+/// See also [`cumulative_sum`].
+pub fn cumulative_sum_f<T, B, D>(
+    tensor: impl TensorViewAPI<Type = T, Backend = B, Dim = D>,
+    args: impl Into<CumulativeArgs>,
+) -> Result<Tensor<B::TOut, B, IxD>>
+where
+    D: DimAPI,
+    B: OpCumSumAPI<T, D> + DeviceCreationAnyAPI<B::TOut>,
+{
+    let tensor = tensor.view();
+    let (axis, include_initial) = prepare_cumulative_args(tensor.layout().ndim(), args.into())?;
+    let (storage, layout) = tensor.device().cumulative_sum(tensor.raw(), tensor.layout(), axis, include_initial)?;
+    Tensor::new_f(storage, layout)
+}
+/// Calculates the cumulative sum of elements along an axis.
+///
+/// This is a scan, not a reduction: the element at position `k` along the
+/// scan axis folds all elements up to and including `k`
+/// (`out[.., k, ..] = sum(x[.., :k+1, ..])`). The result is a new tensor with
+/// the same shape as the input, except the scan axis has size `M + 1` when
+/// `include_initial` is set (the additive identity `0` prepended).
+///
+/// This function behaves identically under [`RowMajor`] and [`ColMajor`] device default orders.
+///
+/// # Parameters
+///
+/// - `tensor`: [`&TensorAny<R, T, B, D>`](TensorAny), the input.
+/// - `args`: [`CumulativeArgs`] grouping `axis` (the single scan axis; `None` only for 1-D input)
+///   and `include_initial`. Overloads: `()` (default), the axis alone (`rt::cumulative_sum(&x,
+///   0)`), `bool` alone (shorthand for `include_initial`), or an `(axis, include_initial)` pair.
+///
+/// # Returns
+///
+/// A new owned tensor `Tensor<B::TOut, B, IxD>` with `B::TOut = T`; the input is not consumed
+/// and no view of it is kept.
+///
+/// # Examples
+///
+/// For a 1-D input, the default args scan along the only axis:
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let a = rt::tensor_from_nested!([1, 2, 3, 4], &device);
+/// println!("{}", rt::cumulative_sum(&a, ()));
+/// // [ 1 3 6 10]
+/// // include the initial value 0
+/// println!("{}", rt::cumulative_sum(&a, true));
+/// // [ 0 1 3 6 10]
+/// # assert_eq!(format!("{}", rt::cumulative_sum(&a, ())), "[ 1 3 6 10]");
+/// # assert_eq!(format!("{}", rt::cumulative_sum(&a, true)), "[ 0 1 3 6 10]");
+/// ```
+///
+/// For a 2-D input, an explicit axis is required:
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let b = rt::tensor_from_nested!([[1, 2, 3], [4, 5, 6]], &device);
+/// println!("{}", rt::cumulative_sum(&b, 1));
+/// // [[ 1 3 6]
+/// //  [ 4 9 15]]
+/// // accumulate in f64 to avoid overflow of narrow integer dtypes
+/// println!("{}", b.cumulative_sum_with_dtype::<f64>(0));
+/// // [[ 1 2 3]
+/// //  [ 5 7 9]]
+/// # assert_eq!(format!("{}", rt::cumulative_sum(&b, 1)), "[[ 1 3 6]\n [ 4 9 15]]");
+/// # assert_eq!(format!("{}", b.cumulative_sum_with_dtype::<f64>(0)), "[[ 1 2 3]\n [ 5 7 9]]");
+/// ```
+///
+/// # Notes of API accordance
+///
+/// - Array-API: `cumulative_sum(x, /, *, axis=None, dtype=None, include_initial=False)` ([`cumulative_sum`](https://data-apis.org/array-api/2024.12/API_specification/generated/array_api.cumulative_sum.html))
+/// - NumPy: `cumulative_sum(x, /, *, axis=None, dtype=None, out=None, include_initial=False)` ([`numpy.cumulative_sum`](https://numpy.org/doc/stable/reference/generated/numpy.cumulative_sum.html),
+///   NumPy >= 2.1); the legacy spelling is `numpy.cumsum(a, axis=None, dtype=None, out=None)` ([`numpy.cumsum`](https://numpy.org/doc/stable/reference/generated/numpy.cumsum.html))
+/// - RSTSR: `rt::cumulative_sum(&tensor, args)` or `tensor.cumulative_sum(args)`
+///
+/// Please note the following differences:
+///
+/// - Narrow integer dtypes are **not** widened when `args` selects the input dtype: NumPy and
+///   array-api accumulate `int16`/`uint16`/... inputs in the platform default integer (e.g.
+///   `int64`), RSTSR keeps `T`. Use [`cumulative_sum_with_dtype`] (array-api `dtype=`) for
+///   anti-overflow accumulation.
+/// - `numpy.cumsum` flattens an n-D input when `axis=None`; RSTSR raises instead, matching
+///   `numpy.cumulative_sum` and the array-api standard (`axis` is required for ndim > 1).
+/// - There is no `out=` parameter; the result is always a newly allocated tensor.
+///
+/// # Panics
+///
+/// - Panics if the input is zero-dimensional.
+/// - Panics if `args` leaves `axis = None` while the input is not 1-D.
+/// - Panics if `axis` is out of range (`[-ndim, ndim)`).
+///
+/// For a fallible version, use [`cumulative_sum_f`].
+///
+/// # See also
+///
+/// ## Similar function from other crates/libraries
+///
+/// - NumPy: [`numpy.cumulative_sum`](https://numpy.org/doc/stable/reference/generated/numpy.cumulative_sum.html),
+///   [`numpy.cumsum`](https://numpy.org/doc/stable/reference/generated/numpy.cumsum.html)
+/// - Array-API: [`cumulative_sum`](https://data-apis.org/array-api/2024.12/API_specification/generated/array_api.cumulative_sum.html)
+///
+/// ## Related functions in RSTSR
+///
+/// - [`cumulative_prod`]: the multiplicative counterpart
+/// - [`sum`]: reduce the whole axis into one value
+///
+/// ## Variants of this function
+///
+/// - [`cumulative_sum_f`]: fallible version
+/// - [`cumulative_sum_with_dtype`]: explicit output dtype (accumulate in `TOut`)
+/// - Associated methods on `TensorAny`: [`TensorAny::cumulative_sum`],
+///   [`TensorAny::cumulative_sum_f`], [`TensorAny::cumulative_sum_with_dtype`]
+pub fn cumulative_sum<T, B, D>(
+    tensor: impl TensorViewAPI<Type = T, Backend = B, Dim = D>,
+    args: impl Into<CumulativeArgs>,
+) -> Tensor<B::TOut, B, IxD>
+where
+    D: DimAPI,
+    B: OpCumSumAPI<T, D> + DeviceCreationAnyAPI<B::TOut>,
+{
+    cumulative_sum_f(tensor, args).rstsr_unwrap()
+}
+/// Calculates the cumulative product of elements along an axis; fallible version of
+/// [`cumulative_prod`].
+///
+/// See also [`cumulative_prod`].
+pub fn cumulative_prod_f<T, B, D>(
+    tensor: impl TensorViewAPI<Type = T, Backend = B, Dim = D>,
+    args: impl Into<CumulativeArgs>,
+) -> Result<Tensor<B::TOut, B, IxD>>
+where
+    D: DimAPI,
+    B: OpCumProdAPI<T, D> + DeviceCreationAnyAPI<B::TOut>,
+{
+    let tensor = tensor.view();
+    let (axis, include_initial) = prepare_cumulative_args(tensor.layout().ndim(), args.into())?;
+    let (storage, layout) = tensor.device().cumulative_prod(tensor.raw(), tensor.layout(), axis, include_initial)?;
+    Tensor::new_f(storage, layout)
+}
+/// Calculates the cumulative product of elements along an axis.
+///
+/// This is a scan, not a reduction: the element at position `k` along the
+/// scan axis folds all elements up to and including `k`
+/// (`out[.., k, ..] = prod(x[.., :k+1, ..])`). The result is a new tensor with
+/// the same shape as the input, except the scan axis has size `M + 1` when
+/// `include_initial` is set (the multiplicative identity `1` prepended).
+///
+/// This function behaves identically under [`RowMajor`] and [`ColMajor`] device default orders.
+///
+/// # Parameters
+///
+/// - `tensor`: [`&TensorAny<R, T, B, D>`](TensorAny), the input.
+/// - `args`: [`CumulativeArgs`] grouping `axis` (the single scan axis; `None` only for 1-D input)
+///   and `include_initial`. Overloads: `()` (default), the axis alone (`rt::cumulative_prod(&x,
+///   0)`), `bool` alone (shorthand for `include_initial`), or an `(axis, include_initial)` pair.
+///
+/// # Returns
+///
+/// A new owned tensor `Tensor<B::TOut, B, IxD>` with `B::TOut = T`; the input is not consumed
+/// and no view of it is kept.
+///
+/// # Examples
+///
+/// For a 1-D input, the default args scan along the only axis:
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let a = rt::tensor_from_nested!([1, 2, 3, 4], &device);
+/// println!("{}", rt::cumulative_prod(&a, ()));
+/// // [ 1 2 6 24]
+/// // include the initial value 1
+/// println!("{}", rt::cumulative_prod(&a, true));
+/// // [ 1 1 2 6 24]
+/// # assert_eq!(format!("{}", rt::cumulative_prod(&a, ())), "[ 1 2 6 24]");
+/// # assert_eq!(format!("{}", rt::cumulative_prod(&a, true)), "[ 1 1 2 6 24]");
+/// ```
+///
+/// For a 2-D input, an explicit axis is required:
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let b = rt::tensor_from_nested!([[1, 2, 3], [4, 5, 6]], &device);
+/// println!("{}", rt::cumulative_prod(&b, -1));
+/// // [[ 1 2 6]
+/// //  [ 4 20 120]]
+/// // accumulate in f64 to avoid overflow of narrow integer dtypes
+/// println!("{}", b.cumulative_prod_with_dtype::<f64>(0));
+/// // [[ 1 2 3]
+/// //  [ 4 10 18]]
+/// # assert_eq!(format!("{}", rt::cumulative_prod(&b, -1)), "[[ 1 2 6]\n [ 4 20 120]]");
+/// # assert_eq!(format!("{}", b.cumulative_prod_with_dtype::<f64>(0)), "[[ 1 2 3]\n [ 4 10 18]]");
+/// ```
+///
+/// # Notes of API accordance
+///
+/// - Array-API: `cumulative_prod(x, /, *, axis=None, dtype=None, include_initial=False)` ([`cumulative_prod`](https://data-apis.org/array-api/2024.12/API_specification/generated/array_api.cumulative_prod.html))
+/// - NumPy: `cumulative_prod(x, /, *, axis=None, dtype=None, out=None, include_initial=False)` ([`numpy.cumulative_prod`](https://numpy.org/doc/stable/reference/generated/numpy.cumulative_prod.html),
+///   NumPy >= 2.1); the legacy spelling is `numpy.cumprod(a, axis=None, dtype=None, out=None)` ([`numpy.cumprod`](https://numpy.org/doc/stable/reference/generated/numpy.cumprod.html))
+/// - RSTSR: `rt::cumulative_prod(&tensor, args)` or `tensor.cumulative_prod(args)`
+///
+/// Please note the following differences (same as [`cumulative_sum`]):
+///
+/// - Narrow integer dtypes are **not** widened when `args` selects the input dtype: NumPy and
+///   array-api accumulate in the platform default integer, RSTSR keeps `T`. Use
+///   [`cumulative_prod_with_dtype`] (array-api `dtype=`) for anti-overflow accumulation.
+/// - `numpy.cumprod` flattens an n-D input when `axis=None`; RSTSR raises instead, matching
+///   `numpy.cumulative_prod` and the array-api standard (`axis` is required for ndim > 1).
+/// - There is no `out=` parameter; the result is always a newly allocated tensor.
+///
+/// # Panics
+///
+/// - Panics if the input is zero-dimensional.
+/// - Panics if `args` leaves `axis = None` while the input is not 1-D.
+/// - Panics if `axis` is out of range (`[-ndim, ndim)`).
+///
+/// For a fallible version, use [`cumulative_prod_f`].
+///
+/// # See also
+///
+/// ## Similar function from other crates/libraries
+///
+/// - NumPy: [`numpy.cumulative_prod`](https://numpy.org/doc/stable/reference/generated/numpy.cumulative_prod.html),
+///   [`numpy.cumprod`](https://numpy.org/doc/stable/reference/generated/numpy.cumprod.html)
+/// - Array-API: [`cumulative_prod`](https://data-apis.org/array-api/2024.12/API_specification/generated/array_api.cumulative_prod.html)
+///
+/// ## Related functions in RSTSR
+///
+/// - [`cumulative_sum`]: the additive counterpart
+/// - [`prod`]: reduce the whole axis into one value
+///
+/// ## Variants of this function
+///
+/// - [`cumulative_prod_f`]: fallible version
+/// - [`cumulative_prod_with_dtype`]: explicit output dtype (accumulate in `TOut`)
+/// - Associated methods on `TensorAny`: [`TensorAny::cumulative_prod`],
+///   [`TensorAny::cumulative_prod_f`], [`TensorAny::cumulative_prod_with_dtype`]
+pub fn cumulative_prod<T, B, D>(
+    tensor: impl TensorViewAPI<Type = T, Backend = B, Dim = D>,
+    args: impl Into<CumulativeArgs>,
+) -> Tensor<B::TOut, B, IxD>
+where
+    D: DimAPI,
+    B: OpCumProdAPI<T, D> + DeviceCreationAnyAPI<B::TOut>,
+{
+    cumulative_prod_f(tensor, args).rstsr_unwrap()
+}
+
+/// Cumulative sum accumulating in an explicit output dtype; fallible version of
+/// [`cumulative_sum_with_dtype`].
+///
+/// See also [`cumulative_sum_with_dtype`].
+pub fn cumulative_sum_with_dtype_f<T, TOut, B, D>(
+    tensor: impl TensorViewAPI<Type = T, Backend = B, Dim = D>,
+    args: impl Into<CumulativeArgs>,
+) -> Result<Tensor<TOut, B, IxD>>
+where
+    D: DimAPI,
+    T: DTypeCastAPI<TOut>,
+    B: OpCumSumDtypeAPI<T, TOut, D> + DeviceCreationAnyAPI<TOut>,
+{
+    let tensor = tensor.view();
+    let (axis, include_initial) = prepare_cumulative_args(tensor.layout().ndim(), args.into())?;
+    let (storage, layout) =
+        tensor.device().cumulative_sum_dtype(tensor.raw(), tensor.layout(), axis, include_initial)?;
+    Tensor::new_f(storage, layout)
+}
+/// Cumulative sum accumulating in an explicit output dtype `TOut` (array-api
+/// `dtype=` semantics): elements are cast inside the scan, so intermediate
+/// values accumulate in `TOut` without materializing a cast copy of the input.
+///
+/// See also [`cumulative_sum`] for the full behavior; the args follow the same
+/// conventions.
+///
+/// For a fallible version, use [`cumulative_sum_with_dtype_f`].
+pub fn cumulative_sum_with_dtype<T, TOut, B, D>(
+    tensor: impl TensorViewAPI<Type = T, Backend = B, Dim = D>,
+    args: impl Into<CumulativeArgs>,
+) -> Tensor<TOut, B, IxD>
+where
+    D: DimAPI,
+    T: DTypeCastAPI<TOut>,
+    B: OpCumSumDtypeAPI<T, TOut, D> + DeviceCreationAnyAPI<TOut>,
+{
+    cumulative_sum_with_dtype_f(tensor, args).rstsr_unwrap()
+}
+
+/// Cumulative product accumulating in an explicit output dtype; fallible version of
+/// [`cumulative_prod_with_dtype`].
+///
+/// See also [`cumulative_prod_with_dtype`].
+pub fn cumulative_prod_with_dtype_f<T, TOut, B, D>(
+    tensor: impl TensorViewAPI<Type = T, Backend = B, Dim = D>,
+    args: impl Into<CumulativeArgs>,
+) -> Result<Tensor<TOut, B, IxD>>
+where
+    D: DimAPI,
+    T: DTypeCastAPI<TOut>,
+    B: OpCumProdDtypeAPI<T, TOut, D> + DeviceCreationAnyAPI<TOut>,
+{
+    let tensor = tensor.view();
+    let (axis, include_initial) = prepare_cumulative_args(tensor.layout().ndim(), args.into())?;
+    let (storage, layout) =
+        tensor.device().cumulative_prod_dtype(tensor.raw(), tensor.layout(), axis, include_initial)?;
+    Tensor::new_f(storage, layout)
+}
+/// Cumulative product accumulating in an explicit output dtype `TOut`
+/// (array-api `dtype=` semantics): elements are cast inside the scan, so
+/// intermediate values accumulate in `TOut` without materializing a cast copy
+/// of the input.
+///
+/// See also [`cumulative_prod`] for the full behavior; the args follow the
+/// same conventions.
+///
+/// For a fallible version, use [`cumulative_prod_with_dtype_f`].
+pub fn cumulative_prod_with_dtype<T, TOut, B, D>(
+    tensor: impl TensorViewAPI<Type = T, Backend = B, Dim = D>,
+    args: impl Into<CumulativeArgs>,
+) -> Tensor<TOut, B, IxD>
+where
+    D: DimAPI,
+    T: DTypeCastAPI<TOut>,
+    B: OpCumProdDtypeAPI<T, TOut, D> + DeviceCreationAnyAPI<TOut>,
+{
+    cumulative_prod_with_dtype_f(tensor, args).rstsr_unwrap()
+}
+
+impl<R, T, B, D> TensorAny<R, T, B, D>
+where
+    R: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
+    D: DimAPI,
+    B: OpCumSumAPI<T, D>,
+{
+    pub fn cumulative_sum_f(&self, args: impl Into<CumulativeArgs>) -> Result<Tensor<B::TOut, B, IxD>>
+    where
+        B: DeviceCreationAnyAPI<B::TOut>,
+    {
+        cumulative_sum_f(self, args)
+    }
+
+    pub fn cumulative_sum(&self, args: impl Into<CumulativeArgs>) -> Tensor<B::TOut, B, IxD>
+    where
+        B: DeviceCreationAnyAPI<B::TOut>,
+    {
+        cumulative_sum(self, args)
+    }
+
+    pub fn cumulative_sum_with_dtype_f<TOut>(&self, args: impl Into<CumulativeArgs>) -> Result<Tensor<TOut, B, IxD>>
+    where
+        T: DTypeCastAPI<TOut>,
+        B: OpCumSumDtypeAPI<T, TOut, D> + DeviceCreationAnyAPI<TOut>,
+    {
+        cumulative_sum_with_dtype_f(self, args)
+    }
+
+    pub fn cumulative_sum_with_dtype<TOut>(&self, args: impl Into<CumulativeArgs>) -> Tensor<TOut, B, IxD>
+    where
+        T: DTypeCastAPI<TOut>,
+        B: OpCumSumDtypeAPI<T, TOut, D> + DeviceCreationAnyAPI<TOut>,
+    {
+        cumulative_sum_with_dtype(self, args)
+    }
+}
+
+impl<R, T, B, D> TensorAny<R, T, B, D>
+where
+    R: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
+    D: DimAPI,
+    B: OpCumProdAPI<T, D>,
+{
+    pub fn cumulative_prod_f(&self, args: impl Into<CumulativeArgs>) -> Result<Tensor<B::TOut, B, IxD>>
+    where
+        B: DeviceCreationAnyAPI<B::TOut>,
+    {
+        cumulative_prod_f(self, args)
+    }
+
+    pub fn cumulative_prod(&self, args: impl Into<CumulativeArgs>) -> Tensor<B::TOut, B, IxD>
+    where
+        B: DeviceCreationAnyAPI<B::TOut>,
+    {
+        cumulative_prod(self, args)
+    }
+
+    pub fn cumulative_prod_with_dtype_f<TOut>(&self, args: impl Into<CumulativeArgs>) -> Result<Tensor<TOut, B, IxD>>
+    where
+        T: DTypeCastAPI<TOut>,
+        B: OpCumProdDtypeAPI<T, TOut, D> + DeviceCreationAnyAPI<TOut>,
+    {
+        cumulative_prod_with_dtype_f(self, args)
+    }
+
+    pub fn cumulative_prod_with_dtype<TOut>(&self, args: impl Into<CumulativeArgs>) -> Tensor<TOut, B, IxD>
+    where
+        T: DTypeCastAPI<TOut>,
+        B: OpCumProdDtypeAPI<T, TOut, D> + DeviceCreationAnyAPI<TOut>,
+    {
+        cumulative_prod_with_dtype(self, args)
     }
 }
 
@@ -1949,6 +2781,63 @@ mod test {
         let bv: TensorView<i64, DeviceFaer, Vec<usize>> = broadcast_to(&av_dyn, vec![4usize, 3]);
         assert_eq!(bv.sum_axes(1).to_vec(), vec![0i64, 3, 6, 9]);
         assert_eq!(bv.sum_axes([0, 1]).to_scalar(), 18i64);
+    }
+
+    #[test]
+    #[cfg(feature = "faer")]
+    fn test_reduce_custom_faer() {
+        // rayon (DeviceFaer) paths of the custom reduce family
+        let device = DeviceFaer::default();
+        let v: Tensor<f64, DeviceFaer> = asarray((vec![3.0, 4.0], &device));
+        let a: Tensor<f64, DeviceFaer> = asarray((vec![1.0, 2.0, 3.0, 4.0], [2, 2].c(), &device));
+
+        let r = reduce_all(&v, || 0.0_f64, |acc, x| acc + x, |acc1, acc2| acc1 + acc2, |acc| acc);
+        assert_eq!(r, 7.0);
+        let s = reduce_axes(&a, 1, || 0.0_f64, |acc, x| acc + x, |acc1, acc2| acc1 + acc2, |acc| acc);
+        assert_eq!(s.to_vec(), vec![3.0, 7.0]);
+        let any = reduce_with_args(&a, true, || false, |acc, x| acc || x > 2.0, |acc1, acc2| acc1 || acc2, |acc| acc);
+        assert!(any.to_scalar());
+    }
+
+    #[test]
+    #[cfg(feature = "faer")]
+    fn test_cumulative_faer() {
+        // rayon (DeviceFaer) paths of cumulative_sum / cumulative_prod
+        let mut device = DeviceFaer::default();
+        device.set_default_order(RowMajor);
+        let a: Tensor<i32, DeviceFaer> = asarray((vec![1, 2, 3, 4, 5, 6], [2, 3].c(), &device));
+
+        let r = a.cumulative_sum(1);
+        assert_eq!(r[[0, 2]], 6);
+        assert_eq!(r[[1, 2]], 15);
+        let r = cumulative_prod(&a, 0);
+        assert_eq!(r[[0, 1]], 2);
+        assert_eq!(r[[1, 0]], 4);
+        assert_eq!(r[[1, 2]], 18);
+
+        // with_dtype + include_initial through the rayon kernel
+        let r = a.cumulative_sum_with_dtype::<i64>((1, true));
+        assert_eq!(r.shape().to_vec(), vec![2, 4]);
+        assert_eq!(r[[1, 3]], 15);
+        let r = a.cumulative_prod_with_dtype::<f64>((1, true));
+        assert_eq!(r[[1, 3]], 120.0);
+
+        // large input: exercise the parallel (>= PARALLEL_SWITCH) scan-line loop
+        // a = [[0..1023], [1024..2047]]; along axis 0: out[1, j] = 1024 + 2j
+        let big = arange((2048_i64, &device)).into_shape([2, 1024]);
+        let r = big.cumulative_sum(0);
+        assert_eq!(r.shape().to_vec(), vec![2, 1024]);
+        assert_eq!(r[[1, 1023]], 3070);
+        let r = big.cumulative_sum((0, true));
+        assert_eq!(r.shape().to_vec(), vec![3, 1024]);
+        assert_eq!(r[[2, 1023]], 3070);
+        assert_eq!(r[[0, 512]], 0);
+        // scan along the inner (contiguous) axis, parallel lines = 2
+        let r = big.cumulative_sum(1);
+        assert_eq!(r[[1, 1023]], (1024 + 2047) * 1024 / 2);
+        let o: Tensor<f64, DeviceFaer> = ones(([2, 1024], &device));
+        let r = o.cumulative_prod(-1);
+        assert_eq!(r[[0, 1023]], 1.0);
     }
 
     #[test]

@@ -844,3 +844,152 @@ where
         unimplemented!("This function (`allclose_axes`) is not planned to be implemented yet.");
     }
 }
+
+impl<T, TS, TO, D> OpReduceCustomAPI<T, TS, TO, D> for DeviceRayonAutoImpl
+where
+    T: Clone + Send + Sync,
+    TS: Clone + Send + Sync,
+    TO: Clone + Send + Sync,
+    D: DimAPI,
+{
+    fn reduce_all_custom<FI, FF, FC, FO>(
+        &self,
+        a: &Vec<T>,
+        la: &Layout<D>,
+        f_init: FI,
+        f: FF,
+        f_sum: FC,
+        f_out: FO,
+    ) -> Result<TO>
+    where
+        TS: Clone,
+        FI: Fn() -> TS + Send + Sync,
+        FF: Fn(TS, T) -> TS + Send + Sync,
+        FC: Fn(TS, TS) -> TS + Send + Sync,
+        FO: Fn(TS) -> TO + Send + Sync,
+    {
+        let pool = self.get_current_pool();
+        reduce_all_cpu_rayon(a, la, f_init, f, f_sum, f_out, pool)
+    }
+
+    fn reduce_axes_custom<FI, FF, FC, FO>(
+        &self,
+        a: &Vec<T>,
+        la: &Layout<D>,
+        axes: &[isize],
+        f_init: FI,
+        f: FF,
+        f_sum: FC,
+        f_out: FO,
+    ) -> Result<(Storage<DataOwned<Vec<TO>>, TO, Self>, Layout<IxD>)>
+    where
+        TS: Clone,
+        TO: Clone,
+        FI: Fn() -> TS + Send + Sync,
+        FF: Fn(TS, T) -> TS + Send + Sync,
+        FC: Fn(TS, TS) -> TS + Send + Sync,
+        FO: Fn(TS) -> TO + Send + Sync,
+    {
+        let pool = self.get_current_pool();
+        let (out, layout_out) = reduce_axes_cpu_rayon(a, &la.to_dim()?, axes, f_init, f, f_sum, f_out, pool)?;
+        Ok((Storage::new(out.into(), self.clone()), layout_out))
+    }
+}
+
+impl<T, D> OpCumSumAPI<T, D> for DeviceRayonAutoImpl
+where
+    T: Clone + Send + Sync + Zero + Add<Output = T>,
+    D: DimAPI,
+{
+    type TOut = T;
+
+    fn cumulative_sum(
+        &self,
+        a: &Vec<T>,
+        la: &Layout<D>,
+        axis: isize,
+        include_initial: bool,
+    ) -> Result<(Storage<DataOwned<Vec<T>>, T, Self>, Layout<IxD>)> {
+        let pool = self.get_current_pool();
+
+        let f_init = T::zero;
+        let f = |acc, x| acc + x;
+        let f_out = |acc| acc;
+
+        let (out, layout_out) = cumulative_cpu_rayon(a, &la.to_dim()?, axis, include_initial, f_init, f, f_out, pool)?;
+        Ok((Storage::new(out.into(), self.clone()), layout_out))
+    }
+}
+
+impl<T, D> OpCumProdAPI<T, D> for DeviceRayonAutoImpl
+where
+    T: Clone + Send + Sync + One + Mul<Output = T>,
+    D: DimAPI,
+{
+    type TOut = T;
+
+    fn cumulative_prod(
+        &self,
+        a: &Vec<T>,
+        la: &Layout<D>,
+        axis: isize,
+        include_initial: bool,
+    ) -> Result<(Storage<DataOwned<Vec<T>>, T, Self>, Layout<IxD>)> {
+        let pool = self.get_current_pool();
+
+        let f_init = T::one;
+        let f = |acc, x| acc * x;
+        let f_out = |acc| acc;
+
+        let (out, layout_out) = cumulative_cpu_rayon(a, &la.to_dim()?, axis, include_initial, f_init, f, f_out, pool)?;
+        Ok((Storage::new(out.into(), self.clone()), layout_out))
+    }
+}
+
+impl<T, TOut, D> OpCumSumDtypeAPI<T, TOut, D> for DeviceRayonAutoImpl
+where
+    T: Clone + Send + Sync + DTypeCastAPI<TOut>,
+    TOut: Clone + Send + Sync + Zero + Add<Output = TOut>,
+    D: DimAPI,
+{
+    fn cumulative_sum_dtype(
+        &self,
+        a: &Vec<T>,
+        la: &Layout<D>,
+        axis: isize,
+        include_initial: bool,
+    ) -> Result<(Storage<DataOwned<Vec<TOut>>, TOut, Self>, Layout<IxD>)> {
+        let pool = self.get_current_pool();
+
+        let f_init = TOut::zero;
+        let f = |acc, x: T| acc + x.into_cast();
+        let f_out = |acc| acc;
+
+        let (out, layout_out) = cumulative_cpu_rayon(a, &la.to_dim()?, axis, include_initial, f_init, f, f_out, pool)?;
+        Ok((Storage::new(out.into(), self.clone()), layout_out))
+    }
+}
+
+impl<T, TOut, D> OpCumProdDtypeAPI<T, TOut, D> for DeviceRayonAutoImpl
+where
+    T: Clone + Send + Sync + DTypeCastAPI<TOut>,
+    TOut: Clone + Send + Sync + One + Mul<Output = TOut>,
+    D: DimAPI,
+{
+    fn cumulative_prod_dtype(
+        &self,
+        a: &Vec<T>,
+        la: &Layout<D>,
+        axis: isize,
+        include_initial: bool,
+    ) -> Result<(Storage<DataOwned<Vec<TOut>>, TOut, Self>, Layout<IxD>)> {
+        let pool = self.get_current_pool();
+
+        let f_init = TOut::one;
+        let f = |acc, x: T| acc * x.into_cast();
+        let f_out = |acc| acc;
+
+        let (out, layout_out) = cumulative_cpu_rayon(a, &la.to_dim()?, axis, include_initial, f_init, f, f_out, pool)?;
+        Ok((Storage::new(out.into(), self.clone()), layout_out))
+    }
+}
