@@ -122,6 +122,7 @@ from .rstsr_faer import (
     argmin as _argmin,
     count_nonzero as _count_nonzero,
     sum_bool as _sum_bool,
+    where as _where,
     take as _take,
 )
 
@@ -1317,6 +1318,30 @@ def count_nonzero(x, /, *, axis=None, keepdims=False):
     return _wrap(_count_nonzero(h, axes, _py_bool(keepdims)))
 
 
+def where(condition, x1, x2, /):
+    """Element-wise select: x1 where ``condition`` is True, x2 elsewhere.
+
+    The condition must be an Array with boolean dtype (the spec's "should have
+    a boolean data type"; non-bool conditions are declined, never truthiness-
+    cast). ``x1``/``x2`` may each be an Array or a Python scalar; scalars are
+    converted to 0-d arrays of the array operand's dtype before the native call
+    (spec "Mixing arrays with Python scalars" — the same weak-scalar rule as
+    the binary functions, via ``_operands``). At least one of ``x1``/``x2``
+    must be an Array; dtype promotion of Array pairs happens rust-side in
+    rstsr's own matrix.
+    """
+    if not isinstance(condition, Array):
+        raise TypeError(
+            f"where: condition must be an rstsr_faer.api Array, got {type(condition).__name__}"
+        )
+    if _kind(condition.dtype) != "bool":
+        raise TypeError(
+            f"where: condition must have a boolean data type, got {condition.dtype!r}"
+        )
+    a, b = _operands(x1, x2)
+    return _wrap(_where(condition._h, a, b))
+
+
 def take(x, /, indices, *, axis=None):
     h = _handle(x)
     if not isinstance(indices, Array):
@@ -1390,7 +1415,7 @@ __all__ = [
     "reshape", "permute_dims", "broadcast_arrays", "broadcast_shapes",
     "concat", "stack", "unstack", "expand_dims", "squeeze", "flip", "moveaxis",
     # searching / indexing
-    "argmax", "argmin", "count_nonzero", "take",
+    "argmax", "argmin", "count_nonzero", "take", "where",
     # data types
     "astype", "finfo", "iinfo",
     # constants / sentinels

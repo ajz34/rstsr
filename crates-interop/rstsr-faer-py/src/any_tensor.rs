@@ -986,6 +986,287 @@ macro_rules! dispatch_bin_promote_eq {
 }
 pub(crate) use dispatch_bin_promote_eq;
 
+/// Ternary dispatch for the element-wise select (`where`): a boolean
+/// condition plus any `x`/`y` dtype pair in rstsr's promotion matrix. Every
+/// arm calls the same generic fn item `$f::<TX, TY>(cond, a, b)`; the result
+/// variant follows the *promoted* type (`any_of`), so no promotion table is
+/// duplicated here (arms mirror `rstsr-dtype-traits/src/promotion.rs`, which
+/// promotes all 169 pairs of the 13 canonical dtypes).
+macro_rules! dispatch_where {
+    ($cond:expr, $x:expr, $y:expr, $f:ident) => {
+        match (&$x, &$y) {
+            (AnyTensor::Bool(a), AnyTensor::Bool(b)) => {
+                lift(($f::<bool, bool>)($cond, a, b), crate::any_tensor::any_of)
+            },
+            (AnyTensor::Bool(a), AnyTensor::I8(b)) => lift(($f::<bool, i8>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::Bool(a), AnyTensor::I16(b)) => lift(($f::<bool, i16>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::Bool(a), AnyTensor::I32(b)) => lift(($f::<bool, i32>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::Bool(a), AnyTensor::I64(b)) => lift(($f::<bool, i64>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::Bool(a), AnyTensor::U8(b)) => lift(($f::<bool, u8>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::Bool(a), AnyTensor::U16(b)) => lift(($f::<bool, u16>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::Bool(a), AnyTensor::U32(b)) => lift(($f::<bool, u32>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::Bool(a), AnyTensor::U64(b)) => lift(($f::<bool, u64>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::Bool(a), AnyTensor::F32(b)) => lift(($f::<bool, f32>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::Bool(a), AnyTensor::F64(b)) => lift(($f::<bool, f64>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::Bool(a), AnyTensor::C32(b)) => {
+                lift(($f::<bool, Complex<f32>>)($cond, a, b), crate::any_tensor::any_of)
+            },
+            (AnyTensor::Bool(a), AnyTensor::C64(b)) => {
+                lift(($f::<bool, Complex<f64>>)($cond, a, b), crate::any_tensor::any_of)
+            },
+            (AnyTensor::I8(a), AnyTensor::Bool(b)) => lift(($f::<i8, bool>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::I8(a), AnyTensor::I8(b)) => lift(($f::<i8, i8>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::I8(a), AnyTensor::I16(b)) => lift(($f::<i8, i16>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::I8(a), AnyTensor::I32(b)) => lift(($f::<i8, i32>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::I8(a), AnyTensor::I64(b)) => lift(($f::<i8, i64>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::I8(a), AnyTensor::U8(b)) => lift(($f::<i8, u8>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::I8(a), AnyTensor::U16(b)) => lift(($f::<i8, u16>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::I8(a), AnyTensor::U32(b)) => lift(($f::<i8, u32>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::I8(a), AnyTensor::U64(b)) => lift(($f::<i8, u64>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::I8(a), AnyTensor::F32(b)) => lift(($f::<i8, f32>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::I8(a), AnyTensor::F64(b)) => lift(($f::<i8, f64>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::I8(a), AnyTensor::C32(b)) => {
+                lift(($f::<i8, Complex<f32>>)($cond, a, b), crate::any_tensor::any_of)
+            },
+            (AnyTensor::I8(a), AnyTensor::C64(b)) => {
+                lift(($f::<i8, Complex<f64>>)($cond, a, b), crate::any_tensor::any_of)
+            },
+            (AnyTensor::I16(a), AnyTensor::Bool(b)) => lift(($f::<i16, bool>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::I16(a), AnyTensor::I8(b)) => lift(($f::<i16, i8>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::I16(a), AnyTensor::I16(b)) => lift(($f::<i16, i16>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::I16(a), AnyTensor::I32(b)) => lift(($f::<i16, i32>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::I16(a), AnyTensor::I64(b)) => lift(($f::<i16, i64>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::I16(a), AnyTensor::U8(b)) => lift(($f::<i16, u8>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::I16(a), AnyTensor::U16(b)) => lift(($f::<i16, u16>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::I16(a), AnyTensor::U32(b)) => lift(($f::<i16, u32>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::I16(a), AnyTensor::U64(b)) => lift(($f::<i16, u64>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::I16(a), AnyTensor::F32(b)) => lift(($f::<i16, f32>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::I16(a), AnyTensor::F64(b)) => lift(($f::<i16, f64>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::I16(a), AnyTensor::C32(b)) => {
+                lift(($f::<i16, Complex<f32>>)($cond, a, b), crate::any_tensor::any_of)
+            },
+            (AnyTensor::I16(a), AnyTensor::C64(b)) => {
+                lift(($f::<i16, Complex<f64>>)($cond, a, b), crate::any_tensor::any_of)
+            },
+            (AnyTensor::I32(a), AnyTensor::Bool(b)) => lift(($f::<i32, bool>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::I32(a), AnyTensor::I8(b)) => lift(($f::<i32, i8>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::I32(a), AnyTensor::I16(b)) => lift(($f::<i32, i16>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::I32(a), AnyTensor::I32(b)) => lift(($f::<i32, i32>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::I32(a), AnyTensor::I64(b)) => lift(($f::<i32, i64>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::I32(a), AnyTensor::U8(b)) => lift(($f::<i32, u8>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::I32(a), AnyTensor::U16(b)) => lift(($f::<i32, u16>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::I32(a), AnyTensor::U32(b)) => lift(($f::<i32, u32>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::I32(a), AnyTensor::U64(b)) => lift(($f::<i32, u64>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::I32(a), AnyTensor::F32(b)) => lift(($f::<i32, f32>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::I32(a), AnyTensor::F64(b)) => lift(($f::<i32, f64>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::I32(a), AnyTensor::C32(b)) => {
+                lift(($f::<i32, Complex<f32>>)($cond, a, b), crate::any_tensor::any_of)
+            },
+            (AnyTensor::I32(a), AnyTensor::C64(b)) => {
+                lift(($f::<i32, Complex<f64>>)($cond, a, b), crate::any_tensor::any_of)
+            },
+            (AnyTensor::I64(a), AnyTensor::Bool(b)) => lift(($f::<i64, bool>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::I64(a), AnyTensor::I8(b)) => lift(($f::<i64, i8>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::I64(a), AnyTensor::I16(b)) => lift(($f::<i64, i16>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::I64(a), AnyTensor::I32(b)) => lift(($f::<i64, i32>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::I64(a), AnyTensor::I64(b)) => lift(($f::<i64, i64>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::I64(a), AnyTensor::U8(b)) => lift(($f::<i64, u8>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::I64(a), AnyTensor::U16(b)) => lift(($f::<i64, u16>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::I64(a), AnyTensor::U32(b)) => lift(($f::<i64, u32>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::I64(a), AnyTensor::U64(b)) => lift(($f::<i64, u64>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::I64(a), AnyTensor::F32(b)) => lift(($f::<i64, f32>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::I64(a), AnyTensor::F64(b)) => lift(($f::<i64, f64>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::I64(a), AnyTensor::C32(b)) => {
+                lift(($f::<i64, Complex<f32>>)($cond, a, b), crate::any_tensor::any_of)
+            },
+            (AnyTensor::I64(a), AnyTensor::C64(b)) => {
+                lift(($f::<i64, Complex<f64>>)($cond, a, b), crate::any_tensor::any_of)
+            },
+            (AnyTensor::U8(a), AnyTensor::Bool(b)) => lift(($f::<u8, bool>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::U8(a), AnyTensor::I8(b)) => lift(($f::<u8, i8>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::U8(a), AnyTensor::I16(b)) => lift(($f::<u8, i16>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::U8(a), AnyTensor::I32(b)) => lift(($f::<u8, i32>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::U8(a), AnyTensor::I64(b)) => lift(($f::<u8, i64>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::U8(a), AnyTensor::U8(b)) => lift(($f::<u8, u8>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::U8(a), AnyTensor::U16(b)) => lift(($f::<u8, u16>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::U8(a), AnyTensor::U32(b)) => lift(($f::<u8, u32>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::U8(a), AnyTensor::U64(b)) => lift(($f::<u8, u64>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::U8(a), AnyTensor::F32(b)) => lift(($f::<u8, f32>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::U8(a), AnyTensor::F64(b)) => lift(($f::<u8, f64>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::U8(a), AnyTensor::C32(b)) => {
+                lift(($f::<u8, Complex<f32>>)($cond, a, b), crate::any_tensor::any_of)
+            },
+            (AnyTensor::U8(a), AnyTensor::C64(b)) => {
+                lift(($f::<u8, Complex<f64>>)($cond, a, b), crate::any_tensor::any_of)
+            },
+            (AnyTensor::U16(a), AnyTensor::Bool(b)) => lift(($f::<u16, bool>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::U16(a), AnyTensor::I8(b)) => lift(($f::<u16, i8>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::U16(a), AnyTensor::I16(b)) => lift(($f::<u16, i16>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::U16(a), AnyTensor::I32(b)) => lift(($f::<u16, i32>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::U16(a), AnyTensor::I64(b)) => lift(($f::<u16, i64>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::U16(a), AnyTensor::U8(b)) => lift(($f::<u16, u8>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::U16(a), AnyTensor::U16(b)) => lift(($f::<u16, u16>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::U16(a), AnyTensor::U32(b)) => lift(($f::<u16, u32>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::U16(a), AnyTensor::U64(b)) => lift(($f::<u16, u64>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::U16(a), AnyTensor::F32(b)) => lift(($f::<u16, f32>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::U16(a), AnyTensor::F64(b)) => lift(($f::<u16, f64>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::U16(a), AnyTensor::C32(b)) => {
+                lift(($f::<u16, Complex<f32>>)($cond, a, b), crate::any_tensor::any_of)
+            },
+            (AnyTensor::U16(a), AnyTensor::C64(b)) => {
+                lift(($f::<u16, Complex<f64>>)($cond, a, b), crate::any_tensor::any_of)
+            },
+            (AnyTensor::U32(a), AnyTensor::Bool(b)) => lift(($f::<u32, bool>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::U32(a), AnyTensor::I8(b)) => lift(($f::<u32, i8>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::U32(a), AnyTensor::I16(b)) => lift(($f::<u32, i16>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::U32(a), AnyTensor::I32(b)) => lift(($f::<u32, i32>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::U32(a), AnyTensor::I64(b)) => lift(($f::<u32, i64>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::U32(a), AnyTensor::U8(b)) => lift(($f::<u32, u8>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::U32(a), AnyTensor::U16(b)) => lift(($f::<u32, u16>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::U32(a), AnyTensor::U32(b)) => lift(($f::<u32, u32>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::U32(a), AnyTensor::U64(b)) => lift(($f::<u32, u64>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::U32(a), AnyTensor::F32(b)) => lift(($f::<u32, f32>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::U32(a), AnyTensor::F64(b)) => lift(($f::<u32, f64>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::U32(a), AnyTensor::C32(b)) => {
+                lift(($f::<u32, Complex<f32>>)($cond, a, b), crate::any_tensor::any_of)
+            },
+            (AnyTensor::U32(a), AnyTensor::C64(b)) => {
+                lift(($f::<u32, Complex<f64>>)($cond, a, b), crate::any_tensor::any_of)
+            },
+            (AnyTensor::U64(a), AnyTensor::Bool(b)) => lift(($f::<u64, bool>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::U64(a), AnyTensor::I8(b)) => lift(($f::<u64, i8>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::U64(a), AnyTensor::I16(b)) => lift(($f::<u64, i16>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::U64(a), AnyTensor::I32(b)) => lift(($f::<u64, i32>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::U64(a), AnyTensor::I64(b)) => lift(($f::<u64, i64>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::U64(a), AnyTensor::U8(b)) => lift(($f::<u64, u8>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::U64(a), AnyTensor::U16(b)) => lift(($f::<u64, u16>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::U64(a), AnyTensor::U32(b)) => lift(($f::<u64, u32>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::U64(a), AnyTensor::U64(b)) => lift(($f::<u64, u64>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::U64(a), AnyTensor::F32(b)) => lift(($f::<u64, f32>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::U64(a), AnyTensor::F64(b)) => lift(($f::<u64, f64>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::U64(a), AnyTensor::C32(b)) => {
+                lift(($f::<u64, Complex<f32>>)($cond, a, b), crate::any_tensor::any_of)
+            },
+            (AnyTensor::U64(a), AnyTensor::C64(b)) => {
+                lift(($f::<u64, Complex<f64>>)($cond, a, b), crate::any_tensor::any_of)
+            },
+            (AnyTensor::F32(a), AnyTensor::Bool(b)) => lift(($f::<f32, bool>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::F32(a), AnyTensor::I8(b)) => lift(($f::<f32, i8>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::F32(a), AnyTensor::I16(b)) => lift(($f::<f32, i16>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::F32(a), AnyTensor::I32(b)) => lift(($f::<f32, i32>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::F32(a), AnyTensor::I64(b)) => lift(($f::<f32, i64>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::F32(a), AnyTensor::U8(b)) => lift(($f::<f32, u8>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::F32(a), AnyTensor::U16(b)) => lift(($f::<f32, u16>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::F32(a), AnyTensor::U32(b)) => lift(($f::<f32, u32>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::F32(a), AnyTensor::U64(b)) => lift(($f::<f32, u64>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::F32(a), AnyTensor::F32(b)) => lift(($f::<f32, f32>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::F32(a), AnyTensor::F64(b)) => lift(($f::<f32, f64>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::F32(a), AnyTensor::C32(b)) => {
+                lift(($f::<f32, Complex<f32>>)($cond, a, b), crate::any_tensor::any_of)
+            },
+            (AnyTensor::F32(a), AnyTensor::C64(b)) => {
+                lift(($f::<f32, Complex<f64>>)($cond, a, b), crate::any_tensor::any_of)
+            },
+            (AnyTensor::F64(a), AnyTensor::Bool(b)) => lift(($f::<f64, bool>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::F64(a), AnyTensor::I8(b)) => lift(($f::<f64, i8>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::F64(a), AnyTensor::I16(b)) => lift(($f::<f64, i16>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::F64(a), AnyTensor::I32(b)) => lift(($f::<f64, i32>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::F64(a), AnyTensor::I64(b)) => lift(($f::<f64, i64>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::F64(a), AnyTensor::U8(b)) => lift(($f::<f64, u8>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::F64(a), AnyTensor::U16(b)) => lift(($f::<f64, u16>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::F64(a), AnyTensor::U32(b)) => lift(($f::<f64, u32>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::F64(a), AnyTensor::U64(b)) => lift(($f::<f64, u64>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::F64(a), AnyTensor::F32(b)) => lift(($f::<f64, f32>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::F64(a), AnyTensor::F64(b)) => lift(($f::<f64, f64>)($cond, a, b), crate::any_tensor::any_of),
+            (AnyTensor::F64(a), AnyTensor::C32(b)) => {
+                lift(($f::<f64, Complex<f32>>)($cond, a, b), crate::any_tensor::any_of)
+            },
+            (AnyTensor::F64(a), AnyTensor::C64(b)) => {
+                lift(($f::<f64, Complex<f64>>)($cond, a, b), crate::any_tensor::any_of)
+            },
+            (AnyTensor::C32(a), AnyTensor::Bool(b)) => {
+                lift(($f::<Complex<f32>, bool>)($cond, a, b), crate::any_tensor::any_of)
+            },
+            (AnyTensor::C32(a), AnyTensor::I8(b)) => {
+                lift(($f::<Complex<f32>, i8>)($cond, a, b), crate::any_tensor::any_of)
+            },
+            (AnyTensor::C32(a), AnyTensor::I16(b)) => {
+                lift(($f::<Complex<f32>, i16>)($cond, a, b), crate::any_tensor::any_of)
+            },
+            (AnyTensor::C32(a), AnyTensor::I32(b)) => {
+                lift(($f::<Complex<f32>, i32>)($cond, a, b), crate::any_tensor::any_of)
+            },
+            (AnyTensor::C32(a), AnyTensor::I64(b)) => {
+                lift(($f::<Complex<f32>, i64>)($cond, a, b), crate::any_tensor::any_of)
+            },
+            (AnyTensor::C32(a), AnyTensor::U8(b)) => {
+                lift(($f::<Complex<f32>, u8>)($cond, a, b), crate::any_tensor::any_of)
+            },
+            (AnyTensor::C32(a), AnyTensor::U16(b)) => {
+                lift(($f::<Complex<f32>, u16>)($cond, a, b), crate::any_tensor::any_of)
+            },
+            (AnyTensor::C32(a), AnyTensor::U32(b)) => {
+                lift(($f::<Complex<f32>, u32>)($cond, a, b), crate::any_tensor::any_of)
+            },
+            (AnyTensor::C32(a), AnyTensor::U64(b)) => {
+                lift(($f::<Complex<f32>, u64>)($cond, a, b), crate::any_tensor::any_of)
+            },
+            (AnyTensor::C32(a), AnyTensor::F32(b)) => {
+                lift(($f::<Complex<f32>, f32>)($cond, a, b), crate::any_tensor::any_of)
+            },
+            (AnyTensor::C32(a), AnyTensor::F64(b)) => {
+                lift(($f::<Complex<f32>, f64>)($cond, a, b), crate::any_tensor::any_of)
+            },
+            (AnyTensor::C32(a), AnyTensor::C32(b)) => {
+                lift(($f::<Complex<f32>, Complex<f32>>)($cond, a, b), crate::any_tensor::any_of)
+            },
+            (AnyTensor::C32(a), AnyTensor::C64(b)) => {
+                lift(($f::<Complex<f32>, Complex<f64>>)($cond, a, b), crate::any_tensor::any_of)
+            },
+            (AnyTensor::C64(a), AnyTensor::Bool(b)) => {
+                lift(($f::<Complex<f64>, bool>)($cond, a, b), crate::any_tensor::any_of)
+            },
+            (AnyTensor::C64(a), AnyTensor::I8(b)) => {
+                lift(($f::<Complex<f64>, i8>)($cond, a, b), crate::any_tensor::any_of)
+            },
+            (AnyTensor::C64(a), AnyTensor::I16(b)) => {
+                lift(($f::<Complex<f64>, i16>)($cond, a, b), crate::any_tensor::any_of)
+            },
+            (AnyTensor::C64(a), AnyTensor::I32(b)) => {
+                lift(($f::<Complex<f64>, i32>)($cond, a, b), crate::any_tensor::any_of)
+            },
+            (AnyTensor::C64(a), AnyTensor::I64(b)) => {
+                lift(($f::<Complex<f64>, i64>)($cond, a, b), crate::any_tensor::any_of)
+            },
+            (AnyTensor::C64(a), AnyTensor::U8(b)) => {
+                lift(($f::<Complex<f64>, u8>)($cond, a, b), crate::any_tensor::any_of)
+            },
+            (AnyTensor::C64(a), AnyTensor::U16(b)) => {
+                lift(($f::<Complex<f64>, u16>)($cond, a, b), crate::any_tensor::any_of)
+            },
+            (AnyTensor::C64(a), AnyTensor::U32(b)) => {
+                lift(($f::<Complex<f64>, u32>)($cond, a, b), crate::any_tensor::any_of)
+            },
+            (AnyTensor::C64(a), AnyTensor::U64(b)) => {
+                lift(($f::<Complex<f64>, u64>)($cond, a, b), crate::any_tensor::any_of)
+            },
+            (AnyTensor::C64(a), AnyTensor::F32(b)) => {
+                lift(($f::<Complex<f64>, f32>)($cond, a, b), crate::any_tensor::any_of)
+            },
+            (AnyTensor::C64(a), AnyTensor::F64(b)) => {
+                lift(($f::<Complex<f64>, f64>)($cond, a, b), crate::any_tensor::any_of)
+            },
+            (AnyTensor::C64(a), AnyTensor::C32(b)) => {
+                lift(($f::<Complex<f64>, Complex<f32>>)($cond, a, b), crate::any_tensor::any_of)
+            },
+            (AnyTensor::C64(a), AnyTensor::C64(b)) => {
+                lift(($f::<Complex<f64>, Complex<f64>>)($cond, a, b), crate::any_tensor::any_of)
+            },
+        }
+    };
+}
+pub(crate) use dispatch_where;
+
 // --------------------------------------------------- typed generic helpers --
 
 pub(crate) fn proj_shape<T>(x: &FTensor<T>) -> Vec<usize>

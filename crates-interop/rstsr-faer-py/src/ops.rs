@@ -35,8 +35,8 @@ use crate::any_tensor::{
     device_faer, dispatch_bin_bool_self, dispatch_bin_int_bool_self, dispatch_bin_int_self, dispatch_bin_numeric_self,
     dispatch_bin_promote, dispatch_bin_promote_eq, dispatch_t, dispatch_t_bool, dispatch_t_float_complex_same,
     dispatch_t_index_ord, dispatch_t_index_zero, dispatch_t_into_float, dispatch_t_no_complex, dispatch_t_numeric_same,
-    dispatch_t_real_float_same, dispatch_t_real_numeric_same, dispatch_t_signed, err_py, lift, type_err, AnyTensor,
-    FTensor, NativeArray,
+    dispatch_t_real_float_same, dispatch_t_real_numeric_same, dispatch_t_signed, dispatch_where, err_py, lift,
+    type_err, AnyTensor, FTensor, NativeArray,
 };
 use crate::creation::dim_from;
 
@@ -988,4 +988,36 @@ pub fn sum_bool(x: &NativeArray, axes: Option<Vec<isize>>, keepdims: bool) -> Py
 #[pyfunction]
 pub fn broadcast_to(x: &NativeArray, shape: Vec<usize>) -> PyResult<NativeArray> {
     Ok(NativeArray { t: dispatch_t!(x.t, op_broadcast_to(shape.clone()))? })
+}
+
+// --------------------------------------------------- element-wise select --
+//
+// The `where` slice of the searching surface (register G-037).
+//
+// `where(cond, x, y)`: the condition must be a boolean tensor (spec: "should
+// have a boolean data type" — declined, never truthiness-cast); x/y may be any
+// dtype pair in rstsr's promotion matrix. The promoted result type comes from
+// rstsr's own `DTypePromoteAPI`, so no dtype table is duplicated in the shim.
+
+fn op_where<TX, TY>(
+    cond: &FTensor<bool>,
+    x: &FTensor<TX>,
+    y: &FTensor<TY>,
+) -> rt::Result<FTensor<<TX as DTypePromoteAPI<TY>>::Res>>
+where
+    TX: DTypePromoteAPI<TY>,
+    for<'x> &'x FTensor<bool>:
+        TensorWhereAPI<&'x FTensor<TX>, &'x FTensor<TY>, Output = FTensor<<TX as DTypePromoteAPI<TY>>::Res>>,
+{
+    rt::where_f(cond, x, y)
+}
+
+/// Rust keyword `where` forces the `where_` item name; the Python-visible name
+/// is restored by the pyfunction attribute.
+#[pyfunction(name = "where")]
+pub fn where_(cond: &NativeArray, x: &NativeArray, y: &NativeArray) -> PyResult<NativeArray> {
+    match &cond.t {
+        AnyTensor::Bool(c) => Ok(NativeArray { t: dispatch_where!(c, x.t, y.t, op_where)? }),
+        _ => type_err("where: condition must have a boolean data type"),
+    }
 }
