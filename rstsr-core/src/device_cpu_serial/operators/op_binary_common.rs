@@ -27,7 +27,7 @@ use rstsr_dtype_traits::{DTypeIntoFloatAPI, ExtNum};
     [OpLog2API      ] [ComplexFloat] [b.log2()  ];
     [OpLog10API     ] [ComplexFloat] [b.log10() ];
     [OpReciprocalAPI] [ComplexFloat] [b.recip() ];
-    [OpRoundAPI     ] [Float       ] [b.round() ];
+    [OpRoundAPI     ] [Float       ] [round_ties_even_f(b) ];
     [OpSinAPI       ] [ComplexFloat] [b.sin()   ];
     [OpSinhAPI      ] [ComplexFloat] [b.sinh()  ];
     [OpSqrtAPI      ] [ComplexFloat] [b.sqrt()  ];
