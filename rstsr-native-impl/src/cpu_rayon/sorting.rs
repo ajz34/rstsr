@@ -7,7 +7,7 @@ use core::cmp::Ordering;
 use core::sync::atomic::{AtomicPtr, Ordering as AtomicOrdering};
 
 // Sort workload is per-line `O(axis_size log axis_size)`; parallelize when
-// the total element count passes this (64 kB of f64), mirroring reduction.
+// the total element count passes this (8 KiB of f64), mirroring reduction.
 const PARALLEL_SWITCH: usize = 1024;
 
 /// Rayon twin of [`sort_axes_cpu_serial`]: identical output; lines are
@@ -60,21 +60,21 @@ where
     let c_ptr = AtomicPtr::new(c.map_or(core::ptr::null_mut(), |s| s.as_mut_ptr()));
     let idx_ptr = AtomicPtr::new(idx.map_or(core::ptr::null_mut(), |s| s.as_mut_ptr()));
 
+    // per-rest-digit strides, hoisted once (input's own strides over rest slots)
+    let rest_strides_in: Vec<isize> = rest_slots.iter().map(|&s| stride_ref_in[s]).collect();
+
     let task = || {
         (0..rest_total).into_par_iter().try_for_each(|rest_flat: usize| -> Result<()> {
-            // row-major unravel of the rest position
-            let mut rest_multi: Vec<usize> = vec![0; rest_shape.len()];
-            {
-                let mut flat = rest_flat;
-                for i in (0..rest_shape.len()).rev() {
-                    rest_multi[i] = flat % rest_shape[i];
-                    flat /= rest_shape[i];
-                }
-            }
-            let idx_rest: isize = rest_slots
+            // row-major unravel of the rest position, digits computed on the fly
+            let mut rest_flat_rem = rest_flat;
+            let idx_rest: isize = rest_shape
                 .iter()
-                .zip(rest_multi.iter())
-                .map(|(&slot, &v)| stride_ref_in[slot] * v as isize)
+                .enumerate()
+                .map(|(i, &dim)| {
+                    let v = rest_flat_rem % dim;
+                    rest_flat_rem /= dim;
+                    rest_strides_in[i] * v as isize
+                })
                 .sum::<isize>()
                 + line_base as isize;
             let mut layout_line = layout_axes.clone();
@@ -89,8 +89,16 @@ where
             }
             sort_line_cpu_serial(&mut pairs, f, descending, is_nan);
 
-            let rest_part: usize =
-                rest_slots.iter().zip(rest_multi.iter()).map(|(&slot, &v)| v * out_strides[slot]).sum();
+            let mut rest_flat_rem = rest_flat;
+            let rest_part: usize = rest_shape
+                .iter()
+                .enumerate()
+                .map(|(i, &dim)| {
+                    let v = rest_flat_rem % dim;
+                    rest_flat_rem /= dim;
+                    v * out_strides[rest_slots[i]]
+                })
+                .sum();
             for (j, (value, axis_position)) in pairs.iter().enumerate() {
                 let out_pos = rest_part + j * axis_stride;
                 // SAFETY: base pointers hoisted through AtomicPtr (relaxed
@@ -111,8 +119,6 @@ where
             Ok(())
         })
     };
-    match pool {
-        None => task(),
-        Some(pool) => pool.install(task),
-    }
+    // pool is Some here (checked above); install into it
+    pool.expect("pool checked Some above").install(task)
 }

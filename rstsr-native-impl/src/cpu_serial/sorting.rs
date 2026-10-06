@@ -95,6 +95,11 @@ where
     let mut layout_line = layout_axes.clone();
     let mut pairs: Vec<(T, usize)> = Vec::with_capacity(axis_size);
 
+    // a zero-sized rest dimension means no lines at all (empty output)
+    if rest_shape.contains(&0) {
+        return Ok(());
+    }
+
     loop {
         let idx_rest: isize =
             rest_slots.iter().zip(rest_multi.iter()).map(|(&slot, &v)| stride_ref_in[slot] * v as isize).sum::<isize>()
@@ -113,13 +118,13 @@ where
 
         let rest_part: usize = rest_slots.iter().zip(rest_multi.iter()).map(|(&slot, &v)| v * out_strides[slot]).sum();
         let axis_stride = out_strides[axis];
-        for (j, (value, axis_position)) in pairs.iter().enumerate() {
+        for (j, (value, axis_position)) in pairs.drain(..).enumerate() {
             let out_pos = rest_part + j * axis_stride;
             if let Some(c) = c.as_deref_mut() {
-                c[out_pos].write(value.clone());
+                c[out_pos].write(value);
             }
             if let Some(idx_out) = idx.as_deref_mut() {
-                idx_out[out_pos].write(*axis_position);
+                idx_out[out_pos].write(axis_position);
             }
         }
         if !ndindex_next(&mut rest_multi, &rest_shape) {

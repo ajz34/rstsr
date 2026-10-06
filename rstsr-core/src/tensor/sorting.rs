@@ -3,6 +3,8 @@
 
 use core::cmp::Ordering;
 
+use num::Complex;
+
 use crate::prelude_dev::*;
 
 /* #region argsort */
@@ -14,6 +16,7 @@ pub fn argsort_f<R, T, B, D>(tensor: &TensorAny<R, T, B, D>, args: impl Into<Sor
 where
     R: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
     D: DimAPI,
+    T: 'static,
     B: DeviceAPI<T>
         + DeviceAPI<usize>
         + DeviceRawAPI<MaybeUninit<usize>>
@@ -24,17 +27,32 @@ where
     let tensor = tensor.view();
     let device = tensor.device().clone();
     let axis = rstsr_check_axis!(args.axis, tensor.ndim())?;
+    decline_complex_sort::<T>()?;
     let (storage, layout) = device.argsort_axes(tensor.raw(), tensor.layout(), axis, args.descending, args.stable)?;
     Tensor::new_f(storage, layout)
+}
+
+/// Complex dtypes are declined at the tensor layer (array-api restricts
+/// sort/argsort to real-valued data types; complex ordering is available
+/// through [`sort_custom`]). Runtime gate via TypeId, the same technique as
+/// DeviceFaer's matmul dispatch.
+fn decline_complex_sort<T: 'static>() -> Result<()> {
+    if core::any::TypeId::of::<T>() == core::any::TypeId::of::<Complex<f32>>()
+        || core::any::TypeId::of::<T>() == core::any::TypeId::of::<Complex<f64>>()
+    {
+        return rstsr_raise!(
+            UnImplemented,
+            "sort/argsort do not support complex data type; use sort_custom with an explicit comparator."
+        );
+    }
+    Ok(())
 }
 
 /// Returns the indices that sort a tensor along an axis.
 ///
 /// The returned indices are of dtype [`usize`] and have the same shape as the
-/// input; gathering with them along `axis` (`take`) reproduces [`sort`]. Ties
-/// keep the input order (stable), matching NumPy's default `quicksort`
-/// guarantee for `argsort` only in the stable sense — rstsr always provides
-/// the stable behavior.
+/// input; gathering with them along `axis` reproduces [`sort`]. Ties keep the
+/// input order (stable).
 ///
 /// This function behaves identically under [`RowMajor`] and [`ColMajor`] device
 /// default orders. (Only the memory arrangement of the new tensor follows the
@@ -130,6 +148,7 @@ impl<R, T, B, D, AArg> ArgSortAPI<()> for (&TensorAny<R, T, B, D>, AArg)
 where
     R: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
     D: DimAPI,
+    T: 'static,
     AArg: Into<SortArgs>,
     B: DeviceAPI<T>
         + DeviceAPI<usize>
@@ -149,6 +168,7 @@ impl<R, T, B, D> TensorAny<R, T, B, D>
 where
     R: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
     D: DimAPI,
+    T: 'static,
     B: DeviceAPI<T>
         + DeviceAPI<usize>
         + DeviceRawAPI<MaybeUninit<usize>>
@@ -187,12 +207,14 @@ pub fn sort_f<R, T, B, D>(tensor: &TensorAny<R, T, B, D>, args: impl Into<SortAr
 where
     R: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
     D: DimAPI,
+    T: 'static,
     B: DeviceAPI<T> + DeviceRawAPI<MaybeUninit<T>> + DeviceCreationAnyAPI<T> + OpSortAPI<T, D>,
 {
     let args = args.into();
     let tensor = tensor.view();
     let device = tensor.device().clone();
     let axis = rstsr_check_axis!(args.axis, tensor.ndim())?;
+    decline_complex_sort::<T>()?;
     let (storage, layout) = device.sort_axes(tensor.raw(), tensor.layout(), axis, args.descending, args.stable)?;
     Tensor::new_f(storage, layout)
 }
@@ -288,6 +310,7 @@ impl<R, T, B, D, AArg> SortAPI<()> for (&TensorAny<R, T, B, D>, AArg)
 where
     R: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
     D: DimAPI,
+    T: 'static,
     AArg: Into<SortArgs>,
     B: DeviceAPI<T> + DeviceRawAPI<MaybeUninit<T>> + DeviceCreationAnyAPI<T> + OpSortAPI<T, D>,
 {
@@ -303,6 +326,7 @@ impl<R, T, B, D> TensorAny<R, T, B, D>
 where
     R: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
     D: DimAPI,
+    T: 'static,
     B: DeviceAPI<T> + DeviceRawAPI<MaybeUninit<T>> + DeviceCreationAnyAPI<T> + OpSortAPI<T, D>,
 {
     /// Sort a tensor along an axis.
@@ -461,6 +485,17 @@ where
 
 /// Returns the indices that sort a tensor along an axis with a user-supplied
 /// comparator `f: Fn(&T, &T) -> Ordering` (ties keep input order).
+///
+/// # Parameters
+///
+/// - `tensor`: [`&TensorAny<R, T, B, D>`](TensorAny): the input tensor.
+/// - `axis`: TryInto [`AxisIndex<isize>`]: the axis to sort along.
+/// - `f`: the comparator; must be a consistent total order for correct results.
+///
+/// # Returns
+///
+/// - [`Tensor<usize, B, IxD>`][`Tensor`]: positions within `axis` such that gathering the input
+///   with them reproduces [`sort_custom`].
 ///
 /// # Panics
 ///

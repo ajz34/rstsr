@@ -99,6 +99,7 @@ mod numpy_sort {
 #[cfg(test)]
 mod custom_sort {
     use super::*;
+    use num::Complex;
     static FUNC: &str = "custom_sort";
 
     #[test]
@@ -208,6 +209,55 @@ mod custom_sort {
         let a = rt::arange((6, &device)).into_shape([2, 3]);
         assert!(a.sort_f(2).is_err());
         assert!(a.sort_f(-3).is_err());
+    }
+
+    #[test]
+    fn test_empty_rest_dim() {
+        // a zero-sized dimension OUTSIDE the sorted axis: no lines to sort,
+        // empty output (np.sort(np.zeros((3, 0)), axis=0) has shape (3, 0))
+        crate::specify_test!("test_empty_rest_dim");
+
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        let a: Tensor<f64, _> = rt::zeros(([3, 0], &device));
+        let out = a.sort(0);
+        assert_eq!(out.shape(), &[3, 0]);
+
+        let idx = rt::argsort((&a, 0));
+        assert_eq!(idx.shape(), &[3, 0]);
+
+        // zero-sized sorted axis is also an empty result
+        let b: Tensor<f64, _> = rt::zeros(([2, 0], &device));
+        let out = b.sort(1);
+        assert_eq!(out.shape(), &[2, 0]);
+    }
+
+    #[test]
+    fn test_negative_axis_values() {
+        // negative axes normalize to the same result as positive
+        crate::specify_test!("test_negative_axis_values");
+
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        let a = rt::tensor_from_nested!([[3, 1, 2], [6, 4, 5]], &device);
+        assert_equal(a.sort(-1), a.sort(1), None);
+        assert_equal(a.sort(-2), a.sort(0), None);
+    }
+
+    #[test]
+    fn test_complex_declined() {
+        // complex sort/argsort declined at the tensor layer (array-api
+        // restricts sorting to real-valued dtypes); escape hatch sort_custom
+        crate::specify_test!("test_complex_declined");
+
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        let a = rt::asarray((vec![Complex::new(1.0_f64, 2.0), Complex::new(0.0, 1.0)], &device));
+        assert!(a.sort_f(()).is_err());
+        assert!(a.argsort_f(()).is_err());
     }
 }
 

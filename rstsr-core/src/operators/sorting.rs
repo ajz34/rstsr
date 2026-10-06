@@ -15,7 +15,9 @@ pub struct SortArgs {
     pub axis: isize,
     /// Sort descending; default `false`.
     pub descending: bool,
-    /// Require a stable sort (ties keep input order); default `true`.
+    /// Require a stable sort (ties keep input order); default `true`. The
+    /// current kernels are always stable; `stable = false` is currently
+    /// accepted but does not select an unstable algorithm.
     pub stable: bool,
 }
 
@@ -59,7 +61,7 @@ impl From<(isize, bool, bool)> for SortArgs {
 pub trait OpSortAPI<T, D>
 where
     D: DimAPI,
-    Self: DeviceAPI<T> + DeviceAPI<T>,
+    Self: DeviceAPI<T>,
 {
     /// Sort `a` along `axis` (already normalized, non-negative) into a fresh
     /// storage; output layout must be contiguous of the input's shape.
@@ -74,7 +76,8 @@ where
 }
 
 /// Argsort along one axis (default comparator, see [`ExtSortCmp`]); output
-/// dtype is `usize` row-major flat indices into the sorted axis.
+/// dtype is `usize`, each element the position within `axis` of the sorted
+/// element at that output position (an axis-local index, not a flat index).
 pub trait OpArgSortAPI<T, D>
 where
     D: DimAPI,
@@ -110,8 +113,7 @@ where
     where
         F: Fn(&T, &T) -> core::cmp::Ordering + Send + Sync;
 
-    /// Argsort with a custom comparator; indices are row-major flat positions
-    /// along `axis`.
+    /// Argsort with a custom comparator; indices are positions within `axis`.
     fn argsort_axes_custom<F>(
         &self,
         a: &<Self as DeviceRawAPI<T>>::Raw,
