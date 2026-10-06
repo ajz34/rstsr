@@ -508,5 +508,13 @@ mod axis_index_tests {
         let a = AxisIndex::from(3_isize);
         let v: AxisIndex<usize> = a.try_into().unwrap();
         assert_eq!(v.into_inner(), 3_usize);
+        // negative axis cannot convert to unsigned: must error
+        let a = AxisIndex::from(-1_isize);
+        assert!(AxisIndex::<usize>::try_from(a).is_err());
+        // raw integer TryFrom
+        let a = AxisIndex::<isize>::try_from(4_i32).unwrap();
+        assert_eq!(a.into_inner(), 4);
+        let a = AxisIndex::<isize>::try_from(&4_i64).unwrap();
+        assert_eq!(a.into_inner(), 4);
     }
 }
