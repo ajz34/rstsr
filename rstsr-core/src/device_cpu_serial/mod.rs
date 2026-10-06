@@ -8,6 +8,7 @@ pub mod device;
 pub mod linalg;
 pub mod operators;
 pub mod reduction;
+pub mod sorting;
 
 pub use device::*;
 pub use operators::*;

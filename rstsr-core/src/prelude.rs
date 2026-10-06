@@ -40,6 +40,7 @@ pub mod rstsr_traits {
     pub use crate::tensor::operators::op_where::TensorWhereAPI;
     pub use crate::tensor::ownership_conversion::{TensorIntoOwnedAPI, TensorViewAPI, TensorViewMutAPI};
     pub use crate::tensor::reduction::TensorSumBoolAPI;
+    pub use crate::tensor::sorting::{ArgSortAPI, ArgSortCustomAPI, SortAPI, SortCustomAPI};
 
     #[cfg(feature = "rayon")]
     pub use crate::feature_rayon::DeviceRayonAPI;
@@ -61,6 +62,7 @@ pub mod rstsr_structs {
 
     pub use rstsr_common::axis_index::{AxesIndex, AxisIndex};
 
+    pub use crate::operators::sorting::SortArgs;
     pub use crate::tensor::manipulation::exports::{RepeatArg, ReshapeArgs};
     pub use crate::tensor::reduction::{CumulativeArgs, ReduceArgs, VarArgs};
 }
@@ -167,6 +169,10 @@ pub mod rstsr_funcs {
         unraveled_argmin_axes, unraveled_argmin_axes_f, unraveled_argmin_f, unraveled_argmin_with_args,
         unraveled_argmin_with_args_f, var, var_all, var_all_f, var_axes, var_axes_f, var_f, var_with_args,
         var_with_args_f, var_with_dtype, var_with_dtype_f,
+    };
+    // sorting
+    pub use crate::tensor::sorting::{
+        argsort, argsort_custom, argsort_custom_f, argsort_f, sort, sort_custom, sort_custom_f, sort_f,
     };
     // linalg (array-api's basic linalg operations, not the rstsr-linalg-traits)
     pub use crate::tensor::linalg::exports::{

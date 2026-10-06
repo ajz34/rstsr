@@ -7,6 +7,7 @@ pub mod linalg;
 pub mod matmul;
 pub mod ops;
 pub mod reduction;
+pub mod sorting;
 
 pub mod exports {
     use super::*;
@@ -18,4 +19,5 @@ pub mod exports {
     pub use matmul::*;
     pub use ops::*;
     pub use reduction::*;
+    pub use sorting::*;
 }

@@ -1,7 +1,6 @@
 use core::cmp::Ordering;
 
 use duplicate::duplicate_item;
-use num::complex::ComplexFloat;
 use num::Complex;
 
 /// Total-order comparison for sortable dtypes: integers, booleans, real
@@ -19,6 +18,13 @@ use num::Complex;
 pub trait ExtSortCmp: Clone {
     /// Total-order comparison of `self` against `other`.
     fn ext_total_cmp(&self, other: &Self) -> Ordering;
+
+    /// Whether this value is NaN (or NaN-bearing, for complex); such values
+    /// order after all others regardless of sort direction. `false` for all
+    /// non-float dtypes.
+    fn ext_is_nan(&self) -> bool {
+        false
+    }
 }
 
 #[duplicate_item(T; [bool]; [u8]; [u16]; [u32]; [u64]; [u128]; [usize]; [i8]; [i16]; [i32]; [i64]; [i128]; [isize];)]
@@ -30,6 +36,10 @@ impl ExtSortCmp for T {
 
 #[duplicate_item(T; [f32]; [f64];)]
 impl ExtSortCmp for T {
+    fn ext_is_nan(&self) -> bool {
+        self.is_nan()
+    }
+
     fn ext_total_cmp(&self, other: &Self) -> Ordering {
         match (self.is_nan(), other.is_nan()) {
             // NaN ordered greater than everything; NaN == NaN for sorting
@@ -44,6 +54,10 @@ impl ExtSortCmp for T {
 
 #[duplicate_item(T; [Complex<f32>]; [Complex<f64>];)]
 impl ExtSortCmp for T {
+    fn ext_is_nan(&self) -> bool {
+        self.is_nan()
+    }
+
     fn ext_total_cmp(&self, other: &Self) -> Ordering {
         // NumPy orders NaN-bearing complexes lexicographically by their
         // finite parts (NaN component sorted last within each part), before
@@ -68,6 +82,10 @@ impl ExtSortCmp for T {
 #[cfg(feature = "half")]
 #[duplicate_item(T; [half::f16]; [half::bf16];)]
 impl ExtSortCmp for T {
+    fn ext_is_nan(&self) -> bool {
+        self.is_nan()
+    }
+
     fn ext_total_cmp(&self, other: &Self) -> Ordering {
         match (self.is_nan(), other.is_nan()) {
             (true, true) => Ordering::Equal,

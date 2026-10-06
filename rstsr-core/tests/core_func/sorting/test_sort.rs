@@ -1,0 +1,266 @@
+#[allow(unused_imports)]
+use crate::test_utils::*;
+use rstsr::prelude::*;
+
+use super::CATEGORY;
+use crate::TESTCFG;
+
+#[cfg(test)]
+mod numpy_sort {
+    use super::*;
+    static FUNC: &str = "numpy_sort";
+
+    #[test]
+    fn test_sort_nan_order() {
+        // NumPy v2.5.2, _core/tests/test_multiarray.py, TestMethods::test_sort (line 2267)
+        // real part: np.sort([nan, 1, 0]) == [nan, 1, 0][::-1] == [0, 1, nan]
+        // (NaN sorts to the END of the ascending order)
+        crate::specify_test!("test_sort_nan_order");
+
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        let a = rt::tensor_from_nested!([f64::NAN, 1.0, 0.0], &device);
+        let v = a.sort(()).to_vec();
+        assert_eq!(v[0], 0.0);
+        assert_eq!(v[1], 1.0);
+        assert!(v[2].is_nan());
+    }
+
+    #[test]
+    fn test_sort_unsigned() {
+        // NumPy v2.5.2, _core/tests/test_multiarray.py, TestMethods::test_sort_unsigned
+        // (line 2301): a = arange(101); b = a[::-1]; sort(b) == a
+        crate::specify_test!("test_sort_unsigned");
+
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        let a = rt::arange((101, &device));
+        let b = rt::flip(&a, 0);
+        assert_equal(rt::sort((&b, ())), &a, None);
+    }
+
+    #[test]
+    fn test_sort_2d_axis() {
+        // NumPy behavior: sorting is per-line along the given axis
+        // np.sort([[3, 1, 2], [6, 4, 5]], axis=0) == [[3, 1, 2], [6, 4, 5]]
+        // np.sort(..., axis=1) == [[1, 2, 3], [4, 5, 6]]
+        crate::specify_test!("test_sort_2d_axis");
+
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        let a = rt::tensor_from_nested!([[3, 1, 2], [6, 4, 5]], &device);
+        let expected0 = rt::tensor_from_nested!([[3, 1, 2], [6, 4, 5]], &device);
+        assert_equal(rt::sort((&a, 0)), &expected0, None);
+        let expected1 = rt::tensor_from_nested!([[1, 2, 3], [4, 5, 6]], &device);
+        assert_equal(rt::sort((&a, 1)), &expected1, None);
+        let expected_last = rt::tensor_from_nested!([[1, 2, 3], [4, 5, 6]], &device);
+        assert_equal(rt::sort((&a, ())), &expected_last, None);
+    }
+
+    #[test]
+    fn test_sort_descending() {
+        // NumPy 2.x: np.sort(a, descending=True) reverses value order but
+        // keeps NaN last (numpy_tag.h: "NaN sorts to the end in reverse too")
+        crate::specify_test!("test_sort_descending");
+
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        // np.sort([3, nan, 1, 2], descending=True) -> [3, 2, 1, nan]
+        let a = rt::tensor_from_nested!([3.0, f64::NAN, 1.0, 2.0], &device);
+        let v = a.sort((0, true)).to_vec();
+        assert_eq!(v[..3], [3.0, 2.0, 1.0]);
+        assert!(v[3].is_nan());
+
+        // np.sort([3, nan, 1, 2]) -> [1, 2, 3, nan]
+        let v = a.sort(()).to_vec();
+        assert_eq!(v[..3], [1.0, 2.0, 3.0]);
+        assert!(v[3].is_nan());
+    }
+
+    #[test]
+    fn test_sort_signed_negatives() {
+        // NumPy v2.5.2, TestMethods::test_sort_signed (line 2316): signed
+        // values incl. negatives keep numeric order
+        crate::specify_test!("test_sort_signed_negatives");
+
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        let a = rt::tensor_from_nested!([-5_i32, 3, 0, -1, 7], &device);
+        let expected = rt::tensor_from_nested!([-5, -1, 0, 3, 7], &device);
+        assert_equal(a.sort(()), &expected, None);
+    }
+}
+
+#[cfg(test)]
+mod custom_sort {
+    use super::*;
+    static FUNC: &str = "custom_sort";
+
+    #[test]
+    fn test_stability_ties() {
+        // stable sort: ties keep input order; verified through argsort
+        // companion (values equal, indices ascending among ties)
+        crate::specify_test!("test_stability_ties");
+
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        // values [2, 1, 1, 0]: ascending ties are the two 1s in input order
+        let a = rt::tensor_from_nested!([2_i32, 1, 1, 0], &device);
+        let expected = rt::tensor_from_nested!([3_usize, 1, 2, 0], &device);
+        assert_equal(rt::argsort((&a, ())), &expected, None);
+
+        // descending: value comparison flips, ties still input order
+        let expected = rt::tensor_from_nested!([0_usize, 1, 2, 3], &device);
+        assert_equal(rt::argsort((&a, (0, true))), &expected, None);
+    }
+
+    #[test]
+    fn test_signed_zero_equal() {
+        // -0.0 == 0.0 in the sort order (both between -1 and 1)
+        crate::specify_test!("test_signed_zero_equal");
+
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        let a = rt::tensor_from_nested!([1.0_f64, -0.0, -1.0, 0.0], &device);
+        let out = a.sort(());
+        let v = out.to_vec();
+        assert_eq!(v[0], -1.0);
+        assert_eq!(v[3], 1.0);
+        // middle two are ±0 in some order; both compare equal to 0.0
+        assert_eq!(v[1], 0.0);
+        assert_eq!(v[2], 0.0);
+    }
+
+    #[test]
+    fn test_strided_input() {
+        // sorting a transposed (strided) view along its last axis
+        crate::specify_test!("test_strided_input");
+
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        let a = rt::arange((6, &device)).into_shape([2, 3]);
+        let at = a.t(); // shape [3, 2], rows are [0, 3], [1, 4], [2, 5]
+        let expected = rt::tensor_from_nested!([[0, 3], [1, 4], [2, 5]], &device);
+        assert_equal(rt::sort((&at, ())), &expected, None);
+    }
+
+    #[test]
+    fn test_axis_none_of_shape() {
+        // output shape equals input shape for any axis choice
+        crate::specify_test!("test_axis_none_of_shape");
+
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        let a = rt::arange((24, &device)).into_shape([2, 3, 4]);
+        for axis in [-3_isize, -2, -1, 0, 1, 2] {
+            let out = a.sort(axis);
+            assert_eq!(out.shape(), a.shape());
+        }
+    }
+
+    #[test]
+    fn test_output_layout_default_order() {
+        // output is contiguous in the device default order
+        crate::specify_test!("test_output_layout_default_order");
+
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        let a = rt::arange((6, &device)).into_shape([2, 3]);
+        let out = a.sort(1);
+        assert!(out.c_contig());
+
+        let mut device_f = TESTCFG.device.clone();
+        device_f.set_default_order(ColMajor);
+        let a_f = rt::arange((6, &device_f)).into_shape([2, 3]);
+        let out_f = a_f.sort(1);
+        assert!(out_f.f_contig());
+    }
+
+    #[test]
+    fn test_bool_and_int_dtypes() {
+        // bool sorts False < True; ints sort numerically
+        crate::specify_test!("test_bool_and_int_dtypes");
+
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        let a = rt::tensor_from_nested!([true, false, true], &device);
+        assert_eq!(a.sort(()).to_vec(), vec![false, true, true]);
+    }
+
+    #[test]
+    fn test_axis_out_of_range() {
+        crate::specify_test!("test_axis_out_of_range");
+
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        let a = rt::arange((6, &device)).into_shape([2, 3]);
+        assert!(a.sort_f(2).is_err());
+        assert!(a.sort_f(-3).is_err());
+    }
+}
+
+#[cfg(test)]
+mod custom_sort_custom {
+    use super::*;
+    use core::cmp::Ordering;
+    use num::Complex;
+    static FUNC: &str = "custom_sort_custom";
+
+    #[test]
+    fn test_complex_by_norm() {
+        // documented escape hatch: complex sorted by squared magnitude
+        crate::specify_test!("test_complex_by_norm");
+
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        let a =
+            rt::asarray((vec![Complex::new(3.0_f64, 0.0), Complex::new(1.0, 1.0), Complex::new(0.0, 2.0)], &device));
+        let by_norm = |x: &Complex<f64>, y: &Complex<f64>| {
+            let n1 = x.re * x.re + x.im * x.im;
+            let n2 = y.re * y.re + y.im * y.im;
+            n1.partial_cmp(&n2).unwrap_or(Ordering::Equal)
+        };
+        let out = a.sort_custom(-1, by_norm);
+        let v = out.to_vec();
+        // |1+1i|^2 = 2 < |2i|^2 = 4 < |3|^2 = 9
+        assert_eq!(v[0], Complex::new(1.0, 1.0));
+        assert_eq!(v[1], Complex::new(0.0, 2.0));
+        assert_eq!(v[2], Complex::new(3.0, 0.0));
+    }
+
+    #[test]
+    fn test_argsort_custom_matches_sort_custom() {
+        crate::specify_test!("test_argsort_custom_matches_sort_custom");
+
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        // sort by coarse bucket (x/4); argsort permutation must reproduce the
+        // sorted values when applied through basic indexing
+        let a = rt::arange((12, &device)).into_shape([3, 4]);
+        let by_high_bits = |x: &i32, y: &i32| (x / 4).cmp(&(y / 4));
+        let sorted = a.sort_custom(1, by_high_bits);
+        let idx = a.argsort_custom(1, by_high_bits);
+        // gather rows: for each row i, sorted[i, j] == a[i, idx[i, j]]
+        for i in 0..3 {
+            for j in 0..4 {
+                let vi = sorted.i((i, j)).to_scalar();
+                let orig = a.i((i, idx.i((i, j)).to_scalar())).to_scalar();
+                assert_eq!(vi, orig);
+            }
+        }
+    }
+}
