@@ -423,3 +423,90 @@ pub fn normalize_axes_index(
 }
 
 /* #endregion */
+/* #region AxisIndex (single axis) */
+
+/// Wrapper for exactly one axis, mirroring [`AxesIndex`] for the single-axis
+/// case; makes one-axis signatures distinct from none-or-multi axes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AxisIndex<T> {
+    value: T,
+}
+
+impl<T> AxisIndex<T> {
+    /// Unwrap the inner axis value.
+    pub fn into_inner(self) -> T {
+        self.value
+    }
+}
+
+impl<T> AsRef<T> for AxisIndex<T> {
+    fn as_ref(&self) -> &T {
+        &self.value
+    }
+}
+
+impl<T> From<T> for AxisIndex<T> {
+    fn from(value: T) -> Self {
+        Self { value }
+    }
+}
+
+impl<T> From<&T> for AxisIndex<T>
+where
+    T: Clone,
+{
+    fn from(value: &T) -> Self {
+        Self { value: value.clone() }
+    }
+}
+
+macro_rules! impl_try_from_axis_index {
+    ($t1:ty, $($t2:ty),*) => {
+        $(
+            impl TryFrom<$t2> for AxisIndex<$t1> {
+                type Error = Error;
+
+                fn try_from(value: $t2) -> Result<Self> {
+                    Ok(Self { value: value.try_into()? })
+                }
+            }
+
+            impl TryFrom<&$t2> for AxisIndex<$t1> {
+                type Error = Error;
+
+                fn try_from(value: &$t2) -> Result<Self> {
+                    Ok(Self { value: (*value).try_into()? })
+                }
+            }
+
+            impl TryFrom<AxisIndex<$t2>> for AxisIndex<$t1> {
+                type Error = Error;
+
+                fn try_from(value: AxisIndex<$t2>) -> Result<Self> {
+                    Ok(Self { value: value.into_inner().try_into()? })
+                }
+            }
+        )*
+    };
+}
+
+impl_try_from_axis_index!(usize, isize, u32, u64, i32, i64);
+impl_try_from_axis_index!(isize, usize, u32, u64, i32, i64);
+
+/* #endregion AxisIndex (single axis) */
+
+#[cfg(test)]
+mod axis_index_tests {
+    use crate::prelude_dev::*;
+
+    #[test]
+    fn test_axis_index_from() {
+        let a: AxisIndex<isize> = 2.into();
+        assert_eq!(a.into_inner(), 2);
+        let a: AxisIndex<isize> = (&-1_isize).into();
+        assert_eq!(a.into_inner(), -1);
+        let a = AxisIndex::from(3_isize);
+        let v: AxisIndex<usize> = a.try_into().unwrap();
+        assert_eq!(v.into_inner(), 3_usize);
+    }
+}
