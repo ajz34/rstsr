@@ -262,3 +262,102 @@ halfway example that earlier runs had not). Both kernel tables
 `feature_rayon/auto_impl/op_binary_common.rs`) now use an IEEE
 `roundToIntegralTiesToEven` helper (`round_ties_even_f`, exact for `f32` via an
 `f64` round trip); NaN/inf and signed zeros propagate per IEEE.
+## `triu` indexed past the row when the diagonal left the matrix (FIXED)
+
+- **numpy:** `np.triu` zeroes `j < i + k` clipped to the row: `np.triu(ones((3, 3)), 2)` is
+  `[[0, 0, 1], [0, 0, 0], [0, 0, 0]]`, and a `k` beyond the matrix zeroes (or keeps) everything
+  (`lib/tests/test_twodim_base.py::test_tril_triu_ndim2` covers the in-range cases).
+- **rstsr:** entry_row_cpu::core_func::creation::test_tril_triu::custom_tril_triu::test_k_outside_row_bounds
+  (+ `::test_extreme_k`)
+- **tag:** bug
+- **status:** fixed
+
+`triu_ix2_cpu_serial` computed `j_end = max(i + k, 0)` but never clamped it to `ncol`, so any
+element of the k-th diagonal outside the matrix (e.g. `k >= ncol`, or `M > N` with a negative
+`k`) indexed past the buffer and panicked. Discovered 2026-10-06 through the rstsr-faer-py
+conformance suite (`test_triu` draws `k` over `[-max(n, m), max(n, m)]`). The same kernels now
+clamp to the row and use saturating arithmetic, so a `k` at the `isize` bounds cannot overflow
+either.
+## `linspace` endpoint was not exact and the serial kernel accumulated (FIXED)
+
+- **numpy:** `np.linspace` includes `stop` exactly when `endpoint=True` and computes
+  `y[i] = start + i * step` (`_core/tests/test_function_base.py::TestLinspace`).
+- **rstsr:** entry_row_cpu::core_func::creation::test_linspace::custom_linspace::test_endpoint_exact
+- **tag:** bug
+- **status:** fixed
+
+Both kernels left the last value at `start + (n - 1) * step` — off by one ulp from `stop` on
+some inputs (`linspace(0, 6.4913965932284536e16, 25)`) — and the serial kernel accumulated
+`v += step`, drifting up to a few ulp through the interior (`linspace(2, 10, 100)[-1]` was
+`9.999999999999996`, and `linspace(0, 1, 11)[8]` was `0.7999999999999999`). Discovered
+2026-10-06 through the rstsr-faer-py conformance suite (`test_linspace` asserts
+`out[-1] == stop` exactly). Both kernels now compute `start + i * step` and assign the
+endpoint directly when `endpoint=True`; `endpoint=False` keeps the half-open interval.
+The result matches NumPy bit-for-bit for float64; for float32/complex the arithmetic runs
+in the output dtype, so values may differ from NumPy by a few ulp
+(`linspace(0, 1, 11, dtype=float32)[9]` is one ulp above NumPy's `0.9`).
+
+## `Layout::diagonal` gated super-diagonals on the row count (FIXED)
+
+- **numpy:** `np.eye(2, 4, k=2)` puts ones at `(0, 2)` and `(1, 3)`; a wide matrix's
+  diagonal with `offset >= n_rows` still has elements.
+- **rstsr:** rstsr-common `layout::test::test_diagonal` +
+  entry_row_cpu::core_func::creation::test_eye::custom_eye::test_eye_offset_past_rows
+- **tag:** bug
+- **status:** fixed
+
+`Layout::diagonal`'s super-diagonal branch tested `(0..d1)` (rows) where a super-diagonal
+`k` is valid while `k < d2` (cols). `xp.eye(2, 4, k=2)` therefore produced an all-zero
+matrix, and `xp.eye(3, 1, k=2)` a bogus "Layout is too large" error. Found 2026-10-06 by
+the rstsr-faer-py review; the gate is now `(0..d2)`, which also keeps the `(d2 - k)`
+length non-negative for every accepted offset. `rt::diagonal` consumers (diag, indexing)
+are fixed by the same change.
+
+## `squeeze` validated only the first axis of a descending sort (FIXED)
+
+- **numpy:** `np.squeeze(zeros((1, 2, 1)), axis=(-4, 0))` raises `AxisError` (-4 out of
+  bounds for a 3-d array).
+- **rstsr:** entry_row_cpu::core_func::manipulation::test_squeeze::custom_squeeze_mixed_axes::test_mixed_invalid_negative_axis
+- **tag:** bug
+- **status:** fixed
+
+`into_squeeze_f` mapped negative axes, sorted descending, then checked only `axes.first()`
+— so a mixed list like `(-4, 0)` kept the invalid `-1` (which addressed a real axis after
+the first elimination) and succeeded. Found 2026-10-06 through the rstsr-faer-py review;
+the check now scans every mapped axis.
+
+## `take` rejected empty indices on an empty axis (FIXED)
+
+- **numpy:** `np.take(zeros((0,)), array([], dtype=int64))` returns shape `(0,)`.
+- **rstsr:** entry_row_cpu::core_func::indexing::test_indexing::custom_indexing_take::test_take_empty_indices
+- **tag:** bug
+- **status:** fixed
+
+Both `index_select` kernels bounds-checked `indices.iter().max().unwrap_or(&0)`, testing the
+sentinel `0` against an empty axis (`0..0`). Found 2026-10-06 through the rstsr-faer-py
+review; the check is skipped when `indices` is empty.
+
+## `argmax`/`argmin` rejected an empty *output* (FIXED)
+
+- **numpy:** `np.argmax(zeros((2, 0)), axis=0)` returns an empty array of shape `(0,)`; an
+  empty *reduced* axis still raises.
+- **rstsr:** entry_row_cpu::core_func::reduction::test_argmax::custom_arg_empty::test_empty_output
+- **tag:** bug
+- **status:** fixed
+
+The axes-reduction kernels asserted `la.size() > 0` before splitting, conflating "nothing to
+reduce" with "nothing to produce". Found 2026-10-06 through the rstsr-faer-py review; the
+guard now tests the split reduced layout, so an empty output is legal while an empty reduced
+axis still raises "empty sequence is not allowed for reduce_arg".
+
+## `tril`/`triu` rank-1 input surfaced a bare AxisError (FIXED)
+
+- **numpy:** n/a (array-API defines `x` as `(..., M, N)`; the reference implementation raises
+  for rank < 2).
+- **rstsr:** entry_row_cpu::core_func::creation::test_tril_triu::custom_tril_triu::test_ndim1_error
+- **tag:** bug
+- **status:** fixed
+
+`tril_cpu_serial`/`triu_cpu_serial` reached `dim_split_at(-2)` first, surfacing
+`AxisError { axis: -2, ndim: 1 }` (mapped to `IndexError` by the array-API wrapper). Found
+2026-10-06 through the rstsr-faer-py review; the kernels now assert `ndim >= 2` up front.
