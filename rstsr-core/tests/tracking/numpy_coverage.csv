@@ -42,7 +42,7 @@ _core/tests/test_numeric.py,TestRollaxis,test_results,v2.5.2,not-applicable,,eac
 _core/tests/test_numeric.py,TestRoll,test_roll1d,v2.5.2,not-applicable,,301d1d579165,rstsr has no roll
 _core/tests/test_numeric.py,TestRoll,test_roll2d,v2.5.2,not-applicable,,b53a8bb4ae2c,rstsr has no roll
 _core/tests/test_numeric.py,TestRoll,test_roll_empty,v2.5.2,not-applicable,,89e1e985a56a,rstsr has no roll
-_core/tests/test_numeric.py,TestRoll,test_roll_unsigned_shift,v2.5.2,not-applicable,,f11f02964107,rstsr has no roll
+_core/tests/test_numeric.py,TestRoll,test_roll_unsigned_shift,v2.5.2,not-applicable,,f11f02964107,numpy uint shift widths; rstsr shifts are isize
 _core/tests/test_numeric.py,TestRoll,test_roll_big_int,v2.5.2,not-applicable,,daf9a9e0f62f,rstsr has no roll
 _core/tests/test_regression.py,TestRegression,test_reshape_order,v2.5.2,transferred,core_func/manipulation/test_reshape.rs::numpy_reshape::regression,fe7311072c67,order=F incl non-contig column view
 _core/tests/test_regression.py,TestRegression,test_reshape_zero_strides,v2.5.2,transferred,core_func/manipulation/test_reshape.rs::numpy_reshape::regression,ceb0f75a1627,broadcast zero-stride reshape
@@ -214,3 +214,15 @@ _core/tests/test_multiarray.py,TestWhere,test_string,v2.5.2,not-applicable,,aff8
 _core/tests/test_multiarray.py,TestWhere,test_empty_result,v2.5.2,not-applicable,,f588ac980d30,1-arg where(cond) == nonzero; out of scope (3-arg only)
 _core/tests/test_multiarray.py,TestWhere,test_largedim,v2.5.2,not-applicable,,8be7298435d0,1-arg where(cond)/nonzero; out of scope
 _core/tests/test_multiarray.py,TestWhere,test_kwargs,v2.5.2,not-applicable,,c84ef55a6d2f,kwargs rejection N-A in Rust (positional-only by construction)
+_core/tests/test_multiarray.py,TestRepeat,test_basic,v2.5.2,transferred,core_func/manipulation/test_repeat.rs::numpy_repeat::test_basic,63d8882a07bf,per-element counts
+_core/tests/test_multiarray.py,TestRepeat,test_broadcast1,v2.5.2,transferred,core_func/manipulation/test_repeat.rs::numpy_repeat::test_broadcast1,f9c4f7aa6ca9,scalar count
+_core/tests/test_multiarray.py,TestRepeat,test_axis_spec,v2.5.2,transferred,core_func/manipulation/test_repeat.rs::numpy_repeat::test_axis_spec,7a7dabe5b1ba,axis 0 / axis 1 lists
+_core/tests/test_multiarray.py,TestRepeat,test_broadcast2,v2.5.2,transferred,core_func/manipulation/test_repeat.rs::numpy_repeat::test_broadcast2,df04148f1035,scalar count per axis
+_core/tests/test_numeric.py,TestRoll,test_roll1d,v2.5.2,transferred,core_func/manipulation/test_roll.rs::numpy_roll::test_roll1d,301d1d579165,1-d roll
+_core/tests/test_numeric.py,TestRoll,test_roll2d,v2.5.2,transferred,core_func/manipulation/test_roll.rs::numpy_roll::test_roll2d,b53a8bb4ae2c,full tuple/axis matrix
+_core/tests/test_numeric.py,TestRoll,test_roll_empty,v2.5.2,transferred,core_func/manipulation/test_roll.rs::numpy_roll::test_roll_empty,89e1e985a56a,empty input
+_core/tests/test_numeric.py,TestRoll,test_roll_big_int,v2.5.2,transferred,core_func/manipulation/test_roll.rs::numpy_roll::test_roll_big_int,daf9a9e0f62f,multi-turn wrap; 2**100 case declined (isize shift)
+lib/tests/test_shape_base.py,TestTile,test_basic,v2.5.2,transferred,core_func/manipulation/test_tile.rs::numpy_tile::test_basic,1528134d1518,six tile forms
+lib/tests/test_shape_base.py,TestTile,test_tile_one_repetition_on_array_gh4679,v2.5.2,transferred,core_func/manipulation/test_tile.rs::numpy_tile::test_tile_one_repetition_on_array_gh4679,55dc5b35355d,copy guarantee (rstsr always copies)
+lib/tests/test_shape_base.py,TestTile,test_empty,v2.5.2,transferred,core_func/manipulation/test_tile.rs::numpy_tile::test_empty,62eb3c95e13f,empty shapes
+lib/tests/test_shape_base.py,TestTile,test_kroncompare,v2.5.2,not-applicable,,509cb8549981,requires kron; covered indirectly by 3-d tile test

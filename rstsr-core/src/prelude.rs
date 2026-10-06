@@ -61,7 +61,7 @@ pub mod rstsr_structs {
 
     pub use rstsr_common::axis_index::AxesIndex;
 
-    pub use crate::tensor::manipulation::exports::ReshapeArgs;
+    pub use crate::tensor::manipulation::exports::{RepeatArg, ReshapeArgs};
     pub use crate::tensor::reduction::{CumulativeArgs, ReduceArgs, VarArgs};
 }
 
@@ -93,11 +93,11 @@ pub mod rstsr_funcs {
         into_permute_dims_f, into_prefer, into_prefer_f, into_reverse_axes, into_shape, into_shape_f,
         into_shape_with_args, into_shape_with_args_f, into_squeeze, into_squeeze_f, into_swapaxes, into_swapaxes_f,
         into_transpose, into_transpose_f, into_unsqueeze, into_unsqueeze_f, moveaxis, moveaxis_f, permute_dims,
-        permute_dims_f, reshape, reshape_f, reshape_with_args, reshape_with_args_f, reshapeable_without_copy,
-        reverse_axes, squeeze, squeeze_f, swapaxes, swapaxes_f, to_broadcast, to_broadcast_f, to_compatible_shape,
-        to_compatible_shape_f, to_contig, to_contig_f, to_dim, to_dim_f, to_dyn, to_layout, to_layout_f, to_prefer,
-        to_prefer_f, to_shape, to_shape_f, to_shape_with_args, to_shape_with_args_f, transpose, transpose_f, unsqueeze,
-        unsqueeze_f,
+        permute_dims_f, repeat, repeat_f, reshape, reshape_f, reshape_with_args, reshape_with_args_f,
+        reshapeable_without_copy, reverse_axes, roll, roll_f, squeeze, squeeze_f, swapaxes, swapaxes_f, tile, tile_f,
+        to_broadcast, to_broadcast_f, to_compatible_shape, to_compatible_shape_f, to_contig, to_contig_f, to_dim,
+        to_dim_f, to_dyn, to_layout, to_layout_f, to_prefer, to_prefer_f, to_shape, to_shape_f, to_shape_with_args,
+        to_shape_with_args_f, transpose, transpose_f, unsqueeze, unsqueeze_f,
     };
 
     // binary arithmetics
