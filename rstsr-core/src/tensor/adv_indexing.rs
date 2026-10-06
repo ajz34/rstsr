@@ -409,79 +409,6 @@ where
 
 /* #endregion */
 
-#[cfg(test)]
-mod test {
-    use super::*;
-
-    #[test]
-    fn test_index_select() {
-        #[cfg(not(feature = "col_major"))]
-        {
-            let device = DeviceCpuSerial::default();
-            let a = linspace((1.0, 24.0, 24, &device)).into_shape((2, 3, 4));
-            let b = a.index_select(0, [0, 0, 1, -1]);
-            assert!(fingerprint(&b) - -31.94175930917264 < 1e-8);
-            let b = a.index_select(1, [0, 0, 1, -1]);
-            assert!(fingerprint(&b) - 3.5719025258942088 < 1e-8);
-            let b = a.index_select(2, [0, 0, 1, -1]);
-            assert!(fingerprint(&b) - -25.648600916145096 < 1e-8);
-        }
-        #[cfg(feature = "col_major")]
-        {
-            let device = DeviceCpuSerial::default();
-            let a = linspace((1.0, 24.0, 24, &device)).into_shape((4, 3, 2));
-            let b = a.index_select(2, [0, 0, 1, -1]);
-            assert!(fingerprint(&b) - -31.94175930917264 < 1e-8);
-            let b = a.index_select(1, [0, 0, 1, -1]);
-            assert!(fingerprint(&b) - 3.5719025258942088 < 1e-8);
-            let b = a.index_select(0, [0, 0, 1, -1]);
-            assert!(fingerprint(&b) - -25.648600916145096 < 1e-8);
-        }
-
-        // 1-dim select with empty index
-        let device = DeviceCpuSerial::default();
-        let a = linspace((1.0, 4.0, 4, &device));
-        let mask: Vec<usize> = vec![];
-        let b = a.index_select(0, &mask);
-        assert_eq!(b.raw(), &[]);
-    }
-
-    #[test]
-    fn test_index_select_default_device() {
-        #[cfg(not(feature = "col_major"))]
-        {
-            let device = DeviceCpu::default();
-            let a = linspace((1.0, 2.0, 256 * 256 * 256, &device)).into_shape((256, 256, 256));
-            let sel = [1, 2, 3, 5, 8, 13, 21, 34, 55, 89, 144, 233];
-            let b = a.index_select(0, sel);
-            assert!(fingerprint(&b) - 0.9357016252766746 < 1e-10);
-            let b = a.index_select(1, sel);
-            assert!(fingerprint(&b) - 1.012193909979973 < 1e-10);
-            let b = a.index_select(2, sel);
-            assert!(fingerprint(&b) - 1.010735112247236 < 1e-10);
-        }
-        #[cfg(feature = "col_major")]
-        {
-            let device = DeviceCpu::default();
-            let a = linspace((1.0, 2.0, 256 * 256 * 256, &device)).into_shape((256, 256, 256));
-            let sel = [1, 2, 3, 5, 8, 13, 21, 34, 55, 89, 144, 233];
-            let b = a.index_select(2, sel);
-            assert!(fingerprint(&b) - 0.9357016252766746 < 1e-10);
-            let b = a.index_select(1, sel);
-            assert!(fingerprint(&b) - 1.012193909979973 < 1e-10);
-            let b = a.index_select(0, sel);
-            assert!(fingerprint(&b) - 1.010735112247236 < 1e-10);
-        }
-    }
-
-    #[test]
-    fn test_bool_select_workable() {
-        let a = arange(24).into_shape((2, 3, 4));
-        let b = a.bool_select(-2, [true, false, true]);
-        println!("{b:?}");
-    }
-}
-
 /* #region take_along_axis */
 
 /// Gather values along an axis using an index tensor.
@@ -489,17 +416,18 @@ mod test {
 /// See also [`take_along_axis`].
 pub fn take_along_axis_f<R, RI, T, B, DA, DI>(
     tensor: &TensorAny<R, T, B, DA>,
-    indices: &TensorAny<RI, usize, B, DI>,
+    indices: &TensorAny<RI, isize, B, DI>,
     axis: impl TryInto<AxisIndex<isize>, Error: Into<Error>>,
 ) -> Result<Tensor<T, B, IxD>>
 where
     R: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
-    RI: DataAPI<Data = <B as DeviceRawAPI<usize>>::Raw>,
+    RI: DataAPI<Data = <B as DeviceRawAPI<isize>>::Raw>,
     DA: DimAPI,
     DI: DimAPI,
     T: Clone,
     B: DeviceAPI<T>
         + DeviceAPI<usize, Raw = Vec<usize>>
+        + DeviceAPI<isize, Raw = Vec<isize>>
         + DeviceRawAPI<MaybeUninit<T>>
         + DeviceCreationAnyAPI<T>
         + DeviceTakeAlongAxisAPI<T, DA, DI>,
@@ -531,11 +459,20 @@ where
             )?;
         }
     }
-    // validate index entries within 0..axis_size
+    // validate + resolve index entries: negatives count from the back
+    // (array-api/NumPy semantics; the suite draws ~half negative indices)
     let axis_size = la.shape()[axis];
-    let idx_view = indices.view();
-    for v in idx_view.iter() {
-        rstsr_pattern!(*v, 0..axis_size, IndexError, "take_along_axis index out of range along axis {}.", axis)?;
+    let mut resolved: Vec<usize> = Vec::with_capacity(indices.size());
+    for &v in indices.raw().iter() {
+        let v = if v < 0 { v + axis_size as isize } else { v };
+        rstsr_pattern!(
+            v,
+            0..axis_size as isize,
+            IndexError,
+            "take_along_axis index out of range along axis {}.",
+            axis
+        )?;
+        resolved.push(v as usize);
     }
     // output shape: input shape with the axis length replaced
     let mut out_shape: Vec<usize> = la.shape().as_ref().to_vec();
@@ -543,7 +480,10 @@ where
     let layout_c = out_shape.new_contig(None, device.default_order());
     let (_, idx_max) = layout_c.bounds_index()?;
     let mut storage = device.uninit_impl(idx_max)?;
-    device.take_along_axis(storage.raw_mut(), &layout_c, tensor.raw(), la, indices.raw(), lidx, axis)?;
+    // a fresh C-contig layout over the (unchanged) index shape addresses the
+    // resolved index vector
+    let lidx_resolved: Layout<DI> = lidx.shape().as_ref().to_vec().new_c_contig(None).to_dim()?;
+    device.take_along_axis(storage.raw_mut(), &layout_c, tensor.raw(), la, &resolved, &lidx_resolved, axis)?;
     // SAFETY: `take_along_axis` above wrote every element of the fresh
     // storage exactly once (each (rest, j) position is filled from one
     // indexed source element).
@@ -635,16 +575,17 @@ pub trait TakeAlongAxisAPI<Inp> {
     }
 }
 
-impl<R, RI, T, B, DA, DI, AArg> TakeAlongAxisAPI<()> for (&TensorAny<R, T, B, DA>, &TensorAny<RI, usize, B, DI>, AArg)
+impl<R, RI, T, B, DA, DI, AArg> TakeAlongAxisAPI<()> for (&TensorAny<R, T, B, DA>, &TensorAny<RI, isize, B, DI>, AArg)
 where
     R: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
-    RI: DataAPI<Data = <B as DeviceRawAPI<usize>>::Raw>,
+    RI: DataAPI<Data = <B as DeviceRawAPI<isize>>::Raw>,
     DA: DimAPI,
     DI: DimAPI,
     T: Clone,
     AArg: TryInto<AxisIndex<isize>, Error: Into<Error>>,
     B: DeviceAPI<T>
         + DeviceAPI<usize, Raw = Vec<usize>>
+        + DeviceAPI<isize, Raw = Vec<isize>>
         + DeviceRawAPI<MaybeUninit<T>>
         + DeviceCreationAnyAPI<T>
         + DeviceTakeAlongAxisAPI<T, DA, DI>,
@@ -662,22 +603,27 @@ where
     R: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
     DA: DimAPI,
     T: Clone,
-    B: DeviceAPI<T> + DeviceAPI<usize, Raw = Vec<usize>> + DeviceRawAPI<MaybeUninit<T>> + DeviceCreationAnyAPI<T>,
+    B: DeviceAPI<T>
+        + DeviceAPI<usize, Raw = Vec<usize>>
+        + DeviceAPI<isize, Raw = Vec<isize>>
+        + DeviceRawAPI<MaybeUninit<T>>
+        + DeviceCreationAnyAPI<T>,
 {
     /// Gather values along an axis using an index tensor.
     ///
     /// See also [`take_along_axis`].
     pub fn take_along_axis_f<RI, DI, AArg>(
         &self,
-        indices: &TensorAny<RI, usize, B, DI>,
+        indices: &TensorAny<RI, isize, B, DI>,
         axis: AArg,
     ) -> Result<Tensor<T, B, IxD>>
     where
-        RI: DataAPI<Data = <B as DeviceRawAPI<usize>>::Raw>,
+        RI: DataAPI<Data = <B as DeviceRawAPI<isize>>::Raw>,
         DI: DimAPI,
         AArg: TryInto<AxisIndex<isize>, Error: Into<Error>>,
         B: DeviceAPI<T>
-            + DeviceAPI<usize>
+            + DeviceAPI<usize, Raw = Vec<usize>>
+            + DeviceAPI<isize, Raw = Vec<isize>>
             + DeviceRawAPI<MaybeUninit<T>>
             + DeviceCreationAnyAPI<T>
             + DeviceTakeAlongAxisAPI<T, DA, DI>,
@@ -688,13 +634,14 @@ where
     /// Gather values along an axis using an index tensor.
     ///
     /// See also [`take_along_axis`].
-    pub fn take_along_axis<RI, DI, AArg>(&self, indices: &TensorAny<RI, usize, B, DI>, axis: AArg) -> Tensor<T, B, IxD>
+    pub fn take_along_axis<RI, DI, AArg>(&self, indices: &TensorAny<RI, isize, B, DI>, axis: AArg) -> Tensor<T, B, IxD>
     where
-        RI: DataAPI<Data = <B as DeviceRawAPI<usize>>::Raw>,
+        RI: DataAPI<Data = <B as DeviceRawAPI<isize>>::Raw>,
         DI: DimAPI,
         AArg: TryInto<AxisIndex<isize>, Error: Into<Error>>,
         B: DeviceAPI<T>
-            + DeviceAPI<usize>
+            + DeviceAPI<usize, Raw = Vec<usize>>
+            + DeviceAPI<isize, Raw = Vec<isize>>
             + DeviceRawAPI<MaybeUninit<T>>
             + DeviceCreationAnyAPI<T>
             + DeviceTakeAlongAxisAPI<T, DA, DI>,
@@ -704,3 +651,76 @@ where
 }
 
 /* #endregion */
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_index_select() {
+        #[cfg(not(feature = "col_major"))]
+        {
+            let device = DeviceCpuSerial::default();
+            let a = linspace((1.0, 24.0, 24, &device)).into_shape((2, 3, 4));
+            let b = a.index_select(0, [0, 0, 1, -1]);
+            assert!(fingerprint(&b) - -31.94175930917264 < 1e-8);
+            let b = a.index_select(1, [0, 0, 1, -1]);
+            assert!(fingerprint(&b) - 3.5719025258942088 < 1e-8);
+            let b = a.index_select(2, [0, 0, 1, -1]);
+            assert!(fingerprint(&b) - -25.648600916145096 < 1e-8);
+        }
+        #[cfg(feature = "col_major")]
+        {
+            let device = DeviceCpuSerial::default();
+            let a = linspace((1.0, 24.0, 24, &device)).into_shape((4, 3, 2));
+            let b = a.index_select(2, [0, 0, 1, -1]);
+            assert!(fingerprint(&b) - -31.94175930917264 < 1e-8);
+            let b = a.index_select(1, [0, 0, 1, -1]);
+            assert!(fingerprint(&b) - 3.5719025258942088 < 1e-8);
+            let b = a.index_select(0, [0, 0, 1, -1]);
+            assert!(fingerprint(&b) - -25.648600916145096 < 1e-8);
+        }
+
+        // 1-dim select with empty index
+        let device = DeviceCpuSerial::default();
+        let a = linspace((1.0, 4.0, 4, &device));
+        let mask: Vec<usize> = vec![];
+        let b = a.index_select(0, &mask);
+        assert_eq!(b.raw(), &[]);
+    }
+
+    #[test]
+    fn test_index_select_default_device() {
+        #[cfg(not(feature = "col_major"))]
+        {
+            let device = DeviceCpu::default();
+            let a = linspace((1.0, 2.0, 256 * 256 * 256, &device)).into_shape((256, 256, 256));
+            let sel = [1, 2, 3, 5, 8, 13, 21, 34, 55, 89, 144, 233];
+            let b = a.index_select(0, sel);
+            assert!(fingerprint(&b) - 0.9357016252766746 < 1e-10);
+            let b = a.index_select(1, sel);
+            assert!(fingerprint(&b) - 1.012193909979973 < 1e-10);
+            let b = a.index_select(2, sel);
+            assert!(fingerprint(&b) - 1.010735112247236 < 1e-10);
+        }
+        #[cfg(feature = "col_major")]
+        {
+            let device = DeviceCpu::default();
+            let a = linspace((1.0, 2.0, 256 * 256 * 256, &device)).into_shape((256, 256, 256));
+            let sel = [1, 2, 3, 5, 8, 13, 21, 34, 55, 89, 144, 233];
+            let b = a.index_select(2, sel);
+            assert!(fingerprint(&b) - 0.9357016252766746 < 1e-10);
+            let b = a.index_select(1, sel);
+            assert!(fingerprint(&b) - 1.012193909979973 < 1e-10);
+            let b = a.index_select(0, sel);
+            assert!(fingerprint(&b) - 1.010735112247236 < 1e-10);
+        }
+    }
+
+    #[test]
+    fn test_bool_select_workable() {
+        let a = arange(24).into_shape((2, 3, 4));
+        let b = a.bool_select(-2, [true, false, true]);
+        println!("{b:?}");
+    }
+}

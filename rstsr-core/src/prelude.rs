@@ -23,6 +23,7 @@ pub mod rstsr_traits {
         ConcatAPI, DiagAPI, HStackAPI, MeshgridAPI, StackAPI, UnstackAPI, VStackAPI,
     };
     pub use crate::tensor::device_conversion::{TensorChangeFromDevice, TensorDeviceChangeAPI};
+    pub use crate::tensor::diff::DiffAPI;
     pub use crate::tensor::ext_conversion::IntoRSTSR;
     pub use crate::tensor::manipulation::exports::BroadcastArraysAPI;
     pub use crate::tensor::nonzero::NonzeroAPI;
@@ -183,6 +184,8 @@ pub mod rstsr_funcs {
     // searching
     pub use crate::tensor::nonzero::nonzero;
     pub use crate::tensor::nonzero::nonzero_f;
+    // diff
+    pub use crate::tensor::diff::{diff, diff_f};
     // set functions
     pub use crate::tensor::set::{
         isin, isin_f, unique_all, unique_all_f, unique_counts, unique_counts_f, unique_inverse, unique_inverse_f,

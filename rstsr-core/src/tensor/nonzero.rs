@@ -27,14 +27,13 @@ where
 
     // pass 1: count
     let count = device.nonzero_count(tensor.raw(), tensor.layout(), &is_nonzero)?;
-    // pass 2: fill flat C-order indices (data-dependent length = count)
+    // pass 2: fill flat C-order indices (data-dependent length = count);
+    // kept host-side for the coordinate split (O(count) registered scratch)
     let layout_flat = vec![count].new_contig(None, device.default_order());
     let (_, idx_max) = layout_flat.bounds_index()?;
     let mut storage = device.uninit_impl(idx_max)?;
     device.nonzero_fill(storage.raw_mut(), tensor.raw(), tensor.layout(), &is_nonzero)?;
-    // SAFETY: `nonzero_fill` wrote exactly `count` entries; the raw Vec is
-    // kept host-side for the coordinate split, and a separate storage is
-    // created for the flat index tensor below.
+    // SAFETY: `nonzero_fill` wrote exactly `count` entries.
     let storage = unsafe { <B as DeviceCreationAnyAPI<usize>>::assume_init_impl(storage)? };
     let flat_raw: Vec<usize> = storage.raw().clone();
 

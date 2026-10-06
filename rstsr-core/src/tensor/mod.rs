@@ -8,6 +8,7 @@ pub mod assignment;
 pub mod creation;
 pub mod creation_from_tensor;
 pub mod device_conversion;
+pub mod diff;
 pub mod ext_conversion;
 pub mod indexing;
 pub mod iterator_axes;
@@ -37,6 +38,7 @@ pub mod exports {
     pub use creation::*;
     pub use creation_from_tensor::*;
     pub use device_conversion::*;
+    pub use diff::*;
     pub use ext_conversion::*;
     pub use indexing::*;
     pub use iterator_axes::*;

@@ -22,7 +22,7 @@ mod custom_take_along_axis {
         device.set_default_order(RowMajor);
 
         let a = rt::tensor_from_nested!([[10, 20, 30], [40, 50, 60]], &device);
-        let idx = rt::tensor_from_nested!([[2_usize, 0], [1, 1]], &device);
+        let idx = rt::tensor_from_nested!([[2_isize, 0], [1, 1]], &device);
         let out = rt::take_along_axis((&a, &idx, -1));
         assert_eq!(out.shape(), &[2, 2]);
         assert_eq!(out.reshape([-1]).to_vec(), vec![30, 10, 50, 50]);
@@ -37,7 +37,7 @@ mod custom_take_along_axis {
         device.set_default_order(RowMajor);
 
         let a = rt::tensor_from_nested!([[10, 20, 30], [40, 50, 60]], &device);
-        let idx = rt::tensor_from_nested!([[1_usize, 0, 1]], &device);
+        let idx = rt::tensor_from_nested!([[1_isize, 0, 1]], &device);
         let out = rt::take_along_axis((&a, &idx, 0));
         assert_eq!(out.shape(), &[1, 3]);
         assert_eq!(out.reshape([-1]).to_vec(), vec![40, 20, 60]);
@@ -52,7 +52,7 @@ mod custom_take_along_axis {
         device.set_default_order(RowMajor);
 
         let a = (rt::arange((20, &device)) * 7).mapv(|x| x % 11).into_shape([4, 5]);
-        let idx = a.argsort(1);
+        let idx = a.argsort(1).mapv(|v| v as isize);
         let gathered = a.take_along_axis(&idx, 1);
         let sorted = a.sort(1);
         assert_equal(gathered, &sorted, None);
@@ -67,10 +67,24 @@ mod custom_take_along_axis {
 
         let a = rt::arange((6, &device)).into_shape([2, 3]);
         let at = a.t(); // [[0,3],[1,4],[2,5]]
-        let idx = rt::tensor_from_nested!([[1_usize, 0], [0, 1], [1, 1]], &device);
+        let idx = rt::tensor_from_nested!([[1_isize, 0], [0, 1], [1, 1]], &device);
         let out = rt::take_along_axis((&at, &idx, -1));
         assert_eq!(out.shape(), &[3, 2]);
         assert_eq!(out.reshape([-1]).to_vec(), vec![3, 0, 1, 4, 5, 5]);
+    }
+
+    #[test]
+    fn test_negative_indices() {
+        // negatives count from the back (NumPy: [[2,-3],[1,1]] == [[2,0],[1,1]])
+        crate::specify_test!("test_negative_indices");
+
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        let a = rt::tensor_from_nested!([[10, 20, 30], [40, 50, 60]], &device);
+        let idx = rt::tensor_from_nested!([[2_isize, -3], [1, 1]], &device);
+        let out = rt::take_along_axis((&a, &idx, -1));
+        assert_eq!(out.reshape([-1]).to_vec(), vec![30, 10, 50, 50]);
     }
 
     #[test]
@@ -81,7 +95,7 @@ mod custom_take_along_axis {
         device.set_default_order(RowMajor);
 
         let a = rt::tensor_from_nested!([[10, 20, 30], [40, 50, 60]], &device);
-        let idx = rt::tensor_from_nested!([[3_usize, 0]], &device);
+        let idx = rt::tensor_from_nested!([[3_isize, 0]], &device);
         assert!(rt::take_along_axis_f(&a, &idx, -1).is_err());
     }
 
@@ -93,7 +107,7 @@ mod custom_take_along_axis {
         device.set_default_order(RowMajor);
 
         let a = rt::tensor_from_nested!([[10, 20, 30], [40, 50, 60]], &device);
-        let idx = rt::tensor_from_nested!([[2_usize, 0, 1]], &device);
+        let idx = rt::tensor_from_nested!([[2_isize, 0, 1]], &device);
         assert!(rt::take_along_axis_f(&a, &idx, -1).is_err());
     }
 
@@ -106,7 +120,7 @@ mod custom_take_along_axis {
         device.set_default_order(RowMajor);
 
         let a = rt::tensor_from_nested!([[10, 20, 30], [40, 50, 60]], &device);
-        let idx: Tensor<usize, _> = rt::zeros(([2, 0], &device));
+        let idx: Tensor<isize, _> = rt::zeros(([2, 0], &device));
         let out = rt::take_along_axis((&a, &idx, -1));
         assert_eq!(out.shape(), &[2, 0]);
     }
