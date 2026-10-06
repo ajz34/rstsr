@@ -297,3 +297,32 @@ mod doc_like_family {
         );
     }
 }
+
+mod doc_from_scalar {
+    use super::*;
+    static FUNC: &str = "doc_from_scalar";
+
+    #[test]
+    fn test_doc() {
+        crate::specify_test!("test_doc");
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        let a = rt::from_scalar(3.0, &device);
+        println!("{a}");
+        println!("{:?}", a.shape());
+        let b: Tensor<i32, _, _> = rt::from_scalar(7, &device);
+        println!("{}", b.to_scalar() + 1);
+
+        // a bool constant as a where operand (bool scalars are rejected by
+        // rstsr's scalar overloads; a 0-d bool tensor broadcasts instead)
+        let cond = rt::tensor_from_nested!([true, false, true], &device);
+        let x = rt::tensor_from_nested!([1, 2, 3], &device);
+        let f = rt::from_scalar(false, &device);
+        let r = rt::r#where(&cond, &x, &f);
+        println!("{r}");
+        assert_eq!(format!("{:?}", a.shape()), "[]");
+        assert_eq!(b.to_scalar(), 7);
+        assert_eq!(r.to_vec(), vec![1, 0, 3]);
+    }
+}
