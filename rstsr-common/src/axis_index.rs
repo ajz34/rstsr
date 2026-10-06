@@ -179,6 +179,17 @@ impl_try_from_axes_index!(isize, usize, u32, u64, i32, i64);
 #[macro_export]
 macro_rules! impl_from_tuple_to_axes_index {
     ($t: ty) => {
+        impl<F1> TryFrom<(F1,)> for AxesIndex<$t>
+        where
+            $t: TryFrom<F1>,
+        {
+            type Error = Error;
+
+            fn try_from(value: (F1,)) -> Result<Self> {
+                Ok(AxesIndex::Vec(vec![value.0.try_into().ok().unwrap()]))
+            }
+        }
+
         impl<F1, F2> TryFrom<(F1, F2)> for AxesIndex<$t>
         where
             $t: TryFrom<F1> + TryFrom<F2>,

@@ -548,6 +548,20 @@ mod tests {
     }
 
     #[test]
+    fn test_one_tuple_index() {
+        // one-element tuples convert like longer tuples (arity 1-10)
+        let l = Layout::new([2, 3, 4], [12, 4, 1], 0).unwrap();
+        let idx: AxesIndex<Indexer> = (1..3,).try_into().unwrap();
+        assert_eq!(idx.as_ref().len(), 1);
+        let l1 = l.dim_slice(idx.as_ref()).unwrap();
+        assert_eq!(l1.shape(), &[1, 3, 4]);
+
+        // same conversion for axes/shape lists
+        let axes: AxesIndex<isize> = (3,).try_into().unwrap();
+        assert_eq!(axes.as_ref(), &[3]);
+    }
+
+    #[test]
     fn test_slice_with_stride() {
         let l = Layout::new([24], [1], 0).unwrap();
         let b = l.dim_narrow(0, slice!(5, 15, 2)).unwrap();
