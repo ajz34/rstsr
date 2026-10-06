@@ -6,6 +6,7 @@ pub mod op_tri;
 pub mod op_with_func;
 pub mod reduction;
 pub mod searching;
+pub mod set;
 pub mod sorting;
 pub mod transpose;
 pub mod vecdot;

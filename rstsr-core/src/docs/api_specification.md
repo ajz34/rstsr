@@ -212,6 +212,8 @@ Device is designed to be able extended by other crates. The above devices [`Devi
 | assoc/fn | [`flip`] | Reverses the order of elements in an array along the given axis. |
 | assoc/fn | [`moveaxis`] | Moves array axes (dimensions) to new positions, while leaving other axes in their original positions. |
 | assoc/fn | [`searchsorted`] | Finds insertion positions of values into a sorted 1-D array (`side`, `sorter` arguments in [`SearchSortedArgs`]). |
+| assoc/fn | [`unique_values`] <br/> [`unique_counts`] <br/> [`unique_inverse`] <br/> [`unique_all`] | Unique values of the flattened tensor, with counts / inverse mapping / all fields (named structs `UniqueCounts`, `UniqueInverse`, `UniqueAll`). |
+| assoc/fn | [`isin`] | Element-wise membership of `x1` in `x2` (`invert` argument). |
 | assoc/fn | [`repeat`] | Repeat elements of a tensor along an axis (or the flattened row-major sequence). |
 | assoc/fn | [`roll`] | Roll array elements along a given axis (the flattened form visits row-major). |
 | assoc/fn | [`tile`] | Construct an array by tiling an input array. |

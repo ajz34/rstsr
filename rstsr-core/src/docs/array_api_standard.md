@@ -241,7 +241,7 @@ The reference implementation (as in [`DeviceCpuSerial`] and [`DeviceFaer`]), fol
 
 | status | implementation | Python API | description |
 |-|-|-|-|
-| | | [`isin`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.isin.html) | Tests for each element in `x1` whether the element is in `x2`. |
+| Y | [`isin`] | [`isin`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.isin.html) | Tests for each element in `x1` whether the element is in `x2`. |
 | | | [`unique_all`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.unique_all.html) | Returns the unique elements of an input array `x`, the first occurring indices for each unique element in `x`, the indices from the set of unique elements that reconstruct `x`, and the corresponding counts for each unique element in `x`. |
 | | | [`unique_counts`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.unique_counts.html) | Returns the unique elements of an input array `x` and the corresponding counts for each unique element in `x`. |
 | | | [`unique_inverse`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.unique_inverse.html) | Returns the unique elements of an input array `x` and the indices from the set of unique elements that reconstruct `x`. |

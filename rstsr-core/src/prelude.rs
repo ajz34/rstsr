@@ -41,6 +41,7 @@ pub mod rstsr_traits {
     pub use crate::tensor::ownership_conversion::{TensorIntoOwnedAPI, TensorViewAPI, TensorViewMutAPI};
     pub use crate::tensor::reduction::TensorSumBoolAPI;
     pub use crate::tensor::searching::SearchSortedAPI;
+    pub use crate::tensor::set::{IsinAPI, UniqueAllAPI, UniqueCountsAPI, UniqueInverseAPI, UniqueValuesAPI};
     pub use crate::tensor::sorting::{ArgSortAPI, ArgSortCustomAPI, SortAPI, SortCustomAPI};
 
     #[cfg(feature = "rayon")]
@@ -67,6 +68,7 @@ pub mod rstsr_structs {
     pub use crate::operators::sorting::SortArgs;
     pub use crate::tensor::manipulation::exports::{RepeatArg, ReshapeArgs};
     pub use crate::tensor::reduction::{CumulativeArgs, ReduceArgs, VarArgs};
+    pub use crate::tensor::set::{UniqueAll, UniqueCounts, UniqueInverse};
 }
 
 pub mod rstsr_funcs {
@@ -175,6 +177,11 @@ pub mod rstsr_funcs {
     // searching
     pub use crate::tensor::searching::searchsorted;
     pub use crate::tensor::searching::searchsorted_f;
+    // set functions
+    pub use crate::tensor::set::{
+        isin, isin_f, unique_all, unique_all_f, unique_counts, unique_counts_f, unique_inverse, unique_inverse_f,
+        unique_values, unique_values_f,
+    };
     // sorting
     pub use crate::tensor::sorting::{
         argsort, argsort_custom, argsort_custom_f, argsort_f, sort, sort_custom, sort_custom_f, sort_f,

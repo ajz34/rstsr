@@ -19,6 +19,7 @@ pub use crate::cpu_serial::op_tri::*;
 pub use crate::cpu_serial::op_with_func::*;
 pub use crate::cpu_serial::reduction::*;
 pub use crate::cpu_serial::searching::*;
+pub use crate::cpu_serial::set::*;
 pub use crate::cpu_serial::sorting::*;
 pub use crate::cpu_serial::transpose::*;
 pub use crate::cpu_serial::vecdot::*;
