@@ -178,7 +178,7 @@ The reference implementation (as in [`DeviceCpuSerial`] and [`DeviceFaer`]), fol
 | status | implementation | Python API | description |
 |-|-|-|-|
 | P | [`take`] | [`take`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.take.html) | Returns elements of an array along an axis. |
-| | | [`take_along_axis`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.take_along_axis.html) | Returns elements from an array at the one-dimensional indices specified by `indices` along a provided `axis`. |
+| Y | [`take_along_axis`] | [`take_along_axis`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.take_along_axis.html) | Returns elements from an array at the one-dimensional indices specified by `indices` along a provided `axis`. |
 
 **Partial implementation**
 - [`take`] currently only supports indexing from an axis, which is also the Python Array API requires. However, NumPy also allows `axis = None` to index the flattened array, which is not implemented in RSTSR.
@@ -233,7 +233,7 @@ The reference implementation (as in [`DeviceCpuSerial`] and [`DeviceFaer`]), fol
 | Y | [`argmax`], [`argmax_axes`], [`argmax_with_args`] | [`argmax`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.argmax.html) | Returns the indices of the maximum values along a specified axis. |
 | Y | [`argmin`], [`argmin_axes`], [`argmin_with_args`] | [`argmin`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.argmin.html) | Returns the indices of the minimum values along a specified axis. |
 | Y | [`count_nonzero`], [`count_nonzero_axes`], [`count_nonzero_with_args`] | [`count_nonzero`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.count_nonzero.html) | Counts the number of array elements which are non-zero. |
-| | | [`nonzero`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.nonzero.html) | Returns the indices of the array elements which are non-zero. |
+| Y | [`nonzero`] | [`nonzero`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.nonzero.html) | Returns the indices of the array elements which are non-zero. |
 | Y | [`searchsorted`] | [`searchsorted`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.searchsorted.html) | Finds the indices into x1 such that, if the corresponding elements in x2 were inserted before the indices, the order of x1, when sorted in ascending order, would be preserved. |
 | Y | [`where`], [`where_f`] | [`where`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.where.html) | Returns elements chosen from x1 or x2 depending on condition. |
 

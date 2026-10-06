@@ -15,6 +15,7 @@ pub mod iterator_elem;
 pub mod linalg;
 pub mod manipulation;
 pub mod map_elementwise;
+pub mod nonzero;
 pub mod operators;
 pub mod ownership_conversion;
 pub mod pack_array;

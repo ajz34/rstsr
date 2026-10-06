@@ -21,7 +21,9 @@ pub use itertools::{izip, Itertools};
 pub use rayon::ThreadPool;
 
 pub use rstsr_common::prelude_dev::*;
-pub use rstsr_dtype_traits::{DTypeCastAPI, DTypePromoteAPI, ExtFloat, ExtNum, ExtReal, ExtSortCmp, IsCloseArgs};
+pub use rstsr_dtype_traits::{
+    DTypeCastAPI, DTypePromoteAPI, ExtFloat, ExtNum, ExtReal, ExtSortCmp, ExtZero, IsCloseArgs,
+};
 
 pub use rstsr_native_impl::prelude_dev::*;
 

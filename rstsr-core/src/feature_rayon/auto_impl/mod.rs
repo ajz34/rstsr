@@ -1,6 +1,7 @@
 pub mod adv_indexing;
 pub mod assignment;
 pub mod creation;
+pub mod nonzero;
 pub mod op_binary_arithmetic;
 pub mod op_binary_common;
 pub mod op_quaternary_common;
@@ -12,4 +13,5 @@ pub mod reduction;
 pub mod searching;
 pub mod set;
 pub mod sorting;
+pub mod take_along_axis;
 pub mod vecdot;

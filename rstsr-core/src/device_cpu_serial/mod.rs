@@ -6,11 +6,13 @@ pub mod conversion;
 pub mod creation;
 pub mod device;
 pub mod linalg;
+pub mod nonzero;
 pub mod operators;
 pub mod reduction;
 pub mod searching;
 pub mod set;
 pub mod sorting;
+pub mod take_along_axis;
 
 pub use device::*;
 pub use operators::*;

@@ -214,6 +214,8 @@ Device is designed to be able extended by other crates. The above devices [`Devi
 | assoc/fn | [`searchsorted`] | Finds insertion positions of values into a sorted 1-D array (`side`, `sorter` arguments in [`SearchSortedArgs`]). |
 | assoc/fn | [`unique_values`] <br/> [`unique_counts`] <br/> [`unique_inverse`] <br/> [`unique_all`] | Unique values of the flattened tensor, with counts / inverse mapping / all fields (named structs `UniqueCounts`, `UniqueInverse`, `UniqueAll`). |
 | assoc/fn | [`isin`] | Element-wise membership of `x1` in `x2` (`invert` argument). |
+| assoc/fn | [`nonzero`] | Indices of nonzero elements, one 1-D coordinate tensor per dimension. |
+| assoc/fn | [`take_along_axis`] | Gather along an axis with an index tensor (companion of `argsort`). |
 | assoc/fn | [`repeat`] | Repeat elements of a tensor along an axis (or the flattened row-major sequence). |
 | assoc/fn | [`roll`] | Roll array elements along a given axis (the flattened form visits row-major). |
 | assoc/fn | [`tile`] | Construct an array by tiling an input array. |

@@ -154,3 +154,32 @@ where
         sorter: Option<&[usize]>,
     ) -> Result<(Storage<DataOwned<<Self as DeviceRawAPI<usize>>::Raw>, usize, Self>, Layout<IxD>)>;
 }
+
+/// Nonzero: two-pass count + flat-index fill over the row-major visit
+/// order. The tensor level splits the flat indices into per-dimension
+/// coordinate tensors (host layout math).
+pub trait OpNonzeroAPI<T, D>
+where
+    D: DimAPI,
+    Self: DeviceAPI<T> + DeviceAPI<usize> + DeviceRawAPI<MaybeUninit<usize>>,
+{
+    /// Count the nonzero elements (`is_nonzero` decides; bool: true,
+    /// complex: either component nonzero).
+    fn nonzero_count(
+        &self,
+        a: &<Self as DeviceRawAPI<T>>::Raw,
+        la: &Layout<D>,
+        is_nonzero: &dyn Fn(&T) -> bool,
+    ) -> Result<usize>;
+
+    /// Fill the flat C-order indices of every nonzero element into `out`
+    /// (capacity = the count from [`Self::nonzero_count`]); returns the same
+    /// count.
+    fn nonzero_fill(
+        &self,
+        out: &mut <Self as DeviceRawAPI<MaybeUninit<usize>>>::Raw,
+        a: &<Self as DeviceRawAPI<T>>::Raw,
+        la: &Layout<D>,
+        is_nonzero: &dyn Fn(&T) -> bool,
+    ) -> Result<usize>;
+}

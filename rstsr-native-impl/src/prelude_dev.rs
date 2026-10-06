@@ -12,9 +12,11 @@ pub use core::sync::atomic::{AtomicPtr, Ordering};
 pub use rayon::prelude::*;
 
 pub use crate::cpu_serial::adv_indexing::*;
+pub use crate::cpu_serial::adv_indexing_take_along::*;
 pub use crate::cpu_serial::assignment::*;
 pub use crate::cpu_serial::creation::*;
 pub use crate::cpu_serial::matmul_naive::*;
+pub use crate::cpu_serial::nonzero::*;
 pub use crate::cpu_serial::op_tri::*;
 pub use crate::cpu_serial::op_with_func::*;
 pub use crate::cpu_serial::reduction::*;

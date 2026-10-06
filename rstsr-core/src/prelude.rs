@@ -25,6 +25,7 @@ pub mod rstsr_traits {
     pub use crate::tensor::device_conversion::{TensorChangeFromDevice, TensorDeviceChangeAPI};
     pub use crate::tensor::ext_conversion::IntoRSTSR;
     pub use crate::tensor::manipulation::exports::BroadcastArraysAPI;
+    pub use crate::tensor::nonzero::NonzeroAPI;
     pub use crate::tensor::operators::op_binary_common::{
         TensorATan2API, TensorCopySignAPI, TensorEqualAPI, TensorFloorDivideAPI, TensorGreaterAPI,
         TensorGreaterEqualAPI, TensorHypotAPI, TensorLessAPI, TensorLessEqualAPI, TensorLogAddExpAPI, TensorMaximumAPI,
@@ -72,7 +73,9 @@ pub mod rstsr_structs {
 }
 
 pub mod rstsr_funcs {
-    pub use crate::tensor::adv_indexing::{bool_select, bool_select_f, index_select, index_select_f, take, take_f};
+    pub use crate::tensor::adv_indexing::{
+        bool_select, bool_select_f, index_select, index_select_f, take, take_along_axis, take_along_axis_f, take_f,
+    };
     pub use crate::tensor::asarray::{asarray, asarray_f};
     pub use crate::tensor::creation::{
         arange, arange_f, assume_init, assume_init_f, empty, empty_f, empty_like, empty_like_f, eye, eye_f,
@@ -177,6 +180,9 @@ pub mod rstsr_funcs {
     // searching
     pub use crate::tensor::searching::searchsorted;
     pub use crate::tensor::searching::searchsorted_f;
+    // searching
+    pub use crate::tensor::nonzero::nonzero;
+    pub use crate::tensor::nonzero::nonzero_f;
     // set functions
     pub use crate::tensor::set::{
         isin, isin_f, unique_all, unique_all_f, unique_counts, unique_counts_f, unique_inverse, unique_inverse_f,
