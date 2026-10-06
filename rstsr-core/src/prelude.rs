@@ -37,6 +37,7 @@ pub mod rstsr_traits {
         TensorLogAPI, TensorRealAPI, TensorRoundAPI, TensorSignAPI, TensorSignBitAPI, TensorSinAPI, TensorSinhAPI,
         TensorSqrtAPI, TensorSquareAPI, TensorTanAPI, TensorTanhAPI, TensorTruncAPI,
     };
+    pub use crate::tensor::operators::op_where::TensorWhereAPI;
     pub use crate::tensor::ownership_conversion::{TensorIntoOwnedAPI, TensorViewAPI, TensorViewMutAPI};
     pub use crate::tensor::reduction::TensorSumBoolAPI;
 
@@ -138,7 +139,7 @@ pub mod rstsr_funcs {
         greater_f, greater_than, greater_than_f, gt, gt_f, hypot, hypot_f, le, le_f, less, less_equal, less_equal_f,
         less_equal_to, less_equal_to_f, less_f, less_than, less_than_f, log_add_exp, log_add_exp_f, lt, lt_f, maximum,
         maximum_f, minimum, minimum_f, ne, ne_f, nextafter, nextafter_f, not_equal, not_equal_f, not_equal_to,
-        not_equal_to_f, pow, pow_f,
+        not_equal_to_f, pow, pow_f, r#where, where_f,
     };
     // reduction
     pub use crate::tensor::reduction::{
