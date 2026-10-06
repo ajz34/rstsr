@@ -236,6 +236,7 @@ fn rstsr_faer(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(ops::argmin, m)?)?;
     m.add_function(wrap_pyfunction!(ops::count_nonzero, m)?)?;
     m.add_function(wrap_pyfunction!(ops::sum_bool, m)?)?;
+    m.add_function(wrap_pyfunction!(ops::where_, m)?)?; // native name "where"
     m.add_function(wrap_pyfunction!(indexing::take, m)?)?;
 
     // W4 manipulation surface (bindings over rt:: manipulation entries)
