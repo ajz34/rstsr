@@ -24,6 +24,10 @@ fn use_fast_path<T: 'static>() -> bool {
         || TypeId::of::<T>() == TypeId::of::<u32>()
         || TypeId::of::<T>() == TypeId::of::<u64>()
         || TypeId::of::<T>() == TypeId::of::<usize>()
+        || TypeId::of::<T>() == TypeId::of::<i128>()
+        || TypeId::of::<T>() == TypeId::of::<u128>()
+        || TypeId::of::<T>() == TypeId::of::<half::f16>()
+        || TypeId::of::<T>() == TypeId::of::<half::bf16>()
 }
 
 impl<T, D> OpUniqueAPI<T, D> for DeviceCpuSerial
@@ -33,12 +37,16 @@ where
 {
     fn unique_values(&self, a: &Vec<T>, la: &Layout<D>, values: &mut Vec<MaybeUninit<T>>) -> Result<usize> {
         let access = LineAccess::new(a, la)?;
-        if use_fast_path::<T>() {
+        let u = if use_fast_path::<T>() {
             let is_nan = |x: &T| x.ext_is_nan();
             unique_values_sorted_cpu_serial(values, &access, &is_nan)
         } else {
             unique_values_naive_cpu_serial(values, &access)
-        }
+        }?;
+        // contract: only the first `u` entries are initialized; truncate the
+        // raw Vec so `assume_init_impl` at the tensor level is exact
+        values.truncate(u);
+        Ok(u)
     }
 
     fn unique_all(
@@ -56,12 +64,19 @@ where
             // position IS the flat C-order index of the flattened tensor
             i
         };
-        if use_fast_path::<T>() {
+        let u = if use_fast_path::<T>() {
             let is_nan = |x: &T| x.ext_is_nan();
             unique_all_sorted_cpu_serial(values, indices, inverse, counts, &access, &flat_c, &is_nan)
         } else {
             unique_all_naive_cpu_serial(values, indices, inverse, counts, &access, &flat_c)
-        }
+        }?;
+        // contract: values/indices/counts hold exactly `u` entries; inverse
+        // holds `n`; truncate the raw Vecs so `assume_init_impl` is exact
+        values.truncate(u);
+        indices.truncate(u);
+        counts.truncate(u);
+        inverse.truncate(a.len());
+        Ok(u)
     }
 }
 
@@ -88,8 +103,10 @@ where
         x2_sorted.sort_by(|a, b| a.ext_total_cmp(b));
         x2_sorted.dedup_by(|a, b| a == b);
 
+        // the kernel writes in row-major visit order; the output must be
+        // C-contig regardless of the device default order (values contract)
         let shape: Vec<usize> = l1.shape().as_ref().to_vec();
-        let layout_c = shape.new_contig(None, self.default_order());
+        let layout_c = shape.new_c_contig(None);
         let (_, idx_max) = layout_c.bounds_index()?;
         let mut storage = self.uninit_impl(idx_max)?;
         let access1 = LineAccess::new(x1, l1)?;

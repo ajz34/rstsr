@@ -10,7 +10,8 @@ pub struct UniqueCounts<T, B>
 where
     B: DeviceAPI<T> + DeviceRawAPI<usize>,
 {
-    /// Unique values (first-occurrence order in the row-major sequence).
+    /// Unique values (ascending for orderable dtypes, first-occurrence
+    /// otherwise — the [`unique_values`] ordering contract).
     pub values: Tensor<T, B, IxD>,
     /// Multiplicity of each unique value, aligned with [`Self::values`].
     pub counts: Tensor<usize, B, IxD>,
@@ -30,7 +31,8 @@ pub struct UniqueInverse<T, B>
 where
     B: DeviceAPI<T> + DeviceRawAPI<usize>,
 {
-    /// Unique values (first-occurrence order in the row-major sequence).
+    /// Unique values (ascending for orderable dtypes, first-occurrence
+    /// otherwise — the [`unique_values`] ordering contract).
     pub values: Tensor<T, B, IxD>,
     /// For every input element (row-major), the index of its unique entry;
     /// shape equals the input shape.
@@ -51,7 +53,8 @@ pub struct UniqueAll<T, B>
 where
     B: DeviceAPI<T> + DeviceRawAPI<usize>,
 {
-    /// Unique values (first-occurrence order in the row-major sequence).
+    /// Unique values (ascending for orderable dtypes, first-occurrence
+    /// otherwise — the [`unique_values`] ordering contract).
     pub values: Tensor<T, B, IxD>,
     /// First-occurrence flat C-order index of each unique value.
     pub indices: Tensor<usize, B, IxD>,
@@ -98,8 +101,8 @@ where
     let mut values = device.uninit_impl(v_max)?;
     if !with_all {
         let u = device.unique_values(tensor.raw(), tensor.layout(), values.raw_mut())?;
-        // SAFETY: the kernel wrote exactly `u` entries; the tensor views the
-        // first `u` of the `n`-capacity storage (bounds: u <= n).
+        // SAFETY: the device impl truncated the raw Vec to the `u` written
+        // entries before returning (OpUniqueAPI contract).
         let storage = unsafe { <B as DeviceCreationAnyAPI<T>>::assume_init_impl(values)? };
         let t = Tensor::new_f(storage, vec![u].new_contig(None, device.default_order()))?;
         return Ok((u, t, None, None, None));
@@ -115,8 +118,8 @@ where
         inverse.raw_mut(),
         counts.raw_mut(),
     )?;
-    // SAFETY: values/indices/counts have `u` entries; inverse has `n` — the
-    // tensors view written prefixes of the n-capacity storages (u <= n).
+    // SAFETY: the device impl truncated values/indices/counts to the `u`
+    // written entries and inverse to `n` (OpUniqueAPI contract).
     let values_t = Tensor::new_f(
         unsafe { <B as DeviceCreationAnyAPI<T>>::assume_init_impl(values)? },
         vec![u].new_contig(None, device.default_order()),
@@ -126,9 +129,10 @@ where
         vec![u].new_contig(None, device.default_order()),
     )?;
     let shape_in: Vec<usize> = tensor.shape().as_ref().to_vec();
+    // inverse is written in row-major visit order → C-contig layout
     let inverse_t = Tensor::new_f(
         unsafe { <B as DeviceCreationAnyAPI<usize>>::assume_init_impl(inverse)? },
-        shape_in.new_contig(None, device.default_order()),
+        shape_in.new_c_contig(None),
     )?;
     let counts_t = Tensor::new_f(
         unsafe { <B as DeviceCreationAnyAPI<usize>>::assume_init_impl(counts)? },

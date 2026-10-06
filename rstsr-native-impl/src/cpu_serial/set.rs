@@ -96,6 +96,10 @@ where
             },
         };
         slot_out.write(slot);
+        if slot == count - 1 {
+            // fresh entry: `counts` was written with 1 above
+            continue;
+        }
         // increment the running multiplicity of `slot`
         let c = unsafe { counts[slot].assume_init_mut() };
         *c += 1;
