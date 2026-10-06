@@ -251,6 +251,7 @@ Device is designed to be able extended by other crates. The above devices [`Devi
 | fn | [`empty`] | Uninitialized tensor having a specified shape (requires `unsafe` at call site). |
 | fn | [`empty_like`] | Uninitialized tensor with the same shape as an input tensor (requires `unsafe` at call site). |
 | fn | [`eye`] | Returns a two-dimensional array with ones on the kth diagonal and zeros elsewhere. |
+| fn | [`from_scalar`] | Returns a 0-dimensional (scalar) tensor of a given value. |
 | fn | [`full`] | New tensor having a specified shape and filled with given value. |
 | fn | [`full_like`] | New tensor filled with given value and having the same shape as an input tensor. |
 | fn | [`linspace`] | Evenly spaced numbers over a specified interval. |

@@ -1128,6 +1128,116 @@ where
 
 /* #endregion */
 
+/* #region from_scalar */
+
+/// Returns a 0-dimensional (scalar) tensor of a given value.
+///
+/// This is the rstsr spelling for NumPy's 0-d `numpy.array(value)`: the
+/// result has shape `[]`, one element, and dynamic dimensionality
+/// ([`IxD`]). The dtype follows `value` (or the type annotation); `bool`,
+/// integers, floats, complex floats and half floats are all valid. The
+/// result broadcasts with any tensor, which makes this the way to pass a
+/// constant as a tensor operand, e.g. a bool constant to
+/// [`where`](crate::tensor::operators::op_where::where()).
+///
+/// This function behaves identically under [`RowMajor`] and [`ColMajor`] device default orders.
+///
+/// # Parameters
+///
+/// - `value`: the scalar value of the tensor; also decides the dtype `T`.
+/// - `device`: the device to create the tensor on.
+///
+/// # Returns
+///
+/// - [`Tensor`]<`T, B, `[`IxD`]`>`: a 0-d tensor owning its single element.
+///
+/// # Examples
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let a = rt::from_scalar(3.0, &device);
+/// println!("{a}");
+/// // 3
+/// # assert_eq!(format!("{a}"), "3");
+/// # assert_eq!(format!("{:?}", a.shape()), "[]");
+/// ```
+///
+/// The dtype follows the value, or the type annotation:
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let b: Tensor<i32, _, _> = rt::from_scalar(7, &device);
+/// println!("{}", b.to_scalar() + 1);
+/// // 8
+/// # assert_eq!(b.to_scalar(), 7);
+/// ```
+///
+/// A 0-d tensor broadcasts with everything, so a bool constant can enter a
+/// tensor-level API that rejects plain scalars:
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let cond = rt::tensor_from_nested!([true, false, true], &device);
+/// let x = rt::tensor_from_nested!([1, 2, 3], &device);
+/// let r = rt::r#where(&cond, &x, &rt::from_scalar(false, &device));
+/// println!("{r}");
+/// // [ 1 0 3]
+/// # assert_eq!(r.to_vec(), vec![1, 0, 3]);
+/// ```
+///
+/// # Notes of API accordance
+///
+/// - NumPy: `numpy.array(value)` (0-d array); `numpy.full((), value)` is equivalent ([`numpy.array`](https://numpy.org/doc/stable/reference/generated/numpy.array.html))
+/// - Array-API: `asarray(value)` (0-d result) ([`asarray`](https://data-apis.org/array-api/2024.12/API_specification/generated/array_api.asarray.html))
+/// - RSTSR: `rt::from_scalar(value, &device)`; unlike [`asarray`], the input is a scalar rather
+///   than a sequence, and the device is always explicit.
+///
+/// # Panics
+///
+/// - Panics on device allocation failure.
+///
+/// For a fallible version, use [`from_scalar_f`].
+///
+/// # See also
+///
+/// ## Related functions in RSTSR
+///
+/// - [`full`]: the same fill with an explicit shape.
+/// - [`asarray`]: create a tensor from sequences or existing data.
+/// - [`TensorAny::to_scalar`]: the inverse operation, reading the single element.
+///
+/// ## Variants of this function
+///
+/// - [`from_scalar_f`]: fallible version.
+pub fn from_scalar<T, B>(value: T, device: &B) -> Tensor<T, B, IxD>
+where
+    T: Clone,
+    B: DeviceAPI<T> + DeviceCreationAnyAPI<T>,
+{
+    from_scalar_f(value, device).rstsr_unwrap()
+}
+
+/// Returns a 0-dimensional (scalar) tensor of a given value.
+///
+/// See also [`from_scalar`].
+pub fn from_scalar_f<T, B>(value: T, device: &B) -> Result<Tensor<T, B, IxD>>
+where
+    T: Clone,
+    B: DeviceAPI<T> + DeviceCreationAnyAPI<T>,
+{
+    let storage = device.full_impl(1, value)?;
+    let layout = Layout::new(vec![], vec![], 0)?;
+    Tensor::new_f(storage, layout)
+}
+
+/* #endregion */
+
 /* #region full_like */
 
 pub trait FullLikeAPI<Inp> {

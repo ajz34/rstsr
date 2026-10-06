@@ -69,9 +69,9 @@ pub mod rstsr_funcs {
     pub use crate::tensor::adv_indexing::{bool_select, bool_select_f, index_select, index_select_f, take, take_f};
     pub use crate::tensor::asarray::{asarray, asarray_f};
     pub use crate::tensor::creation::{
-        arange, arange_f, assume_init, assume_init_f, empty, empty_f, empty_like, empty_like_f, eye, eye_f, full,
-        full_f, full_like, full_like_f, linspace, linspace_f, ones, ones_f, ones_like, ones_like_f, tril, tril_f, triu,
-        triu_f, uninit, uninit_f, zeros, zeros_f, zeros_like, zeros_like_f,
+        arange, arange_f, assume_init, assume_init_f, empty, empty_f, empty_like, empty_like_f, eye, eye_f,
+        from_scalar, from_scalar_f, full, full_f, full_like, full_like_f, linspace, linspace_f, ones, ones_f,
+        ones_like, ones_like_f, tril, tril_f, triu, triu_f, uninit, uninit_f, zeros, zeros_f, zeros_like, zeros_like_f,
     };
     pub use crate::tensor::creation_from_tensor::{
         atleast_1d, atleast_1d_f, atleast_2d, atleast_2d_f, atleast_3d, atleast_3d_f, concat, concat_f, concatenate,
