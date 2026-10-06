@@ -321,3 +321,21 @@ because `where` is the first select-family function with scalar overloads.
 
 API-surface scope decision: index retrieval should be served by dedicated
 nonzero/argwhere-style APIs rather than an overloaded `where` (none wired yet).
+
+## Basic indexing surface: no inclusive ranges, `Some(n)` panics
+
+- **numpy:** bracket syntax accepts inclusive bounds (`x[1..=4]` -> `slice(1, 5)`),
+  any tuple arity, and any expression in indexer position.
+- **rstsr:** basic slicing (`tensor.i(index)`) accepts exclusive Rust ranges only
+  (`1..5`, no `..=`), whole-index tuples of arity 1-10 plus a bare single indexer,
+  and `None` as the only meaningful `Option` indexer: `Some(n)` compiles but
+  always panics. (One-element tuples were unsupported until 2026-10-06; adding
+  `TryFrom<(F1,)>` in `rstsr-common/src/axis_index.rs` resolved that part.)
+  Verified NumPy-parity of the *semantics* (negative
+  bounds, clamping, integer axis removal, `None`/`Ellipsis` placement) in
+  `doc_draft::indexing::doc_slice*`.
+- **tag:** intentional
+- **status:** open
+
+Surface-level consequence of Rust argument syntax instead of `[]`-bracket
+indexing; documented inline on the `slice` anchor (src/docs/basic_indexing.md).
