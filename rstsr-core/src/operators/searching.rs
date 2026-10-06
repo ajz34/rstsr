@@ -121,7 +121,9 @@ impl TryFrom<&str> for SearchSide {
 }
 
 impl From<bool> for SearchSide {
-    /// NumPy convention: `false`/0 = 'left', `true`/1 = 'right'.
+    /// Rust-side ergonomics: `false` = 'left', `true` = 'right'
+    /// (mirrors the C-level convention of some libraries; NumPy itself does
+    /// not accept booleans for `side`).
     fn from(value: bool) -> Self {
         if value {
             SearchSide::Right

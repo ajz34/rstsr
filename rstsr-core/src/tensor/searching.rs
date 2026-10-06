@@ -32,6 +32,17 @@ where
         DeviceMismatch,
         "searchsorted requires x1 and x2 on the same device."
     )?;
+    if let Some(sorter) = &args.sorter {
+        rstsr_assert_eq!(
+            sorter.len(),
+            x1.size(),
+            InvalidValue,
+            "searchsorted sorter must have the same length as x1."
+        )?;
+        if let Some(&max) = sorter.iter().max() {
+            rstsr_pattern!(max, 0..x1.size(), InvalidValue, "searchsorted sorter entries must be within x1 bounds.")?;
+        }
+    }
     let l1: Layout<IxD> = x1.layout().to_dim()?;
     rstsr_assert_eq!(l1.ndim(), 1, InvalidLayout, "searchsorted requires a one-dimensional x1.")?;
     let (storage, layout) =
@@ -44,9 +55,13 @@ where
 /// order of `x1` would be preserved.
 ///
 /// Output dtype is [`usize`] and the output shape equals `x2`'s shape.
-/// Elements of `x2` are searched as-is (they need not be sorted). NaN values
-/// land after all finite elements of `x1`, consistent with the sort order of
-/// [`ExtSortCmp`].
+/// Elements of `x2` are searched as-is (they need not be sorted). Real NaN
+/// values land after all finite elements of `x1`, consistent with the sort
+/// order of [`ExtSortCmp`]. Complex keys containing a NaN component are an
+/// edge: the binary search hoists any NaN-bearing key after all finite
+/// entries, which deviates from the part-wise lexicographic order of
+/// [`ExtSortCmp`] (and NumPy); complex `searchsorted` remains a registered
+/// follow-up.
 ///
 /// This function behaves identically under [`RowMajor`] and [`ColMajor`] device
 /// default orders. (Only the memory arrangement of the new tensor follows the
@@ -132,6 +147,8 @@ where
 /// ## Variants of this function
 ///
 /// - [`searchsorted_f`]: fallible version.
+/// - [`TensorAny::searchsorted`]: associated method.
+/// - [`TensorAny::searchsorted_f`]: associated fallible method.
 pub fn searchsorted<Args, Inp>(args: Args) -> Args::Out
 where
     Args: SearchSortedAPI<Inp>,
@@ -171,6 +188,52 @@ where
     fn searchsorted_f(self) -> Result<Self::Out> {
         let (x1, x2, args) = self;
         searchsorted_f(x1, x2, args)
+    }
+}
+
+impl<R1, T, B, D1> TensorAny<R1, T, B, D1>
+where
+    R1: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
+    D1: DimAPI,
+    T: Clone + ExtSortCmp + 'static,
+    B: DeviceAPI<T> + DeviceAPI<usize> + DeviceRawAPI<MaybeUninit<usize>> + DeviceCreationAnyAPI<usize>,
+{
+    /// Finds the positions where values of `x2` would insert into sorted `x1`.
+    ///
+    /// See also [`searchsorted`].
+    pub fn searchsorted_f<R2, D2, AArg>(
+        &self,
+        x2: &TensorAny<R2, T, B, D2>,
+        args: AArg,
+    ) -> Result<Tensor<usize, B, IxD>>
+    where
+        R2: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
+        D2: DimAPI,
+        AArg: TryInto<SearchSortedArgs, Error: Into<Error>>,
+        B: DeviceAPI<T>
+            + DeviceAPI<usize>
+            + DeviceRawAPI<MaybeUninit<usize>>
+            + DeviceCreationAnyAPI<usize>
+            + OpSearchSortedAPI<T, T, D2>,
+    {
+        searchsorted_f(self, x2, args)
+    }
+
+    /// Finds the positions where values of `x2` would insert into sorted `x1`.
+    ///
+    /// See also [`searchsorted`].
+    pub fn searchsorted<R2, D2, AArg>(&self, x2: &TensorAny<R2, T, B, D2>, args: AArg) -> Tensor<usize, B, IxD>
+    where
+        R2: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
+        D2: DimAPI,
+        AArg: TryInto<SearchSortedArgs, Error: Into<Error>>,
+        B: DeviceAPI<T>
+            + DeviceAPI<usize>
+            + DeviceRawAPI<MaybeUninit<usize>>
+            + DeviceCreationAnyAPI<usize>
+            + OpSearchSortedAPI<T, T, D2>,
+    {
+        searchsorted_f(self, x2, args).rstsr_unwrap()
     }
 }
 

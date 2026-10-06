@@ -13,7 +13,7 @@ mod numpy_searchsorted {
     #[test]
     fn test_searchsorted_basic() {
         // NumPy v2.5.2, _core/tests/test_numeric.py, TestNumeric::test_searchsorted
-        // (line 275): arr = [-8, -5, -1, 3, 6, 10]; searchsorted(arr, 0) == 3
+        // (line 276): arr = [-8, -5, -1, 3, 6, 10]; searchsorted(arr, 0) == 3
         crate::specify_test!("test_searchsorted_basic");
 
         let mut device = TESTCFG.device.clone();
@@ -146,6 +146,54 @@ mod custom_searchsorted {
         let args: std::result::Result<SearchSortedArgs, _> = "middle".try_into();
         assert!(args.is_err());
         let _ = (&a, &v);
+    }
+
+    #[test]
+    fn test_empty_inputs() {
+        // NumPy v2.5.2, TestMethods::test_searchsorted_n_elements (line 3112):
+        // 0-element x1 returns all zeros; empty x2 returns an empty output
+        crate::specify_test!("test_empty_inputs");
+
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        let empty: Tensor<i32, _> = rt::zeros(([0], &device));
+        let v = rt::tensor_from_nested!([1, 2, 3], &device);
+        assert_eq!(rt::searchsorted((&empty, &v, ())).to_vec(), vec![0, 0, 0]);
+
+        let a = rt::tensor_from_nested!([1, 3, 5], &device);
+        let out = rt::searchsorted((&a, &empty, ()));
+        assert_eq!(out.shape(), &[0]);
+    }
+
+    #[test]
+    fn test_invalid_sorter() {
+        // NumPy v2.5.2, TestMethods::test_searchsorted_with_invalid_sorter
+        // (line 3211): wrong-length or out-of-range sorter raises
+        crate::specify_test!("test_invalid_sorter");
+
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        let a = rt::tensor_from_nested!([1, 3, 5], &device);
+        let v = rt::tensor_from_nested!([4], &device);
+        // wrong length
+        assert!(rt::searchsorted_f(&a, &v, (SearchSide::Left, vec![0, 1])).is_err());
+        // out-of-range entry
+        assert!(rt::searchsorted_f(&a, &v, (SearchSide::Left, vec![0, 1, 5])).is_err());
+    }
+
+    #[test]
+    fn test_invalid_side_through_f() {
+        // invalid side surfaces as Err through searchsorted_f's TryInto
+        crate::specify_test!("test_invalid_side_through_f");
+
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        let a = rt::tensor_from_nested!([1, 3, 5], &device);
+        let v = rt::tensor_from_nested!([4], &device);
+        assert!(rt::searchsorted_f(&a, &v, "middle").is_err());
     }
 
     #[test]

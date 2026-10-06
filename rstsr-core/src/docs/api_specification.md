@@ -211,7 +211,7 @@ Device is designed to be able extended by other crates. The above devices [`Devi
 | assoc/fn | [`atleast_1d`] <br/> [`atleast_2d`] <br/> [`atleast_3d`] | View the input as a tensor with at least 1 / 2 / 3 dimensions. |
 | assoc/fn | [`flip`] | Reverses the order of elements in an array along the given axis. |
 | assoc/fn | [`moveaxis`] | Moves array axes (dimensions) to new positions, while leaving other axes in their original positions. |
-| assoc/fn | [`searchsorted`] | Find insertion positions of values into a sorted 1-D array (`side`, `sorter`). |
+| assoc/fn | [`searchsorted`] | Finds insertion positions of values into a sorted 1-D array (`side`, `sorter` arguments in [`SearchSortedArgs`]). |
 | assoc/fn | [`repeat`] | Repeat elements of a tensor along an axis (or the flattened row-major sequence). |
 | assoc/fn | [`roll`] | Roll array elements along a given axis (the flattened form visits row-major). |
 | assoc/fn | [`tile`] | Construct an array by tiling an input array. |

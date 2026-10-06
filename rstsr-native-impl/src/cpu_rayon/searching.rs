@@ -59,7 +59,7 @@ where
                 };
                 &x1[j as usize]
             };
-            let pos = searchsorted_value_cpu_serial(x1, n, &x2[off], side_left, &at, is_nan);
+            let pos = searchsorted_value_cpu_serial(n, &x2[off], side_left, &at, is_nan);
             // SAFETY: base pointer hoisted through AtomicPtr (relaxed load;
             // never reassigned); `out_pos` values are a bijection over the
             // output (each value's multi-index maps to one position).

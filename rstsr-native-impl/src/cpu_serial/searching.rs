@@ -14,7 +14,6 @@ use rstsr_dtype_traits::ExtSortCmp;
 /// first `i` with `x1[i] > v`. NaN keys land after all finite values
 /// (consistent with the sort order of [`ExtSortCmp`]).
 pub fn searchsorted_value_cpu_serial<'a, T>(
-    _x1: &'a [T],
     n: usize,
     v: &T,
     side_left: bool,
@@ -89,15 +88,13 @@ where
     let iter: IndexedIterLayout<IxD> = IndexedIterLayout::new(&l2.to_dim()?, RowMajor)?;
     let stride_ref: &[isize] = layout_c.stride().as_ref();
     let out_strides: Vec<usize> = stride_ref.iter().map(|&s| s.unsigned_abs()).collect();
-    let ndim_out = layout_c.ndim();
     for (index, off) in iter {
         let index_ref: &[usize] = index.as_ref();
         let mut out_pos = 0_usize;
         for (i, &v) in index_ref.iter().enumerate() {
             out_pos += v * out_strides[i];
         }
-        let _ = ndim_out;
-        let pos = searchsorted_value_cpu_serial(x1, n, &x2[off], side_left, &|i| at(i, sorter), is_nan);
+        let pos = searchsorted_value_cpu_serial(n, &x2[off], side_left, &|i| at(i, sorter), is_nan);
         c[out_pos].write(pos);
     }
     Ok(())
