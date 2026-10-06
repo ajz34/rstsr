@@ -19,6 +19,7 @@ pub mod operators;
 pub mod ownership_conversion;
 pub mod pack_array;
 pub mod reduction;
+pub mod searching;
 pub mod sorting;
 pub mod tensor2_impl;
 pub mod tensor_mutable;
@@ -45,6 +46,7 @@ pub mod exports {
     pub use ownership_conversion::*;
     pub use pack_array::*;
     pub use reduction::*;
+    pub use searching::*;
     pub use sorting::*;
     pub use tensor2_impl::*;
     pub use tensor_mutable::*;

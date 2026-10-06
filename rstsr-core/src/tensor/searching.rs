@@ -1,0 +1,177 @@
+//! Searchsorted tensor API: [`searchsorted`] with [`SearchSortedArgs`].
+
+use crate::prelude_dev::*;
+
+/* #region searchsorted */
+
+/// Find the positions where values of `x2` would insert into sorted `x1`.
+///
+/// See also [`searchsorted`].
+pub fn searchsorted_f<R1, R2, T, B, D1, D2, AArg>(
+    x1: &TensorAny<R1, T, B, D1>,
+    x2: &TensorAny<R2, T, B, D2>,
+    args: AArg,
+) -> Result<Tensor<usize, B, IxD>>
+where
+    R1: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
+    R2: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
+    D1: DimAPI,
+    D2: DimAPI,
+    T: Clone + ExtSortCmp + 'static,
+    AArg: TryInto<SearchSortedArgs, Error: Into<Error>>,
+    B: DeviceAPI<T>
+        + DeviceAPI<usize>
+        + DeviceRawAPI<MaybeUninit<usize>>
+        + DeviceCreationAnyAPI<usize>
+        + OpSearchSortedAPI<T, T, D2>,
+{
+    let args = args.try_into().map_err(Into::into)?;
+    let device = x1.device().clone();
+    rstsr_assert!(
+        device.same_device(x2.device()),
+        DeviceMismatch,
+        "searchsorted requires x1 and x2 on the same device."
+    )?;
+    let l1: Layout<IxD> = x1.layout().to_dim()?;
+    rstsr_assert_eq!(l1.ndim(), 1, InvalidLayout, "searchsorted requires a one-dimensional x1.")?;
+    let (storage, layout) =
+        device.searchsorted(x1.raw(), &l1, x2.raw(), x2.layout(), args.side.into(), args.sorter.as_deref())?;
+    Tensor::new_f(storage, layout)
+}
+
+/// Finds the indices into a sorted one-dimensional array `x1` such that, if
+/// the corresponding elements in `x2` were inserted before the indices, the
+/// order of `x1` would be preserved.
+///
+/// Output dtype is [`usize`] and the output shape equals `x2`'s shape.
+/// Elements of `x2` are searched as-is (they need not be sorted). NaN values
+/// land after all finite elements of `x1`, consistent with the sort order of
+/// [`ExtSortCmp`].
+///
+/// This function behaves identically under [`RowMajor`] and [`ColMajor`] device
+/// default orders. (Only the memory arrangement of the new tensor follows the
+/// device default order.)
+///
+/// # Parameters
+///
+/// - `x1`: [`&TensorAny<R, T, B, D>`](TensorAny)
+///
+///   - The one-dimensional array to search into. Must be sorted ascending; otherwise pass `sorter`
+///     (a permutation sorting `x1` ascending).
+///   - Complex and other dtypes are admitted; the comparison is the total order of [`ExtSortCmp`].
+///
+/// - `x2`: [`&TensorAny<R, T, B, D>`](TensorAny): the values to insert (any shape).
+///
+/// - `args`: TryInto [`SearchSortedArgs`]
+///
+///   - `()`: defaults (`side = "left"`, no sorter).
+///   - `"left"` / `"right"` (or [`SearchSide`]): insertion side — `'left'` gives `x1[i-1] < v <=
+///     x1[i]`, `'right'` gives `x1[i-1] <= v < x1[i]`.
+///   - A `Vec<usize>`: the `sorter` permutation.
+///   - `("left" | SearchSide, Vec<usize>)`: both.
+///
+/// # Returns
+///
+/// - [`Tensor<usize, B, IxD>`][`Tensor`]
+///
+///   - Insertion positions, same shape as `x2`; with `sorter`, positions index the permuted
+///     sequence (NumPy-compatible).
+///
+/// # Examples
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let x1 = rt::tensor_from_nested!([11, 12, 14, 15, 16], &device);
+/// let x2 = rt::tensor_from_nested!([10, 13, 17], &device);
+/// println!("{}", rt::searchsorted((&x1, &x2, ())));
+/// // [ 0 2 5]
+/// # assert_eq!(format!("{}", rt::searchsorted((&x1, &x2, ()))), "[ 0 2 5]");
+/// ```
+///
+/// Insertion side (`side = "right"`):
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let x1 = rt::tensor_from_nested!([10, 20, 30], &device);
+/// let v = rt::tensor_from_nested!([20], &device);
+/// println!("{}", rt::searchsorted((&x1, &v, "left")));
+/// // [ 1]
+/// println!("{}", rt::searchsorted((&x1, &v, "right")));
+/// // [ 2]
+/// # assert_eq!(format!("{}", rt::searchsorted((&x1, &v, "left"))), "[ 1]");
+/// # assert_eq!(format!("{}", rt::searchsorted((&x1, &v, "right"))), "[ 2]");
+/// ```
+///
+/// # Notes of API accordance
+///
+/// - Array-API: `searchsorted(x1, x2, /, *, side='left', sorter=None)` ([`searchsorted`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.searchsorted.html))
+/// - NumPy: `numpy.searchsorted(a, v, side='left', sorter=None)` ([`numpy.searchsorted`](https://numpy.org/doc/stable/reference/generated/numpy.searchsorted.html))
+/// - RSTSR: `rt::searchsorted((x1, x2, args))`
+///
+/// Deviation from NumPy: scalar `x2` should be wrapped with
+/// [`asarray`](asarray()) (rstsr functions take tensors). The returned index
+/// dtype is [`usize`].
+///
+/// # Panics
+///
+/// - Panics if `x1` is not one-dimensional, or the devices differ.
+///
+/// For a fallible version, use [`searchsorted_f`].
+///
+/// # See also
+///
+/// ## Related functions in RSTSR
+///
+/// - [`sort`]: produces the sorted order `searchsorted` assumes.
+/// - [`argsort`]: produces a valid `sorter` for unsorted `x1`.
+///
+/// ## Variants of this function
+///
+/// - [`searchsorted_f`]: fallible version.
+pub fn searchsorted<Args, Inp>(args: Args) -> Args::Out
+where
+    Args: SearchSortedAPI<Inp>,
+{
+    Args::searchsorted(args)
+}
+
+/// API trait backing [`searchsorted`].
+pub trait SearchSortedAPI<Inp> {
+    type Out;
+
+    fn searchsorted_f(self) -> Result<Self::Out>;
+    fn searchsorted(self) -> Self::Out
+    where
+        Self: Sized,
+    {
+        Self::searchsorted_f(self).rstsr_unwrap()
+    }
+}
+
+impl<R1, R2, T, B, D1, D2, AArg> SearchSortedAPI<()> for (&TensorAny<R1, T, B, D1>, &TensorAny<R2, T, B, D2>, AArg)
+where
+    R1: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
+    R2: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
+    D1: DimAPI,
+    D2: DimAPI,
+    T: Clone + ExtSortCmp + 'static,
+    AArg: TryInto<SearchSortedArgs, Error: Into<Error>>,
+    B: DeviceAPI<T>
+        + DeviceAPI<usize>
+        + DeviceRawAPI<MaybeUninit<usize>>
+        + DeviceCreationAnyAPI<usize>
+        + OpSearchSortedAPI<T, T, D2>,
+{
+    type Out = Tensor<usize, B, IxD>;
+
+    fn searchsorted_f(self) -> Result<Self::Out> {
+        let (x1, x2, args) = self;
+        searchsorted_f(x1, x2, args)
+    }
+}
+
+/* #endregion */
