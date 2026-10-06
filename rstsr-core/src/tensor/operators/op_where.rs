@@ -138,9 +138,8 @@ where
     DA::Max: DimAPI,
     B: OpWhereAPI<TX, TY, DA::Max>,
     B: DeviceAPI<bool> + DeviceAPI<TX> + DeviceAPI<TY> + DeviceAPI<B::TOut> + DeviceCreationAnyAPI<B::TOut>,
-    // scalar overloads accept any rstsr dtype (bool included); the marker is
-    // not implemented for tensor types, keeping the overloads disjoint
-    TY: DTypeScalarAPI,
+    // this constraint prohibits conflicting impl to the tensor-tensor overload
+    TY: num::Num,
 {
     type Output = Tensor<B::TOut, B, DA::Max>;
 
@@ -177,7 +176,8 @@ where
     DA::Max: DimAPI,
     B: OpWhereAPI<TX, TY, DA::Max>,
     B: DeviceAPI<bool> + DeviceAPI<TX> + DeviceAPI<TY> + DeviceAPI<B::TOut> + DeviceCreationAnyAPI<B::TOut>,
-    TX: DTypeScalarAPI,
+    // this constraint prohibits conflicting impl to the tensor-tensor overload
+    TX: num::Num,
 {
     type Output = Tensor<B::TOut, B, DA::Max>;
 
