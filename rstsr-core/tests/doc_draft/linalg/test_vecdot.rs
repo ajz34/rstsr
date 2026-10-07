@@ -51,5 +51,14 @@ mod doc_vecdot {
         println!("{result}");
         // 14+5i
         assert_eq!(result.to_scalar(), c64(14., 5.));
+
+        // same axes in both inputs ([0, 1] is shorthand for ([0, 1], [0, 1]))
+        let a = rt::tensor_from_nested!([[1, 2], [3, 4]], &device);
+        let b = rt::tensor_from_nested!([[5, 6], [7, 8]], &device);
+        let result = rt::vecdot(&a, &b, [0, 1]);
+        assert!(rt::allclose(&result, rt::vecdot(&a, &b, ([0, 1], [0, 1])), None));
+        println!("{result}");
+        // 70
+        assert_eq!(result.to_scalar(), 70);
     }
 }
