@@ -16,14 +16,13 @@ where
     R: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw> + DataCloneAPI,
     D: DimAPI + DimSmallerOneAPI,
     D::SmallerOne: DimAPI,
-    T: Clone + Default + PartialEq + ExtZero + core::ops::Sub<Output = T>,
+    T: Clone + Default + core::ops::Sub<Output = T>,
     <B as DeviceRawAPI<T>>::Raw: Clone,
     B: DeviceAPI<T>
         + DeviceRawAPI<MaybeUninit<T>>
         + DeviceCreationAnyAPI<T>
-        + DeviceAPI<usize, Raw = Vec<usize>>
-        + OpAssignAPI<T, IxD>
         + OpAssignAPI<T, D>
+        + OpAssignAPI<T, Vec<usize>>
         + OpSubAPI<T, T, T, D>,
 {
     let axis = axis.try_into().map_err(Into::into)?.into_inner();
@@ -148,8 +147,8 @@ where
 /// - `axis`: TryInto [`AxisIndex<isize>`]: the axis along which to difference (negative counts from
 ///   the back).
 ///
-/// - `n`: the number of difference passes; the axis shrinks by `n`. Must not exceed the
-///   (post-concat) axis size.
+/// - `n`: the number of difference passes; the axis shrinks by `n`. Passes on an already-empty axis
+///   stop early (NumPy parity).
 ///
 /// - `prepend` / `append`: optional [`&TensorAny<R, T, B, D>`](TensorAny) values concatenated along
 ///   `axis` before differencing; matching shapes outside `axis`, any size along it.
@@ -184,8 +183,8 @@ where
 ///
 /// # Panics
 ///
-/// - Panics if `axis` is out of range, `n` exceeds the axis size, or `prepend`/`append` shapes
-///   mismatch outside `axis`.
+/// - Panics if `axis` is out of range, or `prepend`/`append` shapes mismatch outside `axis`. An `n`
+///   pass on an empty axis stops early (the axis is already empty), matching NumPy.
 ///
 /// For a fallible version, use [`diff_f`].
 pub fn diff<Args, Inp>(args: Args) -> Args::Out
@@ -216,14 +215,13 @@ where
     R: DataCloneAPI,
     D: DimAPI + DimSmallerOneAPI,
     D::SmallerOne: DimAPI,
-    T: Clone + Default + PartialEq + ExtZero + core::ops::Sub<Output = T>,
+    T: Clone + Default + core::ops::Sub<Output = T>,
     AArg: TryInto<AxisIndex<isize>, Error: Into<Error>>,
     B: DeviceAPI<T>
         + DeviceRawAPI<MaybeUninit<T>>
         + DeviceCreationAnyAPI<T>
-        + DeviceAPI<usize, Raw = Vec<usize>>
-        + OpAssignAPI<T, IxD>
         + OpAssignAPI<T, D>
+        + OpAssignAPI<T, Vec<usize>>
         + OpSubAPI<T, T, T, D>,
 {
     type Out = Tensor<T, B, IxD>;

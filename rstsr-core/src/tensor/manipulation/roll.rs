@@ -110,13 +110,18 @@ where
                 AxesIndex::None => vec![0_isize; axes.len()],
                 AxesIndex::Val(v) => vec![*v; axes.len()],
                 AxesIndex::Vec(v) => {
-                    rstsr_assert_eq!(
-                        v.len(),
-                        axes.len(),
-                        InvalidValue,
-                        "roll: shift and axis must have the same length."
-                    )?;
-                    v.clone()
+                    // a len-1 shift tuple broadcasts across the axes (NumPy)
+                    if v.len() == 1 {
+                        vec![v[0]; axes.len()]
+                    } else {
+                        rstsr_assert_eq!(
+                            v.len(),
+                            axes.len(),
+                            InvalidValue,
+                            "roll: shift and axis must have the same length."
+                        )?;
+                        v.clone()
+                    }
                 },
             };
             let mut current: Option<Tensor<T, B, IxD>> = None;

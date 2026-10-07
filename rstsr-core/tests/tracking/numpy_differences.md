@@ -339,3 +339,48 @@ nonzero/argwhere-style APIs rather than an overloaded `where` (none wired yet).
 
 Surface-level consequence of Rust argument syntax instead of `[]`-bracket
 indexing; documented inline on the `slice` anchor (src/docs/basic_indexing.md).
+
+## Sort/argsort decline complex dtypes
+
+- **numpy:** `np.sort` / `np.argsort` accept complex arrays; NumPy orders them
+  lexicographically (real part first, then imaginary), NaN components last
+  (`numpy/core/tests/test_sort.py::TestSortComplex`).
+- **rstsr:** `rt::sort` / `rt::argsort` raise `UnImplemented` for `Complex<f32>` /
+  `Complex<f64>` (tensor-layer gate `decline_complex_sort`); the comparator
+  variants `sort_custom`/`argsort_custom` with `ExtSortCmp` (lexicographic,
+  NaN-part-last) remain available.
+- **tag:** intentional
+- **status:** open
+
+The Python array-API standard restricts sort/argsort to real-valued data types
+("Should have a real-valued data type"), so the decline is spec-aligned; the
+comparator is implemented in `rstsr-dtype-traits/src/ext_sort_cmp.rs` should a
+complex surface ever be wanted.
+
+## `np.sort` `kind=` stability knob absent
+
+- **numpy:** `np.sort(x, kind='stable'|'quicksort'|'heapsort'|'mergesort')` selects
+  the algorithm; `stable=` maps onto it.
+- **rstsr:** `SortArgs.stable` is honored as a requirement flag, but the kernels are
+  always the stable merge-sort lines; `stable = false` does not select an
+  unstable algorithm (documented on `SortArgs`).
+- **tag:** intentional
+- **status:** open
+
+Single-algorithm implementation; a selection knob is a registered follow-up.
+
+## `unique_*` output order for non-orderable dtypes is first-occurrence
+
+- **numpy:** `np.unique` always returns values in ascending (sorted) order, also for
+  complex (lexicographic) input.
+- **rstsr:** `rt::unique_values`/`unique_counts`/`unique_inverse`/`unique_all` return
+  ascending order for orderable scalar dtypes (bool, integers, real floats — the
+  `ExtSortCmp` fast path), but **first-occurrence order** over the row-major visit
+  sequence for other dtypes (complex via the naive path).
+- **tag:** intentional
+- **status:** open
+
+The naive (general-bound `Clone + PartialEq`) algorithm cannot order complex
+values without the `ExtSortCmp` total order; substitution of the sorted path for
+complex is a registered follow-up. NaNs are distinct entries (tail of ascending
+order) and signed zeros merge in both paths, matching NumPy.

@@ -197,6 +197,38 @@ mod custom_roll {
     }
 
     #[test]
+    fn test_tuple_shift_single_axis_broadcast() {
+        crate::specify_test!("test_tuple_shift_single_axis_broadcast");
+
+        // tuple shift on a single axis is summed (NumPy broadcasts the axis);
+        // np.roll(x, (1, 2), axis=0) on a size-5 axis == np.roll(x, 3, axis=0)
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        let x = rt::arange((5, &device));
+        let expected = x.roll(3, None);
+        assert_equal(x.roll([1, 2], None), &expected, None);
+        let m = rt::arange((20, &device)).into_shape([4, 5]);
+        let expected_m = m.roll(3, 1);
+        assert_equal(m.roll([1, 2], 1), &expected_m, None);
+    }
+
+    #[test]
+    fn test_len1_shift_tuple_axis_broadcast() {
+        crate::specify_test!("test_len1_shift_tuple_axis_broadcast");
+
+        // len-1 tuple shift with a tuple axis: that shift on every axis (NumPy)
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        let x = rt::arange((24, &device)).into_shape([2, 3, 4]);
+        let expected = x.roll([5, 5], [0, 1]);
+        assert_equal(x.roll([5], [0, 1]), &expected, None);
+        // int shift with tuple axis behaves identically
+        assert_equal(x.roll(5, [0, 1]), &expected, None);
+    }
+
+    #[test]
     fn test_0d() {
         crate::specify_test!("test_0d");
 

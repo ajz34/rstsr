@@ -1,12 +1,12 @@
-//! Manipulation surface (W4): the array-API manipulation functions rstsr-core
-//! already provides — joins, splits, axis moves, broadcasts.
+//! Manipulation surface (W4 + W6): the array-API manipulation functions
+//! rstsr-core provides — joins, splits, axis moves, broadcasts, and the
+//! repeat/roll/tile family.
 //!
 //! Every entry point is a thin wrapper: marshalling up, one `rt::` call,
 //! `.into_owned()` where rstsr returns a view (copy semantics, register
 //! G-036). Joins (`concat`/`stack`/`meshgrid`) are same-dtype only: rstsr's
 //! kernels carry one dtype parameter, so cross-dtype joins need promotion,
-//! which the shim does not implement (register G-009). `repeat`, `roll` and
-//! `tile` have no rstsr primitive and stay registered gaps.
+//! which the shim does not implement (register G-009).
 
 use core::mem::MaybeUninit;
 use num::Complex;
@@ -14,14 +14,18 @@ use pyo3::exceptions::{PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use rstsr::prelude::rt;
 use rstsr::prelude::*;
+use rstsr_dtype_traits::ExtZero;
 
 use rstsr_core::operators::assignment::{OpAssignAPI, OpAssignArbitaryAPI};
+use rstsr_core::operators::ops::OpSubAPI;
 use rstsr_core::storage::exports::{DeviceCreationAnyAPI, DeviceRawAPI};
 
 use crate::any_tensor::{
     device_faer, dispatch_name, dispatch_name_many, dispatch_t, err_py, lift, lift_vec, liftp, type_err, AnyTensor,
     AnyTensorRef, FTensor, NativeArray,
 };
+
+// AnyTensorRef (typed_part/tensor_ref) drives diff's same-dtype side args.
 
 /* #region homogeneous-part helpers */
 
@@ -229,6 +233,138 @@ where
 pub fn unstack(x: &NativeArray, axis: isize) -> PyResult<Vec<NativeArray>> {
     let out: Vec<AnyTensor> = dispatch_name_many!(x.t.dtype_name(), op_unstack(x, axis))?;
     Ok(out.into_iter().map(|t| NativeArray { t }).collect())
+}
+
+/* #endregion */
+
+/* #region repeat / roll / tile (W6) */
+
+fn op_repeat<T>(t: &FTensor<T>, repeats: &RepeatArg, axis: AxesIndex<isize>) -> rt::Result<FTensor<T>>
+where
+    T: Clone + Default + Send + Sync + 'static,
+    DeviceFaer: DeviceAPI<T, Raw = Vec<T>> + DeviceCreationAnyAPI<T> + OpAssignAPI<T, IxD>,
+{
+    rt::repeat_f(t, repeats.clone(), axis)
+}
+
+/// `repeats` travels as int-or-list (the Python layer flattens an index array
+/// through `tolist`, the `take` precedent); `RepeatArg::All` for the scalar
+/// and a length-1 list, `Elems` otherwise (rstsr's length-1 shortcut).
+#[pyfunction]
+pub fn repeat(
+    x: &NativeArray,
+    repeats: Option<Vec<usize>>,
+    all_count: Option<usize>,
+    axis: Option<isize>,
+) -> PyResult<NativeArray> {
+    let arg = match (all_count, repeats) {
+        (Some(n), _) => RepeatArg::All(n),
+        (None, Some(v)) if v.len() == 1 => RepeatArg::All(v[0]),
+        (None, Some(v)) => RepeatArg::Elems(v),
+        (None, None) => return value_err("repeat: repeats is required"),
+    };
+    // at most one axis (AxesIndex::Vec would be rejected rust-side)
+    let axis = match axis {
+        Some(a) => AxesIndex::Val(a),
+        None => AxesIndex::None,
+    };
+    Ok(NativeArray { t: dispatch_t!(x.t, op_repeat(&arg, axis))? })
+}
+
+/// `axis=None` flattens (AxesIndex::None); an int is a single axis.
+#[pyfunction]
+pub fn roll(x: &NativeArray, shift: Vec<isize>, axis: Option<Vec<isize>>) -> PyResult<NativeArray> {
+    let shift_idx = match shift.len() {
+        1 => AxesIndex::Val(shift[0]),
+        _ => AxesIndex::Vec(shift),
+    };
+    let axis_idx = match axis {
+        Some(v) if v.len() == 1 => AxesIndex::Val(v[0]),
+        Some(v) => AxesIndex::Vec(v),
+        None => AxesIndex::None,
+    };
+    Ok(NativeArray { t: dispatch_t!(x.t, op_roll(shift_idx.clone(), axis_idx.clone()))? })
+}
+
+fn op_roll<T>(t: &FTensor<T>, shift: AxesIndex<isize>, axis: AxesIndex<isize>) -> rt::Result<FTensor<T>>
+where
+    T: Clone + Send + Sync + 'static,
+    DeviceFaer:
+        DeviceAPI<T, Raw = Vec<T>> + DeviceCreationAnyAPI<T> + OpAssignAPI<T, IxD> + OpAssignArbitaryAPI<T, IxD, IxD>,
+{
+    rt::roll_f(t, shift, axis)
+}
+
+fn op_tile<T>(t: &FTensor<T>, repetitions: AxesIndex<usize>) -> rt::Result<FTensor<T>>
+where
+    T: Clone + Send + Sync + 'static,
+    DeviceFaer:
+        DeviceAPI<T, Raw = Vec<T>> + DeviceCreationAnyAPI<T> + OpAssignAPI<T, IxD> + OpAssignArbitaryAPI<T, IxD, IxD>,
+{
+    rt::tile_f(t, repetitions)
+}
+
+/// `repetitions` is int-or-tuple at the spec level; the Python layer always
+/// sends a list (a bare int becomes a length-1 list).
+#[pyfunction]
+pub fn tile(x: &NativeArray, repetitions: Vec<usize>) -> PyResult<NativeArray> {
+    let reps = match repetitions.len() {
+        1 => AxesIndex::Val(repetitions[0]),
+        _ => AxesIndex::Vec(repetitions),
+    };
+    Ok(NativeArray { t: dispatch_t!(x.t, op_tile(reps.clone()))? })
+}
+
+/* #endregion */
+
+/* #region diff (W7) */
+
+fn op_diff<T>(
+    t: &FTensor<T>,
+    axis: isize,
+    n: usize,
+    prepend: Option<&FTensor<T>>,
+    append: Option<&FTensor<T>>,
+) -> rt::Result<FTensor<T>>
+where
+    T: Clone + Default + PartialEq + ExtZero + core::ops::Sub<Output = T> + Send + Sync + 'static,
+    DeviceFaer: DeviceAPI<T, Raw = Vec<T>> + DeviceCreationAnyAPI<T> + OpAssignAPI<T, IxD> + OpSubAPI<T, T, T, IxD>,
+{
+    rt::diff_f(t, axis, n, prepend, append)
+}
+
+/// prepend/append are same-dtype arrays (cross-dtype sides need promotion,
+/// G-009); `n` and axis validation happen rust-side. Bool has no `Sub`, so
+/// its arm is declined (numeric dtypes per the spec).
+#[pyfunction]
+pub fn diff(
+    x: &NativeArray,
+    axis: isize,
+    n: usize,
+    prepend: Option<&NativeArray>,
+    append: Option<&NativeArray>,
+) -> PyResult<NativeArray> {
+    macro_rules! arms {
+        ($($dv:ident);* $(;)?) => {
+            match &x.t {
+                $(AnyTensor::$dv(t) => {
+                    let pre = prepend.and_then(|p| p.t.tensor_ref());
+                    let app = append.and_then(|a| a.t.tensor_ref());
+                    if (prepend.is_some() && pre.is_none()) || (append.is_some() && app.is_none()) {
+                        return type_err(
+                            "diff: prepend/append must have the same dtype as x (cross-dtype sides \
+                             need promotion, rstsr gap G-009); cast first",
+                        );
+                    }
+                    lift(op_diff(t, axis, n, pre, app), AnyTensor::$dv).map(|t| NativeArray { t })
+                },)*
+                AnyTensor::Bool(_) => type_err(
+                    "diff: not defined for bool dtype (rstsr's difference kernel is bound on Sub)",
+                ),
+            }
+        };
+    }
+    arms!(I8; I16; I32; I64; U8; U16; U32; U64; F32; F64; C32; C64)
 }
 
 /* #endregion */

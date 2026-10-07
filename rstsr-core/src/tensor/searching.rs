@@ -39,8 +39,8 @@ where
             InvalidValue,
             "searchsorted sorter must have the same length as x1."
         )?;
-        if let Some(&max) = sorter.iter().max() {
-            rstsr_pattern!(max, 0..x1.size(), InvalidValue, "searchsorted sorter entries must be within x1 bounds.")?;
+        for &idx in sorter.iter() {
+            rstsr_pattern!(idx, 0..x1.size(), InvalidValue, "searchsorted sorter entries must be within x1 bounds.")?;
         }
     }
     let l1: Layout<IxD> = x1.layout().to_dim()?;

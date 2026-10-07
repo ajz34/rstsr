@@ -138,6 +138,24 @@ mod custom_tile {
     }
 
     #[test]
+    fn test_zero_size_input_axis() {
+        // tiling along a zero-size input axis must not panic: layout offsets
+        // may point past the empty source storage (G-072)
+        crate::specify_test!("test_zero_size_input_axis");
+
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        let a: Tensor<f64, _> = rt::zeros(([0, 4], &device));
+        let out = a.tile([2, 2]);
+        assert_eq!(out.shape(), &[0, 8]);
+
+        let b: Tensor<f64, _> = rt::zeros(([2, 0], &device));
+        let out = b.tile([3]);
+        assert_eq!(out.shape(), &[2, 0]);
+    }
+
+    #[test]
     fn test_0d() {
         crate::specify_test!("test_0d");
 

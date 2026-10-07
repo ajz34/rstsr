@@ -50,7 +50,9 @@ where
     DeviceFaer: DeviceAPI<T, Raw = Vec<T>> + DeviceCreationAnyAPI<T> + OpAllAPI<bool, IxD, TOut = bool>,
     for<'x> &'x FTensor<T>: TensorNotEqualAPI<&'x FTensor<T>, Output = FTensor<bool>>,
 {
-    let zero: FTensor<T> = rt::asarray_f((vec![T::default()], device_faer()))?;
+    // 0-d zero: broadcasts against any shape without promoting the input
+    // (a (1,) zero would lift a 0-d input to shape (1,))
+    let zero: FTensor<T> = rt::asarray_f((vec![T::default()], dim_from(&[]), device_faer()))?;
     let truthy = rt::not_equal_f(t, &zero)?;
     rt::all_with_args_f(&truthy, reduce_args(axes, keepdims))
 }
@@ -61,7 +63,7 @@ where
     DeviceFaer: DeviceAPI<T, Raw = Vec<T>> + DeviceCreationAnyAPI<T> + OpAnyAPI<bool, IxD, TOut = bool>,
     for<'x> &'x FTensor<T>: TensorNotEqualAPI<&'x FTensor<T>, Output = FTensor<bool>>,
 {
-    let zero: FTensor<T> = rt::asarray_f((vec![T::default()], device_faer()))?;
+    let zero: FTensor<T> = rt::asarray_f((vec![T::default()], dim_from(&[]), device_faer()))?;
     let truthy = rt::not_equal_f(t, &zero)?;
     rt::any_with_args_f(&truthy, reduce_args(axes, keepdims))
 }
@@ -921,6 +923,12 @@ where
 /// Macro arms in `any_tensor.rs` land here through `dispatch_t_index*!`.
 pub(crate) fn idx_lift(r: rt::Result<FTensor<usize>>) -> PyResult<NativeArray> {
     let t = err_py(r)?;
+    idx_lift_tensor(t)
+}
+
+/// `idx_lift` for an already-unwrapped tensor (nonzero coordinates, unique
+/// struct fields — multi-output index results lifted element-wise).
+pub(crate) fn idx_lift_tensor(t: FTensor<usize>) -> PyResult<NativeArray> {
     let shape = AsRef::<[usize]>::as_ref(t.shape()).to_vec();
     let data: Vec<i64> = t.view().iter().map(|&v| v as i64).collect();
     let out = err_py(rt::asarray_f((data, dim_from(&shape), device_faer())))?;

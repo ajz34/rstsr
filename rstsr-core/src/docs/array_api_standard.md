@@ -242,17 +242,17 @@ The reference implementation (as in [`DeviceCpuSerial`] and [`DeviceFaer`]), fol
 | status | implementation | Python API | description |
 |-|-|-|-|
 | Y | [`isin`] | [`isin`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.isin.html) | Tests for each element in `x1` whether the element is in `x2`. |
-| | | [`unique_all`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.unique_all.html) | Returns the unique elements of an input array `x`, the first occurring indices for each unique element in `x`, the indices from the set of unique elements that reconstruct `x`, and the corresponding counts for each unique element in `x`. |
-| | | [`unique_counts`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.unique_counts.html) | Returns the unique elements of an input array `x` and the corresponding counts for each unique element in `x`. |
-| | | [`unique_inverse`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.unique_inverse.html) | Returns the unique elements of an input array `x` and the indices from the set of unique elements that reconstruct `x`. |
-| | | [`unique_values`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.unique_values.html) | Returns the unique elements of an input array `x`. |
+| Y | [`unique_all`] | [`unique_all`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.unique_all.html) | Returns the unique elements of an input array `x`, the first occurring indices for each unique element in `x`, the indices from the set of unique elements that reconstruct `x`, and the corresponding counts for each unique element in `x`. |
+| Y | [`unique_counts`] | [`unique_counts`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.unique_counts.html) | Returns the unique elements of an input array `x` and the corresponding counts for each unique element in `x`. |
+| Y | [`unique_inverse`] | [`unique_inverse`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.unique_inverse.html) | Returns the unique elements of an input array `x` and the indices from the set of unique elements that reconstruct `x`. |
+| Y | [`unique_values`] | [`unique_values`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.unique_values.html) | Returns the unique elements of an input array `x`. |
 
 ## Sorting Functions
 
 | status | implementation | Python API | description |
 |-|-|-|-|
-| | | [`argsort`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.argsort.html) | Returns the indices that sort an array x along a specified axis. |
-| | | [`sort`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.sort.html) | Returns a sorted copy of an input array x. |
+| Y | [`argsort`], [`argsort_custom`] | [`argsort`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.argsort.html) | Returns the indices that sort an array x along a specified axis. |
+| Y | [`sort`], [`sort_custom`] | [`sort`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.sort.html) | Returns a sorted copy of an input array x. |
 
 ## Statistical Functions
 
@@ -274,7 +274,7 @@ The reference implementation (as in [`DeviceCpuSerial`] and [`DeviceFaer`]), fol
 |-|-|-|-|
 | Y | [`all`], [`all_axes`], [`all_with_args`] | [`all`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.all.html) | Tests whether all input array elements evaluate to `True` along a specified axis. |
 | Y | [`any`], [`any_axes`], [`any_with_args`] | [`any`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.any.html) | Tests whether any input array element evaluates to `True` along a specified axis. |
-| | | [`diff`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.diff.html) | Calculates the n-th discrete forward difference along a specified axis. |
+| Y | [`diff`] | [`diff`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.diff.html) | Calculates the n-th discrete forward difference along a specified axis. |
 
 
 ## Element-wise Functions

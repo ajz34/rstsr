@@ -346,6 +346,8 @@ Custom user reduction (expert-level): [`reduce_all`], [`reduce_axes`], [`reduce_
 
 [`argmin`]/[`argmin_axes`], [`argmax`]/[`argmax_axes`], [`count_nonzero`]/[`count_nonzero_axes`], [`unraveled_argmin`]/[`unraveled_argmin_axes`], [`unraveled_argmax`]/[`unraveled_argmax_axes`], each with `_with_args` forms; and select function [`where`] (boolean condition, NumPy three-argument form)
 
+Sorting family: [`sort`], [`argsort`] with [`SortArgs`] (`axis` + `descending` + `stable`), plus expert comparator variants [`sort_custom`]/[`argsort_custom`]. Searching: [`searchsorted`] with [`SearchSortedArgs`]; [`nonzero`]. Gathering: [`take_along_axis`]. Discrete differences: [`diff`] (`axis` + `n` + optional `prepend`/`append`).
+
 ### Utility functions
 
 [`all`]/[`all_axes`], [`any`]/[`any_axes`]
