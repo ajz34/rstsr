@@ -59,6 +59,15 @@ impl From<SearchSide> for SearchSortedArgs {
     }
 }
 
+impl core::str::FromStr for SearchSortedArgs {
+    type Err = Error;
+
+    /// String form of the side (`"left"` / `"right"`), sorter unset.
+    fn from_str(side: &str) -> Result<Self> {
+        Self::try_from(side)
+    }
+}
+
 impl TryFrom<&str> for SearchSortedArgs {
     type Error = Error;
 
@@ -124,6 +133,15 @@ impl TryFrom<&str> for SearchSide {
             "right" => Ok(SearchSide::Right),
             other => rstsr_raise!(InvalidValue, "searchsorted side must be 'left' or 'right', got {:?}.", other),
         }
+    }
+}
+
+impl core::str::FromStr for SearchSide {
+    type Err = Error;
+
+    /// Parse `"left"` or `"right"`.
+    fn from_str(side: &str) -> Result<Self> {
+        Self::try_from(side)
     }
 }
 
