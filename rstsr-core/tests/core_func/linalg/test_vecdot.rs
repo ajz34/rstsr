@@ -151,6 +151,25 @@ mod custom_vecdot {
     }
 
     #[test]
+    fn test_vecdot_same_axes_shorthand() {
+        crate::specify_test!("test_vecdot_same_axes_shorthand");
+
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        // `axes` is shorthand for `(axes, axes)`: the same axes in both inputs.
+        let a = rt::tensor_from_nested!([[1, 2], [3, 4]], &device);
+        let b = rt::tensor_from_nested!([[5, 6], [7, 8]], &device);
+        let shorthand = rt::vecdot(&a, &b, [0, 1]);
+        let explicit = rt::vecdot(&a, &b, ([0, 1], [0, 1]));
+        assert_equal(&shorthand, &explicit, None);
+        assert_eq!(shorthand.to_scalar(), 70);
+
+        // same-axes on the last axis of 2-D arrays matches the default (-1)
+        assert_equal(rt::vecdot(&a, &b, [1]), rt::vecdot(&a, &b, None), None);
+    }
+
+    #[test]
     fn test_vecdot_non_contiguous() {
         crate::specify_test!("test_vecdot_non_contiguous");
 

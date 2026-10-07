@@ -8,8 +8,8 @@ use core::mem::transmute;
 ///
 /// $$\mathbf{a} \cdot \mathbf{b} = \sum_{i=0}^{n-1} \overline{a_i}b_i$$
 ///
-/// where the sum is over the dimension specified by `axis` (default: last axis)
-/// and where $\overline{a_i}$ denotes the complex conjugate if $a_i$
+/// where the sum is over the axis or axes specified by `axes_pair` (default:
+/// last axis) and where $\overline{a_i}$ denotes the complex conjugate if $a_i$
 /// is complex and the identity otherwise.
 /// This function behaves identically under [`RowMajor`] and [`ColMajor`] device default orders.
 ///
@@ -25,11 +25,18 @@ use core::mem::transmute;
 ///   - The second input array.
 ///   - Scalar not allowed.
 ///
-/// - `axis`: `impl Into<Option<isize>>`
+/// - `axes_pair`: `impl TryInto<AxesPairIndex<isize>>`
 ///
-///   - The axis over which to compute the dot product.
-///   - Default: `-1` (the last axis).
-///   - If negative, the axis is counted from the last axis of each input array.
+///   - The axis or axes over which to compute the dot product.
+///   - Default: `-1` (the last axis of each input array).
+///   - If an axis is negative, it is counted from the last axis of the corresponding input array.
+///   - Overloads:
+///     - integer: contract that axis in both `a` and `b`.
+///     - `None`: same as `-1`.
+///     - `(axes_a, axes_b)`: contract `axes_a` of `a` with `axes_b` of `b`, where each side is an
+///       integer or a collection of integers.
+///     - `axes`: shorthand for `(axes, axes)`, contracting the same axes in both inputs. Use a
+///       collection (`[0, 1]`, `vec![0, 1]`, a slice); a 2-tuple is the pair overload above.
 ///
 /// # Returns
 ///
@@ -93,11 +100,25 @@ use core::mem::transmute;
 /// // 14+5i
 /// ```
 ///
+/// Same axes in both inputs (`[0, 1]` is shorthand for `([0, 1], [0, 1])`):
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let a = rt::tensor_from_nested!([[1, 2], [3, 4]], &device);
+/// let b = rt::tensor_from_nested!([[5, 6], [7, 8]], &device);
+/// let result = rt::vecdot(&a, &b, [0, 1]);
+/// assert!(rt::allclose(&result, rt::vecdot(&a, &b, ([0, 1], [0, 1])), None));
+/// println!("{result}");
+/// // 70
+/// ```
+///
 /// # Notes of API accordance
 ///
 /// - Array-API: `vecdot(x1, x2, /, *, axis=-1)` ([`vecdot`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.vecdot.html))
 /// - NumPy: `vecdot(x1, x2, /, out=None, *, casting='same_kind', order='K', dtype=None, subok=True[, signature, axes, axis])` ([`numpy.vecdot`](https://numpy.org/doc/stable/reference/generated/numpy.vecdot.html))
-/// - RSTSR: `rt::vecdot(a, b, axis)`
+/// - RSTSR: `rt::vecdot(a, b, axes_pair)`
 ///
 /// # Panics
 ///
