@@ -197,4 +197,29 @@ mod custom_nonzero {
         let coords = rt::nonzero(&n);
         assert_eq!(coords[0].to_vec(), vec![0]);
     }
+
+    #[test]
+    fn test_nonzero_custom_ext_zero_type() {
+        // a user dtype with only `ExtZero + PartialEq` works: the nonzero
+        // element test is carried at the device impl level, not the tensor API
+        crate::specify_test!("test_nonzero_custom_ext_zero_type");
+
+        use rstsr_dtype_traits::ExtZero;
+
+        #[derive(Clone, PartialEq, Debug)]
+        struct Nz(i32);
+        impl ExtZero for Nz {
+            fn ext_zero() -> Self {
+                Nz(0)
+            }
+        }
+
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        let a = rt::asarray((vec![Nz(1), Nz(0), Nz(2), Nz(0)], &device));
+        let coords = rt::nonzero(&a);
+        assert_eq!(coords.len(), 1);
+        assert_eq!(coords[0].to_vec(), vec![0, 2]);
+    }
 }

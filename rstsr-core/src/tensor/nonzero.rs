@@ -1,7 +1,5 @@
 //! Nonzero tensor API: [`nonzero`] returning one index tensor per dimension.
 
-use rstsr_dtype_traits::ExtZero;
-
 use crate::prelude_dev::*;
 
 /// Returns the indices of the elements that are non-zero.
@@ -11,9 +9,8 @@ pub fn nonzero_f<R, T, B, D>(tensor: &TensorAny<R, T, B, D>) -> Result<Vec<Tenso
 where
     R: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
     D: DimAPI,
-    T: Clone + PartialEq + ExtZero,
     B: DeviceAPI<T>
-        + DeviceAPI<usize, Raw = Vec<usize>>
+        + DeviceAPI<usize>
         + DeviceRawAPI<MaybeUninit<usize>>
         + DeviceCreationAnyAPI<usize>
         + OpNonzeroAPI<T, D>,
@@ -22,47 +19,26 @@ where
     let device = tensor.device().clone();
     let ndim = tensor.ndim();
     rstsr_assert!(ndim > 0, InvalidLayout, "nonzero requires ndim > 0.")?;
-    let zero = T::ext_zero();
-    let is_nonzero = move |v: &T| v != &zero;
 
-    // pass 1: count
-    let count = device.nonzero_count(tensor.raw(), tensor.layout(), &is_nonzero)?;
-    // pass 2: fill flat C-order indices (data-dependent length = count);
-    // kept host-side for the coordinate split (O(count) registered scratch)
-    let layout_flat = vec![count].new_contig(None, device.default_order());
-    let (_, idx_max) = layout_flat.bounds_index()?;
-    let mut storage = device.uninit_impl(idx_max)?;
-    device.nonzero_fill(storage.raw_mut(), tensor.raw(), tensor.layout(), &is_nonzero)?;
-    // SAFETY: `nonzero_fill` wrote exactly `count` entries.
-    let storage = unsafe { <B as DeviceCreationAnyAPI<usize>>::assume_init_impl(storage)? };
-    let flat_raw: Vec<usize> = storage.raw().clone();
-
-    // split the flat indices into per-dimension coordinates (host layout math
-    // over the input shape; row-major unravel)
-    let shape: Vec<usize> = tensor.shape().as_ref().to_vec();
-    let mut coords: Vec<Vec<usize>> = (0..ndim).map(|_| Vec::with_capacity(count)).collect();
-    let strides_c: Vec<usize> = {
-        let mut strides = vec![1_usize; ndim];
-        for i in (0..ndim.saturating_sub(1)).rev() {
-            strides[i] = strides[i + 1] * shape[i + 1];
-        }
-        strides
-    };
-    for &flat_idx in flat_raw.iter() {
-        let mut rem = flat_idx;
-        for d in 0..ndim {
-            coords[d].push(rem / strides_c[d]);
-            rem %= strides_c[d];
-        }
+    // pass 1: count (the output length is data-dependent)
+    let count = device.nonzero_count(tensor.raw(), tensor.layout())?;
+    // pass 2: one output buffer per dimension, filled with the coordinates of
+    // every nonzero element in row-major visit order
+    let mut storages = (0..ndim).map(|_| device.uninit_impl(count)).collect::<Result<Vec<_>>>()?;
+    {
+        let mut buffers: Vec<_> = storages.iter_mut().map(|s| s.raw_mut()).collect();
+        device.nonzero_fill(&mut buffers, tensor.raw(), tensor.layout())?;
     }
-    let out = coords
+    let layout = vec![count].new_contig(None, device.default_order());
+    storages
         .into_iter()
-        .map(|c| {
-            let layout = vec![count].new_contig(None, device.default_order());
-            device.outof_cpu_vec(c).and_then(|storage| Tensor::new_f(storage, layout))
+        .map(|storage| {
+            // SAFETY: `nonzero_fill` wrote exactly `count` coordinates into
+            // every buffer.
+            let storage = unsafe { <B as DeviceCreationAnyAPI<usize>>::assume_init_impl(storage)? };
+            Tensor::new_f(storage, layout.clone())
         })
-        .collect::<Result<Vec<_>>>()?;
-    Ok(out)
+        .collect()
 }
 
 /// Returns the indices of the elements that are non-zero, one 1-D index
@@ -146,9 +122,8 @@ impl<R, T, B, D> NonzeroAPI for &TensorAny<R, T, B, D>
 where
     R: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
     D: DimAPI,
-    T: Clone + PartialEq + ExtZero,
     B: DeviceAPI<T>
-        + DeviceAPI<usize, Raw = Vec<usize>>
+        + DeviceAPI<usize>
         + DeviceRawAPI<MaybeUninit<usize>>
         + DeviceCreationAnyAPI<usize>
         + OpNonzeroAPI<T, D>,

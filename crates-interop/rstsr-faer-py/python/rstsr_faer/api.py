@@ -1392,11 +1392,8 @@ def take_along_axis(x, /, indices, *, axis=-1):
         )
     if _kind(indices.dtype) != "integral":
         raise TypeError(f"take_along_axis: indices must have an integer data type, got {indices.dtype!r}")
-    if indices.ndim != h.ndim():
-        raise ValueError(
-            f"take_along_axis: indices must have the same number of axes as x "
-            f"({h.ndim()}), got ndim={indices.ndim}"
-        )
+    # shape compatibility (same ndim; broadcast-compatible outside `axis`) is
+    # validated rust-side
     # tolist flattens nested ints; the shape travels alongside so the shim can
     # rebuild the index tensor (the `take` marshalling precedent)
     flat = indices.tolist()
@@ -1446,14 +1443,20 @@ def _int_tuple_arg(value, opname, /):
 def repeat(x, /, repeats, *, axis=None):
     h = _handle(x)
     if isinstance(repeats, Array):
+        # dtype/ndim checks stand in for the rust boundary: repeats travel as a
+        # flat unsigned int list, so bad dtypes/shapes get a clean error first
         if _kind(repeats.dtype) != "integral":
             raise TypeError(f"repeat: repeats must have an integer data type, got {repeats.dtype!r}")
         if repeats.ndim != 1:
             raise ValueError(f"repeat: repeats must be one-dimensional, got ndim={repeats.ndim}")
         reps = repeats.tolist()
+        # negative repetitions are a ValueError (NumPy parity); a raw negative
+        # would die as OverflowError at the unsigned pyo3 boundary
         if builtins.any(s < 0 for s in reps):
             raise ValueError(f"repeat: negative repeats are not allowed, got {reps!r}")
     elif isinstance(repeats, _py_int) and not isinstance(repeats, _py_bool):
+        # bool is rejected (NumPy parity); a raw negative would die as
+        # OverflowError at the unsigned pyo3 boundary
         if repeats < 0:
             raise ValueError(f"repeat: negative repeats are not allowed, got {repeats!r}")
         reps = None
@@ -1472,13 +1475,8 @@ def roll(x, /, shift=None, *, axis=None):
     axes = None
     if axis is not None:
         axes = _int_tuple_arg(axis, "roll(axis)")
-        if builtins.len(axes) != 1 and builtins.len(shifts) != builtins.len(axes):
-            # int shift with a tuple axis broadcasts; tuple shift must match
-            if builtins.len(shifts) > 1:
-                raise ValueError(
-                    f"roll: shift and axis must have the same length, got "
-                    f"{builtins.len(shifts)} and {builtins.len(axes)}"
-                )
+    # shift/axis lengths follow NumPy's broadcast rule; incompatibilities are
+    # validated rust-side (surfaced as ValueError)
     return _wrap(_roll(h, shifts, axes))
 
 

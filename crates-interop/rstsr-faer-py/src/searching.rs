@@ -70,7 +70,7 @@ fn idx_lift_tensor_of(r: rt::Result<FTensor<usize>>) -> PyResult<NativeArray> {
 
 fn op_nonzero<T>(t: &FTensor<T>) -> rt::Result<Vec<FTensor<usize>>>
 where
-    T: Clone + PartialEq + ExtZero + Send + Sync + 'static,
+    T: ExtZero + PartialEq + Send + Sync,
     DeviceFaer: DeviceCreationAnyAPI<usize> + OpNonzeroAPI<T, IxD>,
 {
     rt::nonzero_f(t)

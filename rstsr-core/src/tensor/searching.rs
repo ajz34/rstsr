@@ -17,7 +17,6 @@ where
     R2: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
     D1: DimAPI,
     D2: DimAPI,
-    T: Clone + ExtSortCmp + 'static,
     AArg: TryInto<SearchSortedArgs, Error: Into<Error>>,
     B: DeviceAPI<T>
         + DeviceAPI<usize>
@@ -175,7 +174,6 @@ where
     R2: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
     D1: DimAPI,
     D2: DimAPI,
-    T: Clone + ExtSortCmp + 'static,
     AArg: TryInto<SearchSortedArgs, Error: Into<Error>>,
     B: DeviceAPI<T>
         + DeviceAPI<usize>
@@ -195,7 +193,6 @@ impl<R1, T, B, D1> TensorAny<R1, T, B, D1>
 where
     R1: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
     D1: DimAPI,
-    T: Clone + ExtSortCmp + 'static,
     B: DeviceAPI<T> + DeviceAPI<usize> + DeviceRawAPI<MaybeUninit<usize>> + DeviceCreationAnyAPI<usize>,
 {
     /// Finds the positions where values of `x2` would insert into sorted `x1`.

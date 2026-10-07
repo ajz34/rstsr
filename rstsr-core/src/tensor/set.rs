@@ -82,7 +82,6 @@ fn unique_impl<R, T, B, D>(
 where
     R: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
     D: DimAPI,
-    T: Clone + PartialEq + ExtSortCmp + 'static,
     B: DeviceAPI<T>
         + DeviceAPI<usize>
         + DeviceRawAPI<MaybeUninit<T>>
@@ -152,7 +151,6 @@ pub fn unique_values_f<R, T, B, D>(tensor: &TensorAny<R, T, B, D>) -> Result<Ten
 where
     R: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
     D: DimAPI,
-    T: Clone + PartialEq + ExtSortCmp + 'static,
     B: DeviceAPI<T>
         + DeviceAPI<usize>
         + DeviceRawAPI<MaybeUninit<T>>
@@ -210,7 +208,7 @@ where
 /// (`numpy.unique_values`/`unique_all`/...), which since NumPy 2.3 do not
 /// guarantee an order. NaNs are distinct entries (parity with the array-api
 /// aliases, which pass `equal_nan=False`; differs from `numpy.unique`, which
-/// collapses them). See `tests/tracking/numpy_differences.md`.
+/// collapses them into one entry).
 ///
 /// # See also
 ///
@@ -241,7 +239,6 @@ impl<R, T, B, D> UniqueValuesAPI for &TensorAny<R, T, B, D>
 where
     R: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
     D: DimAPI,
-    T: Clone + PartialEq + ExtSortCmp + 'static,
     B: DeviceAPI<T>
         + DeviceAPI<usize>
         + DeviceRawAPI<MaybeUninit<T>>
@@ -268,7 +265,6 @@ pub fn unique_counts_f<R, T, B, D>(tensor: &TensorAny<R, T, B, D>) -> Result<Uni
 where
     R: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
     D: DimAPI,
-    T: Clone + PartialEq + ExtSortCmp + 'static,
     B: DeviceAPI<T>
         + DeviceAPI<usize>
         + DeviceRawAPI<MaybeUninit<T>>
@@ -345,7 +341,6 @@ impl<R, T, B, D> UniqueCountsAPI for &TensorAny<R, T, B, D>
 where
     R: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
     D: DimAPI,
-    T: Clone + PartialEq + ExtSortCmp + 'static,
     B: DeviceAPI<T>
         + DeviceAPI<usize>
         + DeviceRawAPI<MaybeUninit<T>>
@@ -372,7 +367,6 @@ pub fn unique_inverse_f<R, T, B, D>(tensor: &TensorAny<R, T, B, D>) -> Result<Un
 where
     R: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
     D: DimAPI,
-    T: Clone + PartialEq + ExtSortCmp + 'static,
     B: DeviceAPI<T>
         + DeviceAPI<usize>
         + DeviceRawAPI<MaybeUninit<T>>
@@ -450,7 +444,6 @@ impl<R, T, B, D> UniqueInverseAPI for &TensorAny<R, T, B, D>
 where
     R: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
     D: DimAPI,
-    T: Clone + PartialEq + ExtSortCmp + 'static,
     B: DeviceAPI<T>
         + DeviceAPI<usize>
         + DeviceRawAPI<MaybeUninit<T>>
@@ -478,7 +471,6 @@ pub fn unique_all_f<R, T, B, D>(tensor: &TensorAny<R, T, B, D>) -> Result<Unique
 where
     R: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
     D: DimAPI,
-    T: Clone + PartialEq + ExtSortCmp + 'static,
     B: DeviceAPI<T>
         + DeviceAPI<usize>
         + DeviceRawAPI<MaybeUninit<T>>
@@ -571,7 +563,6 @@ impl<R, T, B, D> UniqueAllAPI for &TensorAny<R, T, B, D>
 where
     R: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
     D: DimAPI,
-    T: Clone + PartialEq + ExtSortCmp + 'static,
     B: DeviceAPI<T>
         + DeviceAPI<usize>
         + DeviceRawAPI<MaybeUninit<T>>
@@ -604,7 +595,6 @@ where
     R2: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
     D1: DimAPI,
     D2: DimAPI,
-    T: Clone + PartialEq + ExtSortCmp + 'static,
     B: DeviceAPI<T>
         + DeviceAPI<bool>
         + DeviceRawAPI<MaybeUninit<T>>
@@ -696,7 +686,6 @@ where
     R2: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
     D1: DimAPI,
     D2: DimAPI,
-    T: Clone + PartialEq + ExtSortCmp + 'static,
     B: DeviceAPI<T>
         + DeviceAPI<bool>
         + DeviceRawAPI<MaybeUninit<T>>

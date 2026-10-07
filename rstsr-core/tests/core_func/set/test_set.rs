@@ -290,6 +290,61 @@ mod custom_unique {
         let out = rt::unique_values(&a);
         assert_eq!(out.shape(), &[0]);
     }
+
+    #[test]
+    fn test_unique_custom_partial_eq_type() {
+        // a user dtype with only `Clone + PartialEq` works through the general
+        // first-occurrence path (no ExtSortCmp bound at the API)
+        crate::specify_test!("test_unique_custom_partial_eq_type");
+
+        #[derive(Clone, PartialEq, Debug)]
+        struct Tag(i32);
+
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        let a = rt::asarray((vec![Tag(2), Tag(1), Tag(2), Tag(3), Tag(1)], &device));
+        assert_eq!(rt::unique_values(&a).to_vec(), vec![Tag(2), Tag(1), Tag(3)]);
+        let res = rt::unique_all(&a);
+        assert_eq!(res.values.to_vec(), vec![Tag(2), Tag(1), Tag(3)]);
+        assert_eq!(res.counts.to_vec(), vec![2_usize, 2, 1]);
+        assert_eq!(res.indices.to_vec(), vec![0_usize, 1, 3]);
+    }
+
+    #[test]
+    fn test_unique_values_ascending_dtype_sweep() {
+        // the sorted fast path is unrolled per dtype (TypeId dispatch); pin
+        // ascending order across the listed scalar dtypes
+        crate::specify_test!("test_unique_values_ascending_dtype_sweep");
+
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        macro_rules! check {
+            ($($v:expr),* $(,)?) => {{
+                let t = rt::asarray((vec![$($v),*], &device));
+                assert_eq!(rt::unique_values(&t).to_vec(), vec![1, 2, 3]);
+            }};
+        }
+        check!(3_i8, 1_i8, 2_i8);
+        check!(3_i16, 1_i16, 2_i16);
+        check!(3_i32, 1_i32, 2_i32);
+        check!(3_i64, 1_i64, 2_i64);
+        check!(3_isize, 1_isize, 2_isize);
+        check!(3_u8, 1_u8, 2_u8);
+        check!(3_u16, 1_u16, 2_u16);
+        check!(3_u32, 1_u32, 2_u32);
+        check!(3_u64, 1_u64, 2_u64);
+        check!(3_usize, 1_usize, 2_usize);
+        check!(3_i128, 1_i128, 2_i128);
+        check!(3_u128, 1_u128, 2_u128);
+        let f32v = rt::asarray((vec![3.0_f32, 1.0, 2.0], &device));
+        assert_eq!(rt::unique_values(&f32v).to_vec(), vec![1.0_f32, 2.0, 3.0]);
+        let f64v = rt::asarray((vec![3.0_f64, 1.0, 2.0], &device));
+        assert_eq!(rt::unique_values(&f64v).to_vec(), vec![1.0_f64, 2.0, 3.0]);
+        let b = rt::asarray((vec![true, false, true], &device));
+        assert_eq!(rt::unique_values(&b).to_vec(), vec![false, true]);
+    }
 }
 
 #[cfg(test)]
@@ -450,5 +505,23 @@ mod custom_isin {
         let b = rt::tensor_from_nested!([2, 2, 2], &device);
         let out = rt::isin((&a, &b, false));
         assert_eq!(out.to_vec(), vec![false, true, false]);
+    }
+
+    #[test]
+    fn test_isin_custom_partial_eq_type() {
+        // membership is equality only: a user dtype with `Clone + PartialEq`
+        // works through the general linear-scan path
+        crate::specify_test!("test_isin_custom_partial_eq_type");
+
+        #[derive(Clone, PartialEq, Debug)]
+        struct Tag(i32);
+
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        let x1 = rt::asarray((vec![Tag(1), Tag(3), Tag(2)], &device));
+        let x2 = rt::asarray((vec![Tag(3), Tag(3)], &device));
+        assert_eq!(rt::isin((&x1, &x2, false)).to_vec(), vec![false, true, false]);
+        assert_eq!(rt::isin((&x1, &x2, true)).to_vec(), vec![true, false, true]);
     }
 }

@@ -245,8 +245,8 @@ pub fn take(x: &NativeArray, indices: Vec<isize>, axis: isize) -> PyResult<Nativ
 
 /// Indices travel as a Python nested int list (the Python layer flattens the
 /// index array through `tolist`), rebuilt as an `isize` tensor of the same
-/// shape; rstsr resolves negatives and enforces the same-shape-except-axis
-/// contract.
+/// shape; rstsr resolves negatives and enforces the same-ndim,
+/// broadcast-compatible (outside `axis`) shape contract.
 fn op_take_along_axis<T>(
     t: &FTensor<T>,
     indices: Vec<isize>,

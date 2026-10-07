@@ -1,5 +1,5 @@
 //! Set-operation kernels (serial): naive unique (PartialEq, general bound)
-//! and unique_all sweeps; binary-search isin.
+//! and unique_all sweeps; sorted / linear-scan isin.
 
 use crate::prelude_dev::*;
 use core::cmp::Ordering;
@@ -107,26 +107,39 @@ where
     Ok(count)
 }
 
-/// Isin: for each element of `x1`, whether it appears in the sorted unique
-/// sequence `x2_sorted` (binary search). Writes `bool`s into `c`.
+/// Isin, sorted path: sort and dedupe a copy of `x2`'s row-major values by
+/// the total order of [`ExtSortCmp`], then binary-search each `x1` element.
+/// Writes `bool`s into `c` (row-major visit order).
 ///
 /// Membership is value equality (`==`, array-api `isin`'s contract via
 /// `equal`): a NaN key is never a member — NumPy parity — so NaN keys short-
 /// circuit to `false` without searching.
-pub fn isin_cpu_serial<T>(
+pub fn isin_sorted_cpu_serial<T, D1>(
     c: &mut [MaybeUninit<bool>],
-    x2_sorted: &[T],
-    x1_access: &LineAccess<'_, T>,
-    is_nan: &dyn Fn(&T) -> bool,
+    x1: &[T],
+    l1: &Layout<D1>,
+    x2: &[T],
+    l2: &Layout<IxD>,
 ) -> Result<()>
 where
-    T: ExtSortCmp,
+    T: Clone + PartialEq + ExtSortCmp,
+    D1: DimAPI,
 {
-    let n = x1_access.len();
+    // efficiency exception (registered): sort a deduped copy of x2's values
+    let access2 = LineAccess::new(x2, l2)?;
+    let n2 = access2.len();
+    let mut x2_sorted: Vec<T> = Vec::with_capacity(n2);
+    for i in 0..n2 {
+        x2_sorted.push(access2.get(i).clone());
+    }
+    x2_sorted.sort_by(|a, b| a.ext_total_cmp(b));
+    x2_sorted.dedup_by(|a, b| a == b);
+
+    let access1 = LineAccess::new(x1, l1)?;
     let m = x2_sorted.len();
-    for (i, c_slot) in c.iter_mut().take(n).enumerate() {
-        let v = x1_access.get(i);
-        let found = if is_nan(v) {
+    for (i, c_slot) in c.iter_mut().take(access1.len()).enumerate() {
+        let v = access1.get(i);
+        let found = if v.ext_is_nan() {
             // NaN is never equal under `==` (NumPy: isin([nan], [nan]) is
             // false); complex NaN-bearing keys likewise match nothing
             false
@@ -147,14 +160,34 @@ where
     Ok(())
 }
 
+/// Isin, general path: linear membership scan over `x2` (value equality `==`;
+/// no ordering required). Writes `bool`s into `c` (row-major visit order).
+pub fn isin_naive_cpu_serial<T, D1>(
+    c: &mut [MaybeUninit<bool>],
+    x1: &[T],
+    l1: &Layout<D1>,
+    x2: &[T],
+    l2: &Layout<IxD>,
+) -> Result<()>
+where
+    T: PartialEq,
+    D1: DimAPI,
+{
+    let access1 = LineAccess::new(x1, l1)?;
+    let access2 = LineAccess::new(x2, l2)?;
+    let m = access2.len();
+    for (i, c_slot) in c.iter_mut().take(access1.len()).enumerate() {
+        let v = access1.get(i);
+        // NaN (and NaN-bearing complex) never compare equal — NumPy parity
+        c_slot.write((0..m).any(|j| access2.get(j) == v));
+    }
+    Ok(())
+}
+
 /// Fast unique: copy all values (row-major) into `values` (capacity n), sort
 /// with the total order of [`ExtSortCmp`], dedupe adjacent in place. Returns
 /// the unique count `u`; values are in ascending order (NumPy parity).
-pub fn unique_values_sorted_cpu_serial<T>(
-    values: &mut [MaybeUninit<T>],
-    access: &LineAccess<'_, T>,
-    is_nan: &dyn Fn(&T) -> bool,
-) -> Result<usize>
+pub fn unique_values_sorted_cpu_serial<T>(values: &mut [MaybeUninit<T>], access: &LineAccess<'_, T>) -> Result<usize>
 where
     T: Clone + ExtSortCmp + PartialEq,
 {
@@ -166,12 +199,12 @@ where
     let slice = unsafe { core::slice::from_raw_parts_mut(values.as_mut_ptr() as *mut T, n) };
     // stable sort with NaN-last total order; equal (±0) keep input order
     slice.sort_by(|a, b| a.ext_total_cmp(b));
-    // adjacent dedupe (NaN entries are mutually Equal and collapse; use
-    // is_nan to keep each NaN distinct, matching the naive path's contract)
+    // adjacent dedupe (NaN entries are mutually Equal and collapse; each NaN
+    // stays distinct via ext_is_nan, matching the naive path's contract)
     let mut u = if n > 0 { 1 } else { 0 };
     for i in 1..n {
-        let prev_is_nan = is_nan(&slice[u - 1]);
-        let cur_is_nan = is_nan(&slice[i]);
+        let prev_is_nan = slice[u - 1].ext_is_nan();
+        let cur_is_nan = slice[i].ext_is_nan();
         if !prev_is_nan && !cur_is_nan && slice[u - 1] == slice[i] {
             continue;
         }
@@ -195,7 +228,6 @@ pub fn unique_all_sorted_cpu_serial<T>(
     counts: &mut [MaybeUninit<usize>],
     access: &LineAccess<'_, T>,
     flat_c: &dyn Fn(usize) -> usize,
-    is_nan: &dyn Fn(&T) -> bool,
 ) -> Result<usize>
 where
     T: Clone + ExtSortCmp + PartialEq,
@@ -212,7 +244,7 @@ where
     let mut u = 0_usize;
     let mut prev_is_nan = false;
     for (j, (v, pos)) in pairs.iter().enumerate() {
-        let cur_is_nan = is_nan(v);
+        let cur_is_nan = v.ext_is_nan();
         // new entry iff first, NaN-class changes, finite values differ, or
         // both NaN (each NaN is a distinct entry)
         let new_entry = j == 0

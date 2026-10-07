@@ -1,11 +1,11 @@
 //! Set surface: `unique_values`/`unique_counts`/`unique_inverse`/`unique_all`
 //! and `isin` over the rstsr set kernels.
 //!
-//! All 13 dtypes are admitted (kernel bounds are `Clone + PartialEq +
-//! ExtSortCmp`). The `usize` index outputs (`indices`/`inverse_indices`/
-//! `counts`) are lifted to int64; multi-output results cross to Python as
-//! `Vec<NativeArray>`-style tuples and the Python layer builds the spec
-//! namedtuples.
+//! All 13 dtypes are admitted (the device paths take `Clone + PartialEq`;
+//! each device dispatches a sorted fast path per dtype). The `usize` index
+//! outputs (`indices`/`inverse_indices`/`counts`) are lifted to int64;
+//! multi-output results cross to Python as `Vec<NativeArray>`-style tuples
+//! and the Python layer builds the spec namedtuples.
 
 use num::Complex;
 use pyo3::prelude::*;
@@ -13,14 +13,13 @@ use rstsr::prelude::rt;
 use rstsr::prelude::*;
 use rstsr_core::operators::set::{OpIsinAPI, OpUniqueAPI};
 use rstsr_core::storage::exports::{DeviceCreationAnyAPI, DeviceRawAPI};
-use rstsr_dtype_traits::ExtSortCmp;
 
 use crate::any_tensor::{err_py, lift, type_err, AnyTensor, FTensor, NativeArray};
 use crate::ops::idx_lift_tensor;
 
 fn op_unique_values<T>(t: &FTensor<T>) -> rt::Result<FTensor<T>>
 where
-    T: Clone + PartialEq + ExtSortCmp + Send + Sync + 'static,
+    T: Clone + PartialEq + Send + Sync + 'static,
     DeviceFaer:
         DeviceRawAPI<T, Raw = Vec<T>> + DeviceCreationAnyAPI<T> + DeviceCreationAnyAPI<usize> + OpUniqueAPI<T, IxD>,
 {
@@ -30,7 +29,7 @@ where
 /// (values, counts) — counts lifted to int64 by the caller.
 fn op_unique_counts<T>(t: &FTensor<T>) -> rt::Result<(FTensor<T>, FTensor<usize>)>
 where
-    T: Clone + PartialEq + ExtSortCmp + Send + Sync + 'static,
+    T: Clone + PartialEq + Send + Sync + 'static,
     DeviceFaer:
         DeviceRawAPI<T, Raw = Vec<T>> + DeviceCreationAnyAPI<T> + DeviceCreationAnyAPI<usize> + OpUniqueAPI<T, IxD>,
 {
@@ -40,7 +39,7 @@ where
 /// (values, inverse_indices) — inverse lifted to int64 by the caller.
 fn op_unique_inverse<T>(t: &FTensor<T>) -> rt::Result<(FTensor<T>, FTensor<usize>)>
 where
-    T: Clone + PartialEq + ExtSortCmp + Send + Sync + 'static,
+    T: Clone + PartialEq + Send + Sync + 'static,
     DeviceFaer:
         DeviceRawAPI<T, Raw = Vec<T>> + DeviceCreationAnyAPI<T> + DeviceCreationAnyAPI<usize> + OpUniqueAPI<T, IxD>,
 {
@@ -49,9 +48,10 @@ where
 
 /// (values, indices, inverse_indices, counts) — index outputs lifted to
 /// int64 by the caller.
+#[allow(clippy::type_complexity)]
 fn op_unique_all<T>(t: &FTensor<T>) -> rt::Result<(FTensor<T>, FTensor<usize>, FTensor<usize>, FTensor<usize>)>
 where
-    T: Clone + PartialEq + ExtSortCmp + Send + Sync + 'static,
+    T: Clone + PartialEq + Send + Sync + 'static,
     DeviceFaer:
         DeviceRawAPI<T, Raw = Vec<T>> + DeviceCreationAnyAPI<T> + DeviceCreationAnyAPI<usize> + OpUniqueAPI<T, IxD>,
 {
@@ -61,7 +61,7 @@ where
 
 fn op_isin<T>(x1: &FTensor<T>, x2: &FTensor<T>, invert: bool) -> rt::Result<FTensor<bool>>
 where
-    T: Clone + PartialEq + ExtSortCmp + Send + Sync + 'static,
+    T: Clone + PartialEq + Send + Sync + 'static,
     DeviceFaer: DeviceRawAPI<T, Raw = Vec<T>> + DeviceCreationAnyAPI<bool> + OpIsinAPI<T, IxD>,
 {
     rt::isin_f(x1, x2, invert)

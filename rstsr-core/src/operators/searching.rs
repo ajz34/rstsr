@@ -155,31 +155,25 @@ where
     ) -> Result<(Storage<DataOwned<<Self as DeviceRawAPI<usize>>::Raw>, usize, Self>, Layout<IxD>)>;
 }
 
-/// Nonzero: two-pass count + flat-index fill over the row-major visit
-/// order. The tensor level splits the flat indices into per-dimension
-/// coordinate tensors (host layout math).
+/// Nonzero: two-pass count + coordinate fill over the row-major visit order.
+/// The output buffers are allocated at the tensor level, one per dimension
+/// (capacity = the count from [`Self::nonzero_count`]); the element test
+/// (`!= 0`) is carried by the device impl's own `T` bounds.
 pub trait OpNonzeroAPI<T, D>
 where
     D: DimAPI,
-    Self: DeviceAPI<T> + DeviceAPI<usize> + DeviceRawAPI<MaybeUninit<usize>>,
+    Self: DeviceAPI<T> + DeviceRawAPI<MaybeUninit<usize>>,
 {
-    /// Count the nonzero elements (`is_nonzero` decides; bool: true,
-    /// complex: either component nonzero).
-    fn nonzero_count(
-        &self,
-        a: &<Self as DeviceRawAPI<T>>::Raw,
-        la: &Layout<D>,
-        is_nonzero: &dyn Fn(&T) -> bool,
-    ) -> Result<usize>;
+    /// Count the nonzero elements in row-major visit order.
+    fn nonzero_count(&self, a: &<Self as DeviceRawAPI<T>>::Raw, la: &Layout<D>) -> Result<usize>;
 
-    /// Fill the flat C-order indices of every nonzero element into `out`
-    /// (capacity = the count from [`Self::nonzero_count`]); returns the same
-    /// count.
+    /// Fill the coordinates of every nonzero element into `out` (one buffer
+    /// per dimension, capacity = the count from [`Self::nonzero_count`]), in
+    /// row-major visit order.
     fn nonzero_fill(
         &self,
-        out: &mut <Self as DeviceRawAPI<MaybeUninit<usize>>>::Raw,
+        out: &mut [&mut <Self as DeviceRawAPI<MaybeUninit<usize>>>::Raw],
         a: &<Self as DeviceRawAPI<T>>::Raw,
         la: &Layout<D>,
-        is_nonzero: &dyn Fn(&T) -> bool,
-    ) -> Result<usize>;
+    ) -> Result<()>;
 }
