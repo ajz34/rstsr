@@ -172,8 +172,8 @@ where
 /// parity); other dtypes (e.g. complex) return values in **first-occurrence
 /// order** over the strict row-major visit sequence. NaNs are distinct
 /// entries (tail of the ascending order); signed zeros merge (the first-
-/// seen encoding is kept for the naive path, the +0.0 encoding for the
-/// sorted path). Output shape is data-dependent (1-D).
+/// seen encoding is kept, in both paths). Output shape is data-dependent
+/// (1-D).
 ///
 /// This function behaves identically under [`RowMajor`] and [`ColMajor`] device
 /// default orders.
@@ -206,8 +206,9 @@ where
 ///
 /// Ordering note: NumPy always returns sorted values; rstsr matches that
 /// for orderable scalar dtypes and uses first-occurrence order for others
-/// (e.g. complex). NaNs are distinct entries in rstsr (NumPy sorts them
-/// together at the end).
+/// (e.g. complex). NaNs are distinct entries in rstsr (NumPy collapses them
+/// into one entry at the end); that deviation is recorded in
+/// `tests/tracking/numpy_differences.md`.
 ///
 /// # See also
 ///
@@ -621,8 +622,9 @@ where
 
 /// Calculates the element-wise membership of `x1` in `x2`: the output is
 /// `true` where an element of `x1` appears in `x2` (and inverted with
-/// `invert = true`). Output shape equals `x1`'s shape. NaNs are distinct
-/// members: a NaN element of `x1` matches iff `x2` contains any NaN.
+/// `invert = true`). Output shape equals `x1`'s shape. Membership is value
+/// equality, so a NaN (or NaN-bearing complex) element is never a member,
+/// even of a set containing NaN (NumPy parity).
 ///
 /// This function behaves identically under [`RowMajor`] and [`ColMajor`] device
 /// default orders.

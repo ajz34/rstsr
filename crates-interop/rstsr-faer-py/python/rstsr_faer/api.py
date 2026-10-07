@@ -1451,7 +1451,11 @@ def repeat(x, /, repeats, *, axis=None):
         if repeats.ndim != 1:
             raise ValueError(f"repeat: repeats must be one-dimensional, got ndim={repeats.ndim}")
         reps = repeats.tolist()
+        if builtins.any(s < 0 for s in reps):
+            raise ValueError(f"repeat: negative repeats are not allowed, got {reps!r}")
     elif isinstance(repeats, _py_int) and not isinstance(repeats, _py_bool):
+        if repeats < 0:
+            raise ValueError(f"repeat: negative repeats are not allowed, got {repeats!r}")
         reps = None
     else:
         raise TypeError(
@@ -1481,14 +1485,19 @@ def roll(x, /, shift=None, *, axis=None):
 def tile(x, /, repetitions):
     h = _handle(x)
     reps = _int_tuple_arg(repetitions, "tile(repetitions)")
+    # negative sizes are a ValueError (NumPy parity); a raw negative would die
+    # as OverflowError in the unsigned pyo3 boundary
+    if builtins.any(s < 0 for s in reps):
+        raise ValueError(f"tile: negative repetitions are not allowed, got {reps!r}")
     return _wrap(_tile(h, reps))
 
 
 def diff(x, /, *, axis=-1, n=1, prepend=None, append=None):
     h = _handle(x)
     axis = _int_arg(axis, "diff(axis)")
-    if not isinstance(n, _py_int) or isinstance(n, _py_bool) or n < 1:
-        raise ValueError(f"diff: n must be a positive integer, got {n!r}")
+    # n = 0 returns the input unchanged (NumPy parity; rust diff_f handles it)
+    if not isinstance(n, _py_int) or isinstance(n, _py_bool) or n < 0:
+        raise ValueError(f"diff: n must be a non-negative integer, got {n!r}")
     pre = _handle(prepend) if prepend is not None else None
     app = _handle(append) if append is not None else None
     return _wrap(_diff(h, axis, n, pre, app))
@@ -1511,7 +1520,16 @@ def searchsorted(x1, /, x2, *, side="left", sorter=None):
     if isinstance(x2, Array):
         h2 = x2._h
     elif isinstance(x2, (_py_int, _py_float)) and not isinstance(x2, _py_bool):
-        # 2025.12: scalar x2 == 0-d array of x1's dtype (mixing-scalars rule)
+        # 2025.12 mixing-scalars rule: a compatible scalar becomes a 0-d array
+        # of x1's dtype. Compatibility: int scalar for an int array; int/float
+        # scalar for a real-floating array. A float scalar with an int array is
+        # unspecified by the standard (may promote or raise) — rstsr's
+        # searchsorted is single-dtype, so it raises (same as a float *array*).
+        if _kind(h1.dtype()) == "integral" and isinstance(x2, _py_float):
+            raise TypeError(
+                f"searchsorted: float scalar x2 with an integer array x1 is not "
+                f"provided by rstsr (gap G-009); cast x2 or x1 first"
+            )
         h2 = asarray(x2, dtype=h1.dtype())._h
     else:
         raise TypeError(
@@ -1529,6 +1547,10 @@ def searchsorted(x1, /, x2, *, side="left", sorter=None):
         if sorter.ndim != 1:
             raise ValueError(f"searchsorted: sorter must be one-dimensional, got ndim={sorter.ndim}")
         sort_idx = sorter.tolist()
+        # negative sorter entries would die as OverflowError at the unsigned
+        # pyo3 boundary; rstsr validates bounds rust-side
+        if builtins.any(i < 0 for i in sort_idx):
+            raise ValueError("searchsorted: sorter entries must be non-negative")
     return _wrap(_searchsorted(h1, h2, side == "right", sort_idx))
 
 

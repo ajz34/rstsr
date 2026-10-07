@@ -11,10 +11,10 @@ use num::Complex;
 /// following NumPy's ordering semantics:
 ///
 /// - values equal under `==` (including `-0.0` and `0.0`) compare [`Ordering::Equal`];
-/// - NaN (or a NaN component, for complex) is ordered greater than everything, including in
-///   descending sorts;
-/// - complex NaN-bearing values order by their finite parts before the NaN group (NumPy
-///   `numpy_tag.h` complex comparator).
+/// - NaN is ordered greater than everything, including in descending sorts;
+/// - complex: every finite value orders before every NaN-bearing value; among NaN-bearing values
+///   the order is part-wise lexicographic with the NaN part after a finite part (NumPy
+///   `arraytypes.c.src` `C@TYPE@_compare`).
 pub trait ExtSortCmp: Clone {
     /// Total-order comparison of `self` against `other`.
     fn ext_total_cmp(&self, other: &Self) -> Ordering;
@@ -59,22 +59,31 @@ impl ExtSortCmp for T {
     }
 
     fn ext_total_cmp(&self, other: &Self) -> Ordering {
-        // NumPy orders NaN-bearing complexes lexicographically by their
-        // finite parts (NaN component sorted last within each part), before
-        // every non-NaN value; see NumPy `numpy_tag.h` complex comparator.
-        fn part_cmp<F: num::Float>(a: &F, b: &F) -> Ordering {
-            match (a.is_nan(), b.is_nan()) {
-                (true, true) => Ordering::Equal,
-                (true, false) => Ordering::Greater,
-                (false, true) => Ordering::Less,
-                (false, false) => a.partial_cmp(b).unwrap_or(Ordering::Equal),
-            }
+        // NumPy `C@TYPE@_compare` (numpy/_core/src/multiarray/arraytypes.c.src):
+        // every finite value orders before every NaN-bearing value; among
+        // NaN-bearing values the order is part-wise lexicographic with the
+        // NaN part ordering after a finite part.
+        let (ar, ai, br, bi) = (self.re, self.im, other.re, other.im);
+        if ar < br {
+            return if ai.is_nan() && !bi.is_nan() { Ordering::Greater } else { Ordering::Less };
         }
-        let (a_re, a_im) = (self.re, self.im);
-        let (b_re, b_im) = (other.re, other.im);
-        match part_cmp(&a_re, &b_re) {
-            Ordering::Equal => part_cmp(&a_im, &b_im),
-            ord => ord,
+        if br < ar {
+            return if bi.is_nan() && !ai.is_nan() { Ordering::Less } else { Ordering::Greater };
+        }
+        if ar == br || (ar.is_nan() && br.is_nan()) {
+            if ai < bi || (bi.is_nan() && !ai.is_nan()) {
+                return Ordering::Less;
+            }
+            if bi < ai || (ai.is_nan() && !bi.is_nan()) {
+                return Ordering::Greater;
+            }
+            return Ordering::Equal;
+        }
+        // real parts incomparable with exactly one NaN: that value is greater
+        if !ar.is_nan() {
+            Ordering::Less
+        } else {
+            Ordering::Greater
         }
     }
 }
@@ -131,25 +140,39 @@ mod tests {
     }
 
     #[test]
-    fn test_complex_nan_by_finite_parts() {
-        // NumPy ordering: NaN-bearing complexes compare by finite parts,
-        // NaN part last; all NaN-bearing values come after finite ones
-        let finite = Complex::new(f64::INFINITY, 0.0);
+    fn test_complex_nan_numpy_order() {
+        // NumPy ordering (arraytypes.c.src C@TYPE@_compare): finite values
+        // first (whatever their parts), NaN-bearing values last, part-wise
+        // lexicographic among NaN-bearing values (NaN part after finite).
+        let f_inf = Complex::new(f64::INFINITY, 0.0);
         let nan_re = Complex::new(f64::NAN, 0.0);
         let nan_im = Complex::new(0.0f64, f64::NAN);
         let nan_both = Complex::new(f64::NAN, f64::NAN);
-        // finite parts decide among NaN-bearing values
-        assert_eq!(nan_im.ext_total_cmp(&nan_re), Ordering::Less); // (0, nan) < (nan, 0)
-        assert_eq!(nan_re.ext_total_cmp(&nan_both), Ordering::Less); // (nan, 0) < (nan, nan)
+        let neg_inf_im = Complex::new(f64::NEG_INFINITY, f64::INFINITY);
+        // every finite value sorts before every NaN-bearing one
+        assert_eq!(f_inf.ext_total_cmp(&nan_re), Ordering::Less); // (inf,0) < (nan,0)
+        assert_eq!(f_inf.ext_total_cmp(&nan_im), Ordering::Less); // (inf,0) < (0,nan)
+        assert_eq!(f_inf.ext_total_cmp(&nan_both), Ordering::Less);
+        assert_eq!(neg_inf_im.ext_total_cmp(&nan_im), Ordering::Less); // (-inf,inf) < (0,nan)
+                                                                       // a NaN-bearing value never
+                                                                       // sorts before a finite one,
+                                                                       // whatever the parts
+        assert_eq!(nan_im.ext_total_cmp(&f_inf), Ordering::Greater); // (0,nan) > (inf,0)
+        let two = Complex::new(2.0f64, 0.0);
+        assert_eq!(nan_im.ext_total_cmp(&two), Ordering::Greater); // (0,nan) > (2,0)
+                                                                   // among NaN-bearing: part-wise
+                                                                   // lexicographic, NaN part after
+                                                                   // finite
+        assert_eq!(nan_im.ext_total_cmp(&nan_re), Ordering::Less); // (0,nan) < (nan,0)
+        assert_eq!(nan_re.ext_total_cmp(&nan_both), Ordering::Less); // (nan,0) < (nan,nan)
         assert_eq!(nan_im.ext_total_cmp(&nan_both), Ordering::Less);
-        // any NaN-bearing value sorts after every finite one
-        assert_eq!(finite.ext_total_cmp(&nan_re), Ordering::Less);
-        assert_eq!(nan_both.ext_total_cmp(&finite), Ordering::Greater);
+        let m1_nan = Complex::new(-1.0f64, f64::NAN);
+        assert_eq!(m1_nan.ext_total_cmp(&nan_im), Ordering::Less); // (-1,nan) < (0,nan)
     }
 
     #[test]
     fn test_complex_nan_equal_parts() {
-        // identical finite parts with NaN in the same slot compare Equal
+        // identical NaN placement with equal finite parts compare Equal
         let a = Complex::new(1.0f64, f64::NAN);
         let b = Complex::new(1.0, f64::NAN);
         assert_eq!(a.ext_total_cmp(&b), Ordering::Equal);

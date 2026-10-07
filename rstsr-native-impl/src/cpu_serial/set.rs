@@ -84,6 +84,7 @@ where
     let mut count = 0_usize;
     for (i, slot_out) in inverse.iter_mut().take(n).enumerate() {
         let v = access.get(i);
+        let mut fresh = false;
         let slot = match seen.iter().position(|s| *s == v) {
             Some(slot) => slot,
             None => {
@@ -92,23 +93,26 @@ where
                 indices[count].write(flat_c(i));
                 counts[count].write(1);
                 count += 1;
+                fresh = true;
                 count - 1
             },
         };
         slot_out.write(slot);
-        if slot == count - 1 {
-            // fresh entry: `counts` was written with 1 above
-            continue;
+        if !fresh {
+            // increment the running multiplicity of `slot`
+            let c = unsafe { counts[slot].assume_init_mut() };
+            *c += 1;
         }
-        // increment the running multiplicity of `slot`
-        let c = unsafe { counts[slot].assume_init_mut() };
-        *c += 1;
     }
     Ok(count)
 }
 
 /// Isin: for each element of `x1`, whether it appears in the sorted unique
 /// sequence `x2_sorted` (binary search). Writes `bool`s into `c`.
+///
+/// Membership is value equality (`==`, array-api `isin`'s contract via
+/// `equal`): a NaN key is never a member — NumPy parity — so NaN keys short-
+/// circuit to `false` without searching.
 pub fn isin_cpu_serial<T>(
     c: &mut [MaybeUninit<bool>],
     x2_sorted: &[T],
@@ -123,9 +127,9 @@ where
     for (i, c_slot) in c.iter_mut().take(n).enumerate() {
         let v = x1_access.get(i);
         let found = if is_nan(v) {
-            // NaN keys: present iff x2_sorted contains at least one NaN tail
-            // entry (any NaN matches any NaN per set membership)
-            m > 0 && is_nan(&x2_sorted[m - 1])
+            // NaN is never equal under `==` (NumPy: isin([nan], [nan]) is
+            // false); complex NaN-bearing keys likewise match nothing
+            false
         } else {
             let mut lo = 0_usize;
             let mut hi = m;

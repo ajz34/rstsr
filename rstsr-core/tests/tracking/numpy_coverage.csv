@@ -39,11 +39,7 @@ _core/tests/test_numeric.py,TestMoveaxis,test_errors,v2.5.2,transferred,core_fun
 _core/tests/test_numeric.py,TestMoveaxis,test_array_likes,v2.5.2,not-applicable,,2ad1c9a7984b,masked arrays / class preservation
 _core/tests/test_numeric.py,TestRollaxis,test_exceptions,v2.5.2,not-applicable,,ae5da103ad49,rstsr has no rollaxis
 _core/tests/test_numeric.py,TestRollaxis,test_results,v2.5.2,not-applicable,,eac707da345d,rstsr has no rollaxis
-_core/tests/test_numeric.py,TestRoll,test_roll1d,v2.5.2,not-applicable,,301d1d579165,rstsr has no roll
-_core/tests/test_numeric.py,TestRoll,test_roll2d,v2.5.2,not-applicable,,b53a8bb4ae2c,rstsr has no roll
-_core/tests/test_numeric.py,TestRoll,test_roll_empty,v2.5.2,not-applicable,,89e1e985a56a,rstsr has no roll
 _core/tests/test_numeric.py,TestRoll,test_roll_unsigned_shift,v2.5.2,not-applicable,,f11f02964107,numpy uint shift widths; rstsr shifts are isize
-_core/tests/test_numeric.py,TestRoll,test_roll_big_int,v2.5.2,not-applicable,,daf9a9e0f62f,rstsr has no roll
 _core/tests/test_regression.py,TestRegression,test_reshape_order,v2.5.2,transferred,core_func/manipulation/test_reshape.rs::numpy_reshape::regression,fe7311072c67,order=F incl non-contig column view
 _core/tests/test_regression.py,TestRegression,test_reshape_zero_strides,v2.5.2,transferred,core_func/manipulation/test_reshape.rs::numpy_reshape::regression,ceb0f75a1627,broadcast zero-stride reshape
 _core/tests/test_regression.py,TestRegression,test_reshape_zero_size,v2.5.2,transferred,core_func/manipulation/test_reshape.rs::numpy_reshape::regression,854cd2fe0e89,-1 inference on 0-size; in-place a.shape= N/A
@@ -156,7 +152,6 @@ lib/tests/test_shape_base.py,TestSplit,test_equal_split,v2.5.2,todo,,9cdaba7b936
 lib/tests/test_shape_base.py,TestHsplit,test_2D_array,v2.5.2,todo,,25baf0aa4181,rstsr has no hsplit; 4 methods (representative)
 lib/tests/test_shape_base.py,TestVsplit,test_2D_array,v2.5.2,todo,,6ec470002bf5,rstsr has no vsplit; 4 methods (representative)
 lib/tests/test_shape_base.py,TestDsplit,test_2D_array,v2.5.2,todo,,37104399225a,rstsr has no dsplit; 5 methods (representative)
-lib/tests/test_shape_base.py,TestTile,test_basic,v2.5.2,todo,,1528134d1518,rstsr has no tile; 4 methods (representative)
 # --- core_func/reduction ---
 _core/tests/test_numeric.py,TestNonarrayArgs,test_sum,v2.5.2,transferred,core_func/reduction/test_sum.rs::numpy_sum::test_numeric,5b4513c503cd,"keepdims emulated as axis-dropped (rstsr has no keepdims; see numpy_differences.md)"
 _core/tests/test_numeric.py,TestNonarrayArgs,test_prod,v2.5.2,transferred,core_func/reduction/test_prod.rs::numpy_prod::test_numeric;test_basic,e3312864895c,"axis=-1 values + TestProd::test_basic values (dtype loop N/A)"

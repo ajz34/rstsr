@@ -1,17 +1,18 @@
 //! take_along_axis kernel (serial): gather with an index tensor along one
-//! axis. Output shape = input shape with the axis length replaced by the
-//! indices' axis length; `layout_c` is a contiguous layout of that shape.
+//! axis. Output shape = broadcast of the rest shapes with the indices' axis
+//! length; `layout_c` is a contiguous layout of that shape.
 //!
-//! The index tensor `idx` must have the same rank as `a`, with every
-//! non-axis dimension matching `a`'s shape (checked by the tensor level).
+//! The index tensor `idx` must have the same rank as `a`; non-axis dims are
+//! broadcast-compatible (dim 1 broadcasts; checked by the tensor level).
 
 use crate::prelude_dev::*;
 
 /// Gather `a` along `axis` using per-position indices from `idx`.
 ///
-/// Both `a` and `idx` are visited in row-major order over their rest axes;
-/// for each rest position the line's gathered values are written contiguously
-/// into the output block for that rest position (via `out_strides`).
+/// Rest positions are enumerated over the broadcast rest shape (dim-1 rest
+/// axes of either tensor reuse their single slice); for each rest position
+/// the line's gathered values are written into the output block for that
+/// position (via `out_strides`).
 #[allow(clippy::too_many_arguments)]
 pub fn take_along_axis_cpu_serial<T, DA, DI>(
     c: &mut [MaybeUninit<T>],
@@ -35,10 +36,10 @@ where
     let idx_base_in = lidx.offset();
     let axis_size_idx = lidx.shape()[axis];
 
-    // rest axes of the input (ascending order); both tensors share the rest
-    // shape (tensor-level check)
+    // rest axes (ascending order); the walk covers the broadcast rest shape:
+    // a dim-1 rest axis of a tensor keeps its single slice (index 0)
     let rest_slots: Vec<usize> = (0..ndim).filter(|&i| i != axis).collect();
-    let rest_shape: Vec<usize> = rest_slots.iter().map(|&s| la.shape()[s]).collect();
+    let rest_shape: Vec<usize> = rest_slots.iter().map(|&s| la.shape()[s].max(lidx.shape()[s])).collect();
     let stride_ref_a: &[isize] = la.stride().as_ref();
     let stride_ref_i: &[isize] = lidx.stride().as_ref();
     let total: usize = rest_shape.iter().product();
@@ -51,18 +52,30 @@ where
             rest_multi[i] = rem % rest_shape[i];
             rem /= rest_shape[i];
         }
+        // per-tensor rest offsets: clamp broadcast (dim-1) axes to slice 0
+        let mut a_multi = rest_multi.clone();
+        let mut i_multi = rest_multi.clone();
+        for (k, &slot) in rest_slots.iter().enumerate() {
+            if la.shape()[slot] == 1 {
+                a_multi[k] = 0;
+            }
+            if lidx.shape()[slot] == 1 {
+                i_multi[k] = 0;
+            }
+        }
         let a_off: isize =
-            rest_slots.iter().zip(rest_multi.iter()).map(|(&slot, &v)| stride_ref_a[slot] * v as isize).sum::<isize>()
+            rest_slots.iter().zip(a_multi.iter()).map(|(&slot, &v)| stride_ref_a[slot] * v as isize).sum::<isize>()
                 + base_in as isize;
         let i_off: isize =
-            rest_slots.iter().zip(rest_multi.iter()).map(|(&slot, &v)| stride_ref_i[slot] * v as isize).sum::<isize>()
+            rest_slots.iter().zip(i_multi.iter()).map(|(&slot, &v)| stride_ref_i[slot] * v as isize).sum::<isize>()
                 + idx_base_in as isize;
         let out_base: usize = rest_slots.iter().zip(rest_multi.iter()).map(|(&slot, &v)| v * out_strides[slot]).sum();
         let out_axis_stride = out_strides[axis];
         for j in 0..axis_size_idx {
             // SAFETY: the tensor level validated every index within
             // `0..la.shape()[axis]`; line offsets are input-stride
-            // dot-products over in-range rest indices.
+            // dot-products over in-range rest indices (broadcast dims
+            // clamped to their single slice).
             let idx_pos = (i_off + idx_stride_in * j as isize) as usize;
             let src_pos = (a_off + axis_stride_in * idx[idx_pos] as isize) as usize;
             let src = a[src_pos].clone();

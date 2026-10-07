@@ -7,9 +7,12 @@ use crate::prelude_dev::*;
 /// Unique-family operations over the flattened row-major sequence.
 ///
 /// Output storages are caller-allocated with the INPUT's element count `n`
-/// (the unique count is data-dependent and returned); the tensor level
-/// truncates to `u` elements. `unique_counts`/`unique_inverse` derive from
-/// `unique_all` at the tensor level, so only the two kernels below exist.
+/// (the unique count is data-dependent and returned); the device impl MUST
+/// truncate every output raw Vec to its initialized prefix (values/indices/
+/// counts to the returned `u`, inverse to the input element count) before
+/// returning — the tensor level `assume_init`s the Vecs as-is.
+/// `unique_counts`/`unique_inverse` derive from `unique_all` at the tensor
+/// level, so only the two kernels below exist.
 pub trait OpUniqueAPI<T, D>
 where
     D: DimAPI,

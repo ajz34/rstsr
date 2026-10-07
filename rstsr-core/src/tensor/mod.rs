@@ -46,6 +46,7 @@ pub mod exports {
     pub use linalg::exports::*;
     pub use manipulation::exports::*;
     pub use map_elementwise::*;
+    pub use nonzero::*;
     pub use operators::exports::*;
     pub use ownership_conversion::*;
     pub use pack_array::*;

@@ -324,7 +324,7 @@ where
 /// ## Related functions in RSTSR
 ///
 /// - [`tile`]: repeat the whole tensor (block-wise) instead of its elements.
-/// - [`concat`]: join tensors along an axis (the composition building block).
+/// - `rt::concat`: join tensors along an axis (the composition building block).
 ///
 /// ## Variants of this function
 ///

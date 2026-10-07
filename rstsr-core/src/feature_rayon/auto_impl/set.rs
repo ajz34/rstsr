@@ -14,6 +14,9 @@ use crate::prelude_dev::*;
 
 /// Dtype check mirroring [`crate::device_cpu_serial::set::use_fast_path`];
 /// kept local so the device crates' symlinked module stays self-contained.
+/// Half-precision arms are omitted here: the device crates do not depend on
+/// the `half` crate, so this shared module cannot name `half::` types (they
+/// stay on the naive path when reached through a device crate).
 fn use_fast_path<T: 'static>() -> bool {
     TypeId::of::<T>() == TypeId::of::<f32>()
         || TypeId::of::<T>() == TypeId::of::<f64>()
@@ -30,8 +33,6 @@ fn use_fast_path<T: 'static>() -> bool {
         || TypeId::of::<T>() == TypeId::of::<usize>()
         || TypeId::of::<T>() == TypeId::of::<i128>()
         || TypeId::of::<T>() == TypeId::of::<u128>()
-        || TypeId::of::<T>() == TypeId::of::<half::f16>()
-        || TypeId::of::<T>() == TypeId::of::<half::bf16>()
 }
 
 impl<T, D> OpUniqueAPI<T, D> for DeviceRayonAutoImpl
@@ -72,10 +73,11 @@ where
         }?;
         // contract: values/indices/counts hold exactly `u` entries; inverse
         // holds `n`; truncate the raw Vecs so `assume_init_impl` is exact
+        // (layout size — a broadcast view's storage may be shorter)
         values.truncate(u);
         indices.truncate(u);
         counts.truncate(u);
-        inverse.truncate(a.len());
+        inverse.truncate(la.size());
         Ok(u)
     }
 }

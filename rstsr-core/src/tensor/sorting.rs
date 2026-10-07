@@ -99,10 +99,10 @@ fn decline_complex_sort<T: 'static>() -> Result<()> {
 /// - RSTSR: `rt::argsort((tensor, args))`
 ///
 /// Deviation from NumPy: NumPy's `kind` parameter is not supported (the sort
-/// is always stable). Complex dtypes sort lexicographically (real part first),
-/// whereas NumPy raises for complex sort — rstsr declines complex here to
-/// follow the array-api standard (complex is accepted by
-/// [`argsort_custom`] with a user comparator).
+/// is always stable). Complex dtypes are declined: the array-api standard
+/// scopes `argsort` to real-valued dtypes, whereas NumPy accepts complex and
+/// sorts lexicographically (real part first) — use [`argsort_custom`] with
+/// the [`ExtSortCmp`] comparator for NumPy-parity complex ordering.
 ///
 /// # Panics
 ///
@@ -264,7 +264,10 @@ where
 ///
 /// Deviation from NumPy: NumPy's `kind` parameter is not supported (the sort
 /// is always stable); NaN orders last in descending sorts as well (NumPy
-/// 2.x behavior).
+/// 2.x behavior). Complex dtypes are declined (the array-api standard scopes
+/// `sort` to real-valued dtypes), whereas NumPy accepts complex and sorts
+/// lexicographically — use [`sort_custom`] with the [`ExtSortCmp`]
+/// comparator for NumPy-parity complex ordering.
 ///
 /// # Panics
 ///

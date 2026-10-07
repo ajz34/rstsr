@@ -24,7 +24,7 @@ where
 }
 
 /// Gather along one axis with an index TENSOR (see
-/// [`take_along_axis`](crate::tensor::adv_indexing::take_along_axis)).
+/// [`take_along_axis`]).
 ///
 /// `idx` must have the same rank as `a`; every non-axis dimension must match
 /// `a`'s shape; entries must be within `0..a.shape()[axis]` (all validated

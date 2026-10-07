@@ -382,5 +382,8 @@ Single-algorithm implementation; a selection knob is a registered follow-up.
 
 The naive (general-bound `Clone + PartialEq`) algorithm cannot order complex
 values without the `ExtSortCmp` total order; substitution of the sorted path for
-complex is a registered follow-up. NaNs are distinct entries (tail of ascending
-order) and signed zeros merge in both paths, matching NumPy.
+complex is a registered follow-up. NaNs are **distinct entries** in rstsr
+(tail of the ascending order), whereas NumPy collapses all NaNs into one
+trailing entry (`np.unique([nan, nan])` → `[nan]`) — that NaN part is part of
+this registered deviation. Signed zeros merge in both paths, keeping the
+first-seen encoding (also NumPy's behavior for the sorted path).

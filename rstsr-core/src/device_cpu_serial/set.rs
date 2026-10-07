@@ -72,10 +72,11 @@ where
         }?;
         // contract: values/indices/counts hold exactly `u` entries; inverse
         // holds `n`; truncate the raw Vecs so `assume_init_impl` is exact
+        // (layout size — a broadcast view's storage may be shorter)
         values.truncate(u);
         indices.truncate(u);
         counts.truncate(u);
-        inverse.truncate(a.len());
+        inverse.truncate(la.size());
         Ok(u)
     }
 }

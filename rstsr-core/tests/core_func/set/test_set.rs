@@ -194,7 +194,8 @@ mod custom_isin {
 
     #[test]
     fn test_isin_nan_membership() {
-        // a NaN in x1 matches iff x2 contains any NaN
+        // membership is value equality: NaN is never a member (NumPy:
+        // isin([nan], [nan]) is [false]), including complex NaN-bearing keys
         crate::specify_test!("test_isin_nan_membership");
 
         let mut device = TESTCFG.device.clone();
@@ -202,11 +203,17 @@ mod custom_isin {
 
         let a = rt::tensor_from_nested!([f64::NAN, 1.0, f64::NAN], &device);
         let b = rt::tensor_from_nested!([f64::NAN, 1.0], &device);
-        let expected = rt::tensor_from_nested!([true, true, true], &device);
         let out = rt::isin((&a, &b, false));
-        let v = out.to_vec();
-        assert_eq!(v, vec![true, true, true]);
-        let _ = expected;
+        assert_eq!(out.to_vec(), vec![false, true, false]);
+
+        let c1 = rt::asarray((vec![num::Complex::new(0.0_f64, f64::NAN)], &device));
+        let c2 = rt::asarray((vec![num::Complex::new(1.0_f64, 0.0), num::Complex::new(2.0, f64::NAN)], &device));
+        let out = rt::isin((&c1, &c2, false));
+        assert_eq!(out.to_vec(), vec![false]);
+
+        // invert flips the NaN verdict to true
+        let out = rt::isin((&a, &b, true));
+        assert_eq!(out.to_vec(), vec![true, false, true]);
     }
 
     #[test]

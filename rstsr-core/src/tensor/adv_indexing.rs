@@ -440,7 +440,10 @@ where
         "take_along_axis requires tensor and indices on the same device."
     )?;
     let axis = rstsr_check_axis!(axis, tensor.ndim())?;
-    // shape checks: same rank; every non-axis dim matches
+    // shape checks: same rank; non-axis dims must be broadcast-compatible
+    // (array-api 2025.12: indices "must be compatible with x, except for the
+    // axis specified by axis (see broadcasting)"; the output shape follows
+    // that broadcasting)
     let la = tensor.layout();
     let lidx = indices.layout();
     rstsr_assert_eq!(
@@ -449,21 +452,41 @@ where
         InvalidLayout,
         "take_along_axis requires indices with the same ndim as the tensor."
     )?;
+    let mut out_shape: Vec<usize> = la.shape().as_ref().to_vec();
+    #[allow(clippy::needless_range_loop)] // reads and writes out_shape[i]
     for i in 0..la.ndim() {
         if i != axis {
-            rstsr_assert_eq!(
-                lidx.shape()[i],
-                la.shape()[i],
-                InvalidLayout,
-                "take_along_axis requires matching shapes outside the indexed axis."
-            )?;
+            let d1 = out_shape[i];
+            let d2 = lidx.shape()[i];
+            let bcast = if d1 == d2 {
+                d1
+            } else if d1 == 1 {
+                d2
+            } else if d2 == 1 {
+                d1
+            } else {
+                rstsr_assert!(
+                    false,
+                    InvalidLayout,
+                    "take_along_axis requires broadcast-compatible shapes outside the indexed axis; got {} and {} along axis {}.",
+                    d1,
+                    d2,
+                    i
+                )?;
+                unreachable!()
+            };
+            out_shape[i] = bcast;
         }
     }
-    // validate + resolve index entries: negatives count from the back
-    // (array-api/NumPy semantics; the suite draws ~half negative indices)
+    // validate + resolve index entries in logical row-major order (the index
+    // tensor may be strided, offset, or broadcast — never read the raw
+    // buffer): negatives count from the back (array-api/NumPy semantics; the
+    // suite draws ~half negative indices)
     let axis_size = la.shape()[axis];
     let mut resolved: Vec<usize> = Vec::with_capacity(indices.size());
-    for &v in indices.raw().iter() {
+    let iter: IndexedIterLayout<IxD> = IndexedIterLayout::new(&lidx.to_dim()?, RowMajor)?;
+    for (_, off) in iter {
+        let v = indices.raw()[off];
         let v = if v < 0 { v + axis_size as isize } else { v };
         rstsr_pattern!(
             v,
@@ -474,8 +497,7 @@ where
         )?;
         resolved.push(v as usize);
     }
-    // output shape: input shape with the axis length replaced
-    let mut out_shape: Vec<usize> = la.shape().as_ref().to_vec();
+    // output shape: broadcast outside the axis, indices' length along it
     out_shape[axis] = lidx.shape()[axis];
     let layout_c = out_shape.new_contig(None, device.default_order());
     let (_, idx_max) = layout_c.bounds_index()?;
@@ -503,15 +525,16 @@ where
 /// # Parameters
 ///
 /// - `tensor`: [`&TensorAny<R, T, B, DA>`](TensorAny): the source tensor.
-/// - `indices`: [`&TensorAny<RI, usize, B, DI>`](TensorAny): integer indices along `axis`; same
-///   rank, matching shapes outside `axis`, entries within range (no negative values — use [`take`]
-///   for a single host-side index list with negatives).
+/// - `indices`: [`&TensorAny<RI, isize, B, DI>`](TensorAny): integer indices along `axis`; same
+///   rank, broadcast-compatible shapes outside `axis`. Negative entries count from the back of the
+///   indexed axis.
 /// - `axis`: TryInto [`AxisIndex<isize>`]: the axis to gather along (negative counts from the
 ///   back).
 ///
 /// # Returns
 ///
-/// - [`Tensor<T, B, IxD>`][`Tensor`]: shape of `indices`.
+/// - [`Tensor<T, B, IxD>`][`Tensor`]: broadcast of the shapes outside `axis`, with `indices`'
+///   length along it.
 ///
 /// # Examples
 ///

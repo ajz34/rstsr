@@ -106,22 +106,40 @@ where
             // successive single-axis rolls (NumPy's own decomposition);
             // duplicate axes are allowed (each occurrence rolls once)
             let axes = normalize_axes_index(AxesIndex::Vec(axes), ndim, true, false)?;
-            let shifts = match &shift {
+            // shift/axis combination follows NumPy's `broadcast(shift, axis)`
+            // then per-axis sum: a len-1 side broadcasts to the other's
+            // length; repeated axes accumulate their shifts
+            let shifts: Vec<isize> = match &shift {
                 AxesIndex::None => vec![0_isize; axes.len()],
                 AxesIndex::Val(v) => vec![*v; axes.len()],
                 AxesIndex::Vec(v) => {
-                    // a len-1 shift tuple broadcasts across the axes (NumPy)
+                    let mut acc: Vec<isize> = vec![0_isize; axes.len()];
+                    let paired = axes.len().max(v.len());
+                    rstsr_assert!(
+                        v.len() == 1 || axes.len() == 1 || v.len() == axes.len(),
+                        InvalidValue,
+                        "roll: shift and axis must be broadcastable (NumPy); got lengths {} and {}.",
+                        v.len(),
+                        axes.len()
+                    )?;
+                    rstsr_assert!(
+                        paired == axes.len(),
+                        InvalidValue,
+                        "roll: shift length {} is not broadcastable to axis length {}.",
+                        v.len(),
+                        axes.len()
+                    )?;
                     if v.len() == 1 {
-                        vec![v[0]; axes.len()]
+                        // (1,) broadcasts to (axes.len(),)
+                        acc.iter_mut().for_each(|s| *s = v[0]);
                     } else {
-                        rstsr_assert_eq!(
-                            v.len(),
-                            axes.len(),
-                            InvalidValue,
-                            "roll: shift and axis must have the same length."
-                        )?;
-                        v.clone()
+                        // equal lengths pair elementwise; a len-axes of 1
+                        // accumulates all shifts onto that one axis
+                        for (a, &s) in acc.iter_mut().zip(v.iter()) {
+                            *a = a.wrapping_add(s);
+                        }
                     }
+                    acc
                 },
             };
             let mut current: Option<Tensor<T, B, IxD>> = None;

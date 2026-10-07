@@ -4,7 +4,7 @@
 
 use crate::prelude_dev::*;
 
-/// Insertion side for [`searchsorted`](crate::tensor::searching::searchsorted):
+/// Insertion side for [`searchsorted`]:
 /// `'left'` gives the first insertion point (`x1[i-1] < v <= x1[i]`), `'right'`
 /// gives the last (`x1[i-1] <= v < x1[i]`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
