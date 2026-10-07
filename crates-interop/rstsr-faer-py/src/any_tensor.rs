@@ -482,30 +482,6 @@ macro_rules! dispatch_t_into_float {
 }
 pub(crate) use dispatch_t_into_float;
 
-/// Unary dispatch for kernels with a real-only `Float` bound (no complex
-/// kernel in rstsr); integers promote to float64 as in `dispatch_t_into_float`.
-macro_rules! dispatch_t_no_complex {
-    ($scrut:expr, $f:ident ( $($arg:expr),* )) => {
-        match &$scrut {
-            AnyTensor::Bool(_) => type_err("unary op: not defined for bool dtype"),
-            AnyTensor::I8(t) => lift(($f::<i8>)(&t, $($arg),*), AnyTensor::F64),
-            AnyTensor::I16(t) => lift(($f::<i16>)(&t, $($arg),*), AnyTensor::F64),
-            AnyTensor::I32(t) => lift(($f::<i32>)(&t, $($arg),*), AnyTensor::F64),
-            AnyTensor::I64(t) => lift(($f::<i64>)(&t, $($arg),*), AnyTensor::F64),
-            AnyTensor::U8(t) => lift(($f::<u8>)(&t, $($arg),*), AnyTensor::F64),
-            AnyTensor::U16(t) => lift(($f::<u16>)(&t, $($arg),*), AnyTensor::F64),
-            AnyTensor::U32(t) => lift(($f::<u32>)(&t, $($arg),*), AnyTensor::F64),
-            AnyTensor::U64(t) => lift(($f::<u64>)(&t, $($arg),*), AnyTensor::F64),
-            AnyTensor::F32(t) => lift(($f::<f32>)(&t, $($arg),*), AnyTensor::F32),
-            AnyTensor::F64(t) => lift(($f::<f64>)(&t, $($arg),*), AnyTensor::F64),
-            AnyTensor::C32(_) | AnyTensor::C64(_) => {
-                type_err("unary op: complex inputs are not provided by rstsr (gap)")
-            }
-        }
-    };
-}
-pub(crate) use dispatch_t_no_complex;
-
 /// Unary dispatch whose spec output dtype equals the input dtype, restricted
 /// to real floating dtypes (`f32`/`f64`): bool, integer and complex inputs
 /// are declined. Integer inputs are declined because rstsr's kernels promote

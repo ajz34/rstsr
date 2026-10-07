@@ -63,6 +63,7 @@ from .rstsr_faer import (
     exp as _exp,
     expm1 as _expm1,
     log as _log,
+    log1p as _log1p,
     log2 as _log2,
     log10 as _log10,
     reciprocal as _reciprocal,
@@ -982,6 +983,9 @@ def imag(x, /):
 def log(x, /):
     return _wrap(_log(_handle(x)))
 
+def log1p(x, /):
+    return _wrap(_log1p(_handle(x)))
+
 def log2(x, /):
     return _wrap(_log2(_handle(x)))
 
@@ -1671,7 +1675,7 @@ __all__ = [
     "add", "subtract", "multiply", "divide", "negative", "abs", "positive",
     "acos", "acosh", "asin", "asinh", "atan", "atan2", "atanh", "ceil",
     "conj", "copysign", "cos", "cosh", "exp", "expm1", "floor", "floor_divide",
-    "hypot", "imag", "log", "log2", "log10", "logaddexp", "maximum",
+    "hypot", "imag", "log", "log1p", "log2", "log10", "logaddexp", "maximum",
     "minimum", "nextafter", "pow", "real", "reciprocal", "remainder", "round",
     "sign", "signbit", "sin", "sinh", "sqrt", "square", "tan", "tanh", "trunc",
     "bitwise_and", "bitwise_left_shift", "bitwise_invert", "bitwise_or",
