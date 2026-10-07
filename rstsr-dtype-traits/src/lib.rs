@@ -3,6 +3,7 @@
 
 extern crate alloc;
 
+mod c99_complex;
 mod ext_complex_float;
 mod ext_float;
 mod ext_num;
