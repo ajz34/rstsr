@@ -7,16 +7,16 @@ use rstsr_dtype_traits::{DTypeIntoFloatAPI, ExtComplexFloat, ExtNum};
 
 #[duplicate_item(
      OpAPI             NumTrait       func_inner;
-    [OpAcosAPI      ] [ComplexFloat] [b.acos()  ];
-    [OpAcoshAPI     ] [ComplexFloat] [b.acosh() ];
-    [OpAsinAPI      ] [ComplexFloat] [b.asin()  ];
-    [OpAsinhAPI     ] [ComplexFloat] [b.asinh() ];
+    [OpAcosAPI      ] [ExtComplexFloat] [b.ext_acos()  ];
+    [OpAcoshAPI     ] [ExtComplexFloat] [b.ext_acosh() ];
+    [OpAsinAPI      ] [ExtComplexFloat] [b.ext_asin()  ];
+    [OpAsinhAPI     ] [ExtComplexFloat] [b.ext_asinh() ];
     [OpAtanAPI      ] [ComplexFloat] [b.atan()  ];
-    [OpAtanhAPI     ] [ComplexFloat] [b.atanh() ];
+    [OpAtanhAPI     ] [ExtComplexFloat] [b.ext_atanh() ];
     [OpCeilAPI      ] [Float       ] [b.ceil()  ];
     [OpConjAPI      ] [ComplexFloat] [b.conj()  ];
     [OpCosAPI       ] [ComplexFloat] [b.cos()   ];
-    [OpCoshAPI      ] [ComplexFloat] [b.cosh()  ];
+    [OpCoshAPI      ] [ExtComplexFloat] [b.ext_cosh()  ];
     [OpExpAPI       ] [ComplexFloat] [b.exp()   ];
     [OpExpm1API     ] [ExtComplexFloat] [b.ext_exp_m1()];
     [OpFloorAPI     ] [Float       ] [b.floor() ];
@@ -28,10 +28,10 @@ use rstsr_dtype_traits::{DTypeIntoFloatAPI, ExtComplexFloat, ExtNum};
     [OpReciprocalAPI] [ComplexFloat] [b.recip() ];
     [OpRoundAPI     ] [Float       ] [round_ties_even_f(b) ];
     [OpSinAPI       ] [ComplexFloat] [b.sin()   ];
-    [OpSinhAPI      ] [ComplexFloat] [b.sinh()  ];
-    [OpSqrtAPI      ] [ComplexFloat] [b.sqrt()  ];
-    [OpTanAPI       ] [ComplexFloat] [b.tan()   ];
-    [OpTanhAPI      ] [ComplexFloat] [b.tanh()  ];
+    [OpSinhAPI      ] [ExtComplexFloat] [b.ext_sinh()  ];
+    [OpSqrtAPI      ] [ExtComplexFloat] [b.ext_sqrt()  ];
+    [OpTanAPI       ] [ExtComplexFloat] [b.ext_tan()   ];
+    [OpTanhAPI      ] [ExtComplexFloat] [b.ext_tanh()  ];
     [OpTruncAPI     ] [Float       ] [b.trunc() ];
 )]
 impl<T, D> OpAPI<T, D> for DeviceCpuSerial
