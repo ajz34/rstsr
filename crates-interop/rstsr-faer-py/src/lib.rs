@@ -175,6 +175,7 @@ fn rstsr_faer(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(ops::exp, m)?)?;
     m.add_function(wrap_pyfunction!(ops::expm1, m)?)?;
     m.add_function(wrap_pyfunction!(ops::log, m)?)?;
+    m.add_function(wrap_pyfunction!(ops::log1p, m)?)?;
     m.add_function(wrap_pyfunction!(ops::log2, m)?)?;
     m.add_function(wrap_pyfunction!(ops::log10, m)?)?;
     m.add_function(wrap_pyfunction!(ops::reciprocal, m)?)?;

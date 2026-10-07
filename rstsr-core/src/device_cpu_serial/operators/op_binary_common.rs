@@ -1,9 +1,7 @@
 use crate::prelude_dev::*;
 use num::complex::ComplexFloat;
 use num::{Float, Signed};
-use rstsr_dtype_traits::{DTypeIntoFloatAPI, ExtNum};
-
-// TODO: log1p
+use rstsr_dtype_traits::{DTypeIntoFloatAPI, ExtComplexFloat, ExtNum};
 
 /* #region same type */
 
@@ -20,10 +18,11 @@ use rstsr_dtype_traits::{DTypeIntoFloatAPI, ExtNum};
     [OpCosAPI       ] [ComplexFloat] [b.cos()   ];
     [OpCoshAPI      ] [ComplexFloat] [b.cosh()  ];
     [OpExpAPI       ] [ComplexFloat] [b.exp()   ];
-    [OpExpm1API     ] [Float       ] [b.exp_m1()];
+    [OpExpm1API     ] [ExtComplexFloat] [b.ext_exp_m1()];
     [OpFloorAPI     ] [Float       ] [b.floor() ];
     [OpInvAPI       ] [ComplexFloat] [b.recip() ];
     [OpLogAPI       ] [ComplexFloat] [b.ln()    ];
+    [OpLog1pAPI     ] [ExtComplexFloat] [b.ext_log_1p() ];
     [OpLog2API      ] [ComplexFloat] [b.log2()  ];
     [OpLog10API     ] [ComplexFloat] [b.log10() ];
     [OpReciprocalAPI] [ComplexFloat] [b.recip() ];

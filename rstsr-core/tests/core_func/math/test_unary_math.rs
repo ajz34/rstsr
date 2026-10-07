@@ -130,6 +130,51 @@ mod custom_math_transcendental {
         let th1 = 1.0_f64.tanh();
         assert_equal(rt::tanh(&t), rt::tensor_from_nested!([-th1, 0.0, th1], &device), None);
     }
+
+    #[test]
+    fn test_log1p_expm1() {
+        crate::specify_test!("test_log1p_expm1");
+
+        use num::Complex;
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        // Near zero, `ln(1 + x)` collapses to 0; log1p must return ~x.
+        let tiny = rt::tensor_from_nested!([1e-20_f64, -1e-20], &device);
+        let lp = rt::log1p(&tiny).to_vec();
+        assert!((lp[0] - 1e-20).abs() < 1e-36, "log1p(1e-20) = {:e}", lp[0]);
+        assert!((lp[1] + 1e-20).abs() < 1e-36, "log1p(-1e-20) = {:e}", lp[1]);
+
+        // log1p special values: -1 -> -inf, 0 -> 0, +inf -> +inf, x < -1 -> NaN.
+        let sp: Tensor<f64, _> = rt::asarray((vec![-1.0, 0.0, f64::INFINITY, -2.0], &device));
+        let ls = rt::log1p(&sp).to_vec();
+        assert_eq!(ls[0], f64::NEG_INFINITY);
+        assert_eq!(ls[1], 0.0);
+        assert_eq!(ls[2], f64::INFINITY);
+        assert!(ls[3].is_nan());
+
+        // expm1 near zero, and the real special cases.
+        let em = rt::expm1(&tiny).to_vec();
+        assert!((em[0] - 1e-20).abs() < 1e-36, "expm1(1e-20) = {:e}", em[0]);
+        assert!((em[1] + 1e-20).abs() < 1e-36, "expm1(-1e-20) = {:e}", em[1]);
+        let ei: Tensor<f64, _> = rt::asarray((vec![f64::NEG_INFINITY, 0.0, f64::INFINITY], &device));
+        let es = rt::expm1(&ei).to_vec();
+        assert_eq!(es[0], -1.0);
+        assert_eq!(es[1], 0.0);
+        assert_eq!(es[2], f64::INFINITY);
+
+        // Complex log1p / expm1 are supported and accurate near zero.
+        let z = rt::asarray((vec![Complex::new(1e-20_f64, 1e-20)], &device));
+        let lz = rt::log1p(&z).to_vec();
+        assert!((lz[0].re - 1e-20).abs() < 1e-36 && (lz[0].im - 1e-20).abs() < 1e-36, "{:?}", lz[0]);
+        let ez = rt::expm1(&z).to_vec();
+        assert!((ez[0].re - 1e-20).abs() < 1e-36 && (ez[0].im - 1e-20).abs() < 1e-36, "{:?}", ez[0]);
+
+        // Complex special case: log1p(-1 + 0j) == -inf + 0j.
+        let neg = rt::asarray((vec![Complex::new(-1.0_f64, 0.0)], &device));
+        let ln = rt::log1p(&neg).to_vec();
+        assert!(ln[0].re.is_infinite() && ln[0].re < 0.0 && ln[0].im == 0.0, "{:?}", ln[0]);
+    }
 }
 
 #[cfg(test)]

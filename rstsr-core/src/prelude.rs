@@ -33,9 +33,9 @@ pub mod rstsr_traits {
     pub use crate::tensor::operators::op_unary_common::{
         TensorAbsAPI, TensorAcosAPI, TensorAcoshAPI, TensorAsinAPI, TensorAsinhAPI, TensorAtanAPI, TensorAtanhAPI,
         TensorCeilAPI, TensorConjAPI, TensorCosAPI, TensorCoshAPI, TensorExpAPI, TensorExpm1API, TensorFloorAPI,
-        TensorImagAPI, TensorInvAPI, TensorIsFiniteAPI, TensorIsInfAPI, TensorIsNanAPI, TensorLog10API, TensorLog2API,
-        TensorLogAPI, TensorRealAPI, TensorRoundAPI, TensorSignAPI, TensorSignBitAPI, TensorSinAPI, TensorSinhAPI,
-        TensorSqrtAPI, TensorSquareAPI, TensorTanAPI, TensorTanhAPI, TensorTruncAPI,
+        TensorImagAPI, TensorInvAPI, TensorIsFiniteAPI, TensorIsInfAPI, TensorIsNanAPI, TensorLog10API, TensorLog1pAPI,
+        TensorLog2API, TensorLogAPI, TensorRealAPI, TensorRoundAPI, TensorSignAPI, TensorSignBitAPI, TensorSinAPI,
+        TensorSinhAPI, TensorSqrtAPI, TensorSquareAPI, TensorTanAPI, TensorTanhAPI, TensorTruncAPI,
     };
     pub use crate::tensor::operators::op_where::TensorWhereAPI;
     pub use crate::tensor::ownership_conversion::{TensorIntoOwnedAPI, TensorViewAPI, TensorViewMutAPI};
@@ -133,9 +133,9 @@ pub mod rstsr_funcs {
     pub use crate::tensor::operators::exports::{
         abs, abs_f, acos, acos_f, acosh, acosh_f, asin, asin_f, asinh, asinh_f, atan, atan_f, atanh, atanh_f, ceil,
         ceil_f, conj, conj_f, cos, cos_f, cosh, cosh_f, exp, exp_f, expm1, expm1_f, floor, floor_f, imag, imag_f, inv,
-        inv_f, is_finite, is_finite_f, is_inf, is_inf_f, is_nan, is_nan_f, log, log10, log10_f, log2, log2_f, log_f,
-        real, real_f, reciprocal, reciprocal_f, round, round_f, sign, sign_f, signbit, signbit_f, sin, sin_f, sinh,
-        sinh_f, sqrt, sqrt_f, square, square_f, tan, tan_f, tanh, tanh_f, trunc, trunc_f,
+        inv_f, is_finite, is_finite_f, is_inf, is_inf_f, is_nan, is_nan_f, log, log10, log10_f, log1p, log1p_f, log2,
+        log2_f, log_f, real, real_f, reciprocal, reciprocal_f, round, round_f, sign, sign_f, signbit, signbit_f, sin,
+        sin_f, sinh, sinh_f, sqrt, sqrt_f, square, square_f, tan, tan_f, tanh, tanh_f, trunc, trunc_f,
     };
     // binary common functions
     pub use crate::tensor::operators::exports::{

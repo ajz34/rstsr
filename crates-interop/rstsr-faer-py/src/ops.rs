@@ -34,7 +34,7 @@ use rstsr_dtype_traits::{DTypeIntoFloatAPI, DTypePromoteAPI};
 use crate::any_tensor::{
     device_faer, dispatch_bin_bool_self, dispatch_bin_int_bool_self, dispatch_bin_int_self, dispatch_bin_numeric_self,
     dispatch_bin_promote, dispatch_bin_promote_eq, dispatch_t, dispatch_t_bool, dispatch_t_float_complex_same,
-    dispatch_t_index_ord, dispatch_t_index_zero, dispatch_t_into_float, dispatch_t_no_complex, dispatch_t_numeric_same,
+    dispatch_t_index_ord, dispatch_t_index_zero, dispatch_t_into_float, dispatch_t_numeric_same,
     dispatch_t_real_float_same, dispatch_t_real_numeric_same, dispatch_t_signed, dispatch_where, err_py, lift,
     type_err, AnyTensor, FTensor, NativeArray,
 };
@@ -222,6 +222,7 @@ unary_wrapper!(op_cos, cos_f, TensorCosAPI);
 unary_wrapper!(op_cosh, cosh_f, TensorCoshAPI);
 unary_wrapper!(op_exp, exp_f, TensorExpAPI);
 unary_wrapper!(op_log, log_f, TensorLogAPI);
+unary_wrapper!(op_log1p, log1p_f, TensorLog1pAPI);
 unary_wrapper!(op_log2, log2_f, TensorLog2API);
 unary_wrapper!(op_log10, log10_f, TensorLog10API);
 unary_wrapper!(op_reciprocal, reciprocal_f, TensorReciprocalAPI);
@@ -230,8 +231,8 @@ unary_wrapper!(op_sinh, sinh_f, TensorSinhAPI);
 unary_wrapper!(op_sqrt, sqrt_f, TensorSqrtAPI);
 unary_wrapper!(op_tan, tan_f, TensorTanAPI);
 unary_wrapper!(op_tanh, tanh_f, TensorTanhAPI);
-// real-only kernels
 unary_wrapper!(op_expm1, expm1_f, TensorExpm1API);
+// real-only kernels
 unary_wrapper_same!(op_ceil, ceil_f, TensorCeilAPI);
 unary_wrapper_same!(op_floor, floor_f, TensorFloorAPI);
 unary_wrapper_same!(op_trunc, trunc_f, TensorTruncAPI);
@@ -247,17 +248,6 @@ macro_rules! py_unary_into_float {
             #[pyfunction]
             pub fn $pyname(x: &NativeArray) -> PyResult<NativeArray> {
                 Ok(NativeArray { t: dispatch_t_into_float!(x.t, $wrapper())? })
-            }
-        )*
-    };
-}
-
-macro_rules! py_unary_no_complex {
-    ($($pyname:ident => $wrapper:ident),* $(,)?) => {
-        $(
-            #[pyfunction]
-            pub fn $pyname(x: &NativeArray) -> PyResult<NativeArray> {
-                Ok(NativeArray { t: dispatch_t_no_complex!(x.t, $wrapper())? })
             }
         )*
     };
@@ -308,9 +298,11 @@ py_unary_into_float!(
     cos => op_cos,
     cosh => op_cosh,
     exp => op_exp,
+    expm1 => op_expm1,
     log => op_log,
     log2 => op_log2,
     log10 => op_log10,
+    log1p => op_log1p,
     reciprocal => op_reciprocal,
     sin => op_sin,
     sinh => op_sinh,
@@ -318,7 +310,6 @@ py_unary_into_float!(
     tan => op_tan,
     tanh => op_tanh,
 );
-py_unary_no_complex!(expm1 => op_expm1);
 py_unary_real_float_same!(
     ceil => op_ceil,
     floor => op_floor,
