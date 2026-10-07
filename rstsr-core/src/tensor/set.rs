@@ -204,11 +204,13 @@ where
 /// - NumPy: `numpy.unique(x)` ([`numpy.unique`](https://numpy.org/doc/stable/reference/generated/numpy.unique.html))
 /// - RSTSR: `rt::unique_values(tensor)`
 ///
-/// Ordering note: NumPy always returns sorted values; rstsr matches that
-/// for orderable scalar dtypes and uses first-occurrence order for others
-/// (e.g. complex). NaNs are distinct entries in rstsr (NumPy collapses them
-/// into one entry at the end); that deviation is recorded in
-/// `tests/tracking/numpy_differences.md`.
+/// Ordering note: rstsr returns ascending order for orderable scalar dtypes
+/// (bool/integers/real floats) and first-occurrence order for others (e.g.
+/// complex). This matches `numpy.unique` but not the array-api aliases
+/// (`numpy.unique_values`/`unique_all`/...), which since NumPy 2.3 do not
+/// guarantee an order. NaNs are distinct entries (parity with the array-api
+/// aliases, which pass `equal_nan=False`; differs from `numpy.unique`, which
+/// collapses them). See `tests/tracking/numpy_differences.md`.
 ///
 /// # See also
 ///

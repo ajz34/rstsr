@@ -12,8 +12,8 @@ mod numpy_searchsorted {
 
     #[test]
     fn test_searchsorted_basic() {
-        // NumPy v2.5.2, _core/tests/test_numeric.py, TestNumeric::test_searchsorted
-        // (line 276): arr = [-8, -5, -1, 3, 6, 10]; searchsorted(arr, 0) == 3
+        // numpy: v2.5.2 | _core/tests/test_numeric.py::TestNonarrayArgs::test_searchsorted (L276)
+        // arr = [-8, -5, -1, 3, 6, 10]; searchsorted(arr, 0) == 3
         crate::specify_test!("test_searchsorted_basic");
 
         let mut device = TESTCFG.device.clone();
@@ -26,9 +26,8 @@ mod numpy_searchsorted {
 
     #[test]
     fn test_searchsorted_floats_nan() {
-        // NumPy v2.5.2, _core/tests/test_multiarray.py,
-        // TestMethods::test_searchsorted_floats (line 3072):
-        // a = [0, 1, nan]; a.searchsorted(a, 'left') == [0, 1, 2]
+        // numpy: v2.5.2 | _core/tests/test_multiarray.py::TestMethods::test_searchsorted_floats
+        // (L3072) a = [0, 1, nan]; a.searchsorted(a, 'left') == [0, 1, 2]
         // a.searchsorted(a, 'right') == [1, 2, 3]
         crate::specify_test!("test_searchsorted_floats_nan");
 
@@ -44,15 +43,23 @@ mod numpy_searchsorted {
 
     #[test]
     fn test_searchsorted_with_sorter() {
-        // NumPy v2.5.2, _core/tests/test_multiarray.py,
-        // TestMethods::test_searchsorted_with_sorter (line 3225), case 2:
-        // a = [0, 1, 2, 3, 5] * 20; side='left' + sorter -> [0, 20, 40, 60, 80];
-        // side='right' + sorter -> [20, 40, 60, 80, 100]
+        // numpy: v2.5.2 |
+        // _core/tests/test_multiarray.py::TestMethods::test_searchsorted_with_sorter (L3225)
+        // case 1: b.searchsorted(k) == a.searchsorted(k, sorter=a.argsort())
+        // where b = sort(a).
         crate::specify_test!("test_searchsorted_with_sorter");
 
         let mut device = TESTCFG.device.clone();
         device.set_default_order(RowMajor);
 
+        let a = rt::tensor_from_nested!([3, 1, 4, 1, 5, 9, 2, 6], &device);
+        let s = a.argsort(()).to_vec();
+        let b = rt::sort((&a, ()));
+        let k = rt::tensor_from_nested!([0, 2, 3, 6, 10], &device);
+        assert_equal(rt::searchsorted((&b, &k, ())), rt::searchsorted((&a, &k, (SearchSide::Left, s))), None);
+
+        // case 2: a = [0, 1, 2, 3, 5] * 20; side='left' + sorter -> [0, 20, 40, 60, 80];
+        // side='right' + sorter -> [20, 40, 60, 80, 100]
         // a = [0, 1, 2, 3, 5] repeated 20 times
         let block = vec![0_usize, 1, 2, 3, 5];
         let mut a = Vec::with_capacity(100);
@@ -71,7 +78,8 @@ mod numpy_searchsorted {
 
     #[test]
     fn test_searchsorted_return_type() {
-        // NumPy v2.5.2, TestMethods::test_searchsorted_return_type (line 3304):
+        // numpy: v2.5.2 |
+        // _core/tests/test_multiarray.py::TestMethods::test_searchsorted_return_type (L3304)
         // the result dtype is the default index dtype (usize here)
         crate::specify_test!("test_searchsorted_return_type");
 
@@ -83,6 +91,48 @@ mod numpy_searchsorted {
         let out = rt::searchsorted((&a, &v, ()));
         assert_eq!(out.shape(), &[1]);
         assert_eq!(out.to_vec(), vec![2]);
+    }
+
+    #[test]
+    fn test_searchsorted_n_elements() {
+        // numpy: v2.5.2 | _core/tests/test_multiarray.py::TestMethods::test_searchsorted_n_elements
+        // (L3112) boundary behavior for 0-, 1- and all-equal-element x1.
+        crate::specify_test!("test_searchsorted_n_elements");
+
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        let k = rt::tensor_from_nested!([0, 1, 2], &device);
+
+        // 0 elements: all zeros
+        let a0: Tensor<i32, _> = rt::zeros(([0], &device));
+        assert_eq!(rt::searchsorted((&a0, &k, "left")).to_vec(), vec![0, 0, 0]);
+        assert_eq!(rt::searchsorted((&a0, &k, "right")).to_vec(), vec![0, 0, 0]);
+
+        // 1 element
+        let a1: Tensor<i32, _> = rt::ones(([1], &device));
+        assert_eq!(rt::searchsorted((&a1, &k, "left")).to_vec(), vec![0, 0, 1]);
+        assert_eq!(rt::searchsorted((&a1, &k, "right")).to_vec(), vec![0, 1, 1]);
+
+        // all elements equal
+        let a2: Tensor<i32, _> = rt::ones(([2], &device));
+        assert_eq!(rt::searchsorted((&a2, &k, "left")).to_vec(), vec![0, 0, 2]);
+        assert_eq!(rt::searchsorted((&a2, &k, "right")).to_vec(), vec![0, 2, 2]);
+    }
+
+    #[test]
+    fn test_searchsorted_resetting() {
+        // numpy: v2.5.2 | _core/tests/test_multiarray.py::TestMethods::test_searchsorted_resetting
+        // (L3149) query keys need not be monotonic (binsearch index resets).
+        crate::specify_test!("test_searchsorted_resetting");
+
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        let a = rt::arange((5, &device)); // [0, 1, 2, 3, 4]
+        let k = rt::tensor_from_nested!([6, 5, 4], &device);
+        assert_eq!(rt::searchsorted((&a, &k, "left")).to_vec(), vec![5, 5, 4]);
+        assert_eq!(rt::searchsorted((&a, &k, "right")).to_vec(), vec![5, 5, 5]);
     }
 }
 
@@ -150,26 +200,24 @@ mod custom_searchsorted {
 
     #[test]
     fn test_empty_inputs() {
-        // NumPy v2.5.2, TestMethods::test_searchsorted_n_elements (line 3112):
-        // 0-element x1 returns all zeros; empty x2 returns an empty output
+        // empty x2 returns an empty output (the 0-element x1 case is covered
+        // by numpy_searchsorted::test_searchsorted_n_elements)
         crate::specify_test!("test_empty_inputs");
 
         let mut device = TESTCFG.device.clone();
         device.set_default_order(RowMajor);
 
-        let empty: Tensor<i32, _> = rt::zeros(([0], &device));
-        let v = rt::tensor_from_nested!([1, 2, 3], &device);
-        assert_eq!(rt::searchsorted((&empty, &v, ())).to_vec(), vec![0, 0, 0]);
-
         let a = rt::tensor_from_nested!([1, 3, 5], &device);
+        let empty: Tensor<i32, _> = rt::zeros(([0], &device));
         let out = rt::searchsorted((&a, &empty, ()));
         assert_eq!(out.shape(), &[0]);
     }
 
     #[test]
     fn test_invalid_sorter() {
-        // NumPy v2.5.2, TestMethods::test_searchsorted_with_invalid_sorter
-        // (line 3211): wrong-length or out-of-range sorter raises
+        // numpy: v2.5.2 |
+        // _core/tests/test_multiarray.py::TestMethods::test_searchsorted_with_invalid_sorter
+        // (L3211) wrong-length or out-of-range sorter raises
         crate::specify_test!("test_invalid_sorter");
 
         let mut device = TESTCFG.device.clone();

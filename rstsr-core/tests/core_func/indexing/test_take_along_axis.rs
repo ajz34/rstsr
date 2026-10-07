@@ -1,4 +1,4 @@
-//! take_along_axis tests: NumPy-cited gather contract + edges.
+//! take_along_axis tests: NumPy-cited gather contract (TestTakeAlongAxis) + edges.
 
 #[allow(unused_imports)]
 use crate::test_utils::*;
@@ -6,6 +6,79 @@ use rstsr::prelude::*;
 
 use super::CATEGORY;
 use crate::TESTCFG;
+
+#[cfg(test)]
+mod numpy_take_along_axis {
+    use super::*;
+    static FUNC: &str = "numpy_take_along_axis";
+
+    #[test]
+    fn test_argequivalent() {
+        // numpy: v2.5.2 | lib/tests/test_shape_base.py::TestTakeAlongAxis::test_argequivalent (L41)
+        // take_along_axis(a, argsort(a, axis), axis) == sort(a, axis) for every axis.
+        crate::specify_test!("test_argequivalent");
+
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        let a = (rt::arange((60, &device)) * 7).mapv(|x| x % 13).into_shape([3, 4, 5]);
+        for axis in 0..a.ndim() {
+            let idx = a.argsort(axis as isize).mapv(|v| v as isize);
+            let gathered = a.take_along_axis(&idx, axis as isize);
+            assert_equal(gathered, rt::sort((&a, axis as isize)), None);
+        }
+    }
+
+    #[test]
+    fn test_invalid() {
+        // numpy: v2.5.2 | lib/tests/test_shape_base.py::TestTakeAlongAxis::test_invalid (L59)
+        // bool/float index dtypes and axis=None are type-level or API-level N/A
+        // (rstsr indices are `isize`, axis is required); the dimensional and
+        // axis-range errors transfer.
+        crate::specify_test!("test_invalid");
+
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        let a: Tensor<f64, _> = rt::ones(([10, 10], &device));
+        // not enough indices (0-d index tensor)
+        let idx0 = rt::full(([], 1_isize, &device));
+        assert!(rt::take_along_axis_f(&a, &idx0, 1).is_err());
+        // invalid axis
+        let ai = rt::full(([10, 2], 1_isize, &device));
+        assert!(rt::take_along_axis_f(&a, &ai, 10).is_err());
+    }
+
+    #[test]
+    fn test_empty() {
+        // numpy: v2.5.2 | lib/tests/test_shape_base.py::TestTakeAlongAxis::test_empty (L78)
+        crate::specify_test!("test_empty");
+
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        let a: Tensor<f64, _> = rt::ones(([3, 4, 5], &device));
+        let ai: Tensor<isize, _> = rt::ones(([3, 0, 5], &device));
+        let actual = rt::take_along_axis((&a, &ai, 1));
+        assert_eq!(actual.shape(), &[3, 0, 5]);
+    }
+
+    #[test]
+    fn test_broadcast() {
+        // numpy: v2.5.2 | lib/tests/test_shape_base.py::TestTakeAlongAxis::test_broadcast (L86)
+        // non-indexing dimensions broadcast in both directions: the tensor may
+        // own the size-1 dimension (not only the indices).
+        crate::specify_test!("test_broadcast");
+
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        let a: Tensor<f64, _> = rt::ones(([3, 4, 1], &device));
+        let ai: Tensor<isize, _> = rt::ones(([1, 2, 5], &device));
+        let actual = rt::take_along_axis((&a, &ai, 1));
+        assert_eq!(actual.shape(), &[3, 2, 5]);
+    }
+}
 
 #[cfg(test)]
 mod custom_take_along_axis {

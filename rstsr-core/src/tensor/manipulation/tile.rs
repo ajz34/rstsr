@@ -140,8 +140,8 @@ impl Iterator for NdIndex {
 /// - [`Tensor<T, B, IxD>`][`Tensor`]
 ///
 ///   - A new owned tensor of shape `repetitions[i] * x.shape[i]` (after rank promotion); the input
-///     is not modified. Unlike NumPy, a fully-ones `repetitions` still produces a copy (rstsr
-///     functions always return fresh data).
+///     is not modified. rstsr functions always return fresh data, so a fully-ones `repetitions`
+///     also produces a copy (NumPy copies in that case too, since its gh4679 fix).
 ///
 /// # Examples
 ///
@@ -190,9 +190,6 @@ impl Iterator for NdIndex {
 /// - Array-API: `tile(x, repetitions, /)` ([`tile`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.tile.html))
 /// - NumPy: `numpy.tile(A, reps)` ([`numpy.tile`](https://numpy.org/doc/stable/reference/generated/numpy.tile.html))
 /// - RSTSR: `rt::tile((tensor, repetitions))`
-///
-/// Deviation from NumPy: NumPy skips copying when every repetition is `1`;
-/// rstsr's `tile` always returns freshly owned data.
 ///
 /// # Panics
 ///

@@ -12,7 +12,7 @@ mod numpy_repeat {
 
     #[test]
     fn test_basic() {
-        // NumPy v2.5.2, _core/tests/test_multiarray.py, TestRepeat::test_basic (line 8440)
+        // numpy: v2.5.2 | _core/tests/test_multiarray.py::TestRepeat::test_basic (L8440)
         crate::specify_test!("test_basic");
 
         let mut device = TESTCFG.device.clone();
@@ -28,7 +28,7 @@ mod numpy_repeat {
 
     #[test]
     fn test_broadcast1() {
-        // NumPy v2.5.2, _core/tests/test_multiarray.py, TestRepeat::test_broadcast1 (line 8446)
+        // numpy: v2.5.2 | _core/tests/test_multiarray.py::TestRepeat::test_broadcast1 (L8446)
         crate::specify_test!("test_broadcast1");
 
         let mut device = TESTCFG.device.clone();
@@ -44,7 +44,7 @@ mod numpy_repeat {
 
     #[test]
     fn test_axis_spec() {
-        // NumPy v2.5.2, _core/tests/test_multiarray.py, TestRepeat::test_axis_spec (line 8452)
+        // numpy: v2.5.2 | _core/tests/test_multiarray.py::TestRepeat::test_axis_spec (L8452)
         crate::specify_test!("test_axis_spec");
 
         let mut device = TESTCFG.device.clone();
@@ -63,7 +63,7 @@ mod numpy_repeat {
 
     #[test]
     fn test_broadcast2() {
-        // NumPy v2.5.2, _core/tests/test_multiarray.py, TestRepeat::test_broadcast2 (line 8463)
+        // numpy: v2.5.2 | _core/tests/test_multiarray.py::TestRepeat::test_broadcast2 (L8463)
         crate::specify_test!("test_broadcast2");
 
         let mut device = TESTCFG.device.clone();

@@ -12,7 +12,7 @@ mod numpy_sort {
 
     #[test]
     fn test_sort_nan_order() {
-        // NumPy v2.5.2, _core/tests/test_multiarray.py, TestMethods::test_sort (line 2267)
+        // numpy: v2.5.2 | _core/tests/test_multiarray.py::TestMethods::test_sort (L2267)
         // real part: np.sort([nan, 1, 0]) == [nan, 1, 0][::-1] == [0, 1, nan]
         // (NaN sorts to the END of the ascending order)
         crate::specify_test!("test_sort_nan_order");
@@ -29,8 +29,8 @@ mod numpy_sort {
 
     #[test]
     fn test_sort_unsigned() {
-        // NumPy v2.5.2, _core/tests/test_multiarray.py, TestMethods::test_sort_unsigned
-        // (line 2301): a = arange(101); b = a[::-1]; sort(b) == a
+        // numpy: v2.5.2 | _core/tests/test_multiarray.py::TestMethods::test_sort_unsigned (L2301)
+        // a = arange(101); b = a[::-1]; sort(b) == a
         crate::specify_test!("test_sort_unsigned");
 
         let mut device = TESTCFG.device.clone();
@@ -43,7 +43,8 @@ mod numpy_sort {
 
     #[test]
     fn test_sort_2d_axis() {
-        // NumPy behavior: sorting is per-line along the given axis
+        // numpy: v2.5.2 | _core/tests/test_multiarray.py::TestMethods::test_sort_axis (L2426)
+        // sorting is per-line along the given axis
         // np.sort([[3, 1, 2], [6, 4, 5]], axis=0) == [[3, 1, 2], [6, 4, 5]]
         // np.sort(..., axis=1) == [[1, 2, 3], [4, 5, 6]]
         crate::specify_test!("test_sort_2d_axis");
@@ -62,8 +63,9 @@ mod numpy_sort {
 
     #[test]
     fn test_sort_descending() {
-        // NumPy 2.x: np.sort(a, descending=True) reverses value order but
-        // keeps NaN last (numpy_tag.h: "NaN sorts to the end in reverse too")
+        // numpy: v2.5.2 | _core/tests/test_multiarray.py::TestMethods::test_sort_descending_floats
+        // (L2842) np.sort(a, descending=True) reverses value order but keeps NaN last
+        // (numpy_tag.h: "NaN sorts to the end in reverse too")
         crate::specify_test!("test_sort_descending");
 
         let mut device = TESTCFG.device.clone();
@@ -83,8 +85,8 @@ mod numpy_sort {
 
     #[test]
     fn test_sort_signed_negatives() {
-        // NumPy v2.5.2, TestMethods::test_sort_signed (line 2316): signed
-        // values incl. negatives keep numeric order
+        // numpy: v2.5.2 | _core/tests/test_multiarray.py::TestMethods::test_sort_signed (L2316)
+        // signed values incl. negatives keep numeric order
         crate::specify_test!("test_sort_signed_negatives");
 
         let mut device = TESTCFG.device.clone();
@@ -93,6 +95,81 @@ mod numpy_sort {
         let a = rt::tensor_from_nested!([-5_i32, 3, 0, -1, 7], &device);
         let expected = rt::tensor_from_nested!([-5, -1, 0, 3, 7], &device);
         assert_equal(a.sort(()), &expected, None);
+    }
+}
+
+#[cfg(test)]
+mod numpy_sort_descending {
+    use super::*;
+    static FUNC: &str = "numpy_sort_descending";
+
+    #[test]
+    fn test_sort_descending_signed() {
+        // numpy: v2.5.2 | _core/tests/test_multiarray.py::TestMethods::test_sort_descending_signed
+        // (L2826) ascending input [-51, 50); ascending sort is the identity, descending
+        // is its reverse (no NaNs). `stable` does not change distinct values.
+        crate::specify_test!("test_sort_descending_signed");
+
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        let a = rt::arange((-51, 50, &device));
+        assert_equal(rt::sort((&a, (0, false))), &a, None);
+        let rev = rt::flip(&a, 0);
+        assert_equal(rt::sort((&a, (0, true))), &rev, None);
+        assert_equal(rt::sort((&a, (0, true, true))), &rev, None);
+    }
+
+    #[test]
+    fn test_sort_descending_unsigned() {
+        // numpy: v2.5.2 |
+        // _core/tests/test_multiarray.py::TestMethods::test_sort_descending_unsigned (L2833)
+        crate::specify_test!("test_sort_descending_unsigned");
+
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        let a: Tensor<u32, _> = rt::arange((0_u32, 101, &device));
+        assert_equal(rt::sort((&a, (0, false))), &a, None);
+        assert_equal(rt::sort((&a, (0, true))), rt::flip(&a, 0), None);
+    }
+
+    #[test]
+    fn test_sort_descending_floats() {
+        // numpy: v2.5.2 | _core/tests/test_multiarray.py::TestMethods::test_sort_descending_floats
+        // (L2842) NaNs sort to the END in both directions.
+        crate::specify_test!("test_sort_descending_floats");
+
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        let mut v = rt::arange((-50.0_f64, 50.0, &device)).to_vec(); // 100 values
+        for i in (0..v.len()).step_by(10) {
+            v[i] = f64::NAN;
+        }
+        let a = rt::asarray((v, &device));
+
+        let asc = rt::sort((&a, ())).to_vec();
+        let desc = rt::sort((&a, (0, true))).to_vec();
+        assert_eq!(asc.iter().filter(|x| x.is_nan()).count(), 10);
+        assert!(asc[..90].windows(2).all(|w| w[0] <= w[1]));
+        assert!(asc[90..].iter().all(|x| x.is_nan()));
+        assert!(desc[..90].windows(2).all(|w| w[0] >= w[1]));
+        assert!(desc[90..].iter().all(|x| x.is_nan()));
+        // descending finite part is the reverse of the ascending finite part
+        assert_eq!(desc[..90], asc[..90].iter().rev().cloned().collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn test_sort_size_0() {
+        // numpy: v2.5.2 | _core/tests/test_multiarray.py::TestMethods::test_sort_size_0 (L2442)
+        crate::specify_test!("test_sort_size_0");
+
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        let a: Tensor<f64, _> = rt::zeros(([0], &device));
+        assert_eq!(rt::sort((&a, ())).shape(), &[0]);
     }
 }
 
@@ -298,14 +375,17 @@ mod custom_sort_custom {
         let mut device = TESTCFG.device.clone();
         device.set_default_order(RowMajor);
 
-        // sort by coarse bucket (x/4); argsort permutation must reproduce the
-        // sorted values when applied through basic indexing
-        let a = rt::arange((12, &device)).into_shape([3, 4]);
-        let by_high_bits = |x: &i32, y: &i32| (x / 4).cmp(&(y / 4));
-        let sorted = a.sort_custom(1, by_high_bits);
-        let idx = a.argsort_custom(1, by_high_bits);
-        // gather rows: for each row i, sorted[i, j] == a[i, idx[i, j]]
+        // sort by residue mod 4; the rows are scrambled so the comparator (not
+        // the input order) determines the result, and argsort's permutation must
+        // reproduce the sorted values when applied through basic indexing.
+        let raw = vec![3_i32, 1, 2, 0, 7, 5, 4, 6, 11, 9, 8, 10];
+        let a = rt::asarray((raw, [3, 4], &device));
+        let by_mod4 = |x: &i32, y: &i32| (x % 4).cmp(&(y % 4));
+        let sorted = a.sort_custom(1, by_mod4);
+        let idx = a.argsort_custom(1, by_mod4);
         for i in 0..3 {
+            let row: Vec<i32> = (0..4).map(|j| sorted.i((i, j)).to_scalar()).collect();
+            assert_eq!(row.iter().map(|x| x % 4).collect::<Vec<_>>(), vec![0, 1, 2, 3]);
             for j in 0..4 {
                 let vi = sorted.i((i, j)).to_scalar();
                 let orig = a.i((i, idx.i((i, j)).to_scalar())).to_scalar();

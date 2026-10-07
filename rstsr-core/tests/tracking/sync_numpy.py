@@ -237,6 +237,66 @@ SURFACE = [
     # --- indexing (basic indexing via Tensor::i) ---
     ("_core/tests/test_indexing.py", "TestIndexing", "test_single_int_index"),
     ("_core/tests/test_indexing.py", "TestIndexing", "test_ellipsis_index"),
+    # --- manipulation: repeat / tile (roll above) ---
+    ("_core/tests/test_multiarray.py", "TestRepeat", "test_basic"),
+    ("_core/tests/test_multiarray.py", "TestRepeat", "test_broadcast1"),
+    ("_core/tests/test_multiarray.py", "TestRepeat", "test_axis_spec"),
+    ("_core/tests/test_multiarray.py", "TestRepeat", "test_broadcast2"),
+    ("lib/tests/test_shape_base.py", "TestTile", "test_basic"),
+    ("lib/tests/test_shape_base.py", "TestTile", "test_tile_one_repetition_on_array_gh4679"),
+    ("lib/tests/test_shape_base.py", "TestTile", "test_empty"),
+    ("lib/tests/test_shape_base.py", "TestTile", "test_kroncompare"),
+    # --- sorting: sort / argsort ---
+    ("_core/tests/test_multiarray.py", "TestMethods", "test_sort"),
+    ("_core/tests/test_multiarray.py", "TestMethods", "test_sort_unsigned"),
+    ("_core/tests/test_multiarray.py", "TestMethods", "test_sort_signed"),
+    ("_core/tests/test_multiarray.py", "TestMethods", "test_sort_axis"),
+    ("_core/tests/test_multiarray.py", "TestMethods", "test_sort_size_0"),
+    ("_core/tests/test_multiarray.py", "TestMethods", "test_sort_descending_signed"),
+    ("_core/tests/test_multiarray.py", "TestMethods", "test_sort_descending_unsigned"),
+    ("_core/tests/test_multiarray.py", "TestMethods", "test_sort_descending_floats"),
+    ("_core/tests/test_multiarray.py", "TestMethods", "test_argsort"),
+    ("_core/tests/test_multiarray.py", "TestMethods", "test_argsort_descending_signed"),
+    ("_core/tests/test_multiarray.py", "TestMethods", "test_argsort_descending_unsigned"),
+    ("_core/tests/test_multiarray.py", "TestMethods", "test_argsort_descending_floats"),
+    ("_core/tests/test_multiarray.py", "TestMethods", "test_argsort_stable_bool_int_duplicates"),
+    # --- searching: searchsorted / nonzero ---
+    ("_core/tests/test_numeric.py", "TestNonarrayArgs", "test_searchsorted"),
+    ("_core/tests/test_multiarray.py", "TestMethods", "test_searchsorted_floats"),
+    ("_core/tests/test_multiarray.py", "TestMethods", "test_searchsorted_n_elements"),
+    ("_core/tests/test_multiarray.py", "TestMethods", "test_searchsorted_resetting"),
+    ("_core/tests/test_multiarray.py", "TestMethods", "test_searchsorted_with_invalid_sorter"),
+    ("_core/tests/test_multiarray.py", "TestMethods", "test_searchsorted_with_sorter"),
+    ("_core/tests/test_multiarray.py", "TestMethods", "test_searchsorted_return_type"),
+    ("_core/tests/test_numeric.py", "TestNonzero", "test_nonzero_trivial"),
+    ("_core/tests/test_numeric.py", "TestNonzero", "test_nonzero_zerodim"),
+    ("_core/tests/test_numeric.py", "TestNonzero", "test_nonzero_onedim"),
+    ("_core/tests/test_numeric.py", "TestNonzero", "test_nonzero_twodim"),
+    ("_core/tests/test_numeric.py", "TestNonzero", "test_nonzero_float_dtypes"),
+    ("_core/tests/test_numeric.py", "TestNonzero", "test_nonzero_integer_dtypes"),
+    # --- set: unique / isin ---
+    ("lib/tests/test_arraysetops.py", "TestUnique", "test_unique_1d"),
+    ("lib/tests/test_arraysetops.py", "TestUnique", "test_unique_zero_sized"),
+    ("lib/tests/test_arraysetops.py", "TestUnique", "test_unique_nanequals"),
+    ("lib/tests/test_arraysetops.py", "TestUnique", "test_unique_array_api_functions"),
+    ("lib/tests/test_arraysetops.py", "TestUnique", "test_unique_inverse_shape"),
+    ("lib/tests/test_arraysetops.py", "TestUnique", "test_unique_complex_signed_zeros"),
+    ("lib/tests/test_arraysetops.py", "TestSetOps", "test_isin"),
+    ("lib/tests/test_arraysetops.py", "TestSetOps", "test_isin_invert"),
+    ("lib/tests/test_arraysetops.py", "TestSetOps", "test_isin_boolean"),
+    ("lib/tests/test_arraysetops.py", "TestSetOps", "test_isin_errors"),
+    # --- indexing: take_along_axis ---
+    ("lib/tests/test_shape_base.py", "TestTakeAlongAxis", "test_argequivalent"),
+    ("lib/tests/test_shape_base.py", "TestTakeAlongAxis", "test_invalid"),
+    ("lib/tests/test_shape_base.py", "TestTakeAlongAxis", "test_empty"),
+    ("lib/tests/test_shape_base.py", "TestTakeAlongAxis", "test_broadcast"),
+    # --- misc: diff ---
+    ("lib/tests/test_function_base.py", "TestDiff", "test_basic"),
+    ("lib/tests/test_function_base.py", "TestDiff", "test_axis"),
+    ("lib/tests/test_function_base.py", "TestDiff", "test_nd"),
+    ("lib/tests/test_function_base.py", "TestDiff", "test_n"),
+    ("lib/tests/test_function_base.py", "TestDiff", "test_prepend"),
+    ("lib/tests/test_function_base.py", "TestDiff", "test_append"),
     # --- gap functions (rstsr has no analog): one representative method per NumPy
     #     test class, status `todo` in numpy_coverage.csv. The note cites the full
     #     class + method count; only the representative is hashed here. ---
@@ -248,7 +308,6 @@ SURFACE = [
     ("lib/tests/test_shape_base.py", "TestHsplit", "test_2D_array"),
     ("lib/tests/test_shape_base.py", "TestVsplit", "test_2D_array"),
     ("lib/tests/test_shape_base.py", "TestDsplit", "test_2D_array"),
-    ("lib/tests/test_shape_base.py", "TestTile", "test_basic"),
 ]
 
 

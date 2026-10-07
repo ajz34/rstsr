@@ -557,9 +557,9 @@ where
 /// - NumPy: `numpy.take_along_axis(arr, indices, axis)`
 /// - RSTSR: `rt::take_along_axis((tensor, indices, axis))`
 ///
-/// Deviation from NumPy: NumPy allows broadcasting between `arr` and
-/// `indices`; the array-api standard requires matching shapes outside the
-/// axis (rstsr follows the standard).
+/// Shapes outside `axis` must be broadcast-compatible: a size-1 dimension on
+/// either side broadcasts against the other (array-api 2025.12 and NumPy
+/// parity — the output shape follows that broadcast).
 ///
 /// # Panics
 ///

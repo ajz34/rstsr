@@ -12,7 +12,7 @@ mod numpy_roll {
 
     #[test]
     fn test_roll1d() {
-        // NumPy v2.5.2, _core/tests/test_numeric.py, TestRoll::test_roll1d (line 3761)
+        // numpy: v2.5.2 | _core/tests/test_numeric.py::TestRoll::test_roll1d (L3761)
         crate::specify_test!("test_roll1d");
 
         let mut device = TESTCFG.device.clone();
@@ -27,7 +27,7 @@ mod numpy_roll {
 
     #[test]
     fn test_roll2d() {
-        // NumPy v2.5.2, _core/tests/test_numeric.py, TestRoll::test_roll2d (line 3766)
+        // numpy: v2.5.2 | _core/tests/test_numeric.py::TestRoll::test_roll2d (L3766)
         crate::specify_test!("test_roll2d");
 
         let mut device = TESTCFG.device.clone();
@@ -99,7 +99,7 @@ mod numpy_roll {
 
     #[test]
     fn test_roll_empty() {
-        // NumPy v2.5.2, _core/tests/test_numeric.py, TestRoll::test_roll_empty (line 3813)
+        // numpy: v2.5.2 | _core/tests/test_numeric.py::TestRoll::test_roll_empty (L3813)
         crate::specify_test!("test_roll_empty");
 
         let mut device = TESTCFG.device.clone();
@@ -113,7 +113,7 @@ mod numpy_roll {
 
     #[test]
     fn test_roll_big_int() {
-        // NumPy v2.5.2, _core/tests/test_numeric.py, TestRoll::test_roll_big_int (line 3825)
+        // numpy: v2.5.2 | _core/tests/test_numeric.py::TestRoll::test_roll_big_int (L3825)
         crate::specify_test!("test_roll_big_int");
 
         let mut device = TESTCFG.device.clone();

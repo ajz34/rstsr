@@ -12,7 +12,7 @@ mod numpy_tile {
 
     #[test]
     fn test_basic() {
-        // NumPy v2.5.2, lib/tests/test_shape_base.py, TestTile::test_basic (line 755)
+        // numpy: v2.5.2 | lib/tests/test_shape_base.py::TestTile::test_basic (L755)
         crate::specify_test!("test_basic");
 
         let mut device = TESTCFG.device.clone();
@@ -51,8 +51,8 @@ mod numpy_tile {
 
     #[test]
     fn test_tile_one_repetition_on_array_gh4679() {
-        // NumPy v2.5.2, lib/tests/test_shape_base.py,
-        // TestTile::test_tile_one_repetition_on_array_gh4679 (line 766)
+        // numpy: v2.5.2 |
+        // lib/tests/test_shape_base.py::TestTile::test_tile_one_repetition_on_array_gh4679 (L766)
         // NumPy checks tile(a, 1) copies (b += 2 does not touch a); rstsr's
         // tile always returns freshly owned data, so the equivalent guarantee
         // is checked by mutating the result.
@@ -70,7 +70,7 @@ mod numpy_tile {
 
     #[test]
     fn test_empty() {
-        // NumPy v2.5.2, lib/tests/test_shape_base.py, TestTile::test_empty (line 772)
+        // numpy: v2.5.2 | lib/tests/test_shape_base.py::TestTile::test_empty (L772)
         crate::specify_test!("test_empty");
 
         let mut device = TESTCFG.device.clone();
@@ -88,11 +88,19 @@ mod numpy_tile {
         let c = b.tile(2);
         assert_eq!(c.shape(), &[2, 0]);
     }
+}
+
+#[cfg(test)]
+mod custom_tile {
+    use super::*;
+    static FUNC: &str = "custom_tile";
 
     #[test]
     fn test_rank_promotion_up() {
         // repetitions longer than ndim: singleton axes prepended to x
         // np.tile(np.array([0, 1, 2]), (2, 1, 2)) has shape (2, 1, 6)
+        crate::specify_test!("test_rank_promotion_up");
+
         let mut device = TESTCFG.device.clone();
         device.set_default_order(RowMajor);
 
@@ -102,12 +110,6 @@ mod numpy_tile {
         let expected = rt::tensor_from_nested!([[[0, 1, 2, 0, 1, 2]], [[0, 1, 2, 0, 1, 2]]], &device);
         assert_equal(t, &expected, None);
     }
-}
-
-#[cfg(test)]
-mod custom_tile {
-    use super::*;
-    static FUNC: &str = "custom_tile";
 
     #[test]
     fn test_strided_input() {

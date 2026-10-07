@@ -1,9 +1,150 @@
+//! Set tests: NumPy-cited unique_*/isin (TestUnique / TestSetOps) + custom edges.
+
 #[allow(unused_imports)]
 use crate::test_utils::*;
 use rstsr::prelude::*;
 
 use super::CATEGORY;
 use crate::TESTCFG;
+
+#[cfg(test)]
+mod numpy_unique {
+    use super::*;
+    use num::Complex;
+    static FUNC: &str = "numpy_unique";
+
+    #[test]
+    fn test_unique_1d() {
+        // numpy: v2.5.2 | lib/tests/test_arraysetops.py::TestUnique::test_unique_1d (L700)
+        crate::specify_test!("test_unique_1d");
+
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        // a = [5, 7, 1, 2, 1, 5, 7] * 10; b = [1, 2, 5, 7];
+        // i1 = [2, 3, 0, 1]; counts = [20, 10, 20, 20]; i2 = [2,3,0,1,0,2,3] * 10
+        let base = [5_i32, 7, 1, 2, 1, 5, 7];
+        let mut a = Vec::new();
+        for _ in 0..10 {
+            a.extend_from_slice(&base);
+        }
+        let a = rt::asarray((a, &device));
+        let res = rt::unique_all(&a);
+        assert_eq!(res.values.to_vec(), vec![1, 2, 5, 7]);
+        assert_eq!(res.indices.to_vec(), vec![2_usize, 3, 0, 1]);
+        assert_eq!(res.counts.to_vec(), vec![20_usize, 10, 20, 20]);
+        let inv_base = [2_usize, 3, 0, 1, 0, 2, 3];
+        let mut inv_expected = Vec::new();
+        for _ in 0..10 {
+            inv_expected.extend_from_slice(&inv_base);
+        }
+        assert_eq!(res.inverse_indices.reshape([-1]).to_vec(), inv_expected);
+    }
+
+    #[test]
+    fn test_unique_zero_sized() {
+        // numpy: v2.5.2 | lib/tests/test_arraysetops.py::TestUnique::test_unique_zero_sized (L822)
+        crate::specify_test!("test_unique_zero_sized");
+
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        let a: Tensor<i32, _> = rt::zeros(([0], &device));
+        let res = rt::unique_all(&a);
+        assert_eq!(res.values.shape(), &[0]);
+        assert_eq!(res.indices.shape(), &[0]);
+        assert_eq!(res.counts.shape(), &[0]);
+        assert_eq!(res.inverse_indices.shape(), &[0]);
+    }
+
+    #[test]
+    fn test_unique_nanequals() {
+        // numpy: v2.5.2 | lib/tests/test_arraysetops.py::TestUnique::test_unique_nanequals (L1200)
+        // np.unique([1,1,nan,nan,nan], equal_nan=False) == [1, nan, nan, nan];
+        // rstsr mirrors the array-api aliases (distinct NaNs).
+        crate::specify_test!("test_unique_nanequals");
+
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        let a = rt::tensor_from_nested!([1.0_f64, 1.0, f64::NAN, f64::NAN, f64::NAN], &device);
+        let res = rt::unique_all(&a);
+        let v = res.values.to_vec();
+        assert_eq!(v.len(), 4);
+        assert_eq!(v[0], 1.0);
+        assert!(v[1..].iter().all(|x| x.is_nan()));
+        assert_eq!(res.counts.to_vec(), vec![2_usize, 1, 1, 1]);
+    }
+
+    #[test]
+    fn test_unique_array_api_functions() {
+        // numpy: v2.5.2 |
+        // lib/tests/test_arraysetops.py::TestUnique::test_unique_array_api_functions (L1208)
+        // The NumPy test compares the array-api aliases against
+        // np.unique(..., equal_nan=False); the alias order is not guaranteed
+        // (the test sorts before comparing), so rstsr's ascending order with a
+        // distinct-NaN tail is checked here.
+        crate::specify_test!("test_unique_array_api_functions");
+
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        let arr =
+            vec![f64::NAN, 1.0, 0.0, 4.0, -f64::NAN, -0.0, 1.0, 3.0, 4.0, f64::NAN, 5.0, -0.0, 1.0, -f64::NAN, 0.0];
+        let a = rt::asarray((arr, &device));
+
+        let res = rt::unique_all(&a);
+        assert_eq!(res.values.to_vec().len(), 9);
+        assert_eq!(res.counts.to_vec(), vec![4_usize, 3, 1, 2, 1, 1, 1, 1, 1]);
+        let v = res.values.to_vec();
+        assert!(v[5..].iter().all(|x| x.is_nan()));
+        let mut finite = v[..5].to_vec();
+        finite.sort_by(|x, y| x.partial_cmp(y).unwrap());
+        assert_eq!(finite, vec![0.0, 1.0, 3.0, 4.0, 5.0]);
+
+        // unique_counts agrees with unique_all's counts
+        assert_eq!(rt::unique_counts(&a).counts.to_vec(), res.counts.to_vec());
+    }
+
+    #[test]
+    fn test_unique_inverse_shape() {
+        // numpy: v2.5.2 | lib/tests/test_arraysetops.py::TestUnique::test_unique_inverse_shape
+        // (L1251) https://github.com/numpy/numpy/issues/25552
+        crate::specify_test!("test_unique_inverse_shape");
+
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        let arr = rt::tensor_from_nested!([[1, 2, 3], [2, 3, 1]], &device);
+        for res in [rt::unique_inverse(&arr), {
+            let a = rt::unique_all(&arr);
+            UniqueInverse { values: a.values, inverse_indices: a.inverse_indices }
+        }] {
+            assert_eq!(res.values.to_vec(), vec![1, 2, 3]);
+            assert_eq!(res.inverse_indices.shape(), &[2, 3]);
+            // arr == values[inverse_indices]
+            let vals = res.values.to_vec();
+            let gathered: Vec<i32> = res.inverse_indices.reshape([-1]).to_vec().iter().map(|&i| vals[i]).collect();
+            assert_eq!(gathered, arr.reshape([-1]).to_vec());
+        }
+    }
+
+    #[test]
+    fn test_unique_complex_signed_zeros() {
+        // numpy: v2.5.2 |
+        // lib/tests/test_arraysetops.py::TestUnique::test_unique_complex_signed_zeros (L1301)
+        // z = [0.-1j, -0.-1j, 0]; the two signed-zero-imag entries compare
+        // equal, so the unique length is len(values) - 1.
+        crate::specify_test!("test_unique_complex_signed_zeros");
+
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        let z =
+            rt::asarray((vec![Complex::new(0.0_f64, -1.0), Complex::new(-0.0, -1.0), Complex::new(0.0, 0.0)], &device));
+        assert_eq!(rt::unique_values(&z).to_vec().len(), 2);
+    }
+}
 
 #[cfg(test)]
 mod custom_unique {
@@ -92,7 +233,9 @@ mod custom_unique {
         let a = rt::tensor_from_nested!([-0.0_f64, 1.0, 0.0], &device);
         let res = rt::unique_all(&a);
         assert_eq!(res.values.to_vec().len(), 2);
-        assert_eq!(res.values.to_vec()[0], 0.0); // -0.0 == 0.0, sorted first
+        // first-seen encoding is -0.0 (the first input element) — assert the sign
+        assert_eq!(res.values.to_vec()[0], 0.0);
+        assert!(res.values.to_vec()[0].is_sign_negative());
         assert_eq!(res.values.to_vec()[1], 1.0);
         assert_eq!(res.counts.to_vec(), vec![2, 1]);
     }
@@ -123,7 +266,8 @@ mod custom_unique {
 
     #[test]
     fn test_unique_complex_first_occurrence() {
-        // complex entries compare with == (PartialEq), first occurrence kept
+        // complex entries compare with == (PartialEq); the naive path keeps
+        // first-occurrence order, so [1+2j, 1+2j, 0j] -> [1+2j, 0j]
         crate::specify_test!("test_unique_complex_first_occurrence");
 
         let mut device = TESTCFG.device.clone();
@@ -132,7 +276,7 @@ mod custom_unique {
         let a =
             rt::asarray((vec![Complex::new(1.0_f64, 2.0), Complex::new(1.0, 2.0), Complex::new(0.0, 0.0)], &device));
         let out = rt::unique_values(&a);
-        assert_eq!(out.to_vec().len(), 2);
+        assert_eq!(out.to_vec(), vec![Complex::new(1.0, 2.0), Complex::new(0.0, 0.0)]);
     }
 
     #[test]
@@ -145,6 +289,84 @@ mod custom_unique {
         let a: Tensor<i32, _> = rt::zeros(([0], &device));
         let out = rt::unique_values(&a);
         assert_eq!(out.shape(), &[0]);
+    }
+}
+
+#[cfg(test)]
+mod numpy_isin {
+    use super::*;
+    static FUNC: &str = "numpy_isin";
+
+    #[test]
+    fn test_isin() {
+        // numpy: v2.5.2 | lib/tests/test_arraysetops.py::TestSetOps::test_isin (L218)
+        // multidimensional arrays in both arguments; empty-array cases.
+        crate::specify_test!("test_isin");
+
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        let a = rt::arange((24, &device)).into_shape([2, 3, 4]);
+        let b = rt::tensor_from_nested!([[10, 20, 30], [0, 1, 3], [11, 22, 33]], &device);
+        let out = rt::isin((&a, &b, false));
+        assert_eq!(out.shape(), &[2, 3, 4]);
+        assert_eq!(out.reshape([-1]).to_vec(), vec![
+            true, true, false, true, false, false, false, false, false, false, true, true, false, false, false, false,
+            false, false, false, false, true, false, true, false
+        ]);
+
+        // empty x1 / empty x2 give all-false
+        let empty: Tensor<i32, _> = rt::zeros(([0], &device));
+        let ar = rt::tensor_from_nested!([10, 20, 30], &device);
+        assert_eq!(rt::isin((&empty, &ar, false)).shape(), &[0]);
+        assert_eq!(rt::isin((&ar, &empty, false)).to_vec(), vec![false, false, false]);
+    }
+
+    #[test]
+    fn test_isin_invert() {
+        // numpy: v2.5.2 | lib/tests/test_arraysetops.py::TestSetOps::test_isin_invert (L347)
+        crate::specify_test!("test_isin_invert");
+
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        let a = rt::tensor_from_nested!([5, 4, 5, 3, 4, 4, 3, 4, 3, 5, 2, 1, 5, 5], &device);
+        let b = rt::tensor_from_nested!([2, 3, 4], &device);
+        let normal = rt::isin((&a, &b, false)).to_vec();
+        let inverted = rt::isin((&a, &b, true)).to_vec();
+        assert_eq!(normal, vec![
+            false, true, false, true, true, true, true, true, true, false, true, false, false, false
+        ]);
+        assert_eq!(inverted, normal.iter().map(|x| !x).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn test_isin_boolean() {
+        // numpy: v2.5.2 | lib/tests/test_arraysetops.py::TestSetOps::test_isin_boolean (L384)
+        crate::specify_test!("test_isin_boolean");
+
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        let a = rt::tensor_from_nested!([true, false], &device);
+        let b = rt::tensor_from_nested!([false, false, false], &device);
+        assert_eq!(rt::isin((&a, &b, false)).to_vec(), vec![false, true]);
+        assert_eq!(rt::isin((&a, &b, true)).to_vec(), vec![true, false]);
+    }
+
+    #[test]
+    fn test_isin_errors() {
+        // numpy: v2.5.2 | lib/tests/test_arraysetops.py::TestSetOps::test_isin_errors (L539)
+        // The `kind=` error cases are N/A (rstsr isin has no `kind`); the
+        // non-error overflow case (kind=None -> sort path) transfers.
+        crate::specify_test!("test_isin_errors");
+
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        let ar1 = rt::tensor_from_nested!([-1, 2, 3, 4, 5], &device);
+        let ar2 = rt::tensor_from_nested!([-1, i32::MAX], &device);
+        assert_eq!(rt::isin((&ar1, &ar2, false)).to_vec(), vec![true, false, false, false, false]);
     }
 }
 
