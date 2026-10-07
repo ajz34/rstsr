@@ -120,9 +120,9 @@ where
 /// # let mut device = DeviceCpu::default();
 /// # device.set_default_order(RowMajor);
 /// let a = rt::arange((3, &device));
-/// println!("{}", rt::tile((&a, 2)));
+/// println!("{}", rt::tile(&a, 2));
 /// // [ 0 1 2 0 1 2]
-/// # assert_eq!(format!("{}", rt::tile((&a, 2))), "[ 0 1 2 0 1 2]");
+/// # assert_eq!(format!("{}", rt::tile(&a, 2)), "[ 0 1 2 0 1 2]");
 /// ```
 ///
 /// Tiling into a higher-rank result:
@@ -132,10 +132,10 @@ where
 /// # let mut device = DeviceCpu::default();
 /// # device.set_default_order(RowMajor);
 /// let a = rt::arange((3, &device));
-/// println!("{}", rt::tile((&a, [2, 2])));
+/// println!("{}", rt::tile(&a, [2, 2]));
 /// // [[ 0 1 2 0 1 2]
 /// //  [ 0 1 2 0 1 2]]
-/// # let b = rt::tile((&a, [2, 2]));
+/// # let b = rt::tile(&a, [2, 2]);
 /// # assert_eq!(format!("{b}"), "[[ 0 1 2 0 1 2]\n [ 0 1 2 0 1 2]]");
 /// ```
 ///
@@ -146,10 +146,10 @@ where
 /// # let mut device = DeviceCpu::default();
 /// # device.set_default_order(RowMajor);
 /// let a = rt::tensor_from_nested!([[1, 2], [3, 4]], &device);
-/// println!("{}", rt::tile((&a, [1, 2])));
+/// println!("{}", rt::tile(&a, [1, 2]));
 /// // [[ 1 2 1 2]
 /// //  [ 3 4 3 4]]
-/// # let b = rt::tile((&a, [1, 2]));
+/// # let b = rt::tile(&a, [1, 2]);
 /// # assert_eq!(format!("{b}"), "[[ 1 2 1 2]\n [ 3 4 3 4]]");
 /// ```
 ///
@@ -157,7 +157,7 @@ where
 ///
 /// - Array-API: `tile(x, repetitions, /)` ([`tile`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.tile.html))
 /// - NumPy: `numpy.tile(A, reps)` ([`numpy.tile`](https://numpy.org/doc/stable/reference/generated/numpy.tile.html))
-/// - RSTSR: `rt::tile((tensor, repetitions))`
+/// - RSTSR: `rt::tile(tensor, repetitions)`
 ///
 /// # Panics
 ///
@@ -178,61 +178,19 @@ where
 /// - [`tile_f`]: fallible version.
 /// - [`TensorAny::tile`]: associated method.
 /// - [`TensorAny::tile_f`]: associated fallible method.
-pub fn tile<Args, Inp>(args: Args) -> Args::Out
+pub fn tile<T, B, D>(
+    tensor: impl TensorViewAPI<Type = T, Backend = B, Dim = D>,
+    repetitions: impl TryInto<AxesIndex<usize>, Error: Into<Error>>,
+) -> Tensor<T, B, IxD>
 where
-    Args: TileAPI<Inp>,
-{
-    Args::tile(args)
-}
-
-/// API trait backing [`tile`].
-pub trait TileAPI<Inp> {
-    type Out;
-
-    fn tile_f(self) -> Result<Self::Out>;
-    fn tile(self) -> Self::Out
-    where
-        Self: Sized,
-    {
-        Self::tile_f(self).rstsr_unwrap()
-    }
-}
-
-impl<RA, T, B, D, RArg> TileAPI<()> for (&TensorAny<RA, T, B, D>, RArg)
-where
-    RA: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
     D: DimAPI,
-    RArg: TryInto<AxesIndex<usize>, Error: Into<Error>>,
     B: DeviceAPI<T>
         + DeviceRawAPI<MaybeUninit<T>>
         + DeviceCreationAnyAPI<T>
         + OpAssignAPI<T, IxD>
         + OpAssignArbitaryAPI<T, IxD, IxD>,
 {
-    type Out = Tensor<T, B, IxD>;
-
-    fn tile_f(self) -> Result<Self::Out> {
-        let (tensor, repetitions) = self;
-        tile_f(tensor, repetitions)
-    }
-}
-
-impl<T, B, D, RArg> TileAPI<()> for (TensorView<'_, T, B, D>, RArg)
-where
-    D: DimAPI,
-    RArg: TryInto<AxesIndex<usize>, Error: Into<Error>>,
-    B: DeviceAPI<T>
-        + DeviceRawAPI<MaybeUninit<T>>
-        + DeviceCreationAnyAPI<T>
-        + OpAssignAPI<T, IxD>
-        + OpAssignArbitaryAPI<T, IxD, IxD>,
-{
-    type Out = Tensor<T, B, IxD>;
-
-    fn tile_f(self) -> Result<Self::Out> {
-        let (tensor, repetitions) = self;
-        tile_f(tensor, repetitions)
-    }
+    tile_f(tensor, repetitions).rstsr_unwrap()
 }
 
 impl<RA, T, B, D> TensorAny<RA, T, B, D>

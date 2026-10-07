@@ -298,27 +298,23 @@ where
 /// ## Variants of this function
 ///
 /// - [`unique_values_f`]: fallible version.
-pub fn unique_values<Inp>(inp: Inp) -> Inp::Out
+/// - [`TensorAny::unique_values`]: associated method.
+/// - [`TensorAny::unique_values_f`]: associated fallible method.
+pub fn unique_values<T, B, D>(tensor: impl TensorViewAPI<Type = T, Backend = B, Dim = D>) -> Tensor<T, B, IxD>
 where
-    Inp: UniqueValuesAPI,
+    D: DimAPI,
+    B: DeviceAPI<T>
+        + DeviceAPI<usize>
+        + DeviceRawAPI<MaybeUninit<T>>
+        + DeviceRawAPI<MaybeUninit<usize>>
+        + DeviceCreationAnyAPI<T>
+        + DeviceCreationAnyAPI<usize>
+        + OpUniqueAPI<T, D>,
 {
-    Inp::unique_values(inp)
+    unique_values_f(tensor).rstsr_unwrap()
 }
 
-/// API trait backing [`unique_values`].
-pub trait UniqueValuesAPI {
-    type Out;
-
-    fn unique_values_f(self) -> Result<Self::Out>;
-    fn unique_values(self) -> Self::Out
-    where
-        Self: Sized,
-    {
-        Self::unique_values_f(self).rstsr_unwrap()
-    }
-}
-
-impl<R, T, B, D> UniqueValuesAPI for &TensorAny<R, T, B, D>
+impl<R, T, B, D> TensorAny<R, T, B, D>
 where
     R: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
     D: DimAPI,
@@ -330,31 +326,20 @@ where
         + DeviceCreationAnyAPI<usize>
         + OpUniqueAPI<T, D>,
 {
-    type Out = Tensor<T, B, IxD>;
-
-    fn unique_values_f(self) -> Result<Self::Out> {
+    /// Returns the unique values of a tensor.
+    ///
+    /// See also [`unique_values`].
+    pub fn unique_values_f(&self) -> Result<Tensor<T, B, IxD>> {
         unique_values_f(self)
     }
-}
 
-impl<T, B, D> UniqueValuesAPI for TensorView<'_, T, B, D>
-where
-    D: DimAPI,
-    B: DeviceAPI<T>
-        + DeviceAPI<usize>
-        + DeviceRawAPI<MaybeUninit<T>>
-        + DeviceRawAPI<MaybeUninit<usize>>
-        + DeviceCreationAnyAPI<T>
-        + DeviceCreationAnyAPI<usize>
-        + OpUniqueAPI<T, D>,
-{
-    type Out = Tensor<T, B, IxD>;
-
-    fn unique_values_f(self) -> Result<Self::Out> {
-        unique_values_f(self)
+    /// Returns the unique values of a tensor.
+    ///
+    /// See also [`unique_values`].
+    pub fn unique_values(&self) -> Tensor<T, B, IxD> {
+        unique_values_f(self).rstsr_unwrap()
     }
 }
-
 /* #endregion */
 
 /* #region unique_counts */
@@ -439,27 +424,23 @@ where
 /// ## Variants of this function
 ///
 /// - [`unique_counts_f`]: fallible version.
-pub fn unique_counts<Inp>(inp: Inp) -> Inp::Out
+/// - [`TensorAny::unique_counts`]: associated method.
+/// - [`TensorAny::unique_counts_f`]: associated fallible method.
+pub fn unique_counts<T, B, D>(tensor: impl TensorViewAPI<Type = T, Backend = B, Dim = D>) -> UniqueCounts<T, B>
 where
-    Inp: UniqueCountsAPI,
+    D: DimAPI,
+    B: DeviceAPI<T>
+        + DeviceAPI<usize>
+        + DeviceRawAPI<MaybeUninit<T>>
+        + DeviceRawAPI<MaybeUninit<usize>>
+        + DeviceCreationAnyAPI<T>
+        + DeviceCreationAnyAPI<usize>
+        + OpUniqueAPI<T, D>,
 {
-    Inp::unique_counts(inp)
+    unique_counts_f(tensor).rstsr_unwrap()
 }
 
-/// API trait backing [`unique_counts`].
-pub trait UniqueCountsAPI {
-    type Out;
-
-    fn unique_counts_f(self) -> Result<Self::Out>;
-    fn unique_counts(self) -> Self::Out
-    where
-        Self: Sized,
-    {
-        Self::unique_counts_f(self).rstsr_unwrap()
-    }
-}
-
-impl<R, T, B, D> UniqueCountsAPI for &TensorAny<R, T, B, D>
+impl<R, T, B, D> TensorAny<R, T, B, D>
 where
     R: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
     D: DimAPI,
@@ -471,31 +452,20 @@ where
         + DeviceCreationAnyAPI<usize>
         + OpUniqueAPI<T, D>,
 {
-    type Out = UniqueCounts<T, B>;
-
-    fn unique_counts_f(self) -> Result<Self::Out> {
+    /// Returns the unique values of a tensor and their counts.
+    ///
+    /// See also [`unique_counts`].
+    pub fn unique_counts_f(&self) -> Result<UniqueCounts<T, B>> {
         unique_counts_f(self)
     }
-}
 
-impl<T, B, D> UniqueCountsAPI for TensorView<'_, T, B, D>
-where
-    D: DimAPI,
-    B: DeviceAPI<T>
-        + DeviceAPI<usize>
-        + DeviceRawAPI<MaybeUninit<T>>
-        + DeviceRawAPI<MaybeUninit<usize>>
-        + DeviceCreationAnyAPI<T>
-        + DeviceCreationAnyAPI<usize>
-        + OpUniqueAPI<T, D>,
-{
-    type Out = UniqueCounts<T, B>;
-
-    fn unique_counts_f(self) -> Result<Self::Out> {
-        unique_counts_f(self)
+    /// Returns the unique values of a tensor and their counts.
+    ///
+    /// See also [`unique_counts`].
+    pub fn unique_counts(&self) -> UniqueCounts<T, B> {
+        unique_counts_f(self).rstsr_unwrap()
     }
 }
-
 /* #endregion */
 
 /* #region unique_inverse */
@@ -578,27 +548,23 @@ where
 /// ## Variants of this function
 ///
 /// - [`unique_inverse_f`]: fallible version.
-pub fn unique_inverse<Inp>(inp: Inp) -> Inp::Out
+/// - [`TensorAny::unique_inverse`]: associated method.
+/// - [`TensorAny::unique_inverse_f`]: associated fallible method.
+pub fn unique_inverse<T, B, D>(tensor: impl TensorViewAPI<Type = T, Backend = B, Dim = D>) -> UniqueInverse<T, B>
 where
-    Inp: UniqueInverseAPI,
+    D: DimAPI,
+    B: DeviceAPI<T>
+        + DeviceAPI<usize>
+        + DeviceRawAPI<MaybeUninit<T>>
+        + DeviceRawAPI<MaybeUninit<usize>>
+        + DeviceCreationAnyAPI<T>
+        + DeviceCreationAnyAPI<usize>
+        + OpUniqueAPI<T, D>,
 {
-    Inp::unique_inverse(inp)
+    unique_inverse_f(tensor).rstsr_unwrap()
 }
 
-/// API trait backing [`unique_inverse`].
-pub trait UniqueInverseAPI {
-    type Out;
-
-    fn unique_inverse_f(self) -> Result<Self::Out>;
-    fn unique_inverse(self) -> Self::Out
-    where
-        Self: Sized,
-    {
-        Self::unique_inverse_f(self).rstsr_unwrap()
-    }
-}
-
-impl<R, T, B, D> UniqueInverseAPI for &TensorAny<R, T, B, D>
+impl<R, T, B, D> TensorAny<R, T, B, D>
 where
     R: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
     D: DimAPI,
@@ -610,31 +576,20 @@ where
         + DeviceCreationAnyAPI<usize>
         + OpUniqueAPI<T, D>,
 {
-    type Out = UniqueInverse<T, B>;
-
-    fn unique_inverse_f(self) -> Result<Self::Out> {
+    /// Returns the unique values of a tensor and the inverse mapping.
+    ///
+    /// See also [`unique_inverse`].
+    pub fn unique_inverse_f(&self) -> Result<UniqueInverse<T, B>> {
         unique_inverse_f(self)
     }
-}
 
-impl<T, B, D> UniqueInverseAPI for TensorView<'_, T, B, D>
-where
-    D: DimAPI,
-    B: DeviceAPI<T>
-        + DeviceAPI<usize>
-        + DeviceRawAPI<MaybeUninit<T>>
-        + DeviceRawAPI<MaybeUninit<usize>>
-        + DeviceCreationAnyAPI<T>
-        + DeviceCreationAnyAPI<usize>
-        + OpUniqueAPI<T, D>,
-{
-    type Out = UniqueInverse<T, B>;
-
-    fn unique_inverse_f(self) -> Result<Self::Out> {
-        unique_inverse_f(self)
+    /// Returns the unique values of a tensor and the inverse mapping.
+    ///
+    /// See also [`unique_inverse`].
+    pub fn unique_inverse(&self) -> UniqueInverse<T, B> {
+        unique_inverse_f(self).rstsr_unwrap()
     }
 }
-
 /* #endregion */
 
 /* #region unique_all */
@@ -732,27 +687,23 @@ where
 /// ## Variants of this function
 ///
 /// - [`unique_all_f`]: fallible version.
-pub fn unique_all<Inp>(inp: Inp) -> Inp::Out
+/// - [`TensorAny::unique_all`]: associated method.
+/// - [`TensorAny::unique_all_f`]: associated fallible method.
+pub fn unique_all<T, B, D>(tensor: impl TensorViewAPI<Type = T, Backend = B, Dim = D>) -> UniqueAll<T, B>
 where
-    Inp: UniqueAllAPI,
+    D: DimAPI,
+    B: DeviceAPI<T>
+        + DeviceAPI<usize>
+        + DeviceRawAPI<MaybeUninit<T>>
+        + DeviceRawAPI<MaybeUninit<usize>>
+        + DeviceCreationAnyAPI<T>
+        + DeviceCreationAnyAPI<usize>
+        + OpUniqueAPI<T, D>,
 {
-    Inp::unique_all(inp)
+    unique_all_f(tensor).rstsr_unwrap()
 }
 
-/// API trait backing [`unique_all`].
-pub trait UniqueAllAPI {
-    type Out;
-
-    fn unique_all_f(self) -> Result<Self::Out>;
-    fn unique_all(self) -> Self::Out
-    where
-        Self: Sized,
-    {
-        Self::unique_all_f(self).rstsr_unwrap()
-    }
-}
-
-impl<R, T, B, D> UniqueAllAPI for &TensorAny<R, T, B, D>
+impl<R, T, B, D> TensorAny<R, T, B, D>
 where
     R: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
     D: DimAPI,
@@ -764,31 +715,20 @@ where
         + DeviceCreationAnyAPI<usize>
         + OpUniqueAPI<T, D>,
 {
-    type Out = UniqueAll<T, B>;
-
-    fn unique_all_f(self) -> Result<Self::Out> {
+    /// Returns the unique values of a tensor with all auxiliary fields.
+    ///
+    /// See also [`unique_all`].
+    pub fn unique_all_f(&self) -> Result<UniqueAll<T, B>> {
         unique_all_f(self)
     }
-}
 
-impl<T, B, D> UniqueAllAPI for TensorView<'_, T, B, D>
-where
-    D: DimAPI,
-    B: DeviceAPI<T>
-        + DeviceAPI<usize>
-        + DeviceRawAPI<MaybeUninit<T>>
-        + DeviceRawAPI<MaybeUninit<usize>>
-        + DeviceCreationAnyAPI<T>
-        + DeviceCreationAnyAPI<usize>
-        + OpUniqueAPI<T, D>,
-{
-    type Out = UniqueAll<T, B>;
-
-    fn unique_all_f(self) -> Result<Self::Out> {
-        unique_all_f(self)
+    /// Returns the unique values of a tensor with all auxiliary fields.
+    ///
+    /// See also [`unique_all`].
+    pub fn unique_all(&self) -> UniqueAll<T, B> {
+        unique_all_f(self).rstsr_unwrap()
     }
 }
-
 /* #endregion */
 
 /* #region isin */
@@ -850,16 +790,16 @@ where
 /// # device.set_default_order(RowMajor);
 /// let a = rt::tensor_from_nested!([1, 2, 3, 4], &device);
 /// let b = rt::tensor_from_nested!([2, 4], &device);
-/// println!("{}", rt::isin((&a, &b, false)));
+/// println!("{}", rt::isin(&a, &b, false));
 /// // [ false true false true]
-/// # assert_eq!(format!("{}", rt::isin((&a, &b, false))), "[ false true false true]");
+/// # assert_eq!(format!("{}", rt::isin(&a, &b, false)), "[ false true false true]");
 /// ```
 ///
 /// # Notes of API accordance
 ///
 /// - Array-API: `isin(x1, x2, /, *, invert=False)` (2025.12) ([`isin`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.isin.html))
 /// - NumPy: `numpy.isin(element, test_elements, invert=False)`
-/// - RSTSR: `rt::isin((x1, x2, invert))`
+/// - RSTSR: `rt::isin(x1, x2, invert)`
 ///
 /// Deviation from NumPy: scalar `x1`/`x2` should be wrapped with
 /// [`asarray`](asarray()); NumPy broadcasts `element` against
@@ -871,115 +811,69 @@ where
 /// ## Variants of this function
 ///
 /// - [`isin_f`]: fallible version.
-pub fn isin<Args, Inp>(args: Args) -> Args::Out
+/// - [`TensorAny::isin`]: associated method.
+/// - [`TensorAny::isin_f`]: associated fallible method.
+pub fn isin<T, B, D1, D2>(
+    x1: impl TensorViewAPI<Type = T, Backend = B, Dim = D1>,
+    x2: impl TensorViewAPI<Type = T, Backend = B, Dim = D2>,
+    invert: bool,
+) -> Tensor<bool, B, IxD>
 where
-    Args: IsinAPI<Inp>,
+    D1: DimAPI,
+    D2: DimAPI,
+    B: DeviceAPI<T>
+        + DeviceAPI<bool>
+        + DeviceRawAPI<MaybeUninit<T>>
+        + DeviceRawAPI<MaybeUninit<usize>>
+        + DeviceRawAPI<MaybeUninit<bool>>
+        + DeviceCreationAnyAPI<T>
+        + DeviceCreationAnyAPI<usize>
+        + DeviceCreationAnyAPI<bool>
+        + OpIsinAPI<T, D1>,
 {
-    Args::isin(args)
+    isin_f(x1, x2, invert).rstsr_unwrap()
 }
 
-/// API trait backing [`isin`].
-pub trait IsinAPI<Inp> {
-    type Out;
-
-    fn isin_f(self) -> Result<Self::Out>;
-    fn isin(self) -> Self::Out
+impl<R1, T, B, D1> TensorAny<R1, T, B, D1>
+where
+    R1: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
+    D1: DimAPI,
+    B: DeviceAPI<T>
+        + DeviceAPI<bool>
+        + DeviceRawAPI<MaybeUninit<T>>
+        + DeviceRawAPI<MaybeUninit<usize>>
+        + DeviceRawAPI<MaybeUninit<bool>>
+        + DeviceCreationAnyAPI<T>
+        + DeviceCreationAnyAPI<usize>
+        + DeviceCreationAnyAPI<bool>
+        + OpIsinAPI<T, D1>,
+{
+    /// Element membership of `x1` in `x2`.
+    ///
+    /// See also [`isin`].
+    pub fn isin_f<D2>(
+        &self,
+        x2: impl TensorViewAPI<Type = T, Backend = B, Dim = D2>,
+        invert: bool,
+    ) -> Result<Tensor<bool, B, IxD>>
     where
-        Self: Sized,
+        D2: DimAPI,
     {
-        Self::isin_f(self).rstsr_unwrap()
+        isin_f(self, x2, invert)
     }
-}
 
-impl<R1, R2, T, B, D1, D2> IsinAPI<()> for (&TensorAny<R1, T, B, D1>, &TensorAny<R2, T, B, D2>, bool)
-where
-    R1: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
-    R2: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
-    D1: DimAPI,
-    D2: DimAPI,
-    B: DeviceAPI<T>
-        + DeviceAPI<bool>
-        + DeviceRawAPI<MaybeUninit<T>>
-        + DeviceRawAPI<MaybeUninit<usize>>
-        + DeviceRawAPI<MaybeUninit<bool>>
-        + DeviceCreationAnyAPI<T>
-        + DeviceCreationAnyAPI<usize>
-        + DeviceCreationAnyAPI<bool>
-        + OpIsinAPI<T, D1>,
-{
-    type Out = Tensor<bool, B, IxD>;
-
-    fn isin_f(self) -> Result<Self::Out> {
-        let (x1, x2, invert) = self;
-        isin_f(x1, x2, invert)
-    }
-}
-
-impl<R2, T, B, D1, D2> IsinAPI<()> for (TensorView<'_, T, B, D1>, &TensorAny<R2, T, B, D2>, bool)
-where
-    R2: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
-    D1: DimAPI,
-    D2: DimAPI,
-    B: DeviceAPI<T>
-        + DeviceAPI<bool>
-        + DeviceRawAPI<MaybeUninit<T>>
-        + DeviceRawAPI<MaybeUninit<usize>>
-        + DeviceRawAPI<MaybeUninit<bool>>
-        + DeviceCreationAnyAPI<T>
-        + DeviceCreationAnyAPI<usize>
-        + DeviceCreationAnyAPI<bool>
-        + OpIsinAPI<T, D1>,
-{
-    type Out = Tensor<bool, B, IxD>;
-
-    fn isin_f(self) -> Result<Self::Out> {
-        let (x1, x2, invert) = self;
-        isin_f(x1, x2, invert)
-    }
-}
-
-impl<R1, T, B, D1, D2> IsinAPI<()> for (&TensorAny<R1, T, B, D1>, TensorView<'_, T, B, D2>, bool)
-where
-    R1: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
-    D1: DimAPI,
-    D2: DimAPI,
-    B: DeviceAPI<T>
-        + DeviceAPI<bool>
-        + DeviceRawAPI<MaybeUninit<T>>
-        + DeviceRawAPI<MaybeUninit<usize>>
-        + DeviceRawAPI<MaybeUninit<bool>>
-        + DeviceCreationAnyAPI<T>
-        + DeviceCreationAnyAPI<usize>
-        + DeviceCreationAnyAPI<bool>
-        + OpIsinAPI<T, D1>,
-{
-    type Out = Tensor<bool, B, IxD>;
-
-    fn isin_f(self) -> Result<Self::Out> {
-        let (x1, x2, invert) = self;
-        isin_f(x1, x2, invert)
-    }
-}
-
-impl<T, B, D1, D2> IsinAPI<()> for (TensorView<'_, T, B, D1>, TensorView<'_, T, B, D2>, bool)
-where
-    D1: DimAPI,
-    D2: DimAPI,
-    B: DeviceAPI<T>
-        + DeviceAPI<bool>
-        + DeviceRawAPI<MaybeUninit<T>>
-        + DeviceRawAPI<MaybeUninit<usize>>
-        + DeviceRawAPI<MaybeUninit<bool>>
-        + DeviceCreationAnyAPI<T>
-        + DeviceCreationAnyAPI<usize>
-        + DeviceCreationAnyAPI<bool>
-        + OpIsinAPI<T, D1>,
-{
-    type Out = Tensor<bool, B, IxD>;
-
-    fn isin_f(self) -> Result<Self::Out> {
-        let (x1, x2, invert) = self;
-        isin_f(x1, x2, invert)
+    /// Element membership of `x1` in `x2`.
+    ///
+    /// See also [`isin`].
+    pub fn isin<D2>(
+        &self,
+        x2: impl TensorViewAPI<Type = T, Backend = B, Dim = D2>,
+        invert: bool,
+    ) -> Tensor<bool, B, IxD>
+    where
+        D2: DimAPI,
+    {
+        isin_f(self, x2, invert).rstsr_unwrap()
     }
 }
 

@@ -22,7 +22,7 @@ mod numpy_roll {
         // assert_equal(xr, np.array([8, 9, 0, 1, 2, 3, 4, 5, 6, 7]))
         let x = rt::arange((10, &device));
         let expected = rt::tensor_from_nested!([8, 9, 0, 1, 2, 3, 4, 5, 6, 7], &device);
-        assert_equal(x.roll(2, None), &expected, None);
+        assert_equal(x.roll((2, None)), &expected, None);
     }
 
     #[test]
@@ -39,62 +39,62 @@ mod numpy_roll {
         // x2r = np.roll(x2, 1)
         // assert_equal(x2r, np.array([[9, 0, 1, 2, 3], [4, 5, 6, 7, 8]]))
         let expected = rt::tensor_from_nested!([[9, 0, 1, 2, 3], [4, 5, 6, 7, 8]], &device);
-        assert_equal(x2.roll(1, None), &expected, None);
+        assert_equal(x2.roll((1, None)), &expected, None);
 
         // x2r = np.roll(x2, 1, axis=0)
         let expected = rt::tensor_from_nested!([[5, 6, 7, 8, 9], [0, 1, 2, 3, 4]], &device);
-        assert_equal(x2.roll(1, 0), &expected, None);
+        assert_equal(x2.roll((1, 0)), &expected, None);
 
         // x2r = np.roll(x2, 1, axis=1)
         let expected = rt::tensor_from_nested!([[4, 0, 1, 2, 3], [9, 5, 6, 7, 8]], &device);
-        assert_equal(x2.roll(1, 1), &expected, None);
+        assert_equal(x2.roll((1, 1)), &expected, None);
 
         // Roll multiple axes at once.
         // x2r = np.roll(x2, 1, axis=(0, 1))
         let expected = rt::tensor_from_nested!([[9, 5, 6, 7, 8], [4, 0, 1, 2, 3]], &device);
-        assert_equal(x2.roll(1, [0, 1]), &expected, None);
+        assert_equal(x2.roll((1, [0, 1])), &expected, None);
 
         // x2r = np.roll(x2, (1, 0), axis=(0, 1))
         let expected = rt::tensor_from_nested!([[5, 6, 7, 8, 9], [0, 1, 2, 3, 4]], &device);
-        assert_equal(x2.roll([1, 0], [0, 1]), &expected, None);
+        assert_equal(x2.roll(([1, 0], [0, 1])), &expected, None);
 
         // x2r = np.roll(x2, (-1, 0), axis=(0, 1))
         let expected = rt::tensor_from_nested!([[5, 6, 7, 8, 9], [0, 1, 2, 3, 4]], &device);
-        assert_equal(x2.roll([-1, 0], [0, 1]), &expected, None);
+        assert_equal(x2.roll(([-1, 0], [0, 1])), &expected, None);
 
         // x2r = np.roll(x2, (0, 1), axis=(0, 1))
         let expected = rt::tensor_from_nested!([[4, 0, 1, 2, 3], [9, 5, 6, 7, 8]], &device);
-        assert_equal(x2.roll([0, 1], [0, 1]), &expected, None);
+        assert_equal(x2.roll(([0, 1], [0, 1])), &expected, None);
 
         // x2r = np.roll(x2, (0, -1), axis=(0, 1))
         let expected = rt::tensor_from_nested!([[1, 2, 3, 4, 0], [6, 7, 8, 9, 5]], &device);
-        assert_equal(x2.roll([0, -1], [0, 1]), &expected, None);
+        assert_equal(x2.roll(([0, -1], [0, 1])), &expected, None);
 
         // x2r = np.roll(x2, (1, 1), axis=(0, 1))
         let expected = rt::tensor_from_nested!([[9, 5, 6, 7, 8], [4, 0, 1, 2, 3]], &device);
-        assert_equal(x2.roll([1, 1], [0, 1]), &expected, None);
+        assert_equal(x2.roll(([1, 1], [0, 1])), &expected, None);
 
         // x2r = np.roll(x2, (-1, -1), axis=(0, 1))
         let expected = rt::tensor_from_nested!([[6, 7, 8, 9, 5], [1, 2, 3, 4, 0]], &device);
-        assert_equal(x2.roll([-1, -1], [0, 1]), &expected, None);
+        assert_equal(x2.roll(([-1, -1], [0, 1])), &expected, None);
 
         // Roll the same axis multiple times.
         // x2r = np.roll(x2, 1, axis=(0, 0))
         let expected = rt::tensor_from_nested!([[0, 1, 2, 3, 4], [5, 6, 7, 8, 9]], &device);
-        assert_equal(x2.roll(1, [0, 0]), &expected, None);
+        assert_equal(x2.roll((1, [0, 0])), &expected, None);
 
         // x2r = np.roll(x2, 1, axis=(1, 1))
         let expected = rt::tensor_from_nested!([[3, 4, 0, 1, 2], [8, 9, 5, 6, 7]], &device);
-        assert_equal(x2.roll(1, [1, 1]), &expected, None);
+        assert_equal(x2.roll((1, [1, 1])), &expected, None);
 
         // Roll more than one turn in either direction.
         // x2r = np.roll(x2, 6, axis=1)
         let expected = rt::tensor_from_nested!([[4, 0, 1, 2, 3], [9, 5, 6, 7, 8]], &device);
-        assert_equal(x2.roll(6, 1), &expected, None);
+        assert_equal(x2.roll((6, 1)), &expected, None);
 
         // x2r = np.roll(x2, -4, axis=1)
         let expected = rt::tensor_from_nested!([[4, 0, 1, 2, 3], [9, 5, 6, 7, 8]], &device);
-        assert_equal(x2.roll(-4, 1), &expected, None);
+        assert_equal(x2.roll((-4, 1)), &expected, None);
     }
 
     #[test]
@@ -107,7 +107,7 @@ mod numpy_roll {
 
         // x = np.array([]); assert_equal(np.roll(x, 1), np.array([]))
         let x: Tensor<i32, _> = rt::zeros(([0], &device));
-        let out = x.roll(1, None);
+        let out = x.roll((1, None));
         assert_eq!(out.shape(), &[0]);
     }
 
@@ -124,9 +124,9 @@ mod numpy_roll {
         // isize cannot hold 2**100; the same multi-turn wrap path is exercised
         // with shifts that are exact multiples of the axis length (identity)
         let x = rt::arange((4, &device));
-        assert_equal(x.roll(4 * 25, None), &x, None);
+        assert_equal(x.roll((4 * 25, None)), &x, None);
         // negative multiple turns is identity
-        assert_equal(x.roll(-(4 * 3), None), &x, None);
+        assert_equal(x.roll((-(4 * 3), None)), &x, None);
     }
 }
 
@@ -149,7 +149,7 @@ mod custom_roll {
         let a = rt::arange((6, &device)).into_shape([2, 3]);
         let at = a.t();
         let expected = rt::tensor_from_nested!([[5, 0], [3, 1], [4, 2]], &device);
-        assert_equal(at.roll(1, None), &expected, None);
+        assert_equal(at.roll((1, None)), &expected, None);
     }
 
     #[test]
@@ -164,7 +164,7 @@ mod custom_roll {
 
         let a = rt::arange((6, &device)).into_shape([2, 3]);
         let at = a.t();
-        let out = at.roll(1, 0);
+        let out = at.roll((1, 0));
         assert_eq!(out.shape(), &[3, 2]);
         let expected = rt::tensor_from_nested!([[2, 5], [0, 3], [1, 4]], &device);
         assert_equal(out, &expected, None);
@@ -179,7 +179,7 @@ mod custom_roll {
         device.set_default_order(RowMajor);
 
         let a = rt::arange((6, &device)).into_shape([2, 3]);
-        assert!(a.roll_f([1, 2], [0, 1, 1]).is_err());
+        assert!(a.roll_f(([1, 2], [0, 1, 1])).is_err());
     }
 
     #[test]
@@ -192,8 +192,8 @@ mod custom_roll {
 
         // np.roll(x2, 1, axis=(0, 1)) == np.roll(x2, (1, 1), axis=(0, 1))
         let x2 = rt::arange((10, &device)).into_shape([2, 5]);
-        let expected = x2.roll([1, 1], [0, 1]);
-        assert_equal(x2.roll(1, [0, 1]), &expected, None);
+        let expected = x2.roll(([1, 1], [0, 1]));
+        assert_equal(x2.roll((1, [0, 1])), &expected, None);
     }
 
     #[test]
@@ -206,11 +206,11 @@ mod custom_roll {
         device.set_default_order(RowMajor);
 
         let x = rt::arange((5, &device));
-        let expected = x.roll(3, None);
-        assert_equal(x.roll([1, 2], None), &expected, None);
+        let expected = x.roll((3, None));
+        assert_equal(x.roll(([1, 2], None)), &expected, None);
         let m = rt::arange((20, &device)).into_shape([4, 5]);
-        let expected_m = m.roll(3, 1);
-        assert_equal(m.roll([1, 2], 1), &expected_m, None);
+        let expected_m = m.roll((3, 1));
+        assert_equal(m.roll(([1, 2], 1)), &expected_m, None);
     }
 
     #[test]
@@ -222,10 +222,10 @@ mod custom_roll {
         device.set_default_order(RowMajor);
 
         let x = rt::arange((24, &device)).into_shape([2, 3, 4]);
-        let expected = x.roll([5, 5], [0, 1]);
-        assert_equal(x.roll([5], [0, 1]), &expected, None);
+        let expected = x.roll(([5, 5], [0, 1]));
+        assert_equal(x.roll(([5], [0, 1])), &expected, None);
         // int shift with tuple axis behaves identically
-        assert_equal(x.roll(5, [0, 1]), &expected, None);
+        assert_equal(x.roll((5, [0, 1])), &expected, None);
     }
 
     #[test]
@@ -237,7 +237,7 @@ mod custom_roll {
         device.set_default_order(RowMajor);
 
         let a = rt::full(([], 9, &device));
-        let out = a.roll(3, None);
+        let out = a.roll((3, None));
         assert_eq!(out.shape(), &[]);
         assert_equal(out, &a, None);
     }
@@ -251,7 +251,7 @@ mod custom_roll {
         device.set_default_order(RowMajor);
 
         let a = rt::arange((4, &device));
-        let mut b = a.roll(0, None);
+        let mut b = a.roll((0, None));
         b.i_mut((0,)).fill(100);
         let expected = rt::tensor_from_nested!([0, 1, 2, 3], &device);
         assert_equal(a, &expected, None);
@@ -274,10 +274,37 @@ mod device_order {
         device.set_default_order(ColMajor);
 
         let a = rt::arange((6, &device)).into_shape([2, 3]); // [[0 2 4], [1 3 5]]
-        let out = rt::roll((&a, 1, None));
+        let out = rt::roll(&a, (1, None));
         // the restored shape follows the device order as well (F-contiguous)
         assert_eq!(out.stride(), &[1, 2]);
         let expected = rt::tensor_from_nested!([[5, 1, 3], [0, 2, 4]], &device);
         assert_equal(out, &expected, None);
+    }
+}
+
+#[cfg(test)]
+mod arg_overloads {
+    use super::*;
+    static FUNC: &str = "arg_overloads";
+
+    #[test]
+    fn test_roll_args_forms() {
+        // `RollArgs` accepts the bare shift and the `(shift, axis)` tuple
+        crate::specify_test!("test_roll_args_forms");
+
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        let x = rt::arange((10, &device));
+        let m = rt::arange((6, &device)).into_shape([2, 3]);
+
+        assert_equal(x.roll(2), rt::roll(&x, 2), None);
+        assert_equal(x.roll((2, 0)), rt::roll(&x, (2, 0)), None);
+        assert_equal(x.roll((2, None)), x.roll(2), None);
+        assert_equal(m.roll(([1, 0], [0, 1])), rt::roll(&m, ([1, 0], [0, 1])), None);
+        assert_equal(m.roll([-1, 1]), m.roll(([-1, 1], None)), None);
+        // fallible twins, on a view receiver
+        assert!(m.view().roll_f((1, 1)).is_ok());
+        assert!(rt::roll_f(&m, (1, None)).is_ok());
     }
 }

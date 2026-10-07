@@ -98,9 +98,9 @@ where
 /// # device.set_default_order(RowMajor);
 /// let x1 = rt::tensor_from_nested!([11, 12, 14, 15, 16], &device);
 /// let x2 = rt::tensor_from_nested!([10, 13, 17], &device);
-/// println!("{}", rt::searchsorted((&x1, &x2, ())));
+/// println!("{}", rt::searchsorted(&x1, &x2, ()));
 /// // [ 0 2 5]
-/// # assert_eq!(format!("{}", rt::searchsorted((&x1, &x2, ()))), "[ 0 2 5]");
+/// # assert_eq!(format!("{}", rt::searchsorted(&x1, &x2, ())), "[ 0 2 5]");
 /// ```
 ///
 /// Insertion side (`side = "right"`):
@@ -111,19 +111,19 @@ where
 /// # device.set_default_order(RowMajor);
 /// let x1 = rt::tensor_from_nested!([10, 20, 30], &device);
 /// let v = rt::tensor_from_nested!([20], &device);
-/// println!("{}", rt::searchsorted((&x1, &v, "left")));
+/// println!("{}", rt::searchsorted(&x1, &v, "left"));
 /// // [ 1]
-/// println!("{}", rt::searchsorted((&x1, &v, "right")));
+/// println!("{}", rt::searchsorted(&x1, &v, "right"));
 /// // [ 2]
-/// # assert_eq!(format!("{}", rt::searchsorted((&x1, &v, "left"))), "[ 1]");
-/// # assert_eq!(format!("{}", rt::searchsorted((&x1, &v, "right"))), "[ 2]");
+/// # assert_eq!(format!("{}", rt::searchsorted(&x1, &v, "left")), "[ 1]");
+/// # assert_eq!(format!("{}", rt::searchsorted(&x1, &v, "right")), "[ 2]");
 /// ```
 ///
 /// # Notes of API accordance
 ///
 /// - Array-API: `searchsorted(x1, x2, /, *, side='left', sorter=None)` ([`searchsorted`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.searchsorted.html))
 /// - NumPy: `numpy.searchsorted(a, v, side='left', sorter=None)` ([`numpy.searchsorted`](https://numpy.org/doc/stable/reference/generated/numpy.searchsorted.html))
-/// - RSTSR: `rt::searchsorted((x1, x2, args))`
+/// - RSTSR: `rt::searchsorted(x1, x2, args)`
 ///
 /// Deviation from NumPy: scalar `x2` should be wrapped with
 /// [`asarray`](asarray()) (rstsr functions take tensors). The returned index
@@ -147,88 +147,11 @@ where
 /// - [`searchsorted_f`]: fallible version.
 /// - [`TensorAny::searchsorted`]: associated method.
 /// - [`TensorAny::searchsorted_f`]: associated fallible method.
-pub fn searchsorted<Args, Inp>(args: Args) -> Args::Out
-where
-    Args: SearchSortedAPI<Inp>,
-{
-    Args::searchsorted(args)
-}
-
-/// API trait backing [`searchsorted`].
-pub trait SearchSortedAPI<Inp> {
-    type Out;
-
-    fn searchsorted_f(self) -> Result<Self::Out>;
-    fn searchsorted(self) -> Self::Out
-    where
-        Self: Sized,
-    {
-        Self::searchsorted_f(self).rstsr_unwrap()
-    }
-}
-
-impl<R1, R2, T, B, D1, D2, AArg> SearchSortedAPI<()> for (&TensorAny<R1, T, B, D1>, &TensorAny<R2, T, B, D2>, AArg)
-where
-    R1: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
-    R2: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
-    D1: DimAPI,
-    D2: DimAPI,
-    AArg: TryInto<SearchSortedArgs, Error: Into<Error>>,
-    B: DeviceAPI<T>
-        + DeviceAPI<usize>
-        + DeviceRawAPI<MaybeUninit<usize>>
-        + DeviceCreationAnyAPI<usize>
-        + OpSearchSortedAPI<T, T, D2>,
-{
-    type Out = Tensor<usize, B, IxD>;
-
-    fn searchsorted_f(self) -> Result<Self::Out> {
-        let (x1, x2, args) = self;
-        searchsorted_f(x1, x2, args)
-    }
-}
-
-impl<R2, T, B, D1, D2, AArg> SearchSortedAPI<()> for (TensorView<'_, T, B, D1>, &TensorAny<R2, T, B, D2>, AArg)
-where
-    R2: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
-    D1: DimAPI,
-    D2: DimAPI,
-    AArg: TryInto<SearchSortedArgs, Error: Into<Error>>,
-    B: DeviceAPI<T>
-        + DeviceAPI<usize>
-        + DeviceRawAPI<MaybeUninit<usize>>
-        + DeviceCreationAnyAPI<usize>
-        + OpSearchSortedAPI<T, T, D2>,
-{
-    type Out = Tensor<usize, B, IxD>;
-
-    fn searchsorted_f(self) -> Result<Self::Out> {
-        let (x1, x2, args) = self;
-        searchsorted_f(x1, x2, args)
-    }
-}
-
-impl<R1, T, B, D1, D2, AArg> SearchSortedAPI<()> for (&TensorAny<R1, T, B, D1>, TensorView<'_, T, B, D2>, AArg)
-where
-    R1: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
-    D1: DimAPI,
-    D2: DimAPI,
-    AArg: TryInto<SearchSortedArgs, Error: Into<Error>>,
-    B: DeviceAPI<T>
-        + DeviceAPI<usize>
-        + DeviceRawAPI<MaybeUninit<usize>>
-        + DeviceCreationAnyAPI<usize>
-        + OpSearchSortedAPI<T, T, D2>,
-{
-    type Out = Tensor<usize, B, IxD>;
-
-    fn searchsorted_f(self) -> Result<Self::Out> {
-        let (x1, x2, args) = self;
-        searchsorted_f(x1, x2, args)
-    }
-}
-
-impl<T, B, D1, D2, AArg> SearchSortedAPI<()> for (TensorView<'_, T, B, D1>, TensorView<'_, T, B, D2>, AArg)
+pub fn searchsorted<T, B, D1, D2, AArg>(
+    x1: impl TensorViewAPI<Type = T, Backend = B, Dim = D1>,
+    x2: impl TensorViewAPI<Type = T, Backend = B, Dim = D2>,
+    args: AArg,
+) -> Tensor<usize, B, IxD>
 where
     D1: DimAPI,
     D2: DimAPI,
@@ -239,12 +162,7 @@ where
         + DeviceCreationAnyAPI<usize>
         + OpSearchSortedAPI<T, T, D2>,
 {
-    type Out = Tensor<usize, B, IxD>;
-
-    fn searchsorted_f(self) -> Result<Self::Out> {
-        let (x1, x2, args) = self;
-        searchsorted_f(x1, x2, args)
-    }
+    searchsorted_f(x1, x2, args).rstsr_unwrap()
 }
 
 impl<R1, T, B, D1> TensorAny<R1, T, B, D1>
@@ -256,13 +174,12 @@ where
     /// Finds the positions where values of `x2` would insert into sorted `x1`.
     ///
     /// See also [`searchsorted`].
-    pub fn searchsorted_f<R2, D2, AArg>(
+    pub fn searchsorted_f<D2, AArg>(
         &self,
-        x2: &TensorAny<R2, T, B, D2>,
+        x2: impl TensorViewAPI<Type = T, Backend = B, Dim = D2>,
         args: AArg,
     ) -> Result<Tensor<usize, B, IxD>>
     where
-        R2: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
         D2: DimAPI,
         AArg: TryInto<SearchSortedArgs, Error: Into<Error>>,
         B: DeviceAPI<T>
@@ -277,9 +194,12 @@ where
     /// Finds the positions where values of `x2` would insert into sorted `x1`.
     ///
     /// See also [`searchsorted`].
-    pub fn searchsorted<R2, D2, AArg>(&self, x2: &TensorAny<R2, T, B, D2>, args: AArg) -> Tensor<usize, B, IxD>
+    pub fn searchsorted<D2, AArg>(
+        &self,
+        x2: impl TensorViewAPI<Type = T, Backend = B, Dim = D2>,
+        args: AArg,
+    ) -> Tensor<usize, B, IxD>
     where
-        R2: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
         D2: DimAPI,
         AArg: TryInto<SearchSortedArgs, Error: Into<Error>>,
         B: DeviceAPI<T>

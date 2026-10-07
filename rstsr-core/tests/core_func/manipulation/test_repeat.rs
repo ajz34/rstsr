@@ -23,7 +23,7 @@ mod numpy_repeat {
         // assert_equal(A, [1, 2, 2, 2, 3, 3, 4, 5, 6, 6])
         let m = rt::tensor_from_nested!([1, 2, 3, 4, 5, 6], &device);
         let expected = rt::tensor_from_nested!([1, 2, 2, 2, 3, 3, 4, 5, 6, 6], &device);
-        assert_equal(m.repeat([1, 3, 2, 1, 1, 2], None), &expected, None);
+        assert_equal(m.repeat(([1, 3, 2, 1, 1, 2], None)), &expected, None);
     }
 
     #[test]
@@ -39,7 +39,7 @@ mod numpy_repeat {
         // assert_equal(A, [1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6])
         let m = rt::tensor_from_nested!([1, 2, 3, 4, 5, 6], &device);
         let expected = rt::tensor_from_nested!([1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6], &device);
-        assert_equal(m.repeat(2, None), &expected, None);
+        assert_equal(m.repeat((2, None)), &expected, None);
     }
 
     #[test]
@@ -54,11 +54,11 @@ mod numpy_repeat {
         // A = np.repeat(m_rect, [2, 1], axis=0)
         let m_rect = rt::tensor_from_nested!([[1, 2, 3], [4, 5, 6]], &device);
         let expected = rt::tensor_from_nested!([[1, 2, 3], [1, 2, 3], [4, 5, 6]], &device);
-        assert_equal(m_rect.repeat([2, 1], 0), &expected, None);
+        assert_equal(m_rect.repeat(([2, 1], 0)), &expected, None);
 
         // A = np.repeat(m_rect, [1, 3, 2], axis=1)
         let expected = rt::tensor_from_nested!([[1, 2, 2, 2, 3, 3], [4, 5, 5, 5, 6, 6]], &device);
-        assert_equal(m_rect.repeat([1, 3, 2], 1), &expected, None);
+        assert_equal(m_rect.repeat(([1, 3, 2], 1)), &expected, None);
     }
 
     #[test]
@@ -73,11 +73,11 @@ mod numpy_repeat {
         // A = np.repeat(m_rect, 2, axis=0)
         let m_rect = rt::tensor_from_nested!([[1, 2, 3], [4, 5, 6]], &device);
         let expected = rt::tensor_from_nested!([[1, 2, 3], [1, 2, 3], [4, 5, 6], [4, 5, 6]], &device);
-        assert_equal(m_rect.repeat(2, 0), &expected, None);
+        assert_equal(m_rect.repeat((2, 0)), &expected, None);
 
         // A = np.repeat(m_rect, 2, axis=1)
         let expected = rt::tensor_from_nested!([[1, 1, 2, 2, 3, 3], [4, 4, 5, 5, 6, 6]], &device);
-        assert_equal(m_rect.repeat(2, 1), &expected, None);
+        assert_equal(m_rect.repeat((2, 1)), &expected, None);
     }
 }
 
@@ -95,8 +95,8 @@ mod custom_repeat {
         device.set_default_order(RowMajor);
 
         let m_rect = rt::tensor_from_nested!([[1, 2, 3], [4, 5, 6]], &device);
-        let expected = m_rect.repeat(2, 1);
-        assert_equal(m_rect.repeat(2, -1), &expected, None);
+        let expected = m_rect.repeat((2, 1));
+        assert_equal(m_rect.repeat((2, -1)), &expected, None);
     }
 
     #[test]
@@ -111,7 +111,7 @@ mod custom_repeat {
         let a = rt::arange((6, &device)).into_shape([2, 3]);
         let at = a.t(); // strided view
         let expected = rt::tensor_from_nested!([0, 3, 1, 4, 2, 5], &device);
-        assert_equal(at.repeat(1, None), &expected, None);
+        assert_equal(at.repeat((1, None)), &expected, None);
     }
 
     #[test]
@@ -124,7 +124,7 @@ mod custom_repeat {
 
         let a = rt::arange((3, &device));
         let expected = rt::tensor_from_nested!([0, 0, 1, 1, 2, 2], &device);
-        assert_equal(a.repeat([2], None), &expected, None);
+        assert_equal(a.repeat(([2], None)), &expected, None);
     }
 
     #[test]
@@ -137,9 +137,9 @@ mod custom_repeat {
 
         let a = rt::tensor_from_nested!([1, 2, 3], &device);
         let expected = rt::tensor_from_nested!([2, 3], &device);
-        assert_equal(a.repeat([0, 1, 1], None), &expected, None);
+        assert_equal(a.repeat(([0, 1, 1], None)), &expected, None);
 
-        let empty = a.repeat(0, None);
+        let empty = a.repeat((0, None));
         assert_eq!(empty.shape(), &[0]);
     }
 
@@ -152,8 +152,8 @@ mod custom_repeat {
         device.set_default_order(RowMajor);
 
         let a = rt::arange((6, &device)).into_shape([2, 3]);
-        assert!(a.repeat_f([1, 2, 3, 4], 0).is_err());
-        assert!(a.repeat_f([1, 2], None).is_err());
+        assert!(a.repeat_f(([1, 2, 3, 4], 0)).is_err());
+        assert!(a.repeat_f(([1, 2], None)).is_err());
     }
 
     #[test]
@@ -165,7 +165,7 @@ mod custom_repeat {
         device.set_default_order(RowMajor);
 
         let a = rt::arange((6, &device)).into_shape([2, 3]);
-        assert!(a.repeat_f(1, [0, 1]).is_err());
+        assert!(a.repeat_f((1, [0, 1])).is_err());
     }
 
     #[test]
@@ -178,7 +178,7 @@ mod custom_repeat {
 
         let a = rt::full(([], 7, &device));
         let expected = rt::tensor_from_nested!([7, 7, 7], &device);
-        assert_equal(a.repeat(3, None), &expected, None);
+        assert_equal(a.repeat((3, None)), &expected, None);
     }
 
     #[test]
@@ -190,7 +190,7 @@ mod custom_repeat {
         device.set_default_order(RowMajor);
 
         let a: Tensor<i32, _> = rt::zeros(([0], &device));
-        let out = a.repeat(3, None);
+        let out = a.repeat((3, None));
         assert_eq!(out.shape(), &[0]);
     }
 }
@@ -211,8 +211,34 @@ mod device_order {
 
         // values 0..6 filled in device order: [[0 2 4], [1 3 5]] (F-contiguous)
         let a = rt::arange((6, &device)).into_shape([2, 3]);
-        let out = rt::repeat((&a, [2, 1, 2, 1, 2, 1], None));
+        let out = rt::repeat(&a, ([2, 1, 2, 1, 2, 1], None));
         let expected = rt::tensor_from_nested!([0, 0, 1, 2, 2, 3, 4, 4, 5], &device);
         assert_equal(out, &expected, None);
+    }
+}
+
+#[cfg(test)]
+mod arg_overloads {
+    use super::*;
+    static FUNC: &str = "arg_overloads";
+
+    #[test]
+    fn test_repeat_args_forms() {
+        // `RepeatArgs` accepts the bare repeat counts and the `(repeats, axis)` tuple
+        crate::specify_test!("test_repeat_args_forms");
+
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        let a = rt::tensor_from_nested!([[0, 1, 2], [3, 4, 5]], &device);
+
+        // method and free function agree, for each accepted form
+        assert_equal(a.repeat(2), rt::repeat(&a, 2), None);
+        assert_equal(a.repeat((2, 0)), rt::repeat(&a, (2, 0)), None);
+        assert_equal(a.repeat((2, None)), a.repeat(2), None);
+        assert_equal(a.repeat(([2, 1], 0)), rt::repeat(&a, ([2, 1], 0)), None);
+        // fallible twins, on a view receiver
+        assert!(a.view().repeat_f((2, 1)).is_ok());
+        assert!(rt::repeat_f(&a, (2, None)).is_ok());
     }
 }

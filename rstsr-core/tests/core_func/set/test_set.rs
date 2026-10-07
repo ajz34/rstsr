@@ -363,7 +363,7 @@ mod numpy_isin {
 
         let a = rt::arange((24, &device)).into_shape([2, 3, 4]);
         let b = rt::tensor_from_nested!([[10, 20, 30], [0, 1, 3], [11, 22, 33]], &device);
-        let out = rt::isin((&a, &b, false));
+        let out = rt::isin(&a, &b, false);
         assert_eq!(out.shape(), &[2, 3, 4]);
         assert_eq!(out.reshape([-1]).to_vec(), vec![
             true, true, false, true, false, false, false, false, false, false, true, true, false, false, false, false,
@@ -373,8 +373,8 @@ mod numpy_isin {
         // empty x1 / empty x2 give all-false
         let empty: Tensor<i32, _> = rt::zeros(([0], &device));
         let ar = rt::tensor_from_nested!([10, 20, 30], &device);
-        assert_eq!(rt::isin((&empty, &ar, false)).shape(), &[0]);
-        assert_eq!(rt::isin((&ar, &empty, false)).to_vec(), vec![false, false, false]);
+        assert_eq!(rt::isin(&empty, &ar, false).shape(), &[0]);
+        assert_eq!(rt::isin(&ar, &empty, false).to_vec(), vec![false, false, false]);
     }
 
     #[test]
@@ -387,8 +387,8 @@ mod numpy_isin {
 
         let a = rt::tensor_from_nested!([5, 4, 5, 3, 4, 4, 3, 4, 3, 5, 2, 1, 5, 5], &device);
         let b = rt::tensor_from_nested!([2, 3, 4], &device);
-        let normal = rt::isin((&a, &b, false)).to_vec();
-        let inverted = rt::isin((&a, &b, true)).to_vec();
+        let normal = rt::isin(&a, &b, false).to_vec();
+        let inverted = rt::isin(&a, &b, true).to_vec();
         assert_eq!(normal, vec![
             false, true, false, true, true, true, true, true, true, false, true, false, false, false
         ]);
@@ -405,8 +405,8 @@ mod numpy_isin {
 
         let a = rt::tensor_from_nested!([true, false], &device);
         let b = rt::tensor_from_nested!([false, false, false], &device);
-        assert_eq!(rt::isin((&a, &b, false)).to_vec(), vec![false, true]);
-        assert_eq!(rt::isin((&a, &b, true)).to_vec(), vec![true, false]);
+        assert_eq!(rt::isin(&a, &b, false).to_vec(), vec![false, true]);
+        assert_eq!(rt::isin(&a, &b, true).to_vec(), vec![true, false]);
     }
 
     #[test]
@@ -421,7 +421,7 @@ mod numpy_isin {
 
         let ar1 = rt::tensor_from_nested!([-1, 2, 3, 4, 5], &device);
         let ar2 = rt::tensor_from_nested!([-1, i32::MAX], &device);
-        assert_eq!(rt::isin((&ar1, &ar2, false)).to_vec(), vec![true, false, false, false, false]);
+        assert_eq!(rt::isin(&ar1, &ar2, false).to_vec(), vec![true, false, false, false, false]);
     }
 }
 
@@ -439,7 +439,7 @@ mod custom_isin {
 
         let a = rt::tensor_from_nested!([1, 2, 3, 4], &device);
         let b = rt::tensor_from_nested!([2, 4], &device);
-        assert_eq!(rt::isin((&a, &b, false)).to_vec(), vec![false, true, false, true]);
+        assert_eq!(rt::isin(&a, &b, false).to_vec(), vec![false, true, false, true]);
     }
 
     #[test]
@@ -451,7 +451,7 @@ mod custom_isin {
 
         let a = rt::tensor_from_nested!([1, 2, 3, 4], &device);
         let b = rt::tensor_from_nested!([2, 4], &device);
-        assert_eq!(rt::isin((&a, &b, true)).to_vec(), vec![true, false, true, false]);
+        assert_eq!(rt::isin(&a, &b, true).to_vec(), vec![true, false, true, false]);
     }
 
     #[test]
@@ -464,7 +464,7 @@ mod custom_isin {
 
         let a = rt::arange((6, &device)).into_shape([2, 3]);
         let b = rt::tensor_from_nested!([[1, 3, 5]], &device);
-        let out = rt::isin((&a, &b, false));
+        let out = rt::isin(&a, &b, false);
         assert_eq!(out.shape(), &[2, 3]);
         assert_eq!(out.reshape([-1]).to_vec(), vec![false, true, false, true, false, true]);
     }
@@ -480,16 +480,16 @@ mod custom_isin {
 
         let a = rt::tensor_from_nested!([f64::NAN, 1.0, f64::NAN], &device);
         let b = rt::tensor_from_nested!([f64::NAN, 1.0], &device);
-        let out = rt::isin((&a, &b, false));
+        let out = rt::isin(&a, &b, false);
         assert_eq!(out.to_vec(), vec![false, true, false]);
 
         let c1 = rt::asarray((vec![num::Complex::new(0.0_f64, f64::NAN)], &device));
         let c2 = rt::asarray((vec![num::Complex::new(1.0_f64, 0.0), num::Complex::new(2.0, f64::NAN)], &device));
-        let out = rt::isin((&c1, &c2, false));
+        let out = rt::isin(&c1, &c2, false);
         assert_eq!(out.to_vec(), vec![false]);
 
         // invert flips the NaN verdict to true
-        let out = rt::isin((&a, &b, true));
+        let out = rt::isin(&a, &b, true);
         assert_eq!(out.to_vec(), vec![true, false, true]);
     }
 
@@ -503,7 +503,7 @@ mod custom_isin {
 
         let a = rt::tensor_from_nested!([1, 2, 3], &device);
         let b = rt::tensor_from_nested!([2, 2, 2], &device);
-        let out = rt::isin((&a, &b, false));
+        let out = rt::isin(&a, &b, false);
         assert_eq!(out.to_vec(), vec![false, true, false]);
     }
 
@@ -521,8 +521,8 @@ mod custom_isin {
 
         let x1 = rt::asarray((vec![Tag(1), Tag(3), Tag(2)], &device));
         let x2 = rt::asarray((vec![Tag(3), Tag(3)], &device));
-        assert_eq!(rt::isin((&x1, &x2, false)).to_vec(), vec![false, true, false]);
-        assert_eq!(rt::isin((&x1, &x2, true)).to_vec(), vec![true, false, true]);
+        assert_eq!(rt::isin(&x1, &x2, false).to_vec(), vec![false, true, false]);
+        assert_eq!(rt::isin(&x1, &x2, true).to_vec(), vec![true, false, true]);
     }
 }
 
@@ -589,9 +589,33 @@ mod device_order {
 
         let a = rt::arange((6, &device)).into_shape([2, 3]); // [[0 2 4], [1 3 5]]
         let b = rt::asarray((vec![2_i32, 3], &device));
-        let out = rt::isin((&a, &b, false));
+        let out = rt::isin(&a, &b, false);
         assert_eq!(out.stride(), &[1, 2]);
         // logical [[false, true, false], [false, true, false]]
         assert_eq!(format!("{out}"), "[[ false true false]\n [ false true false]]");
+    }
+}
+
+#[cfg(test)]
+mod associated_methods {
+    use super::*;
+    static FUNC: &str = "associated_methods";
+
+    #[test]
+    fn test_isin_associated_method() {
+        // `x1.isin(x2, invert)` is the associated-method form of `rt::isin(x1, x2, invert)`
+        crate::specify_test!("test_isin_associated_method");
+
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        let a = rt::tensor_from_nested!([1, 2, 3, 4], &device);
+        let b = rt::tensor_from_nested!([2, 4], &device);
+        assert_eq!(a.isin(&b, false).to_vec(), rt::isin(&a, &b, false).to_vec());
+        assert_eq!(a.isin(&b, true).to_vec(), rt::isin(&a, &b, true).to_vec());
+
+        let v = a.view();
+        assert_eq!(v.isin(&b, false).to_vec(), vec![false, true, false, true]);
+        assert!(a.isin_f(&b, false).is_ok());
     }
 }

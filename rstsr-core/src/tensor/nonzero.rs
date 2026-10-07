@@ -133,27 +133,21 @@ where
 /// ## Variants of this function
 ///
 /// - [`nonzero_f`]: fallible version.
-pub fn nonzero<Inp>(inp: Inp) -> Inp::Out
+/// - [`TensorAny::nonzero`]: associated method.
+/// - [`TensorAny::nonzero_f`]: associated fallible method.
+pub fn nonzero<T, B, D>(tensor: impl TensorViewAPI<Type = T, Backend = B, Dim = D>) -> Vec<Tensor<usize, B, IxD>>
 where
-    Inp: NonzeroAPI,
+    D: DimAPI,
+    B: DeviceAPI<T>
+        + DeviceAPI<usize>
+        + DeviceRawAPI<MaybeUninit<usize>>
+        + DeviceCreationAnyAPI<usize>
+        + OpNonzeroAPI<T, D>,
 {
-    Inp::nonzero(inp)
+    nonzero_f(tensor).rstsr_unwrap()
 }
 
-/// API trait backing [`nonzero`].
-pub trait NonzeroAPI {
-    type Out;
-
-    fn nonzero_f(self) -> Result<Self::Out>;
-    fn nonzero(self) -> Self::Out
-    where
-        Self: Sized,
-    {
-        Self::nonzero_f(self).rstsr_unwrap()
-    }
-}
-
-impl<R, T, B, D> NonzeroAPI for &TensorAny<R, T, B, D>
+impl<R, T, B, D> TensorAny<R, T, B, D>
 where
     R: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
     D: DimAPI,
@@ -163,25 +157,17 @@ where
         + DeviceCreationAnyAPI<usize>
         + OpNonzeroAPI<T, D>,
 {
-    type Out = Vec<Tensor<usize, B, IxD>>;
-
-    fn nonzero_f(self) -> Result<Self::Out> {
+    /// Returns the indices of the elements that are non-zero.
+    ///
+    /// See also [`nonzero`].
+    pub fn nonzero_f(&self) -> Result<Vec<Tensor<usize, B, IxD>>> {
         nonzero_f(self)
     }
-}
 
-impl<T, B, D> NonzeroAPI for TensorView<'_, T, B, D>
-where
-    D: DimAPI,
-    B: DeviceAPI<T>
-        + DeviceAPI<usize>
-        + DeviceRawAPI<MaybeUninit<usize>>
-        + DeviceCreationAnyAPI<usize>
-        + OpNonzeroAPI<T, D>,
-{
-    type Out = Vec<Tensor<usize, B, IxD>>;
-
-    fn nonzero_f(self) -> Result<Self::Out> {
-        nonzero_f(self)
+    /// Returns the indices of the elements that are non-zero.
+    ///
+    /// See also [`nonzero`].
+    pub fn nonzero(&self) -> Vec<Tensor<usize, B, IxD>> {
+        nonzero_f(self).rstsr_unwrap()
     }
 }

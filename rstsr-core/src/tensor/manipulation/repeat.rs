@@ -59,6 +59,73 @@ impl<const N: usize> From<&[usize; N]> for RepeatArg {
 
 /* #endregion */
 
+/// Arguments for [`repeat`]: the repeat counts, and the axis to repeat along.
+///
+/// Overloaded forms (all `Into`/`TryInto` [`RepeatArgs`]):
+///
+/// - `repeats`: a single count or a list of counts; the tensor is flattened first
+///   ([`AxesIndex::None`]) and a 1-D tensor is returned;
+/// - `(repeats, axis)`: a tuple combining the counts with the axis (`axis = None`/`()` means the
+///   flattened form).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RepeatArgs {
+    /// Repeat counts (see [`RepeatArg`]).
+    pub repeats: RepeatArg,
+    /// Axis to repeat along; [`AxesIndex::None`] flattens the tensor first.
+    pub axis: AxesIndex<isize>,
+}
+
+impl RepeatArgs {
+    /// Arguments with the given repeat counts and no axis (the flattened form).
+    pub fn new(repeats: impl Into<RepeatArg>) -> Self {
+        Self { repeats: repeats.into(), axis: AxesIndex::None }
+    }
+}
+
+impl From<RepeatArg> for RepeatArgs {
+    fn from(repeats: RepeatArg) -> Self {
+        Self::new(repeats)
+    }
+}
+
+impl<R, A> TryFrom<(R, A)> for RepeatArgs
+where
+    R: Into<RepeatArg>,
+    A: TryInto<AxesIndex<isize>, Error: Into<Error>>,
+{
+    type Error = Error;
+
+    fn try_from((repeats, axis): (R, A)) -> Result<Self> {
+        Ok(Self { repeats: repeats.into(), axis: axis.try_into().map_err(Into::into)? })
+    }
+}
+
+macro_rules! impl_from_repeats_to_repeat_args {
+    ($($t:ty),*) => {
+        $(
+            impl From<$t> for RepeatArgs {
+                fn from(repeats: $t) -> Self {
+                    Self::new(repeats)
+                }
+            }
+        )*
+    };
+}
+
+impl_from_repeats_to_repeat_args!(usize, &usize, Vec<usize>, &Vec<usize>, &[usize]);
+
+impl<const N: usize> From<[usize; N]> for RepeatArgs {
+    fn from(repeats: [usize; N]) -> Self {
+        Self::new(repeats)
+    }
+}
+
+impl<const N: usize> From<&[usize; N]> for RepeatArgs {
+    fn from(repeats: &[usize; N]) -> Self {
+        Self::new(repeats)
+    }
+}
+
 /* #region repeat */
 
 /// Repeat elements of a tensor.
@@ -66,8 +133,7 @@ impl<const N: usize> From<&[usize; N]> for RepeatArg {
 /// See also [`repeat`].
 pub fn repeat_f<T, B, D>(
     tensor: impl TensorViewAPI<Type = T, Backend = B, Dim = D>,
-    repeats: impl Into<RepeatArg>,
-    axis: impl TryInto<AxesIndex<isize>, Error: Into<Error>>,
+    args: impl TryInto<RepeatArgs, Error: Into<Error>>,
 ) -> Result<Tensor<T, B, IxD>>
 where
     D: DimAPI,
@@ -77,8 +143,8 @@ where
         + OpAssignAPI<T, IxD>
         + OpAssignArbitaryAPI<T, IxD, IxD>,
 {
-    let repeats = repeats.into();
-    let axis = axis.try_into().map_err(Into::into)?;
+    let args = args.try_into().map_err(Into::into)?;
+    let (repeats, axis) = (args.repeats, args.axis);
     let tensor = tensor.view();
     let device = tensor.device().clone();
     let ndim = tensor.ndim();
@@ -275,9 +341,9 @@ where
 /// # let mut device = DeviceCpu::default();
 /// # device.set_default_order(RowMajor);
 /// let a = rt::arange((3, &device));
-/// println!("{}", rt::repeat((&a, 2, None)));
+/// println!("{}", rt::repeat(&a, (2, None)));
 /// // [ 0 0 1 1 2 2]
-/// # assert_eq!(format!("{}", rt::repeat((&a, 2, None))), "[ 0 0 1 1 2 2]");
+/// # assert_eq!(format!("{}", rt::repeat(&a, (2, None))), "[ 0 0 1 1 2 2]");
 /// ```
 ///
 /// Per-element counts along a given axis:
@@ -287,11 +353,11 @@ where
 /// # let mut device = DeviceCpu::default();
 /// # device.set_default_order(RowMajor);
 /// let a = rt::arange((6, &device)).into_shape([2, 3]);
-/// println!("{}", rt::repeat((&a, [2, 1], 0)));
+/// println!("{}", rt::repeat(&a, ([2, 1], 0)));
 /// // [[ 0 1 2]
 /// //  [ 0 1 2]
 /// //  [ 3 4 5]]
-/// # assert_eq!(format!("{}", rt::repeat((&a, [2, 1], 0))), "[[ 0 1 2]\n [ 0 1 2]\n [ 3 4 5]]");
+/// # assert_eq!(format!("{}", rt::repeat(&a, ([2, 1], 0))), "[[ 0 1 2]\n [ 0 1 2]\n [ 3 4 5]]");
 /// ```
 ///
 /// Flattening repeat (`axis = None`):
@@ -301,9 +367,9 @@ where
 /// # let mut device = DeviceCpu::default();
 /// # device.set_default_order(RowMajor);
 /// let a = rt::arange((6, &device)).into_shape([2, 3]);
-/// println!("{}", rt::repeat((&a, 1, None)));
+/// println!("{}", rt::repeat(&a, (1, None)));
 /// // [ 0 1 2 3 4 5]
-/// # assert_eq!(format!("{}", rt::repeat((&a, 1, None))), "[ 0 1 2 3 4 5]");
+/// # assert_eq!(format!("{}", rt::repeat(&a, (1, None))), "[ 0 1 2 3 4 5]");
 /// ```
 ///
 /// ## Difference between [`RowMajor`] and [`ColMajor`]
@@ -316,28 +382,28 @@ where
 /// # let mut device = DeviceCpu::default();
 /// # device.set_default_order(RowMajor);
 /// let a = rt::tensor_from_nested!([[0, 1, 2], [3, 4, 5]], &device);
-/// println!("{}", rt::repeat((&a, [2, 1, 1, 1, 1, 1], None)));
+/// println!("{}", rt::repeat(&a, ([2, 1, 1, 1, 1, 1], None)));
 /// // [ 0 0 1 2 3 4 5]
 ///
 /// device.set_default_order(ColMajor);
 /// let a = rt::tensor_from_nested!([[0, 1, 2], [3, 4, 5]], &device);
-/// println!("{}", rt::repeat((&a, [2, 1, 1, 1, 1, 1], None)));
+/// println!("{}", rt::repeat(&a, ([2, 1, 1, 1, 1, 1], None)));
 /// // [ 0 0 3 1 4 2 5]
-/// # assert_eq!(format!("{}", rt::repeat((&a, [2, 1, 1, 1, 1, 1], None))), "[ 0 0 3 1 4 2 5]");
+/// # assert_eq!(format!("{}", rt::repeat(&a, ([2, 1, 1, 1, 1, 1], None))), "[ 0 0 3 1 4 2 5]");
 /// ```
 ///
 /// # Notes of API accordance
 ///
 /// - Array-API: `repeat(x, repeats, /, *, axis=None)` ([`repeat`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.repeat.html))
 /// - NumPy: `numpy.repeat(a, repeats, axis=None)` ([`numpy.repeat`](https://numpy.org/doc/stable/reference/generated/numpy.repeat.html))
-/// - RSTSR: `rt::repeat((tensor, repeats, axis))`
+/// - RSTSR: `rt::repeat(tensor, (repeats, axis))`
 ///
 /// # Overloads Table
 ///
 /// Output is [`Tensor<T, B, IxD>`][`Tensor`].
 ///
-/// - `repeat((tensor, repeats)) -> Tensor<T, B, IxD>` (implicit `axis = None`, flattened)
-/// - `repeat((tensor, repeats, axis)) -> Tensor<T, B, IxD>` where `axis` is any
+/// - `repeat(tensor, repeats) -> Tensor<T, B, IxD>` (implicit `axis = None`, flattened)
+/// - `repeat(tensor, (repeats, axis)) -> Tensor<T, B, IxD>` where `axis` is any
 ///   `TryInto<AxesIndex<isize>>` form (integer, tuple, list, `None`)
 ///
 /// RSTSR's behavior matches NumPy and Array-API; `repeats` of an integer
@@ -363,100 +429,19 @@ where
 /// - [`repeat_f`]: fallible version.
 /// - [`TensorAny::repeat`]: associated method.
 /// - [`TensorAny::repeat_f`]: associated fallible method.
-pub fn repeat<Args, Inp>(args: Args) -> Args::Out
+pub fn repeat<T, B, D>(
+    tensor: impl TensorViewAPI<Type = T, Backend = B, Dim = D>,
+    args: impl TryInto<RepeatArgs, Error: Into<Error>>,
+) -> Tensor<T, B, IxD>
 where
-    Args: RepeatAPI<Inp>,
-{
-    Args::repeat(args)
-}
-
-/// API trait backing [`repeat`].
-pub trait RepeatAPI<Inp> {
-    type Out;
-
-    fn repeat_f(self) -> Result<Self::Out>;
-    fn repeat(self) -> Self::Out
-    where
-        Self: Sized,
-    {
-        Self::repeat_f(self).rstsr_unwrap()
-    }
-}
-
-impl<RA, T, B, D, RArg, AArg> RepeatAPI<()> for (&TensorAny<RA, T, B, D>, RArg, AArg)
-where
-    RA: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
     D: DimAPI,
-    RArg: Into<RepeatArg>,
-    AArg: TryInto<AxesIndex<isize>, Error: Into<Error>>,
     B: DeviceAPI<T>
         + DeviceRawAPI<MaybeUninit<T>>
         + DeviceCreationAnyAPI<T>
         + OpAssignAPI<T, IxD>
         + OpAssignArbitaryAPI<T, IxD, IxD>,
 {
-    type Out = Tensor<T, B, IxD>;
-
-    fn repeat_f(self) -> Result<Self::Out> {
-        let (tensor, repeats, axis) = self;
-        repeat_f(tensor, repeats, axis)
-    }
-}
-
-impl<RA, T, B, D, RArg> RepeatAPI<()> for (&TensorAny<RA, T, B, D>, RArg)
-where
-    RA: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
-    D: DimAPI,
-    RArg: Into<RepeatArg>,
-    B: DeviceAPI<T>
-        + DeviceRawAPI<MaybeUninit<T>>
-        + DeviceCreationAnyAPI<T>
-        + OpAssignAPI<T, IxD>
-        + OpAssignArbitaryAPI<T, IxD, IxD>,
-{
-    type Out = Tensor<T, B, IxD>;
-
-    fn repeat_f(self) -> Result<Self::Out> {
-        let (tensor, repeats) = self;
-        repeat_f(tensor, repeats, AxesIndex::<isize>::None)
-    }
-}
-
-impl<T, B, D, RArg, AArg> RepeatAPI<()> for (TensorView<'_, T, B, D>, RArg, AArg)
-where
-    D: DimAPI,
-    RArg: Into<RepeatArg>,
-    AArg: TryInto<AxesIndex<isize>, Error: Into<Error>>,
-    B: DeviceAPI<T>
-        + DeviceRawAPI<MaybeUninit<T>>
-        + DeviceCreationAnyAPI<T>
-        + OpAssignAPI<T, IxD>
-        + OpAssignArbitaryAPI<T, IxD, IxD>,
-{
-    type Out = Tensor<T, B, IxD>;
-
-    fn repeat_f(self) -> Result<Self::Out> {
-        let (tensor, repeats, axis) = self;
-        repeat_f(tensor, repeats, axis)
-    }
-}
-
-impl<T, B, D, RArg> RepeatAPI<()> for (TensorView<'_, T, B, D>, RArg)
-where
-    D: DimAPI,
-    RArg: Into<RepeatArg>,
-    B: DeviceAPI<T>
-        + DeviceRawAPI<MaybeUninit<T>>
-        + DeviceCreationAnyAPI<T>
-        + OpAssignAPI<T, IxD>
-        + OpAssignArbitaryAPI<T, IxD, IxD>,
-{
-    type Out = Tensor<T, B, IxD>;
-
-    fn repeat_f(self) -> Result<Self::Out> {
-        let (tensor, repeats) = self;
-        repeat_f(tensor, repeats, AxesIndex::<isize>::None)
-    }
+    repeat_f(tensor, args).rstsr_unwrap()
 }
 
 impl<R, T, B, D> TensorAny<R, T, B, D>
@@ -472,23 +457,21 @@ where
     /// Repeat elements of a tensor.
     ///
     /// See also [`repeat`].
-    pub fn repeat_f(
-        &self,
-        repeats: impl Into<RepeatArg>,
-        axis: impl TryInto<AxesIndex<isize>, Error: Into<Error>>,
-    ) -> Result<Tensor<T, B, IxD>> {
-        repeat_f(self, repeats, axis)
+    pub fn repeat_f<AArg>(&self, args: AArg) -> Result<Tensor<T, B, IxD>>
+    where
+        AArg: TryInto<RepeatArgs, Error: Into<Error>>,
+    {
+        repeat_f(self, args)
     }
 
     /// Repeat elements of a tensor.
     ///
     /// See also [`repeat`].
-    pub fn repeat(
-        &self,
-        repeats: impl Into<RepeatArg>,
-        axis: impl TryInto<AxesIndex<isize>, Error: Into<Error>>,
-    ) -> Tensor<T, B, IxD> {
-        repeat_f(self, repeats, axis).rstsr_unwrap()
+    pub fn repeat<AArg>(&self, args: AArg) -> Tensor<T, B, IxD>
+    where
+        AArg: TryInto<RepeatArgs, Error: Into<Error>>,
+    {
+        repeat_f(self, args).rstsr_unwrap()
     }
 }
 

@@ -431,14 +431,14 @@ where
         + DeviceTakeAlongAxisAPI<T, DA, DI>,
 {
     let (tensor, indices) = (tensor.view(), indices.view());
-    let axis = axis.try_into().map_err(Into::into)?.into_inner();
+    let axis: AxisIndex<isize> = axis.try_into().map_err(Into::into)?;
     let device = tensor.device().clone();
     rstsr_assert!(
         device.same_device(indices.device()),
         DeviceMismatch,
         "take_along_axis requires tensor and indices on the same device."
     )?;
-    let axis = rstsr_check_axis!(axis, tensor.ndim())?;
+    let axis = axis.into_normalized(tensor.ndim())?;
     // shape checks: same rank; non-axis dims must be broadcast-compatible
     // (array-api 2025.12: indices "must be compatible with x, except for the
     // axis specified by axis (see broadcasting)"; the output shape follows
@@ -543,10 +543,10 @@ where
 /// # device.set_default_order(RowMajor);
 /// let a = rt::tensor_from_nested!([[10, 20, 30], [40, 50, 60]], &device);
 /// let idx = rt::tensor_from_nested!([[2, 0], [1, 1]], &device);
-/// println!("{}", rt::take_along_axis((&a, &idx, -1)));
+/// println!("{}", rt::take_along_axis(&a, &idx, -1));
 /// // [[ 30 10]
 /// //  [ 50 50]]
-/// # let out = rt::take_along_axis((&a, &idx, -1));
+/// # let out = rt::take_along_axis(&a, &idx, -1);
 /// # assert_eq!(out.reshape([-1]).to_vec(), vec![30, 10, 50, 50]);
 /// ```
 ///
@@ -554,7 +554,7 @@ where
 ///
 /// - Array-API: `take_along_axis(x, indices, /, *, axis=-1)` ([`take_along_axis`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.take_along_axis.html))
 /// - NumPy: `numpy.take_along_axis(arr, indices, axis)`
-/// - RSTSR: `rt::take_along_axis((tensor, indices, axis))`
+/// - RSTSR: `rt::take_along_axis(tensor, indices, axis)`
 ///
 /// Shapes outside `axis` must be broadcast-compatible: a size-1 dimension on
 /// either side broadcasts against the other (array-api 2025.12 and NumPy
@@ -577,34 +577,15 @@ where
 /// ## Variants of this function
 ///
 /// - [`take_along_axis_f`]: fallible version.
-pub fn take_along_axis<Args, Inp>(args: Args) -> Args::Out
+pub fn take_along_axis<T, B, DA, DI>(
+    tensor: impl TensorViewAPI<Type = T, Backend = B, Dim = DA>,
+    indices: impl TensorViewAPI<Type = isize, Backend = B, Dim = DI>,
+    axis: impl TryInto<AxisIndex<isize>, Error: Into<Error>>,
+) -> Tensor<T, B, IxD>
 where
-    Args: TakeAlongAxisAPI<Inp>,
-{
-    Args::take_along_axis(args)
-}
-
-/// API trait backing [`take_along_axis`].
-pub trait TakeAlongAxisAPI<Inp> {
-    type Out;
-
-    fn take_along_axis_f(self) -> Result<Self::Out>;
-    fn take_along_axis(self) -> Self::Out
-    where
-        Self: Sized,
-    {
-        Self::take_along_axis_f(self).rstsr_unwrap()
-    }
-}
-
-impl<R, RI, T, B, DA, DI, AArg> TakeAlongAxisAPI<()> for (&TensorAny<R, T, B, DA>, &TensorAny<RI, isize, B, DI>, AArg)
-where
-    R: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
-    RI: DataAPI<Data = <B as DeviceRawAPI<isize>>::Raw>,
     DA: DimAPI,
     DI: DimAPI,
     T: Clone,
-    AArg: TryInto<AxisIndex<isize>, Error: Into<Error>>,
     B: DeviceAPI<T>
         + DeviceAPI<usize, Raw = Vec<usize>>
         + DeviceAPI<isize, Raw = Vec<isize>>
@@ -612,77 +593,7 @@ where
         + DeviceCreationAnyAPI<T>
         + DeviceTakeAlongAxisAPI<T, DA, DI>,
 {
-    type Out = Tensor<T, B, IxD>;
-
-    fn take_along_axis_f(self) -> Result<Self::Out> {
-        let (tensor, indices, axis) = self;
-        take_along_axis_f(tensor, indices, axis)
-    }
-}
-
-impl<RI, T, B, DA, DI, AArg> TakeAlongAxisAPI<()> for (TensorView<'_, T, B, DA>, &TensorAny<RI, isize, B, DI>, AArg)
-where
-    RI: DataAPI<Data = <B as DeviceRawAPI<isize>>::Raw>,
-    DA: DimAPI,
-    DI: DimAPI,
-    T: Clone,
-    AArg: TryInto<AxisIndex<isize>, Error: Into<Error>>,
-    B: DeviceAPI<T>
-        + DeviceAPI<usize, Raw = Vec<usize>>
-        + DeviceAPI<isize, Raw = Vec<isize>>
-        + DeviceRawAPI<MaybeUninit<T>>
-        + DeviceCreationAnyAPI<T>
-        + DeviceTakeAlongAxisAPI<T, DA, DI>,
-{
-    type Out = Tensor<T, B, IxD>;
-
-    fn take_along_axis_f(self) -> Result<Self::Out> {
-        let (tensor, indices, axis) = self;
-        take_along_axis_f(tensor, indices, axis)
-    }
-}
-
-impl<R, T, B, DA, DI, AArg> TakeAlongAxisAPI<()> for (&TensorAny<R, T, B, DA>, TensorView<'_, isize, B, DI>, AArg)
-where
-    R: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
-    DA: DimAPI,
-    DI: DimAPI,
-    T: Clone,
-    AArg: TryInto<AxisIndex<isize>, Error: Into<Error>>,
-    B: DeviceAPI<T>
-        + DeviceAPI<usize, Raw = Vec<usize>>
-        + DeviceAPI<isize, Raw = Vec<isize>>
-        + DeviceRawAPI<MaybeUninit<T>>
-        + DeviceCreationAnyAPI<T>
-        + DeviceTakeAlongAxisAPI<T, DA, DI>,
-{
-    type Out = Tensor<T, B, IxD>;
-
-    fn take_along_axis_f(self) -> Result<Self::Out> {
-        let (tensor, indices, axis) = self;
-        take_along_axis_f(tensor, indices, axis)
-    }
-}
-
-impl<T, B, DA, DI, AArg> TakeAlongAxisAPI<()> for (TensorView<'_, T, B, DA>, TensorView<'_, isize, B, DI>, AArg)
-where
-    DA: DimAPI,
-    DI: DimAPI,
-    T: Clone,
-    AArg: TryInto<AxisIndex<isize>, Error: Into<Error>>,
-    B: DeviceAPI<T>
-        + DeviceAPI<usize, Raw = Vec<usize>>
-        + DeviceAPI<isize, Raw = Vec<isize>>
-        + DeviceRawAPI<MaybeUninit<T>>
-        + DeviceCreationAnyAPI<T>
-        + DeviceTakeAlongAxisAPI<T, DA, DI>,
-{
-    type Out = Tensor<T, B, IxD>;
-
-    fn take_along_axis_f(self) -> Result<Self::Out> {
-        let (tensor, indices, axis) = self;
-        take_along_axis_f(tensor, indices, axis)
-    }
+    take_along_axis_f(tensor, indices, axis).rstsr_unwrap()
 }
 
 impl<R, T, B, DA> TensorAny<R, T, B, DA>
@@ -699,13 +610,12 @@ where
     /// Gather values along an axis using an index tensor.
     ///
     /// See also [`take_along_axis`].
-    pub fn take_along_axis_f<RI, DI, AArg>(
+    pub fn take_along_axis_f<DI, AArg>(
         &self,
-        indices: &TensorAny<RI, isize, B, DI>,
+        indices: impl TensorViewAPI<Type = isize, Backend = B, Dim = DI>,
         axis: AArg,
     ) -> Result<Tensor<T, B, IxD>>
     where
-        RI: DataAPI<Data = <B as DeviceRawAPI<isize>>::Raw>,
         DI: DimAPI,
         AArg: TryInto<AxisIndex<isize>, Error: Into<Error>>,
         B: DeviceAPI<T>
@@ -721,9 +631,12 @@ where
     /// Gather values along an axis using an index tensor.
     ///
     /// See also [`take_along_axis`].
-    pub fn take_along_axis<RI, DI, AArg>(&self, indices: &TensorAny<RI, isize, B, DI>, axis: AArg) -> Tensor<T, B, IxD>
+    pub fn take_along_axis<DI, AArg>(
+        &self,
+        indices: impl TensorViewAPI<Type = isize, Backend = B, Dim = DI>,
+        axis: AArg,
+    ) -> Tensor<T, B, IxD>
     where
-        RI: DataAPI<Data = <B as DeviceRawAPI<isize>>::Raw>,
         DI: DimAPI,
         AArg: TryInto<AxisIndex<isize>, Error: Into<Error>>,
         B: DeviceAPI<T>

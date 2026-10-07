@@ -2,6 +2,118 @@
 
 use crate::prelude_dev::*;
 
+/* #region roll args */
+
+/// Arguments for [`roll`]: the shift, and the axis (or axes) to roll along.
+///
+/// Overloaded forms (all `TryInto` [`RollArgs`]):
+///
+/// - `shift`: the shift alone; the tensor is flattened in the device default order, rolled, and
+///   reshaped back;
+/// - `(shift, axis)`: a tuple combining both (`axis = None`/`()` means the flattened form).
+///
+/// The bare `shift` accepts `isize` (so plain integer literals), arrays,
+/// slices and `Vec`s of any integer type, and [`AxesIndex<isize>`]; other
+/// scalar integer types are available through the tuple form.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RollArgs {
+    /// Shift applied to each rolled axis.
+    pub shift: AxesIndex<isize>,
+    /// Axis (or axes) to roll along; [`AxesIndex::None`] flattens the tensor first.
+    pub axis: AxesIndex<isize>,
+}
+
+impl RollArgs {
+    /// Arguments with the given shift and axis.
+    pub fn new(shift: AxesIndex<isize>, axis: AxesIndex<isize>) -> Self {
+        Self { shift, axis }
+    }
+}
+
+fn shift_to_axes<F, I>(iter: I) -> Result<AxesIndex<isize>>
+where
+    F: TryInto<isize>,
+    F::Error: Into<Error>,
+    I: Iterator<Item = F>,
+{
+    let shift: Vec<isize> = iter.map(|v| v.try_into().map_err(Into::into)).collect::<Result<Vec<isize>>>()?;
+    Ok(AxesIndex::Vec(shift))
+}
+
+impl From<AxesIndex<isize>> for RollArgs {
+    fn from(shift: AxesIndex<isize>) -> Self {
+        Self { shift, axis: AxesIndex::None }
+    }
+}
+
+impl From<isize> for RollArgs {
+    fn from(shift: isize) -> Self {
+        Self { shift: AxesIndex::Val(shift), axis: AxesIndex::None }
+    }
+}
+
+impl<F> TryFrom<Vec<F>> for RollArgs
+where
+    F: TryInto<isize>,
+    F::Error: Into<Error>,
+{
+    type Error = Error;
+
+    fn try_from(shift: Vec<F>) -> Result<Self> {
+        Ok(Self { shift: shift_to_axes(shift.into_iter())?, axis: AxesIndex::None })
+    }
+}
+
+impl<F, const N: usize> TryFrom<[F; N]> for RollArgs
+where
+    F: TryInto<isize>,
+    F::Error: Into<Error>,
+{
+    type Error = Error;
+
+    fn try_from(shift: [F; N]) -> Result<Self> {
+        Ok(Self { shift: shift_to_axes(shift.into_iter())?, axis: AxesIndex::None })
+    }
+}
+
+impl<'a, F> TryFrom<&'a [F]> for RollArgs
+where
+    F: TryInto<isize> + Clone,
+    F::Error: Into<Error>,
+{
+    type Error = Error;
+
+    fn try_from(shift: &'a [F]) -> Result<Self> {
+        Ok(Self { shift: shift_to_axes(shift.iter().cloned())?, axis: AxesIndex::None })
+    }
+}
+
+impl<'a, F> TryFrom<&'a Vec<F>> for RollArgs
+where
+    F: TryInto<isize> + Clone,
+    F::Error: Into<Error>,
+{
+    type Error = Error;
+
+    fn try_from(shift: &'a Vec<F>) -> Result<Self> {
+        Ok(Self { shift: shift_to_axes(shift.iter().cloned())?, axis: AxesIndex::None })
+    }
+}
+
+impl<S, A> TryFrom<(S, A)> for RollArgs
+where
+    S: TryInto<AxesIndex<isize>, Error: Into<Error>>,
+    A: TryInto<AxesIndex<isize>, Error: Into<Error>>,
+{
+    type Error = Error;
+
+    fn try_from((shift, axis): (S, A)) -> Result<Self> {
+        Ok(Self { shift: shift.try_into().map_err(Into::into)?, axis: axis.try_into().map_err(Into::into)? })
+    }
+}
+
+/* #endregion */
+
 /* #region roll */
 
 /// Roll tensor elements along axes.
@@ -9,8 +121,7 @@ use crate::prelude_dev::*;
 /// See also [`roll`].
 pub fn roll_f<'a, R, T, B, D>(
     tensor: &'a TensorAny<R, T, B, D>,
-    shift: impl TryInto<AxesIndex<isize>, Error: Into<Error>>,
-    axis: impl TryInto<AxesIndex<isize>, Error: Into<Error>>,
+    args: impl TryInto<RollArgs, Error: Into<Error>>,
 ) -> Result<Tensor<T, B, D>>
 where
     R: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw> + DataIntoCowAPI<'a>,
@@ -27,8 +138,8 @@ where
 {
     let device = tensor.device().clone();
     let ndim = tensor.ndim();
-    let shift = shift.try_into().map_err(Into::into)?;
-    let axis = axis.try_into().map_err(Into::into)?;
+    let args = args.try_into().map_err(Into::into)?;
+    let (shift, axis) = (args.shift, args.axis);
 
     match axis {
         AxesIndex::None => {
@@ -280,9 +391,9 @@ where
 /// # let mut device = DeviceCpu::default();
 /// # device.set_default_order(RowMajor);
 /// let a = rt::arange((6, &device));
-/// println!("{}", rt::roll((&a, 2, None)));
+/// println!("{}", rt::roll(&a, (2, None)));
 /// // [ 4 5 0 1 2 3]
-/// # assert_eq!(format!("{}", rt::roll((&a, 2, None))), "[ 4 5 0 1 2 3]");
+/// # assert_eq!(format!("{}", rt::roll(&a, (2, None))), "[ 4 5 0 1 2 3]");
 /// ```
 ///
 /// Rolling along one axis, and along two axes at once:
@@ -292,13 +403,13 @@ where
 /// # let mut device = DeviceCpu::default();
 /// # device.set_default_order(RowMajor);
 /// let a = rt::arange((10, &device)).into_shape([2, 5]);
-/// println!("{}", rt::roll((&a, 1, 0)));
+/// println!("{}", rt::roll(&a, (1, 0)));
 /// // [[ 5 6 7 8 9]
 /// //  [ 0 1 2 3 4]]
-/// println!("{}", rt::roll((&a, (1, 1), (0, 1))));
+/// println!("{}", rt::roll(&a, ((1, 1), (0, 1))));
 /// // [[ 9 5 6 7 8]
 /// //  [ 4 0 1 2 3]]
-/// # let b = rt::roll((&a, (1, 1), (0, 1)));
+/// # let b = rt::roll(&a, ((1, 1), (0, 1)));
 /// # assert_eq!(format!("{b}"), "[[ 9 5 6 7 8]\n [ 4 0 1 2 3]]");
 /// ```
 ///
@@ -309,10 +420,10 @@ where
 /// # let mut device = DeviceCpu::default();
 /// # device.set_default_order(RowMajor);
 /// let a = rt::arange((10, &device)).into_shape([2, 5]);
-/// println!("{}", rt::roll((&a, 1, None)));
+/// println!("{}", rt::roll(&a, (1, None)));
 /// // [[ 9 0 1 2 3]
 /// //  [ 4 5 6 7 8]]
-/// # let b = rt::roll((&a, 1, None));
+/// # let b = rt::roll(&a, (1, None));
 /// # assert_eq!(format!("{b}"), "[[ 9 0 1 2 3]\n [ 4 5 6 7 8]]");
 /// ```
 ///
@@ -327,31 +438,31 @@ where
 /// # let mut device = DeviceCpu::default();
 /// # device.set_default_order(RowMajor);
 /// let a = rt::tensor_from_nested!([[0, 1, 2], [3, 4, 5]], &device);
-/// println!("{}", rt::roll((&a, 1, None)));
+/// println!("{}", rt::roll(&a, (1, None)));
 /// // [[ 5 0 1]
 /// //  [ 2 3 4]]
 ///
 /// device.set_default_order(ColMajor);
 /// let a = rt::tensor_from_nested!([[0, 1, 2], [3, 4, 5]], &device);
-/// println!("{}", rt::roll((&a, 1, None)));
+/// println!("{}", rt::roll(&a, (1, None)));
 /// // [[ 5 3 4]
 /// //  [ 0 1 2]]
-/// # assert_eq!(format!("{}", rt::roll((&a, 1, None))), "[[ 5 3 4]\n [ 0 1 2]]");
+/// # assert_eq!(format!("{}", rt::roll(&a, (1, None))), "[[ 5 3 4]\n [ 0 1 2]]");
 /// ```
 ///
 /// # Overloads Table
 ///
 /// Output is [`Tensor<T, B, D>`][`Tensor`] (same shape as the input).
 ///
-/// - `roll((tensor, shift)) -> Tensor<T, B, D>` (implicit `axis = None`, flattened)
-/// - `roll((tensor, shift, axis)) -> Tensor<T, B, D>` where `shift` and `axis` are any
+/// - `roll(tensor, shift) -> Tensor<T, B, D>` (implicit `axis = None`, flattened)
+/// - `roll(tensor, (shift, axis)) -> Tensor<T, B, D>` where `shift` and `axis` are any
 ///   `TryInto<AxesIndex<isize>>` forms (integer, tuple, list, `None`)
 ///
 /// # Notes of API accordance
 ///
 /// - Array-API: `roll(x, /, shift, *, axis=None)` ([`roll`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.roll.html))
 /// - NumPy: `numpy.roll(a, shift, axis=None)` ([`numpy.roll`](https://numpy.org/doc/stable/reference/generated/numpy.roll.html))
-/// - RSTSR: `rt::roll((tensor, shift, axis))`
+/// - RSTSR: `rt::roll(tensor, (shift, axis))`
 ///
 /// RSTSR's behavior matches NumPy and Array-API, including the tuple-shift /
 /// tuple-axis combinations, same-axis repeats, and the tuple-shift-on-single-axis
@@ -376,33 +487,14 @@ where
 /// - [`roll_f`]: fallible version.
 /// - [`TensorAny::roll`]: associated method.
 /// - [`TensorAny::roll_f`]: associated fallible method.
-pub fn roll<Args, Inp>(args: Args) -> Args::Out
+pub fn roll<'a, R, T, B, D>(
+    tensor: &'a TensorAny<R, T, B, D>,
+    args: impl TryInto<RollArgs, Error: Into<Error>>,
+) -> Tensor<T, B, D>
 where
-    Args: RollAPI<Inp>,
-{
-    Args::roll(args)
-}
-
-/// API trait backing [`roll`].
-pub trait RollAPI<Inp> {
-    type Out;
-
-    fn roll_f(self) -> Result<Self::Out>;
-    fn roll(self) -> Self::Out
-    where
-        Self: Sized,
-    {
-        Self::roll_f(self).rstsr_unwrap()
-    }
-}
-
-impl<'a, RA, T, B, D, SArg, AArg> RollAPI<()> for (&'a TensorAny<RA, T, B, D>, SArg, AArg)
-where
-    RA: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw> + DataIntoCowAPI<'a>,
+    R: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw> + DataIntoCowAPI<'a>,
     D: DimAPI + DimSmallerOneAPI,
     D::SmallerOne: DimAPI,
-    SArg: TryInto<AxesIndex<isize>, Error: Into<Error>>,
-    AArg: TryInto<AxesIndex<isize>, Error: Into<Error>>,
     T: Clone,
     <B as DeviceRawAPI<T>>::Raw: Clone + 'a,
     B: DeviceAPI<T>
@@ -412,35 +504,7 @@ where
         + OpAssignArbitaryAPI<T, IxD, IxD>
         + OpAssignArbitaryAPI<T, IxD, D>,
 {
-    type Out = Tensor<T, B, D>;
-
-    fn roll_f(self) -> Result<Self::Out> {
-        let (tensor, shift, axis) = self;
-        roll_f(tensor, shift, axis)
-    }
-}
-
-impl<'a, RA, T, B, D, SArg> RollAPI<()> for (&'a TensorAny<RA, T, B, D>, SArg)
-where
-    RA: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw> + DataIntoCowAPI<'a>,
-    D: DimAPI + DimSmallerOneAPI,
-    D::SmallerOne: DimAPI,
-    SArg: TryInto<AxesIndex<isize>, Error: Into<Error>>,
-    T: Clone,
-    <B as DeviceRawAPI<T>>::Raw: Clone + 'a,
-    B: DeviceAPI<T>
-        + DeviceRawAPI<MaybeUninit<T>>
-        + DeviceCreationAnyAPI<T>
-        + OpAssignAPI<T, IxD>
-        + OpAssignArbitaryAPI<T, IxD, IxD>
-        + OpAssignArbitaryAPI<T, IxD, D>,
-{
-    type Out = Tensor<T, B, D>;
-
-    fn roll_f(self) -> Result<Self::Out> {
-        let (tensor, shift) = self;
-        roll_f(tensor, shift, AxesIndex::<isize>::None)
-    }
+    roll_f(tensor, args).rstsr_unwrap()
 }
 
 impl<'a, RA, T, B, D> TensorAny<RA, T, B, D>
@@ -460,23 +524,21 @@ where
     /// Roll array elements along a given axis.
     ///
     /// See also [`roll`].
-    pub fn roll_f<SArg, AArg>(&'a self, shift: SArg, axis: AArg) -> Result<Tensor<T, B, D>>
+    pub fn roll_f<AArg>(&'a self, args: AArg) -> Result<Tensor<T, B, D>>
     where
-        SArg: TryInto<AxesIndex<isize>, Error: Into<Error>>,
-        AArg: TryInto<AxesIndex<isize>, Error: Into<Error>>,
+        AArg: TryInto<RollArgs, Error: Into<Error>>,
     {
-        roll_f(self, shift, axis)
+        roll_f(self, args)
     }
 
     /// Roll array elements along a given axis.
     ///
     /// See also [`roll`].
-    pub fn roll<SArg, AArg>(&'a self, shift: SArg, axis: AArg) -> Tensor<T, B, D>
+    pub fn roll<AArg>(&'a self, args: AArg) -> Tensor<T, B, D>
     where
-        SArg: TryInto<AxesIndex<isize>, Error: Into<Error>>,
-        AArg: TryInto<AxesIndex<isize>, Error: Into<Error>>,
+        AArg: TryInto<RollArgs, Error: Into<Error>>,
     {
-        roll_f(self, shift, axis).rstsr_unwrap()
+        roll_f(self, args).rstsr_unwrap()
     }
 }
 

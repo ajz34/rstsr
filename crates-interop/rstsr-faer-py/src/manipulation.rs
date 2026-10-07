@@ -244,7 +244,7 @@ where
     T: Clone + Default + Send + Sync + 'static,
     DeviceFaer: DeviceAPI<T, Raw = Vec<T>> + DeviceCreationAnyAPI<T> + OpAssignAPI<T, IxD>,
 {
-    rt::repeat_f(t, repeats.clone(), axis)
+    rt::repeat_f(t, (repeats.clone(), axis))
 }
 
 /// `repeats` travels as int-or-list (the Python layer flattens an index array
@@ -292,7 +292,7 @@ where
     DeviceFaer:
         DeviceAPI<T, Raw = Vec<T>> + DeviceCreationAnyAPI<T> + OpAssignAPI<T, IxD> + OpAssignArbitaryAPI<T, IxD, IxD>,
 {
-    rt::roll_f(t, shift, axis)
+    rt::roll_f(t, (shift, axis))
 }
 
 fn op_tile<T>(t: &FTensor<T>, repetitions: AxesIndex<usize>) -> rt::Result<FTensor<T>>

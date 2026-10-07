@@ -19,7 +19,7 @@ mod doc_diff {
 
         // first-order differences of a 1-D tensor
         let x = rt::tensor_from_nested!([1, 4, 6, 7, 12], &device);
-        let result = rt::diff((&x, 0, 1, None, None));
+        let result = rt::diff(&x, 0, 1, None, None);
         println!("{result}");
         // [ 3 2 1 5]
         assert_eq!(format!("{result}"), "[ 3 2 1 5]");
@@ -29,7 +29,7 @@ mod doc_diff {
         // along an axis, with an explicit prepend column
         let m = rt::arange((4, &device)).into_shape([2, 2]);
         let p = rt::full(([2, 1], 0, &device));
-        let result = rt::diff((&m, 1, 1, Some(&p), None));
+        let result = rt::diff(&m, 1, 1, Some(&p), None);
         println!("{result}");
         // [[ 0 1]
         //  [ 2 1]]

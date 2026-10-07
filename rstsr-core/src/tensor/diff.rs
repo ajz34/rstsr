@@ -25,10 +25,10 @@ where
         + OpAssignAPI<T, Vec<usize>>
         + OpSubAPI<T, T, T, D>,
 {
-    let axis = axis.try_into().map_err(Into::into)?.into_inner();
+    let axis: AxisIndex<isize> = axis.try_into().map_err(Into::into)?;
     let device = x.device().clone();
     let _ = &device;
-    let axis = rstsr_check_axis!(axis, x.ndim())?;
+    let axis = axis.into_normalized(x.ndim())?;
 
     // prepend/append must match x's shape outside the axis (tensor-level
     // validation before any concat)
@@ -164,14 +164,14 @@ where
 /// # let mut device = DeviceCpu::default();
 /// # device.set_default_order(RowMajor);
 /// let a = rt::tensor_from_nested!([1, 4, 9, 16], &device);
-/// println!("{}", rt::diff((&a, -1, 1, None, None)));
+/// println!("{}", rt::diff(&a, -1, 1, None, None));
 /// // [ 3 5 7]
-/// # let d1 = rt::diff((&a, -1, 1, None, None));
+/// # let d1 = rt::diff(&a, -1, 1, None, None);
 /// # assert_eq!(d1.to_vec(), vec![3, 5, 7]);
 /// let b = rt::tensor_from_nested!([[1, 3, 6]], &device);
-/// println!("{}", rt::diff((&b, -1, 1, None, None)));
+/// println!("{}", rt::diff(&b, -1, 1, None, None));
 /// // [[ 2 3]]
-/// # let d2 = rt::diff((&b, -1, 1, None, None));
+/// # let d2 = rt::diff(&b, -1, 1, None, None);
 /// # assert_eq!(d2.reshape([-1]).to_vec(), vec![2, 3]);
 /// ```
 ///
@@ -179,7 +179,7 @@ where
 ///
 /// - Array-API: `diff(x, /, *, axis=-1, n=1, prepend=None, append=None)` ([`diff`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.diff.html))
 /// - NumPy: `numpy.diff(a, n=1, axis=-1, prepend=None, append=None)` ([`numpy.diff`](https://numpy.org/doc/stable/reference/generated/numpy.diff.html))
-/// - RSTSR: `rt::diff((x, axis, n, prepend, append))`
+/// - RSTSR: `rt::diff(x, axis, n, prepend, append)`
 ///
 /// # Panics
 ///
@@ -187,36 +187,27 @@ where
 ///   pass on an empty axis stops early (the axis is already empty), matching NumPy.
 ///
 /// For a fallible version, use [`diff_f`].
-pub fn diff<Args, Inp>(args: Args) -> Args::Out
+///
+/// # See also
+///
+/// ## Variants of this function
+///
+/// - [`diff_f`]: fallible version.
+/// - [`TensorAny::diff`]: associated method.
+/// - [`TensorAny::diff_f`]: associated fallible method.
+pub fn diff<R, T, B, D>(
+    x: &TensorAny<R, T, B, D>,
+    axis: impl TryInto<AxisIndex<isize>, Error: Into<Error>>,
+    n: usize,
+    prepend: Option<&TensorAny<R, T, B, D>>,
+    append: Option<&TensorAny<R, T, B, D>>,
+) -> Tensor<T, B, IxD>
 where
-    Args: DiffAPI<Inp>,
-{
-    Args::diff(args)
-}
-
-/// API trait backing [`diff`].
-pub trait DiffAPI<Inp> {
-    type Out;
-
-    fn diff_f(self) -> Result<Self::Out>;
-    fn diff(self) -> Self::Out
-    where
-        Self: Sized,
-    {
-        Self::diff_f(self).rstsr_unwrap()
-    }
-}
-
-impl<'a, R, T, B, D, AArg> DiffAPI<()>
-    for (&'a TensorAny<R, T, B, D>, AArg, usize, Option<&'a TensorAny<R, T, B, D>>, Option<&'a TensorAny<R, T, B, D>>)
-where
-    R: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
-    <B as DeviceRawAPI<T>>::Raw: Clone,
-    R: DataCloneAPI,
+    R: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw> + DataCloneAPI,
     D: DimAPI + DimSmallerOneAPI,
     D::SmallerOne: DimAPI,
     T: Clone + Default + core::ops::Sub<Output = T>,
-    AArg: TryInto<AxisIndex<isize>, Error: Into<Error>>,
+    <B as DeviceRawAPI<T>>::Raw: Clone,
     B: DeviceAPI<T>
         + DeviceRawAPI<MaybeUninit<T>>
         + DeviceCreationAnyAPI<T>
@@ -224,10 +215,53 @@ where
         + OpAssignAPI<T, Vec<usize>>
         + OpSubAPI<T, T, T, D>,
 {
-    type Out = Tensor<T, B, IxD>;
+    diff_f(x, axis, n, prepend, append).rstsr_unwrap()
+}
 
-    fn diff_f(self) -> Result<Self::Out> {
-        let (x, axis, n, prepend, append) = self;
-        diff_f(x, axis, n, prepend, append)
+impl<R, T, B, D> TensorAny<R, T, B, D>
+where
+    R: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
+    <B as DeviceRawAPI<T>>::Raw: Clone,
+    R: DataCloneAPI,
+    D: DimAPI + DimSmallerOneAPI,
+    D::SmallerOne: DimAPI,
+    T: Clone + Default + core::ops::Sub<Output = T>,
+    B: DeviceAPI<T>
+        + DeviceRawAPI<MaybeUninit<T>>
+        + DeviceCreationAnyAPI<T>
+        + OpAssignAPI<T, D>
+        + OpAssignAPI<T, Vec<usize>>
+        + OpSubAPI<T, T, T, D>,
+{
+    /// Returns the n-th order discrete differences along the given axis.
+    ///
+    /// See also [`diff`].
+    pub fn diff_f<AArg>(
+        &self,
+        axis: AArg,
+        n: usize,
+        prepend: Option<&TensorAny<R, T, B, D>>,
+        append: Option<&TensorAny<R, T, B, D>>,
+    ) -> Result<Tensor<T, B, IxD>>
+    where
+        AArg: TryInto<AxisIndex<isize>, Error: Into<Error>>,
+    {
+        diff_f(self, axis, n, prepend, append)
+    }
+
+    /// Returns the n-th order discrete differences along the given axis.
+    ///
+    /// See also [`diff`].
+    pub fn diff<AArg>(
+        &self,
+        axis: AArg,
+        n: usize,
+        prepend: Option<&TensorAny<R, T, B, D>>,
+        append: Option<&TensorAny<R, T, B, D>>,
+    ) -> Tensor<T, B, IxD>
+    where
+        AArg: TryInto<AxisIndex<isize>, Error: Into<Error>>,
+    {
+        diff_f(self, axis, n, prepend, append).rstsr_unwrap()
     }
 }

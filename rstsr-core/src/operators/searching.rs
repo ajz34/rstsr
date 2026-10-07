@@ -46,6 +46,13 @@ impl From<()> for SearchSortedArgs {
     }
 }
 
+impl From<Option<()>> for SearchSortedArgs {
+    /// `None` is equivalent to `()`: both request the default arguments.
+    fn from(_: Option<()>) -> Self {
+        Self::default()
+    }
+}
+
 impl From<SearchSide> for SearchSortedArgs {
     fn from(side: SearchSide) -> Self {
         Self { side, ..Self::default() }

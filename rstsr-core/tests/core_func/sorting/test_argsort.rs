@@ -26,12 +26,12 @@ mod numpy_argsort {
 
         let a = rt::tensor_from_nested!([3_i64, 1, 2], &device);
         let expected = rt::tensor_from_nested!([1_usize, 2, 0], &device);
-        assert_equal(rt::argsort((&a, ())), &expected, None);
+        assert_equal(rt::argsort(&a, ()), &expected, None);
 
         let b = rt::arange((101, &device));
-        assert_eq!(rt::argsort((&b, ())).to_vec(), (0..101).collect::<Vec<usize>>());
+        assert_eq!(rt::argsort(&b, ()).to_vec(), (0..101).collect::<Vec<usize>>());
         let br = rt::flip(&b, 0);
-        assert_eq!(rt::argsort((&br, ())).to_vec(), (0..101).rev().collect::<Vec<usize>>());
+        assert_eq!(rt::argsort(&br, ()).to_vec(), (0..101).rev().collect::<Vec<usize>>());
     }
 
     #[test]
@@ -45,9 +45,9 @@ mod numpy_argsort {
         device.set_default_order(RowMajor);
 
         let a = rt::tensor_from_nested!([f64::NAN, 1.0, 0.0], &device);
-        assert_eq!(rt::argsort((&a, ())).to_vec(), vec![2, 1, 0]);
+        assert_eq!(rt::argsort(&a, ()).to_vec(), vec![2, 1, 0]);
         // descending: values [1, 0, nan] -> indices [1, 2, 0] (NaN last)
-        assert_eq!(rt::argsort((&a, (0, true))).to_vec(), vec![1, 2, 0]);
+        assert_eq!(rt::argsort(&a, (0, true)).to_vec(), vec![1, 2, 0]);
     }
 }
 
@@ -67,7 +67,7 @@ mod numpy_argsort_descending {
         device.set_default_order(RowMajor);
 
         let a = rt::arange((-51, 50, &device));
-        assert_eq!(rt::argsort((&a, (0, true))).to_vec(), (0..101).rev().collect::<Vec<usize>>());
+        assert_eq!(rt::argsort(&a, (0, true)).to_vec(), (0..101).rev().collect::<Vec<usize>>());
     }
 
     #[test]
@@ -80,7 +80,7 @@ mod numpy_argsort_descending {
         device.set_default_order(RowMajor);
 
         let a: Tensor<u32, _> = rt::arange((0_u32, 101, &device));
-        assert_eq!(rt::argsort((&a, (0, true))).to_vec(), (0..101).rev().collect::<Vec<usize>>());
+        assert_eq!(rt::argsort(&a, (0, true)).to_vec(), (0..101).rev().collect::<Vec<usize>>());
     }
 
     #[test]
@@ -99,7 +99,7 @@ mod numpy_argsort_descending {
             v[i] = f64::NAN;
         }
         let a = rt::asarray((v, &device));
-        let sorted: Vec<f64> = rt::argsort((&a, (0, true))).to_vec().iter().map(|&i| a.i(i).to_scalar()).collect();
+        let sorted: Vec<f64> = rt::argsort(&a, (0, true)).to_vec().iter().map(|&i| a.i(i).to_scalar()).collect();
         assert!(sorted[..90].windows(2).all(|w| w[0] >= w[1]));
         assert!(sorted[90..].iter().all(|x| x.is_nan()));
     }
@@ -117,9 +117,9 @@ mod numpy_argsort_descending {
 
         let a = rt::tensor_from_nested!([i8::MIN, 1, i8::MAX, i8::MIN, 1, i8::MAX], &device);
         let asc = rt::tensor_from_nested!([0_usize, 3, 1, 4, 2, 5], &device);
-        assert_equal(rt::argsort((&a, (0, false, true))), &asc, None);
+        assert_equal(rt::argsort(&a, (0, false, true)), &asc, None);
         let desc = rt::tensor_from_nested!([2_usize, 5, 1, 4, 0, 3], &device);
-        assert_equal(rt::argsort((&a, (0, true, true))), &desc, None);
+        assert_equal(rt::argsort(&a, (0, true, true)), &desc, None);
     }
 }
 

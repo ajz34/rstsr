@@ -38,7 +38,7 @@ mod numpy_sort {
 
         let a = rt::arange((101, &device));
         let b = rt::flip(&a, 0);
-        assert_equal(rt::sort((&b, ())), &a, None);
+        assert_equal(rt::sort(&b, ()), &a, None);
     }
 
     #[test]
@@ -54,11 +54,11 @@ mod numpy_sort {
 
         let a = rt::tensor_from_nested!([[3, 1, 2], [6, 4, 5]], &device);
         let expected0 = rt::tensor_from_nested!([[3, 1, 2], [6, 4, 5]], &device);
-        assert_equal(rt::sort((&a, 0)), &expected0, None);
+        assert_equal(rt::sort(&a, 0), &expected0, None);
         let expected1 = rt::tensor_from_nested!([[1, 2, 3], [4, 5, 6]], &device);
-        assert_equal(rt::sort((&a, 1)), &expected1, None);
+        assert_equal(rt::sort(&a, 1), &expected1, None);
         let expected_last = rt::tensor_from_nested!([[1, 2, 3], [4, 5, 6]], &device);
-        assert_equal(rt::sort((&a, ())), &expected_last, None);
+        assert_equal(rt::sort(&a, ()), &expected_last, None);
     }
 
     #[test]
@@ -114,10 +114,10 @@ mod numpy_sort_descending {
         device.set_default_order(RowMajor);
 
         let a = rt::arange((-51, 50, &device));
-        assert_equal(rt::sort((&a, (0, false))), &a, None);
+        assert_equal(rt::sort(&a, (0, false)), &a, None);
         let rev = rt::flip(&a, 0);
-        assert_equal(rt::sort((&a, (0, true))), &rev, None);
-        assert_equal(rt::sort((&a, (0, true, true))), &rev, None);
+        assert_equal(rt::sort(&a, (0, true)), &rev, None);
+        assert_equal(rt::sort(&a, (0, true, true)), &rev, None);
     }
 
     #[test]
@@ -130,8 +130,8 @@ mod numpy_sort_descending {
         device.set_default_order(RowMajor);
 
         let a: Tensor<u32, _> = rt::arange((0_u32, 101, &device));
-        assert_equal(rt::sort((&a, (0, false))), &a, None);
-        assert_equal(rt::sort((&a, (0, true))), rt::flip(&a, 0), None);
+        assert_equal(rt::sort(&a, (0, false)), &a, None);
+        assert_equal(rt::sort(&a, (0, true)), rt::flip(&a, 0), None);
     }
 
     #[test]
@@ -149,8 +149,8 @@ mod numpy_sort_descending {
         }
         let a = rt::asarray((v, &device));
 
-        let asc = rt::sort((&a, ())).to_vec();
-        let desc = rt::sort((&a, (0, true))).to_vec();
+        let asc = rt::sort(&a, ()).to_vec();
+        let desc = rt::sort(&a, (0, true)).to_vec();
         assert_eq!(asc.iter().filter(|x| x.is_nan()).count(), 10);
         assert!(asc[..90].windows(2).all(|w| w[0] <= w[1]));
         assert!(asc[90..].iter().all(|x| x.is_nan()));
@@ -169,7 +169,7 @@ mod numpy_sort_descending {
         device.set_default_order(RowMajor);
 
         let a: Tensor<f64, _> = rt::zeros(([0], &device));
-        assert_eq!(rt::sort((&a, ())).shape(), &[0]);
+        assert_eq!(rt::sort(&a, ()).shape(), &[0]);
     }
 }
 
@@ -191,11 +191,11 @@ mod custom_sort {
         // values [2, 1, 1, 0]: ascending ties are the two 1s in input order
         let a = rt::tensor_from_nested!([2_i32, 1, 1, 0], &device);
         let expected = rt::tensor_from_nested!([3_usize, 1, 2, 0], &device);
-        assert_equal(rt::argsort((&a, ())), &expected, None);
+        assert_equal(rt::argsort(&a, ()), &expected, None);
 
         // descending: value comparison flips, ties still input order
         let expected = rt::tensor_from_nested!([0_usize, 1, 2, 3], &device);
-        assert_equal(rt::argsort((&a, (0, true))), &expected, None);
+        assert_equal(rt::argsort(&a, (0, true)), &expected, None);
     }
 
     #[test]
@@ -227,7 +227,7 @@ mod custom_sort {
         let a = rt::arange((6, &device)).into_shape([2, 3]);
         let at = a.t(); // shape [3, 2], rows are [0, 3], [1, 4], [2, 5]
         let expected = rt::tensor_from_nested!([[0, 3], [1, 4], [2, 5]], &device);
-        assert_equal(rt::sort((&at, ())), &expected, None);
+        assert_equal(rt::sort(&at, ()), &expected, None);
     }
 
     #[test]
@@ -301,7 +301,7 @@ mod custom_sort {
         let out = a.sort(0);
         assert_eq!(out.shape(), &[3, 0]);
 
-        let idx = rt::argsort((&a, 0));
+        let idx = rt::argsort(&a, 0);
         assert_eq!(idx.shape(), &[3, 0]);
 
         // zero-sized sorted axis is also an empty result
@@ -392,5 +392,38 @@ mod custom_sort_custom {
                 assert_eq!(vi, orig);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod arg_overloads {
+    use super::*;
+    static FUNC: &str = "arg_overloads";
+
+    #[test]
+    fn test_sort_args_forms() {
+        // `SortArgs` overloads: tuple / axis / descending / () / None
+        crate::specify_test!("test_sort_args_forms");
+
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        let a = rt::tensor_from_nested!([3, 1, 2], &device);
+        let ascending = vec![1, 2, 3];
+        let descending = vec![3, 2, 1];
+
+        assert_eq!(a.sort(()).to_vec(), ascending);
+        assert_eq!(a.sort(0).to_vec(), ascending);
+        assert_eq!(a.sort(true).to_vec(), descending);
+        assert_eq!(a.sort((0, true)).to_vec(), descending);
+        assert_eq!(a.sort((0, true, false)).to_vec(), descending);
+        assert_eq!(a.sort(None).to_vec(), ascending);
+        assert_eq!(rt::sort(&a, ()).to_vec(), ascending);
+        assert_eq!(rt::sort_f(&a, (0, true)).unwrap().to_vec(), descending);
+        // custom comparator shares the same argument overloads
+        let cmp = |x: &i32, y: &i32| y.cmp(x);
+        assert_eq!(a.sort_custom((0, false), cmp).to_vec(), descending);
+        assert_eq!(a.sort_custom(None, cmp).to_vec(), descending);
+        assert_eq!(a.argsort(None).to_vec(), vec![1, 2, 0]);
     }
 }

@@ -214,3 +214,25 @@ mod numpy_atleast_3d {
         assert_equal(rt::atleast_3d(&a), &a, None);
     }
 }
+
+#[cfg(test)]
+mod associated_methods {
+    use super::*;
+    static FUNC: &str = "associated_methods";
+
+    #[test]
+    fn test_into_atleast_methods() {
+        // the ownership-consuming forms are also associated methods
+        crate::specify_test!("test_into_atleast_methods");
+
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        let a: Tensor<i32, _> = rt::asarray((1, &device));
+        assert_equal(a.view().to_owned().into_atleast_1d(), rt::atleast_1d(&a), None);
+        assert_equal(a.view().to_owned().into_atleast_2d(), rt::atleast_2d(&a), None);
+        assert_equal(a.view().to_owned().into_atleast_3d(), rt::atleast_3d(&a), None);
+        assert_eq!(a.view().to_owned().into_atleast_2d().shape(), &[1, 1]);
+        assert!(a.view().to_owned().into_atleast_1d_f().is_ok());
+    }
+}

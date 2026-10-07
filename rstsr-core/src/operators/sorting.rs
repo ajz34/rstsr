@@ -33,6 +33,13 @@ impl From<()> for SortArgs {
     }
 }
 
+impl From<Option<()>> for SortArgs {
+    /// `None` is equivalent to `()`: both request the default arguments.
+    fn from(_: Option<()>) -> Self {
+        Self::default()
+    }
+}
+
 impl From<isize> for SortArgs {
     fn from(axis: isize) -> Self {
         Self { axis, ..Self::default() }

@@ -23,10 +23,8 @@ pub mod rstsr_traits {
         ConcatAPI, DiagAPI, HStackAPI, MeshgridAPI, StackAPI, UnstackAPI, VStackAPI,
     };
     pub use crate::tensor::device_conversion::{TensorChangeFromDevice, TensorDeviceChangeAPI};
-    pub use crate::tensor::diff::DiffAPI;
     pub use crate::tensor::ext_conversion::IntoRSTSR;
     pub use crate::tensor::manipulation::exports::BroadcastArraysAPI;
-    pub use crate::tensor::nonzero::NonzeroAPI;
     pub use crate::tensor::operators::op_binary_common::{
         TensorATan2API, TensorCopySignAPI, TensorEqualAPI, TensorFloorDivideAPI, TensorGreaterAPI,
         TensorGreaterEqualAPI, TensorHypotAPI, TensorLessAPI, TensorLessEqualAPI, TensorLogAddExpAPI, TensorMaximumAPI,
@@ -42,9 +40,6 @@ pub mod rstsr_traits {
     pub use crate::tensor::operators::op_where::TensorWhereAPI;
     pub use crate::tensor::ownership_conversion::{TensorIntoOwnedAPI, TensorViewAPI, TensorViewMutAPI};
     pub use crate::tensor::reduction::TensorSumBoolAPI;
-    pub use crate::tensor::searching::SearchSortedAPI;
-    pub use crate::tensor::set::{IsinAPI, UniqueAllAPI, UniqueCountsAPI, UniqueInverseAPI, UniqueValuesAPI};
-    pub use crate::tensor::sorting::{ArgSortAPI, ArgSortCustomAPI, SortAPI, SortCustomAPI};
 
     #[cfg(feature = "rayon")]
     pub use crate::feature_rayon::DeviceRayonAPI;
@@ -68,7 +63,7 @@ pub mod rstsr_structs {
 
     pub use crate::operators::searching::{SearchSide, SearchSortedArgs};
     pub use crate::operators::sorting::SortArgs;
-    pub use crate::tensor::manipulation::exports::{RepeatArg, ReshapeArgs};
+    pub use crate::tensor::manipulation::exports::{RepeatArg, RepeatArgs, ReshapeArgs, RollArgs};
     pub use crate::tensor::reduction::{CumulativeArgs, ReduceArgs, VarArgs};
     pub use crate::tensor::set::{UniqueAll, UniqueCounts, UniqueInverse};
 }

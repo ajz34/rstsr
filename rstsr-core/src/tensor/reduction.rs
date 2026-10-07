@@ -1275,6 +1275,8 @@ where
 ///
 /// - [`reduce_axes`], [`reduce_with_args`]
 /// - [`reduce_all_f`]: fallible version
+/// - [`TensorAny::reduce_all`] / [`TensorAny::reduce_axes`] / [`TensorAny::reduce_with_args`]:
+///   associated method forms (each with a `_f` twin).
 pub fn reduce_all<T, TS, TO, B, D, FI, FF, FC, FO>(
     tensor: impl TensorViewAPI<Type = T, Backend = B, Dim = D>,
     f_init: FI,
@@ -2204,6 +2206,8 @@ where
 ///
 /// - [`allclose_f`]: fallible version.
 /// - [`allclose_all`] / [`allclose_all_f`]: explicit all-element form.
+/// - [`TensorAny::allclose`] / [`TensorAny::allclose_all`]: associated method forms (each with a
+///   `_f` twin).
 /// - Macro: `allclose!(&a, &b)` (crate-level exported, same name as the function).
 pub fn allclose_all_f<TA, TB, TE, B, DA, DB>(
     tensor_a: impl TensorViewAPI<Type = TA, Backend = B, Dim = DA>,
@@ -2286,6 +2290,218 @@ macro_rules! allclose {
         use rstsr::prelude::rstsr_funcs::allclose;
         allclose($tensor_a, $tensor_b, None)
     }};
+}
+
+/* #endregion */
+
+/* #region custom-reduction and allclose methods */
+
+impl<R, T, B, D> TensorAny<R, T, B, D>
+where
+    R: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
+    B: DeviceAPI<T>,
+    D: DimAPI,
+{
+    /// Reduces the whole input with user-provided fold closures.
+    ///
+    /// See also [`reduce_all`].
+    pub fn reduce_all_f<TS, TO, FI, FF, FC, FO>(&self, f_init: FI, f: FF, f_sum: FC, f_out: FO) -> Result<TO>
+    where
+        TS: Clone,
+        FI: Fn() -> TS + Send + Sync,
+        FF: Fn(TS, T) -> TS + Send + Sync,
+        FC: Fn(TS, TS) -> TS + Send + Sync,
+        FO: Fn(TS) -> TO + Send + Sync,
+        B: OpReduceCustomAPI<T, TS, TO, D>,
+    {
+        reduce_all_f(self, f_init, f, f_sum, f_out)
+    }
+
+    /// Reduces the whole input with user-provided fold closures.
+    ///
+    /// See also [`reduce_all`].
+    pub fn reduce_all<TS, TO, FI, FF, FC, FO>(&self, f_init: FI, f: FF, f_sum: FC, f_out: FO) -> TO
+    where
+        TS: Clone,
+        FI: Fn() -> TS + Send + Sync,
+        FF: Fn(TS, T) -> TS + Send + Sync,
+        FC: Fn(TS, TS) -> TS + Send + Sync,
+        FO: Fn(TS) -> TO + Send + Sync,
+        B: OpReduceCustomAPI<T, TS, TO, D>,
+    {
+        reduce_all_f(self, f_init, f, f_sum, f_out).rstsr_unwrap()
+    }
+
+    /// Reduces the given axes with user-provided fold closures.
+    ///
+    /// See also [`reduce_axes`].
+    pub fn reduce_axes_f<TS, TO, FI, FF, FC, FO, AArg>(
+        &self,
+        axes: AArg,
+        f_init: FI,
+        f: FF,
+        f_sum: FC,
+        f_out: FO,
+    ) -> Result<Tensor<TO, B, IxD>>
+    where
+        TS: Clone,
+        TO: Clone,
+        AArg: TryInto<AxesIndex<isize>, Error: Into<Error>>,
+        FI: Fn() -> TS + Send + Sync,
+        FF: Fn(TS, T) -> TS + Send + Sync,
+        FC: Fn(TS, TS) -> TS + Send + Sync,
+        FO: Fn(TS) -> TO + Send + Sync,
+        B: OpReduceCustomAPI<T, TS, TO, D> + DeviceCreationAnyAPI<TO>,
+    {
+        reduce_axes_f(self, axes, f_init, f, f_sum, f_out)
+    }
+
+    /// Reduces the given axes with user-provided fold closures.
+    ///
+    /// See also [`reduce_axes`].
+    pub fn reduce_axes<TS, TO, FI, FF, FC, FO, AArg>(
+        &self,
+        axes: AArg,
+        f_init: FI,
+        f: FF,
+        f_sum: FC,
+        f_out: FO,
+    ) -> Tensor<TO, B, IxD>
+    where
+        TS: Clone,
+        TO: Clone,
+        AArg: TryInto<AxesIndex<isize>, Error: Into<Error>>,
+        FI: Fn() -> TS + Send + Sync,
+        FF: Fn(TS, T) -> TS + Send + Sync,
+        FC: Fn(TS, TS) -> TS + Send + Sync,
+        FO: Fn(TS) -> TO + Send + Sync,
+        B: OpReduceCustomAPI<T, TS, TO, D> + DeviceCreationAnyAPI<TO>,
+    {
+        reduce_axes_f(self, axes, f_init, f, f_sum, f_out).rstsr_unwrap()
+    }
+
+    /// Reduces with explicit [`ReduceArgs`] and user-provided fold closures.
+    ///
+    /// See also [`reduce_with_args`].
+    pub fn reduce_with_args_f<TS, TO, FI, FF, FC, FO>(
+        &self,
+        args: impl Into<ReduceArgs>,
+        f_init: FI,
+        f: FF,
+        f_sum: FC,
+        f_out: FO,
+    ) -> Result<Tensor<TO, B, IxD>>
+    where
+        TS: Clone,
+        TO: Clone,
+        FI: Fn() -> TS + Send + Sync,
+        FF: Fn(TS, T) -> TS + Send + Sync,
+        FC: Fn(TS, TS) -> TS + Send + Sync,
+        FO: Fn(TS) -> TO + Send + Sync,
+        B: OpReduceCustomAPI<T, TS, TO, D> + DeviceCreationAnyAPI<TO>,
+    {
+        reduce_with_args_f(self, args, f_init, f, f_sum, f_out)
+    }
+
+    /// Reduces with explicit [`ReduceArgs`] and user-provided fold closures.
+    ///
+    /// See also [`reduce_with_args`].
+    pub fn reduce_with_args<TS, TO, FI, FF, FC, FO>(
+        &self,
+        args: impl Into<ReduceArgs>,
+        f_init: FI,
+        f: FF,
+        f_sum: FC,
+        f_out: FO,
+    ) -> Tensor<TO, B, IxD>
+    where
+        TS: Clone,
+        TO: Clone,
+        FI: Fn() -> TS + Send + Sync,
+        FF: Fn(TS, T) -> TS + Send + Sync,
+        FC: Fn(TS, TS) -> TS + Send + Sync,
+        FO: Fn(TS) -> TO + Send + Sync,
+        B: OpReduceCustomAPI<T, TS, TO, D> + DeviceCreationAnyAPI<TO>,
+    {
+        reduce_with_args_f(self, args, f_init, f, f_sum, f_out).rstsr_unwrap()
+    }
+}
+
+impl<R, TA, B, D> TensorAny<R, TA, B, D>
+where
+    R: DataAPI<Data = <B as DeviceRawAPI<TA>>::Raw>,
+    B: DeviceAPI<TA>,
+    D: DimAPI,
+{
+    /// Checks whether all elements of two tensors are close, with an explicit
+    /// all-element form.
+    ///
+    /// See also [`allclose_all`].
+    pub fn allclose_all_f<TB, TE, DB, AArg>(
+        &self,
+        tensor_b: impl TensorViewAPI<Type = TB, Backend = B, Dim = DB>,
+        isclose_args: AArg,
+    ) -> Result<bool>
+    where
+        DB: DimAPI,
+        AArg: Into<IsCloseArgs<TE>>,
+        B: DeviceAPI<bool> + OpAllCloseAPI<TA, TB, TE, IxD>,
+        TE: 'static,
+    {
+        allclose_all_f(self, tensor_b, isclose_args)
+    }
+
+    /// Checks whether all elements of two tensors are close, with an explicit
+    /// all-element form.
+    ///
+    /// See also [`allclose_all`].
+    pub fn allclose_all<TB, TE, DB, AArg>(
+        &self,
+        tensor_b: impl TensorViewAPI<Type = TB, Backend = B, Dim = DB>,
+        isclose_args: AArg,
+    ) -> bool
+    where
+        DB: DimAPI,
+        AArg: Into<IsCloseArgs<TE>>,
+        B: DeviceAPI<bool> + OpAllCloseAPI<TA, TB, TE, IxD>,
+        TE: 'static,
+    {
+        allclose_all_f(self, tensor_b, isclose_args).rstsr_unwrap()
+    }
+
+    /// Checks whether all elements of two tensors are close.
+    ///
+    /// See also [`allclose`].
+    pub fn allclose_f<TB, TE, DB, AArg>(
+        &self,
+        tensor_b: impl TensorViewAPI<Type = TB, Backend = B, Dim = DB>,
+        isclose_args: AArg,
+    ) -> Result<bool>
+    where
+        DB: DimAPI,
+        AArg: Into<IsCloseArgs<TE>>,
+        B: DeviceAPI<bool> + OpAllCloseAPI<TA, TB, TE, IxD>,
+        TE: 'static,
+    {
+        allclose_f(self, tensor_b, isclose_args)
+    }
+
+    /// Checks whether all elements of two tensors are close.
+    ///
+    /// See also [`allclose`].
+    pub fn allclose<TB, TE, DB, AArg>(
+        &self,
+        tensor_b: impl TensorViewAPI<Type = TB, Backend = B, Dim = DB>,
+        isclose_args: AArg,
+    ) -> bool
+    where
+        DB: DimAPI,
+        AArg: Into<IsCloseArgs<TE>>,
+        B: DeviceAPI<bool> + OpAllCloseAPI<TA, TB, TE, IxD>,
+        TE: 'static,
+    {
+        allclose_f(self, tensor_b, isclose_args).rstsr_unwrap()
+    }
 }
 
 /* #endregion */

@@ -89,16 +89,16 @@ fn decline_complex_sort<T: 'static>() -> Result<()> {
 /// # let mut device = DeviceCpu::default();
 /// # device.set_default_order(RowMajor);
 /// let a = rt::tensor_from_nested!([3, 1, 2], &device);
-/// println!("{}", rt::argsort((&a, ())));
+/// println!("{}", rt::argsort(&a, ()));
 /// // [ 1 2 0]
-/// # assert_eq!(format!("{}", rt::argsort((&a, ()))), "[ 1 2 0]");
+/// # assert_eq!(format!("{}", rt::argsort(&a, ())), "[ 1 2 0]");
 /// ```
 ///
 /// # Notes of API accordance
 ///
 /// - Array-API: `argsort(x, /, *, axis=-1, descending=False, stable=True)` ([`argsort`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.argsort.html))
 /// - NumPy: `numpy.argsort(a, axis=-1)` ([`numpy.argsort`](https://numpy.org/doc/stable/reference/generated/numpy.argsort.html))
-/// - RSTSR: `rt::argsort((tensor, args))`
+/// - RSTSR: `rt::argsort(tensor, args)`
 ///
 /// Deviation from NumPy: NumPy's `kind` parameter is not supported (the sort
 /// is always stable). Complex dtypes are declined: the array-api standard
@@ -126,63 +126,20 @@ fn decline_complex_sort<T: 'static>() -> Result<()> {
 /// - [`argsort_custom`] / [`argsort_custom_f`]: user comparator.
 /// - [`TensorAny::argsort`]: associated method.
 /// - [`TensorAny::argsort_f`]: associated fallible method.
-pub fn argsort<Args, Inp>(args: Args) -> Args::Out
+pub fn argsort<T, B, D>(
+    tensor: impl TensorViewAPI<Type = T, Backend = B, Dim = D>,
+    args: impl Into<SortArgs>,
+) -> Tensor<usize, B, IxD>
 where
-    Args: ArgSortAPI<Inp>,
-{
-    Args::argsort(args)
-}
-
-/// API trait backing [`argsort`].
-pub trait ArgSortAPI<Inp> {
-    type Out;
-
-    fn argsort_f(self) -> Result<Self::Out>;
-    fn argsort(self) -> Self::Out
-    where
-        Self: Sized,
-    {
-        Self::argsort_f(self).rstsr_unwrap()
-    }
-}
-
-impl<R, T, B, D, AArg> ArgSortAPI<()> for (&TensorAny<R, T, B, D>, AArg)
-where
-    R: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
     D: DimAPI,
     T: 'static,
-    AArg: Into<SortArgs>,
     B: DeviceAPI<T>
         + DeviceAPI<usize>
         + DeviceRawAPI<MaybeUninit<usize>>
         + DeviceCreationAnyAPI<usize>
         + OpArgSortAPI<T, D>,
 {
-    type Out = Tensor<usize, B, IxD>;
-
-    fn argsort_f(self) -> Result<Self::Out> {
-        let (tensor, args) = self;
-        argsort_f(tensor, args)
-    }
-}
-
-impl<T, B, D, AArg> ArgSortAPI<()> for (TensorView<'_, T, B, D>, AArg)
-where
-    D: DimAPI,
-    T: 'static,
-    AArg: Into<SortArgs>,
-    B: DeviceAPI<T>
-        + DeviceAPI<usize>
-        + DeviceRawAPI<MaybeUninit<usize>>
-        + DeviceCreationAnyAPI<usize>
-        + OpArgSortAPI<T, D>,
-{
-    type Out = Tensor<usize, B, IxD>;
-
-    fn argsort_f(self) -> Result<Self::Out> {
-        let (tensor, args) = self;
-        argsort_f(tensor, args)
-    }
+    argsort_f(tensor, args).rstsr_unwrap()
 }
 
 impl<R, T, B, D> TensorAny<R, T, B, D>
@@ -274,16 +231,16 @@ where
 /// # let mut device = DeviceCpu::default();
 /// # device.set_default_order(RowMajor);
 /// let a = rt::tensor_from_nested!([3, 1, 2], &device);
-/// println!("{}", rt::sort((&a, ())));
+/// println!("{}", rt::sort(&a, ()));
 /// // [ 1 2 3]
-/// # assert_eq!(format!("{}", rt::sort((&a, ()))), "[ 1 2 3]");
+/// # assert_eq!(format!("{}", rt::sort(&a, ())), "[ 1 2 3]");
 /// ```
 ///
 /// # Notes of API accordance
 ///
 /// - Array-API: `sort(x, /, *, axis=-1, descending=False, stable=True)` ([`sort`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.sort.html))
 /// - NumPy: `numpy.sort(a, axis=-1)` ([`numpy.sort`](https://numpy.org/doc/stable/reference/generated/numpy.sort.html))
-/// - RSTSR: `rt::sort((tensor, args))`
+/// - RSTSR: `rt::sort(tensor, args)`
 ///
 /// Deviation from NumPy: NumPy's `kind` parameter is not supported (the sort
 /// is always stable); NaN orders last in descending sorts as well (NumPy
@@ -312,55 +269,16 @@ where
 /// - [`sort_custom`] / [`sort_custom_f`]: user comparator.
 /// - [`TensorAny::sort`]: associated method.
 /// - [`TensorAny::sort_f`]: associated fallible method.
-pub fn sort<Args, Inp>(args: Args) -> Args::Out
-where
-    Args: SortAPI<Inp>,
-{
-    Args::sort(args)
-}
-
-/// API trait backing [`sort`].
-pub trait SortAPI<Inp> {
-    type Out;
-
-    fn sort_f(self) -> Result<Self::Out>;
-    fn sort(self) -> Self::Out
-    where
-        Self: Sized,
-    {
-        Self::sort_f(self).rstsr_unwrap()
-    }
-}
-
-impl<R, T, B, D, AArg> SortAPI<()> for (&TensorAny<R, T, B, D>, AArg)
-where
-    R: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
-    D: DimAPI,
-    T: 'static,
-    AArg: Into<SortArgs>,
-    B: DeviceAPI<T> + DeviceRawAPI<MaybeUninit<T>> + DeviceCreationAnyAPI<T> + OpSortAPI<T, D>,
-{
-    type Out = Tensor<T, B, IxD>;
-
-    fn sort_f(self) -> Result<Self::Out> {
-        let (tensor, args) = self;
-        sort_f(tensor, args)
-    }
-}
-
-impl<T, B, D, AArg> SortAPI<()> for (TensorView<'_, T, B, D>, AArg)
+pub fn sort<T, B, D>(
+    tensor: impl TensorViewAPI<Type = T, Backend = B, Dim = D>,
+    args: impl Into<SortArgs>,
+) -> Tensor<T, B, IxD>
 where
     D: DimAPI,
     T: 'static,
-    AArg: Into<SortArgs>,
     B: DeviceAPI<T> + DeviceRawAPI<MaybeUninit<T>> + DeviceCreationAnyAPI<T> + OpSortAPI<T, D>,
 {
-    type Out = Tensor<T, B, IxD>;
-
-    fn sort_f(self) -> Result<Self::Out> {
-        let (tensor, args) = self;
-        sort_f(tensor, args)
-    }
+    sort_f(tensor, args).rstsr_unwrap()
 }
 
 impl<R, T, B, D> TensorAny<R, T, B, D>
@@ -400,7 +318,7 @@ where
 /// See also [`sort_custom`].
 pub fn sort_custom_f<T, B, D, F>(
     tensor: impl TensorViewAPI<Type = T, Backend = B, Dim = D>,
-    axis: impl TryInto<AxisIndex<isize>, Error: Into<Error>>,
+    args: impl Into<SortArgs>,
     f: F,
 ) -> Result<Tensor<T, B, IxD>>
 where
@@ -408,10 +326,14 @@ where
     F: Fn(&T, &T) -> Ordering + Send + Sync,
     B: DeviceAPI<T> + DeviceRawAPI<MaybeUninit<T>> + DeviceCreationAnyAPI<T> + OpSortCustomAPI<T, D>,
 {
-    let axis = axis.try_into().map_err(Into::into)?.into_inner();
+    let args = args.into();
+    let descending = args.descending;
     let tensor = tensor.view();
     let device = tensor.device().clone();
-    let axis = rstsr_check_axis!(axis, tensor.ndim())?;
+    let axis = rstsr_check_axis!(args.axis, tensor.ndim())?;
+    // `stable` is accepted for parity with `sort` (the custom kernel is always
+    // stable); `descending` reverses the comparator outcome.
+    let f = move |a: &T, b: &T| if descending { f(a, b).reverse() } else { f(a, b) };
     let (storage, layout) = device.sort_axes_custom(tensor.raw(), tensor.layout(), axis, f)?;
     Tensor::new_f(storage, layout)
 }
@@ -438,7 +360,7 @@ where
 ///     let n2 = y.re * y.re + y.im * y.im;
 ///     n1.partial_cmp(&n2).unwrap_or(Ordering::Equal)
 /// };
-/// println!("{}", rt::sort_custom((&a, -1, by_norm)));
+/// println!("{}", rt::sort_custom(&a, -1, by_norm));
 /// // sorted by |z|^2 ascending: (1+1i), (2i), (3)
 /// ```
 ///
@@ -460,64 +382,22 @@ where
 ///
 /// - [`sort_custom_f`]: fallible version.
 /// - [`argsort_custom`]: the permutation instead of the values.
-pub fn sort_custom<Args, Inp>(args: Args) -> Args::Out
+pub fn sort_custom<T, B, D, F>(
+    tensor: impl TensorViewAPI<Type = T, Backend = B, Dim = D>,
+    args: impl Into<SortArgs>,
+    f: F,
+) -> Tensor<T, B, IxD>
 where
-    Args: SortCustomAPI<Inp>,
-{
-    Args::sort_custom(args)
-}
-
-/// API trait backing [`sort_custom`].
-pub trait SortCustomAPI<Inp> {
-    type Out;
-
-    fn sort_custom_f(self) -> Result<Self::Out>;
-    fn sort_custom(self) -> Self::Out
-    where
-        Self: Sized,
-    {
-        Self::sort_custom_f(self).rstsr_unwrap()
-    }
-}
-
-impl<R, T, B, D, AArg, F> SortCustomAPI<()> for (&TensorAny<R, T, B, D>, AArg, F)
-where
-    R: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
     D: DimAPI,
-    AArg: TryInto<AxisIndex<isize>, Error: Into<Error>>,
     F: Fn(&T, &T) -> Ordering + Send + Sync,
     B: DeviceAPI<T> + DeviceRawAPI<MaybeUninit<T>> + DeviceCreationAnyAPI<T> + OpSortCustomAPI<T, D>,
 {
-    type Out = Tensor<T, B, IxD>;
-
-    fn sort_custom_f(self) -> Result<Self::Out> {
-        let (tensor, axis, f) = self;
-        sort_custom_f(tensor, axis, f)
-    }
+    sort_custom_f(tensor, args, f).rstsr_unwrap()
 }
 
-impl<T, B, D, AArg, F> SortCustomAPI<()> for (TensorView<'_, T, B, D>, AArg, F)
-where
-    D: DimAPI,
-    AArg: TryInto<AxisIndex<isize>, Error: Into<Error>>,
-    F: Fn(&T, &T) -> Ordering + Send + Sync,
-    B: DeviceAPI<T> + DeviceRawAPI<MaybeUninit<T>> + DeviceCreationAnyAPI<T> + OpSortCustomAPI<T, D>,
-{
-    type Out = Tensor<T, B, IxD>;
-
-    fn sort_custom_f(self) -> Result<Self::Out> {
-        let (tensor, axis, f) = self;
-        sort_custom_f(tensor, axis, f)
-    }
-}
-
-/// Returns the indices that sort a tensor along an axis with a user
-/// comparator.
-///
-/// See also [`argsort_custom`].
 pub fn argsort_custom_f<T, B, D, F>(
     tensor: impl TensorViewAPI<Type = T, Backend = B, Dim = D>,
-    axis: impl TryInto<AxisIndex<isize>, Error: Into<Error>>,
+    args: impl Into<SortArgs>,
     f: F,
 ) -> Result<Tensor<usize, B, IxD>>
 where
@@ -529,10 +409,14 @@ where
         + DeviceCreationAnyAPI<usize>
         + OpSortCustomAPI<T, D>,
 {
-    let axis = axis.try_into().map_err(Into::into)?.into_inner();
+    let args = args.into();
+    let descending = args.descending;
     let tensor = tensor.view();
     let device = tensor.device().clone();
-    let axis = rstsr_check_axis!(axis, tensor.ndim())?;
+    let axis = rstsr_check_axis!(args.axis, tensor.ndim())?;
+    // `stable` is accepted for parity with `argsort` (the custom kernel is
+    // always stable); `descending` reverses the comparator outcome.
+    let f = move |a: &T, b: &T| if descending { f(a, b).reverse() } else { f(a, b) };
     let (storage, layout) = device.argsort_axes_custom(tensor.raw(), tensor.layout(), axis, f)?;
     Tensor::new_f(storage, layout)
 }
@@ -563,31 +447,13 @@ where
 ///
 /// - [`argsort_custom_f`]: fallible version.
 /// - [`sort_custom`]: the values instead of the permutation.
-pub fn argsort_custom<Args, Inp>(args: Args) -> Args::Out
+pub fn argsort_custom<T, B, D, F>(
+    tensor: impl TensorViewAPI<Type = T, Backend = B, Dim = D>,
+    args: impl Into<SortArgs>,
+    f: F,
+) -> Tensor<usize, B, IxD>
 where
-    Args: ArgSortCustomAPI<Inp>,
-{
-    Args::argsort_custom(args)
-}
-
-/// API trait backing [`argsort_custom`].
-pub trait ArgSortCustomAPI<Inp> {
-    type Out;
-
-    fn argsort_custom_f(self) -> Result<Self::Out>;
-    fn argsort_custom(self) -> Self::Out
-    where
-        Self: Sized,
-    {
-        Self::argsort_custom_f(self).rstsr_unwrap()
-    }
-}
-
-impl<R, T, B, D, AArg, F> ArgSortCustomAPI<()> for (&TensorAny<R, T, B, D>, AArg, F)
-where
-    R: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
     D: DimAPI,
-    AArg: TryInto<AxisIndex<isize>, Error: Into<Error>>,
     F: Fn(&T, &T) -> Ordering + Send + Sync,
     B: DeviceAPI<T>
         + DeviceAPI<usize>
@@ -595,31 +461,7 @@ where
         + DeviceCreationAnyAPI<usize>
         + OpSortCustomAPI<T, D>,
 {
-    type Out = Tensor<usize, B, IxD>;
-
-    fn argsort_custom_f(self) -> Result<Self::Out> {
-        let (tensor, axis, f) = self;
-        argsort_custom_f(tensor, axis, f)
-    }
-}
-
-impl<T, B, D, AArg, F> ArgSortCustomAPI<()> for (TensorView<'_, T, B, D>, AArg, F)
-where
-    D: DimAPI,
-    AArg: TryInto<AxisIndex<isize>, Error: Into<Error>>,
-    F: Fn(&T, &T) -> Ordering + Send + Sync,
-    B: DeviceAPI<T>
-        + DeviceAPI<usize>
-        + DeviceRawAPI<MaybeUninit<usize>>
-        + DeviceCreationAnyAPI<usize>
-        + OpSortCustomAPI<T, D>,
-{
-    type Out = Tensor<usize, B, IxD>;
-
-    fn argsort_custom_f(self) -> Result<Self::Out> {
-        let (tensor, axis, f) = self;
-        argsort_custom_f(tensor, axis, f)
-    }
+    argsort_custom_f(tensor, args, f).rstsr_unwrap()
 }
 
 impl<R, T, B, D> TensorAny<R, T, B, D>
@@ -631,23 +473,23 @@ where
     /// Sort a tensor along an axis with a user comparator.
     ///
     /// See also [`sort_custom`].
-    pub fn sort_custom_f<AArg, F>(&self, axis: AArg, f: F) -> Result<Tensor<T, B, IxD>>
+    pub fn sort_custom_f<AArg, F>(&self, args: AArg, f: F) -> Result<Tensor<T, B, IxD>>
     where
-        AArg: TryInto<AxisIndex<isize>, Error: Into<Error>>,
+        AArg: Into<SortArgs>,
         F: Fn(&T, &T) -> Ordering + Send + Sync,
     {
-        sort_custom_f(self, axis, f)
+        sort_custom_f(self, args, f)
     }
 
     /// Sort a tensor along an axis with a user comparator.
     ///
     /// See also [`sort_custom`].
-    pub fn sort_custom<AArg, F>(&self, axis: AArg, f: F) -> Tensor<T, B, IxD>
+    pub fn sort_custom<AArg, F>(&self, args: AArg, f: F) -> Tensor<T, B, IxD>
     where
-        AArg: TryInto<AxisIndex<isize>, Error: Into<Error>>,
+        AArg: Into<SortArgs>,
         F: Fn(&T, &T) -> Ordering + Send + Sync,
     {
-        sort_custom_f(self, axis, f).rstsr_unwrap()
+        sort_custom_f(self, args, f).rstsr_unwrap()
     }
 }
 
@@ -665,24 +507,24 @@ where
     /// comparator.
     ///
     /// See also [`argsort_custom`].
-    pub fn argsort_custom_f<AArg, F>(&self, axis: AArg, f: F) -> Result<Tensor<usize, B, IxD>>
+    pub fn argsort_custom_f<AArg, F>(&self, args: AArg, f: F) -> Result<Tensor<usize, B, IxD>>
     where
-        AArg: TryInto<AxisIndex<isize>, Error: Into<Error>>,
+        AArg: Into<SortArgs>,
         F: Fn(&T, &T) -> Ordering + Send + Sync,
     {
-        argsort_custom_f(self, axis, f)
+        argsort_custom_f(self, args, f)
     }
 
     /// Returns the indices that sort a tensor along an axis with a user
     /// comparator.
     ///
     /// See also [`argsort_custom`].
-    pub fn argsort_custom<AArg, F>(&self, axis: AArg, f: F) -> Tensor<usize, B, IxD>
+    pub fn argsort_custom<AArg, F>(&self, args: AArg, f: F) -> Tensor<usize, B, IxD>
     where
-        AArg: TryInto<AxisIndex<isize>, Error: Into<Error>>,
+        AArg: Into<SortArgs>,
         F: Fn(&T, &T) -> Ordering + Send + Sync,
     {
-        argsort_custom_f(self, axis, f).rstsr_unwrap()
+        argsort_custom_f(self, args, f).rstsr_unwrap()
     }
 }
 
