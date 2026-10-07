@@ -16,12 +16,12 @@ use rstsr::prelude::rt;
 use rstsr::prelude::*;
 
 use rstsr_common::layout::exports::{Indexer, SliceI};
-use rstsr_core::operators::adv_indexing::DeviceIndexSelectAPI;
+use rstsr_core::operators::adv_indexing::{DeviceIndexSelectAPI, DeviceTakeAlongAxisAPI};
 use rstsr_core::operators::assignment::OpAssignAPI;
 use rstsr_core::storage::exports::{DeviceCreationAnyAPI, DeviceRawAPI};
 
 use crate::any_tensor::{dispatch_t, err_py, lift, parse_leaf, type_err, AnyTensor, FTensor, NativeArray, PyScalar};
-use crate::creation::ScalarCastTarget;
+use crate::creation::{dim_from, ScalarCastTarget};
 
 /* #region key parsing */
 
@@ -237,6 +237,38 @@ where
 #[pyfunction]
 pub fn take(x: &NativeArray, indices: Vec<isize>, axis: isize) -> PyResult<NativeArray> {
     Ok(NativeArray { t: dispatch_t!(x.t, op_take(indices.clone(), axis))? })
+}
+
+/* #endregion */
+
+/* #region take_along_axis (W6) */
+
+/// Indices travel as a Python nested int list (the Python layer flattens the
+/// index array through `tolist`), rebuilt as an `isize` tensor of the same
+/// shape; rstsr resolves negatives and enforces the same-ndim,
+/// broadcast-compatible (outside `axis`) shape contract.
+fn op_take_along_axis<T>(
+    t: &FTensor<T>,
+    indices: Vec<isize>,
+    idx_shape: Vec<usize>,
+    axis: isize,
+) -> rt::Result<FTensor<T>>
+where
+    T: Clone + Send + Sync + 'static,
+    DeviceFaer: DeviceAPI<T, Raw = Vec<T>> + DeviceCreationAnyAPI<T> + DeviceTakeAlongAxisAPI<T, IxD, IxD>,
+{
+    let idx: FTensor<isize> = rt::asarray_f((indices, dim_from(&idx_shape), t.device()))?;
+    rt::take_along_axis_f(t, &idx, axis)
+}
+
+#[pyfunction]
+pub fn take_along_axis(
+    x: &NativeArray,
+    indices: Vec<isize>,
+    idx_shape: Vec<usize>,
+    axis: isize,
+) -> PyResult<NativeArray> {
+    Ok(NativeArray { t: dispatch_t!(x.t, op_take_along_axis(indices.clone(), idx_shape.clone(), axis))? })
 }
 
 /* #endregion */

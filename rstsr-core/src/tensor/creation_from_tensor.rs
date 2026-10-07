@@ -1704,6 +1704,8 @@ where
 ///
 /// - [`atleast_1d_f`]: fallible version.
 /// - [`into_atleast_1d`] / [`into_atleast_1d_f`]: ownership-consuming forms.
+/// - [`TensorAny::atleast_1d`] / [`TensorBase::into_atleast_1d`]: associated method forms (each
+///   with a `_f` twin).
 /// - Associated methods on [`TensorAny`]: [`TensorAny::atleast_1d`] / [`TensorAny::atleast_1d_f`].
 pub fn atleast_1d<R, T, B, D>(tensor: &TensorAny<R, T, B, D>) -> TensorView<'_, T, B, IxD>
 where
@@ -1919,6 +1921,39 @@ where
 }
 
 /* #endregion */
+
+impl<S, D> TensorBase<S, D>
+where
+    D: DimAPI,
+{
+    /// View the tensor as having at least one dimension, consuming ownership.
+    /// See also [`into_atleast_1d`].
+    pub fn into_atleast_1d(self) -> TensorBase<S, IxD> {
+        into_atleast_1d(self)
+    }
+    /// Fallible variant of [`into_atleast_1d`](Self::into_atleast_1d).
+    pub fn into_atleast_1d_f(self) -> Result<TensorBase<S, IxD>> {
+        into_atleast_1d_f(self)
+    }
+    /// View the tensor as having at least two dimensions, consuming ownership.
+    /// See also [`into_atleast_2d`].
+    pub fn into_atleast_2d(self) -> TensorBase<S, IxD> {
+        into_atleast_2d(self)
+    }
+    /// Fallible variant of [`into_atleast_2d`](Self::into_atleast_2d).
+    pub fn into_atleast_2d_f(self) -> Result<TensorBase<S, IxD>> {
+        into_atleast_2d_f(self)
+    }
+    /// View the tensor as having at least three dimensions, consuming ownership.
+    /// See also [`into_atleast_3d`].
+    pub fn into_atleast_3d(self) -> TensorBase<S, IxD> {
+        into_atleast_3d(self)
+    }
+    /// Fallible variant of [`into_atleast_3d`](Self::into_atleast_3d).
+    pub fn into_atleast_3d_f(self) -> Result<TensorBase<S, IxD>> {
+        into_atleast_3d_f(self)
+    }
+}
 
 #[cfg(test)]
 mod test {

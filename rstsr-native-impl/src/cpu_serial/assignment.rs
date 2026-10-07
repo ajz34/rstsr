@@ -50,6 +50,10 @@ where
         let offset_c = lc.offset();
         let offset_a = la.offset();
         let size = lc.size();
+        if size == 0 {
+            // nothing to write; offsets may exceed the (empty) storages
+            return Ok(());
+        }
         c[offset_c..(offset_c + size)].iter_mut().zip(a[offset_a..(offset_a + size)].iter()).for_each(|(ci, ai)| {
             func_clone;
         });

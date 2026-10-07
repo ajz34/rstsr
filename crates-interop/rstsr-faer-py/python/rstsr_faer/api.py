@@ -10,6 +10,7 @@ register rather than papered over with Python fallbacks.
 """
 
 import builtins
+import collections
 
 from . import rstsr_faer as _pkg
 from .rstsr_faer import (
@@ -124,6 +125,20 @@ from .rstsr_faer import (
     sum_bool as _sum_bool,
     where as _where,
     take as _take,
+    repeat as _repeat,
+    roll as _roll,
+    tile as _tile,
+    diff as _diff,
+    sort as _sort,
+    argsort as _argsort,
+    searchsorted as _searchsorted,
+    nonzero as _nonzero,
+    isin as _isin,
+    unique_values as _unique_values,
+    unique_counts as _unique_counts,
+    unique_inverse as _unique_inverse,
+    unique_all as _unique_all,
+    take_along_axis as _take_along_axis,
 )
 
 __array_api_version__ = "2025.12"
@@ -134,6 +149,7 @@ _py_bool = builtins.bool
 _py_int = builtins.int
 _py_float = builtins.float
 _py_complex = builtins.complex
+_py_max = builtins.max
 
 # ----------------------------------------------------------------- constants --
 
@@ -201,6 +217,8 @@ class _NamespaceInfo:
             "real": float64,
             "integral": int64,
             "complex": complex128,
+            # 2025.12 key: every index output is lifted to int64 (idx_lift)
+            "indexing": int64,
         }
 
     def dtypes(self, /, *, device=None, kind=None):
@@ -228,7 +246,7 @@ class _NamespaceInfo:
     def capabilities(self, /):
         return {
             "boolean indexing": True,
-            "data-dependent shapes": False,
+            "data-dependent shapes": True,
             "max dimensions": 8,
         }
 
@@ -394,6 +412,15 @@ class Array:
         if isinstance(index, tuple) and builtins.len(index) == 0:
             return self  # () is a no-op index at any dimensionality
         key = index if isinstance(index, tuple) else (index,)
+        # A 0-d integer array is a scalar index (NumPy semantics), not
+        # integer-array indexing: marshal it through __index__ (G-038/G-039
+        # stay for genuine mask / integer-array keys).
+        key = tuple(
+            _py_int(k)
+            if isinstance(k, Array) and k.ndim == 0 and _kind(k.dtype) == "integral"
+            else k
+            for k in key
+        )
         if builtins.any(isinstance(k, Array) for k in key):
             _unimplemented("boolean-mask / integer-array indexing (rstsr gaps G-038/G-039)")
         return _wrap(_pkg.getitem_basic(self._h, key))
@@ -1357,6 +1384,254 @@ def take(x, /, indices, *, axis=None):
     return _wrap(_take(h, indices.tolist(), axis))
 
 
+def take_along_axis(x, /, indices, *, axis=-1):
+    h = _handle(x)
+    if not isinstance(indices, Array):
+        raise TypeError(
+            f"take_along_axis: indices must be an rstsr_faer.api Array, got {type(indices).__name__}"
+        )
+    if _kind(indices.dtype) != "integral":
+        raise TypeError(f"take_along_axis: indices must have an integer data type, got {indices.dtype!r}")
+    # shape compatibility (same ndim; broadcast-compatible outside `axis`) is
+    # validated rust-side
+    # tolist flattens nested ints; the shape travels alongside so the shim can
+    # rebuild the index tensor (the `take` marshalling precedent)
+    flat = indices.tolist()
+    return _wrap(_take_along_axis(h, _flatten_indices(flat, indices.shape), list(indices.shape), axis))
+
+
+def _flatten_indices(obj, shape, /):
+    """Nested int lists -> flat int list (row-major), len == prod(shape)."""
+    flat = []
+
+    def rec(x, depth):
+        if depth == builtins.len(shape):
+            if isinstance(x, _py_int) and not isinstance(x, _py_bool):
+                flat.append(x)
+                return
+            raise TypeError(f"indices leaves must be ints, got {type(x).__name__}")
+        if not isinstance(x, (list, tuple)) or builtins.len(x) != shape[depth]:
+            raise ValueError("indices: ragged nested sequences are not supported")
+        for item in x:
+            rec(item, depth + 1)
+
+    rec(obj, 0)
+    return flat
+
+
+# ------------------------------------------ manip/sort/set wave (W6-8) -------
+
+
+def _int_arg(value, opname, /):
+    """Required int argument (bool rejected)."""
+    if isinstance(value, _py_int) and not isinstance(value, _py_bool):
+        return value
+    raise TypeError(f"{opname}: expected an int, got {value!r}")
+
+
+def _int_tuple_arg(value, opname, /):
+    """int or tuple of ints -> list of ints."""
+    if isinstance(value, _py_int) and not isinstance(value, _py_bool):
+        return [value]
+    if isinstance(value, tuple) and builtins.all(
+        isinstance(s, _py_int) and not isinstance(s, _py_bool) for s in value
+    ):
+        return list(value)
+    raise TypeError(f"{opname}: expected an int or a tuple of ints, got {value!r}")
+
+
+def repeat(x, /, repeats, *, axis=None):
+    h = _handle(x)
+    if isinstance(repeats, Array):
+        # dtype/ndim checks stand in for the rust boundary: repeats travel as a
+        # flat unsigned int list, so bad dtypes/shapes get a clean error first
+        if _kind(repeats.dtype) != "integral":
+            raise TypeError(f"repeat: repeats must have an integer data type, got {repeats.dtype!r}")
+        if repeats.ndim != 1:
+            raise ValueError(f"repeat: repeats must be one-dimensional, got ndim={repeats.ndim}")
+        reps = repeats.tolist()
+        # negative repetitions are a ValueError (NumPy parity); a raw negative
+        # would die as OverflowError at the unsigned pyo3 boundary
+        if builtins.any(s < 0 for s in reps):
+            raise ValueError(f"repeat: negative repeats are not allowed, got {reps!r}")
+    elif isinstance(repeats, _py_int) and not isinstance(repeats, _py_bool):
+        # bool is rejected (NumPy parity); a raw negative would die as
+        # OverflowError at the unsigned pyo3 boundary
+        if repeats < 0:
+            raise ValueError(f"repeat: negative repeats are not allowed, got {repeats!r}")
+        reps = None
+    else:
+        raise TypeError(
+            f"repeat: repeats must be an int or an rstsr_faer.api Array, got {type(repeats).__name__}"
+        )
+    if axis is not None:
+        axis = _int_arg(axis, "repeat(axis)")
+    return _wrap(_repeat(h, reps, repeats if isinstance(repeats, _py_int) else None, axis))
+
+
+def roll(x, /, shift=None, *, axis=None):
+    h = _handle(x)
+    shifts = _int_tuple_arg(shift, "roll(shift)")
+    axes = None
+    if axis is not None:
+        axes = _int_tuple_arg(axis, "roll(axis)")
+    # shift/axis lengths follow NumPy's broadcast rule; incompatibilities are
+    # validated rust-side (surfaced as ValueError)
+    return _wrap(_roll(h, shifts, axes))
+
+
+def tile(x, /, repetitions):
+    h = _handle(x)
+    reps = _int_tuple_arg(repetitions, "tile(repetitions)")
+    # negative sizes are a ValueError (NumPy parity); a raw negative would die
+    # as OverflowError in the unsigned pyo3 boundary
+    if builtins.any(s < 0 for s in reps):
+        raise ValueError(f"tile: negative repetitions are not allowed, got {reps!r}")
+    return _wrap(_tile(h, reps))
+
+
+def diff(x, /, *, axis=-1, n=1, prepend=None, append=None):
+    h = _handle(x)
+    axis = _int_arg(axis, "diff(axis)")
+    # n = 0 returns the input unchanged (NumPy parity; rust diff_f handles it)
+    if not isinstance(n, _py_int) or isinstance(n, _py_bool) or n < 0:
+        raise ValueError(f"diff: n must be a non-negative integer, got {n!r}")
+    pre = _handle(prepend) if prepend is not None else None
+    app = _handle(append) if append is not None else None
+    return _wrap(_diff(h, axis, n, pre, app))
+
+
+def sort(x, /, *, axis=-1, descending=False, stable=True):
+    return _wrap(_sort(_handle(x), _int_arg(axis, "sort(axis)"), _py_bool(descending), _py_bool(stable)))
+
+
+def argsort(x, /, *, axis=-1, descending=False, stable=True):
+    return _wrap(
+        _argsort(_handle(x), _int_arg(axis, "argsort(axis)"), _py_bool(descending), _py_bool(stable))
+    )
+
+
+def searchsorted(x1, /, x2, *, side="left", sorter=None):
+    h1 = _handle(x1)
+    if side not in ("left", "right"):
+        raise ValueError(f"searchsorted: side must be 'left' or 'right', got {side!r}")
+    if isinstance(x2, Array):
+        h2 = x2._h
+    elif isinstance(x2, (_py_int, _py_float)) and not isinstance(x2, _py_bool):
+        # 2025.12 mixing-scalars rule: a compatible scalar becomes a 0-d array
+        # of x1's dtype. Compatibility: int scalar for an int array; int/float
+        # scalar for a real-floating array. A float scalar with an int array is
+        # unspecified by the standard (may promote or raise) — rstsr's
+        # searchsorted is single-dtype, so it raises (same as a float *array*).
+        if _kind(h1.dtype()) == "integral" and isinstance(x2, _py_float):
+            raise TypeError(
+                f"searchsorted: float scalar x2 with an integer array x1 is not "
+                f"provided by rstsr (gap G-009); cast x2 or x1 first"
+            )
+        h2 = asarray(x2, dtype=h1.dtype())._h
+    else:
+        raise TypeError(
+            f"searchsorted: x2 must be an rstsr_faer.api Array, int, or float, "
+            f"got {type(x2).__name__}"
+        )
+    sort_idx = None
+    if sorter is not None:
+        if not isinstance(sorter, Array):
+            raise TypeError(
+                f"searchsorted: sorter must be an rstsr_faer.api Array, got {type(sorter).__name__}"
+            )
+        if _kind(sorter.dtype) != "integral":
+            raise TypeError(f"searchsorted: sorter must have an integer data type, got {sorter.dtype!r}")
+        if sorter.ndim != 1:
+            raise ValueError(f"searchsorted: sorter must be one-dimensional, got ndim={sorter.ndim}")
+        sort_idx = sorter.tolist()
+        # negative sorter entries would die as OverflowError at the unsigned
+        # pyo3 boundary; rstsr validates bounds rust-side
+        if builtins.any(i < 0 for i in sort_idx):
+            raise ValueError("searchsorted: sorter entries must be non-negative")
+    return _wrap(_searchsorted(h1, h2, side == "right", sort_idx))
+
+
+def nonzero(x, /):
+    return tuple(_wrap(h) for h in _nonzero(_handle(x)))
+
+
+_INT_PROMOTE = {
+    "int8": (1, True), "int16": (2, True), "int32": (3, True), "int64": (4, True),
+    "uint8": (1, False), "uint16": (2, False), "uint32": (3, False), "uint64": (4, False),
+}
+
+
+def _common_int_dtype(d1, d2, /):
+    """Common integer dtype of two int dtypes (the standard's promotion table).
+
+    rstsr's isin kernel is single-dtype, so mixed integer pairs are brought to
+    their promoted dtype through the existing astype path (value-preserving);
+    mixed non-integer pairs stay declined (G-009).
+    """
+    try:
+        r1, s1 = _INT_PROMOTE[d1.name]
+        r2, s2 = _INT_PROMOTE[d2.name]
+    except KeyError:
+        raise TypeError(
+            f"isin: mixed-dtype operands {d1.name}/{d2.name} are not provided by "
+            f"rstsr (gap G-009); use matching dtypes or cast first"
+        ) from None
+    if s1 == s2:
+        return d1 if r1 >= r2 else d2
+    # mixed sign: smallest signed dtype covering both widths; uint64 has no
+    # signed partner (int64 cannot hold all uint64 values) — declined
+    width = _py_max(r1 if s1 else r1 + 1, r2 if s2 else r2 + 1)
+    if width > 4:
+        raise TypeError(
+            f"isin: mixed-dtype operands {d1.name}/{d2.name} have no promotable "
+            f"common integer dtype (gap G-009); use matching dtypes or cast first"
+        )
+    return (int8, int16, int32, int64)[width - 1]
+
+
+def isin(x1, x2, /, *, invert=False):
+    if isinstance(x1, Array) and isinstance(x2, Array):
+        if x1.dtype is x2.dtype:
+            a, b = x1._h, x2._h
+        else:
+            common = _common_int_dtype(x1.dtype, x2.dtype)
+            a, b = astype(x1, common)._h, astype(x2, common)._h
+    elif isinstance(x1, Array):
+        a, b = x1._h, _scalar_operand(x2, x1.dtype)._h
+    elif isinstance(x2, Array):
+        a, b = _scalar_operand(x1, x2.dtype)._h, x2._h
+    else:
+        raise TypeError("isin: at least one of x1, x2 must be an rstsr_faer.api Array")
+    return _wrap(_isin(a, b, _py_bool(invert)))
+
+
+# unique_* return spec namedtuples; the field names are part of the standard.
+
+UniqueAll = collections.namedtuple("unique_all", ["values", "indices", "inverse_indices", "counts"])
+UniqueCounts = collections.namedtuple("unique_counts", ["values", "counts"])
+UniqueInverse = collections.namedtuple("unique_inverse", ["values", "inverse_indices"])
+
+
+def unique_values(x, /):
+    return _wrap(_unique_values(_handle(x)))
+
+
+def unique_counts(x, /):
+    values, counts = _unique_counts(_handle(x))
+    return UniqueCounts(_wrap(values), _wrap(counts))
+
+
+def unique_inverse(x, /):
+    values, inverse = _unique_inverse(_handle(x))
+    return UniqueInverse(_wrap(values), _wrap(inverse))
+
+
+def unique_all(x, /):
+    values, indices, inverse, counts = _unique_all(_handle(x))
+    return UniqueAll(_wrap(values), _wrap(indices), _wrap(inverse), _wrap(counts))
+
+
 # --------------------------------------------------------------- data types ---
 
 
@@ -1414,8 +1689,14 @@ __all__ = [
     # manipulation
     "reshape", "permute_dims", "broadcast_arrays", "broadcast_shapes",
     "concat", "stack", "unstack", "expand_dims", "squeeze", "flip", "moveaxis",
+    "repeat", "roll", "tile", "diff",
+    # sorting
+    "sort", "argsort",
     # searching / indexing
     "argmax", "argmin", "count_nonzero", "take", "where",
+    "searchsorted", "nonzero", "take_along_axis",
+    # set functions
+    "isin", "unique_values", "unique_counts", "unique_inverse", "unique_all",
     # data types
     "astype", "finfo", "iinfo",
     # constants / sentinels

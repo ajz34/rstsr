@@ -14,6 +14,9 @@ mod indexing;
 mod info;
 mod manipulation;
 mod ops;
+mod searching;
+mod set;
+mod sorting;
 
 use std::collections::HashMap;
 
@@ -250,9 +253,25 @@ fn rstsr_faer(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(manipulation::flip, m)?)?;
     m.add_function(wrap_pyfunction!(manipulation::moveaxis, m)?)?;
 
+    // W6-8 manip/sort/set surface (bindings over rt:: manip/sort/set entries)
+    m.add_function(wrap_pyfunction!(manipulation::repeat, m)?)?;
+    m.add_function(wrap_pyfunction!(manipulation::roll, m)?)?;
+    m.add_function(wrap_pyfunction!(manipulation::tile, m)?)?;
+    m.add_function(wrap_pyfunction!(manipulation::diff, m)?)?;
+    m.add_function(wrap_pyfunction!(sorting::sort, m)?)?;
+    m.add_function(wrap_pyfunction!(sorting::argsort, m)?)?;
+    m.add_function(wrap_pyfunction!(searching::searchsorted, m)?)?;
+    m.add_function(wrap_pyfunction!(searching::nonzero, m)?)?;
+    m.add_function(wrap_pyfunction!(set::unique_values, m)?)?;
+    m.add_function(wrap_pyfunction!(set::unique_counts, m)?)?;
+    m.add_function(wrap_pyfunction!(set::unique_inverse, m)?)?;
+    m.add_function(wrap_pyfunction!(set::unique_all, m)?)?;
+    m.add_function(wrap_pyfunction!(set::isin, m)?)?;
+
     m.add_function(wrap_pyfunction!(indexing::getitem_basic, m)?)?;
     m.add_function(wrap_pyfunction!(indexing::setitem_basic, m)?)?;
     m.add_function(wrap_pyfunction!(indexing::setitem_scalar, m)?)?;
+    m.add_function(wrap_pyfunction!(indexing::take_along_axis, m)?)?;
 
     m.add_function(wrap_pyfunction!(dlpack::dlpack_export, m)?)?;
     m.add_function(wrap_pyfunction!(dlpack::dlpack_import, m)?)?;

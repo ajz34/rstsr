@@ -3,6 +3,7 @@ pub mod test_all;
 pub mod test_any;
 pub mod test_argmax;
 pub mod test_argmin;
+pub mod test_associated_methods;
 pub mod test_count_nonzero;
 pub mod test_cumulative;
 pub mod test_max;

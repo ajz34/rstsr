@@ -39,11 +39,7 @@ _core/tests/test_numeric.py,TestMoveaxis,test_errors,v2.5.2,transferred,core_fun
 _core/tests/test_numeric.py,TestMoveaxis,test_array_likes,v2.5.2,not-applicable,,2ad1c9a7984b,masked arrays / class preservation
 _core/tests/test_numeric.py,TestRollaxis,test_exceptions,v2.5.2,not-applicable,,ae5da103ad49,rstsr has no rollaxis
 _core/tests/test_numeric.py,TestRollaxis,test_results,v2.5.2,not-applicable,,eac707da345d,rstsr has no rollaxis
-_core/tests/test_numeric.py,TestRoll,test_roll1d,v2.5.2,not-applicable,,301d1d579165,rstsr has no roll
-_core/tests/test_numeric.py,TestRoll,test_roll2d,v2.5.2,not-applicable,,b53a8bb4ae2c,rstsr has no roll
-_core/tests/test_numeric.py,TestRoll,test_roll_empty,v2.5.2,not-applicable,,89e1e985a56a,rstsr has no roll
-_core/tests/test_numeric.py,TestRoll,test_roll_unsigned_shift,v2.5.2,not-applicable,,f11f02964107,rstsr has no roll
-_core/tests/test_numeric.py,TestRoll,test_roll_big_int,v2.5.2,not-applicable,,daf9a9e0f62f,rstsr has no roll
+_core/tests/test_numeric.py,TestRoll,test_roll_unsigned_shift,v2.5.2,not-applicable,,f11f02964107,numpy uint shift widths; rstsr shifts are isize
 _core/tests/test_regression.py,TestRegression,test_reshape_order,v2.5.2,transferred,core_func/manipulation/test_reshape.rs::numpy_reshape::regression,fe7311072c67,order=F incl non-contig column view
 _core/tests/test_regression.py,TestRegression,test_reshape_zero_strides,v2.5.2,transferred,core_func/manipulation/test_reshape.rs::numpy_reshape::regression,ceb0f75a1627,broadcast zero-stride reshape
 _core/tests/test_regression.py,TestRegression,test_reshape_zero_size,v2.5.2,transferred,core_func/manipulation/test_reshape.rs::numpy_reshape::regression,854cd2fe0e89,-1 inference on 0-size; in-place a.shape= N/A
@@ -156,7 +152,6 @@ lib/tests/test_shape_base.py,TestSplit,test_equal_split,v2.5.2,todo,,9cdaba7b936
 lib/tests/test_shape_base.py,TestHsplit,test_2D_array,v2.5.2,todo,,25baf0aa4181,rstsr has no hsplit; 4 methods (representative)
 lib/tests/test_shape_base.py,TestVsplit,test_2D_array,v2.5.2,todo,,6ec470002bf5,rstsr has no vsplit; 4 methods (representative)
 lib/tests/test_shape_base.py,TestDsplit,test_2D_array,v2.5.2,todo,,37104399225a,rstsr has no dsplit; 5 methods (representative)
-lib/tests/test_shape_base.py,TestTile,test_basic,v2.5.2,todo,,1528134d1518,rstsr has no tile; 4 methods (representative)
 # --- core_func/reduction ---
 _core/tests/test_numeric.py,TestNonarrayArgs,test_sum,v2.5.2,transferred,core_func/reduction/test_sum.rs::numpy_sum::test_numeric,5b4513c503cd,"keepdims emulated as axis-dropped (rstsr has no keepdims; see numpy_differences.md)"
 _core/tests/test_numeric.py,TestNonarrayArgs,test_prod,v2.5.2,transferred,core_func/reduction/test_prod.rs::numpy_prod::test_numeric;test_basic,e3312864895c,"axis=-1 values + TestProd::test_basic values (dtype loop N/A)"
@@ -214,3 +209,61 @@ _core/tests/test_multiarray.py,TestWhere,test_string,v2.5.2,not-applicable,,aff8
 _core/tests/test_multiarray.py,TestWhere,test_empty_result,v2.5.2,not-applicable,,f588ac980d30,1-arg where(cond) == nonzero; out of scope (3-arg only)
 _core/tests/test_multiarray.py,TestWhere,test_largedim,v2.5.2,not-applicable,,8be7298435d0,1-arg where(cond)/nonzero; out of scope
 _core/tests/test_multiarray.py,TestWhere,test_kwargs,v2.5.2,not-applicable,,c84ef55a6d2f,kwargs rejection N-A in Rust (positional-only by construction)
+_core/tests/test_multiarray.py,TestRepeat,test_basic,v2.5.2,transferred,core_func/manipulation/test_repeat.rs::numpy_repeat::test_basic,63d8882a07bf,per-element counts
+_core/tests/test_multiarray.py,TestRepeat,test_broadcast1,v2.5.2,transferred,core_func/manipulation/test_repeat.rs::numpy_repeat::test_broadcast1,f9c4f7aa6ca9,scalar count
+_core/tests/test_multiarray.py,TestRepeat,test_axis_spec,v2.5.2,transferred,core_func/manipulation/test_repeat.rs::numpy_repeat::test_axis_spec,7a7dabe5b1ba,axis 0 / axis 1 lists
+_core/tests/test_multiarray.py,TestRepeat,test_broadcast2,v2.5.2,transferred,core_func/manipulation/test_repeat.rs::numpy_repeat::test_broadcast2,df04148f1035,scalar count per axis
+_core/tests/test_numeric.py,TestRoll,test_roll1d,v2.5.2,transferred,core_func/manipulation/test_roll.rs::numpy_roll::test_roll1d,301d1d579165,1-d roll
+_core/tests/test_numeric.py,TestRoll,test_roll2d,v2.5.2,transferred,core_func/manipulation/test_roll.rs::numpy_roll::test_roll2d,b53a8bb4ae2c,full tuple/axis matrix
+_core/tests/test_numeric.py,TestRoll,test_roll_empty,v2.5.2,transferred,core_func/manipulation/test_roll.rs::numpy_roll::test_roll_empty,89e1e985a56a,empty input
+_core/tests/test_numeric.py,TestRoll,test_roll_big_int,v2.5.2,transferred,core_func/manipulation/test_roll.rs::numpy_roll::test_roll_big_int,daf9a9e0f62f,multi-turn wrap; 2**100 case declined (isize shift)
+lib/tests/test_shape_base.py,TestTile,test_basic,v2.5.2,transferred,core_func/manipulation/test_tile.rs::numpy_tile::test_basic,1528134d1518,six tile forms
+lib/tests/test_shape_base.py,TestTile,test_tile_one_repetition_on_array_gh4679,v2.5.2,transferred,core_func/manipulation/test_tile.rs::numpy_tile::test_tile_one_repetition_on_array_gh4679,55dc5b35355d,copy guarantee (rstsr always copies)
+lib/tests/test_shape_base.py,TestTile,test_empty,v2.5.2,transferred,core_func/manipulation/test_tile.rs::numpy_tile::test_empty,62eb3c95e13f,empty shapes
+lib/tests/test_shape_base.py,TestTile,test_kroncompare,v2.5.2,not-applicable,,509cb8549981,requires kron; covered indirectly by 3-d tile test
+_core/tests/test_multiarray.py,TestMethods,test_sort,v2.5.2,transferred,core_func/sorting/test_sort.rs::numpy_sort::test_sort_nan_order,ab44c8bfdb8a,NaN sorts to the end
+_core/tests/test_multiarray.py,TestMethods,test_sort_unsigned,v2.5.2,transferred,core_func/sorting/test_sort.rs::numpy_sort::test_sort_unsigned,ced80548907f,arange(101)[::-1] argsort/sort
+_core/tests/test_multiarray.py,TestMethods,test_sort_signed,v2.5.2,transferred,core_func/sorting/test_sort.rs::numpy_sort::test_sort_signed_negatives,dc97e6eafd54,signed incl. negatives
+_core/tests/test_multiarray.py,TestMethods,test_sort_axis,v2.5.2,transferred,core_func/sorting/test_sort.rs::numpy_sort::test_sort_2d_axis,a6eab3612479,per-line along axis
+_core/tests/test_multiarray.py,TestMethods,test_sort_size_0,v2.5.2,transferred,core_func/sorting/test_sort.rs::numpy_sort_descending::test_sort_size_0,533193da525d,zero-size sort
+_core/tests/test_multiarray.py,TestMethods,test_sort_descending_signed,v2.5.2,transferred,core_func/sorting/test_sort.rs::numpy_sort_descending::test_sort_descending_signed,1c3527a95c5d,descending reverses distinct values
+_core/tests/test_multiarray.py,TestMethods,test_sort_descending_unsigned,v2.5.2,transferred,core_func/sorting/test_sort.rs::numpy_sort_descending::test_sort_descending_unsigned,bca4adf0fea9,descending unsigned
+_core/tests/test_multiarray.py,TestMethods,test_sort_descending_floats,v2.5.2,transferred,core_func/sorting/test_sort.rs::numpy_sort::test_sort_descending; core_func/sorting/test_sort.rs::numpy_sort_descending::test_sort_descending_floats,9aa6713b5473,NaN last in both directions
+_core/tests/test_multiarray.py,TestMethods,test_argsort,v2.5.2,transferred,core_func/sorting/test_argsort.rs::numpy_argsort::test_argsort_basic; core_func/sorting/test_argsort.rs::numpy_argsort::test_argsort_nan_last,349eb010ef13,index permutation
+_core/tests/test_multiarray.py,TestMethods,test_argsort_descending_signed,v2.5.2,transferred,core_func/sorting/test_argsort.rs::numpy_argsort_descending::test_argsort_descending_signed,600e2d096100,reversal permutation
+_core/tests/test_multiarray.py,TestMethods,test_argsort_descending_unsigned,v2.5.2,transferred,core_func/sorting/test_argsort.rs::numpy_argsort_descending::test_argsort_descending_unsigned,b50735056477,descending unsigned
+_core/tests/test_multiarray.py,TestMethods,test_argsort_descending_floats,v2.5.2,transferred,core_func/sorting/test_argsort.rs::numpy_argsort_descending::test_argsort_descending_floats,57462a88cfd1,NaN tail
+_core/tests/test_multiarray.py,TestMethods,test_argsort_stable_bool_int_duplicates,v2.5.2,transferred,core_func/sorting/test_argsort.rs::numpy_argsort_descending::test_argsort_stable_bool_int_duplicates,ab85fca851a8,stable ties both directions
+_core/tests/test_numeric.py,TestNonarrayArgs,test_searchsorted,v2.5.2,transferred,core_func/searching/test_searchsorted.rs::numpy_searchsorted::test_searchsorted_basic,da1d4584ae41,scalar query index
+_core/tests/test_multiarray.py,TestMethods,test_searchsorted_floats,v2.5.2,transferred,core_func/searching/test_searchsorted.rs::numpy_searchsorted::test_searchsorted_floats_nan,9f79ccf85aff,left/right with NaN
+_core/tests/test_multiarray.py,TestMethods,test_searchsorted_n_elements,v2.5.2,transferred,core_func/searching/test_searchsorted.rs::numpy_searchsorted::test_searchsorted_n_elements,9917123e4228,0/1/all-equal x1
+_core/tests/test_multiarray.py,TestMethods,test_searchsorted_resetting,v2.5.2,transferred,core_func/searching/test_searchsorted.rs::numpy_searchsorted::test_searchsorted_resetting,2818b7dae738,non-monotonic keys
+_core/tests/test_multiarray.py,TestMethods,test_searchsorted_with_invalid_sorter,v2.5.2,transferred,core_func/searching/test_searchsorted.rs::custom_searchsorted::test_invalid_sorter,6d02bfdf303d,wrong-length/OOB sorter
+_core/tests/test_multiarray.py,TestMethods,test_searchsorted_with_sorter,v2.5.2,transferred,core_func/searching/test_searchsorted.rs::numpy_searchsorted::test_searchsorted_with_sorter,2de98f2699ea,"sorter indirection, cases 1+2"
+_core/tests/test_multiarray.py,TestMethods,test_searchsorted_return_type,v2.5.2,transferred,core_func/searching/test_searchsorted.rs::numpy_searchsorted::test_searchsorted_return_type,a8ebf1bbc040,index dtype
+_core/tests/test_numeric.py,TestNonzero,test_nonzero_trivial,v2.5.2,transferred,core_func/searching/test_nonzero.rs::numpy_nonzero::test_nonzero_trivial,46b1de601c28,empty/0/1-element
+_core/tests/test_numeric.py,TestNonzero,test_nonzero_zerodim,v2.5.2,transferred,core_func/searching/test_nonzero.rs::numpy_nonzero::test_nonzero_zerodim,63fb05bc1892,0-d raises (NumPy parity)
+_core/tests/test_numeric.py,TestNonzero,test_nonzero_onedim,v2.5.2,transferred,core_func/searching/test_nonzero.rs::numpy_nonzero::test_nonzero_onedim,7f2bc3c729c9,1-d coordinates
+_core/tests/test_numeric.py,TestNonzero,test_nonzero_twodim,v2.5.2,transferred,core_func/searching/test_nonzero.rs::numpy_nonzero::test_nonzero_twodim,4fdfcd22ab70,2-d + eye
+_core/tests/test_numeric.py,TestNonzero,test_nonzero_float_dtypes,v2.5.2,partial,core_func/searching/test_nonzero.rs::numpy_nonzero::test_nonzero_dtypes,9c9dc2eef006,random cmp vs where; dtype sweep only
+_core/tests/test_numeric.py,TestNonzero,test_nonzero_integer_dtypes,v2.5.2,transferred,core_func/searching/test_nonzero.rs::numpy_nonzero::test_nonzero_dtypes,821192e8cd2b,int/uint/bool dtype sweep
+lib/tests/test_arraysetops.py,TestUnique,test_unique_1d,v2.5.2,transferred,core_func/set/test_set.rs::numpy_unique::test_unique_1d,92b2e2ef8049,values/indices/inverse/counts
+lib/tests/test_arraysetops.py,TestUnique,test_unique_zero_sized,v2.5.2,transferred,core_func/set/test_set.rs::numpy_unique::test_unique_zero_sized,2d58a7791448,empty outputs
+lib/tests/test_arraysetops.py,TestUnique,test_unique_nanequals,v2.5.2,transferred,core_func/set/test_set.rs::numpy_unique::test_unique_nanequals,7519fbdc1bb9,equal_nan=False -> distinct
+lib/tests/test_arraysetops.py,TestUnique,test_unique_array_api_functions,v2.5.2,transferred,core_func/set/test_set.rs::numpy_unique::test_unique_array_api_functions,440b180e5f75,array-api aliases vs np.unique
+lib/tests/test_arraysetops.py,TestUnique,test_unique_inverse_shape,v2.5.2,transferred,core_func/set/test_set.rs::numpy_unique::test_unique_inverse_shape,4884739a9e13,gh-25552 inverse shape
+lib/tests/test_arraysetops.py,TestUnique,test_unique_complex_signed_zeros,v2.5.2,transferred,core_func/set/test_set.rs::numpy_unique::test_unique_complex_signed_zeros,58306082ce9c,"signed-zero merge, len-1"
+lib/tests/test_arraysetops.py,TestSetOps,test_isin,v2.5.2,partial,core_func/set/test_set.rs::numpy_isin::test_isin,560bc095b760,multidim + empty; scalar/array-like N/A
+lib/tests/test_arraysetops.py,TestSetOps,test_isin_invert,v2.5.2,transferred,core_func/set/test_set.rs::numpy_isin::test_isin_invert,dc9ec81df7e3,invert == not isin
+lib/tests/test_arraysetops.py,TestSetOps,test_isin_boolean,v2.5.2,transferred,core_func/set/test_set.rs::numpy_isin::test_isin_boolean,638193bd0989,bool membership
+lib/tests/test_arraysetops.py,TestSetOps,test_isin_errors,v2.5.2,partial,core_func/set/test_set.rs::numpy_isin::test_isin_errors,f16ea738eb90,kind= errors N/A; overflow case kept
+lib/tests/test_shape_base.py,TestTakeAlongAxis,test_argequivalent,v2.5.2,transferred,core_func/indexing/test_take_along_axis.rs::numpy_take_along_axis::test_argequivalent,81dd863cbe4e,gather(argsort)==sort per axis
+lib/tests/test_shape_base.py,TestTakeAlongAxis,test_invalid,v2.5.2,partial,core_func/indexing/test_take_along_axis.rs::numpy_take_along_axis::test_invalid,9c4b0954ea06,bool/float idx + axis=None N/A
+lib/tests/test_shape_base.py,TestTakeAlongAxis,test_empty,v2.5.2,transferred,core_func/indexing/test_take_along_axis.rs::numpy_take_along_axis::test_empty,005880ceeb2d,empty middle axis
+lib/tests/test_shape_base.py,TestTakeAlongAxis,test_broadcast,v2.5.2,transferred,core_func/indexing/test_take_along_axis.rs::numpy_take_along_axis::test_broadcast,700bde40cccf,tensor-side dim-1 broadcast
+lib/tests/test_function_base.py,TestDiff,test_basic,v2.5.2,transferred,core_func/manipulation/test_diff.rs::numpy_diff::test_basic,073b9fa35224,"n=1/2/3, int+float"
+lib/tests/test_function_base.py,TestDiff,test_axis,v2.5.2,transferred,core_func/manipulation/test_diff.rs::numpy_diff::test_axis,d49d96d4a433,axis normalize/errors/0-d
+lib/tests/test_function_base.py,TestDiff,test_nd,v2.5.2,transferred,core_func/manipulation/test_diff.rs::numpy_diff::test_nd,9264a1a69969,n-th order composes
+lib/tests/test_function_base.py,TestDiff,test_n,v2.5.2,transferred,core_func/manipulation/test_diff.rs::numpy_diff::test_n,3eabe5afc719,"n=0 copy; length max(0,len-n)"
+lib/tests/test_function_base.py,TestDiff,test_prepend,v2.5.2,transferred,core_func/manipulation/test_diff.rs::numpy_diff::test_prepend,ca3dc647521d,explicit-shape prepend (no scalar expansion)
+lib/tests/test_function_base.py,TestDiff,test_append,v2.5.2,transferred,core_func/manipulation/test_diff.rs::numpy_diff::test_append,3777c5c667a5,append variants

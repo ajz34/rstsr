@@ -409,6 +409,249 @@ where
 
 /* #endregion */
 
+/* #region take_along_axis */
+
+/// Gather values along an axis using an index tensor.
+///
+/// See also [`take_along_axis`].
+pub fn take_along_axis_f<T, B, DA, DI>(
+    tensor: impl TensorViewAPI<Type = T, Backend = B, Dim = DA>,
+    indices: impl TensorViewAPI<Type = isize, Backend = B, Dim = DI>,
+    axis: impl TryInto<AxisIndex<isize>, Error: Into<Error>>,
+) -> Result<Tensor<T, B, IxD>>
+where
+    DA: DimAPI,
+    DI: DimAPI,
+    T: Clone,
+    B: DeviceAPI<T>
+        + DeviceAPI<usize, Raw = Vec<usize>>
+        + DeviceAPI<isize, Raw = Vec<isize>>
+        + DeviceRawAPI<MaybeUninit<T>>
+        + DeviceCreationAnyAPI<T>
+        + DeviceTakeAlongAxisAPI<T, DA, DI>,
+{
+    let (tensor, indices) = (tensor.view(), indices.view());
+    let axis: AxisIndex<isize> = axis.try_into().map_err(Into::into)?;
+    let device = tensor.device().clone();
+    rstsr_assert!(
+        device.same_device(indices.device()),
+        DeviceMismatch,
+        "take_along_axis requires tensor and indices on the same device."
+    )?;
+    let axis = axis.into_normalized(tensor.ndim())?;
+    // shape checks: same rank; non-axis dims must be broadcast-compatible
+    // (array-api 2025.12: indices "must be compatible with x, except for the
+    // axis specified by axis (see broadcasting)"; the output shape follows
+    // that broadcasting)
+    let la = tensor.layout();
+    let lidx = indices.layout();
+    rstsr_assert_eq!(
+        lidx.ndim(),
+        la.ndim(),
+        InvalidLayout,
+        "take_along_axis requires indices with the same ndim as the tensor."
+    )?;
+    let mut out_shape: Vec<usize> = la.shape().as_ref().to_vec();
+    #[allow(clippy::needless_range_loop)] // reads and writes out_shape[i]
+    for i in 0..la.ndim() {
+        if i != axis {
+            let d1 = out_shape[i];
+            let d2 = lidx.shape()[i];
+            let bcast = if d1 == d2 {
+                d1
+            } else if d1 == 1 {
+                d2
+            } else if d2 == 1 {
+                d1
+            } else {
+                rstsr_assert!(
+                    false,
+                    InvalidLayout,
+                    "take_along_axis requires broadcast-compatible shapes outside the indexed axis; got {} and {} along axis {}.",
+                    d1,
+                    d2,
+                    i
+                )?;
+                unreachable!()
+            };
+            out_shape[i] = bcast;
+        }
+    }
+    // validate + resolve index entries in logical row-major order (the index
+    // tensor may be strided, offset, or broadcast — never read the raw
+    // buffer): negatives count from the back (array-api/NumPy semantics; the
+    // suite draws ~half negative indices)
+    let axis_size = la.shape()[axis];
+    let mut resolved: Vec<usize> = Vec::with_capacity(indices.size());
+    let iter: IndexedIterLayout<IxD> = IndexedIterLayout::new(&lidx.to_dim()?, RowMajor)?;
+    for (_, off) in iter {
+        let v = indices.raw()[off];
+        let v = if v < 0 { v + axis_size as isize } else { v };
+        rstsr_pattern!(
+            v,
+            0..axis_size as isize,
+            IndexError,
+            "take_along_axis index out of range along axis {}.",
+            axis
+        )?;
+        resolved.push(v as usize);
+    }
+    // output shape: broadcast outside the axis, indices' length along it
+    out_shape[axis] = lidx.shape()[axis];
+    let layout_c = out_shape.new_contig(None, device.default_order());
+    let (_, idx_max) = layout_c.bounds_index()?;
+    let mut storage = device.uninit_impl(idx_max)?;
+    // a fresh C-contig layout over the (unchanged) index shape addresses the
+    // resolved index vector
+    let lidx_resolved: Layout<DI> = lidx.shape().as_ref().to_vec().new_c_contig(None).to_dim()?;
+    device.take_along_axis(storage.raw_mut(), &layout_c, tensor.raw(), la, &resolved, &lidx_resolved, axis)?;
+    // SAFETY: `take_along_axis` above wrote every element of the fresh
+    // storage exactly once (each (rest, j) position is filled from one
+    // indexed source element).
+    let storage = unsafe { <B as DeviceCreationAnyAPI<T>>::assume_init_impl(storage)? };
+    Tensor::new_f(storage, layout_c)
+}
+
+/// Gather values along an axis using an index tensor: at every position
+/// outside `axis`, `out[i_0, ..., j, ..., i_n] = x[i_0, ..., indices[i_0,
+/// ..., j, ..., i_n], ..., i_n]`. This is the companion of [`argsort`]:
+/// gathering `x` with `argsort(x, axis)` reproduces [`sort`].
+///
+/// This function behaves identically under [`RowMajor`] and [`ColMajor`] device
+/// default orders. (Only the memory arrangement of the new tensor follows the
+/// device default order.)
+///
+/// # Parameters
+///
+/// - `tensor`: [`&TensorAny<R, T, B, DA>`](TensorAny): the source tensor.
+/// - `indices`: [`&TensorAny<RI, isize, B, DI>`](TensorAny): integer indices along `axis`; same
+///   rank, broadcast-compatible shapes outside `axis`. Negative entries count from the back of the
+///   indexed axis.
+/// - `axis`: TryInto [`AxisIndex<isize>`]: the axis to gather along (negative counts from the
+///   back).
+///
+/// # Returns
+///
+/// - [`Tensor<T, B, IxD>`][`Tensor`]: broadcast of the shapes outside `axis`, with `indices`'
+///   length along it.
+///
+/// # Examples
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let a = rt::tensor_from_nested!([[10, 20, 30], [40, 50, 60]], &device);
+/// let idx = rt::tensor_from_nested!([[2, 0], [1, 1]], &device);
+/// println!("{}", rt::take_along_axis(&a, &idx, -1));
+/// // [[ 30 10]
+/// //  [ 50 50]]
+/// # let out = rt::take_along_axis(&a, &idx, -1);
+/// # assert_eq!(out.reshape([-1]).to_vec(), vec![30, 10, 50, 50]);
+/// ```
+///
+/// # Notes of API accordance
+///
+/// - Array-API: `take_along_axis(x, indices, /, *, axis=-1)` ([`take_along_axis`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.take_along_axis.html))
+/// - NumPy: `numpy.take_along_axis(arr, indices, axis)`
+/// - RSTSR: `rt::take_along_axis(tensor, indices, axis)`
+///
+/// Shapes outside `axis` must be broadcast-compatible: a size-1 dimension on
+/// either side broadcasts against the other (array-api 2025.12 and NumPy
+/// parity — the output shape follows that broadcast).
+///
+/// # Panics
+///
+/// - Panics if `axis` is out of range, shapes mismatch outside `axis`, an index is out of range, or
+///   the devices differ.
+///
+/// For a fallible version, use [`take_along_axis_f`].
+///
+/// # See also
+///
+/// ## Related functions in RSTSR
+///
+/// - [`argsort`]: produces valid index tensors.
+/// - [`take`]: a single host-side index list along one axis.
+///
+/// ## Variants of this function
+///
+/// - [`take_along_axis_f`]: fallible version.
+pub fn take_along_axis<T, B, DA, DI>(
+    tensor: impl TensorViewAPI<Type = T, Backend = B, Dim = DA>,
+    indices: impl TensorViewAPI<Type = isize, Backend = B, Dim = DI>,
+    axis: impl TryInto<AxisIndex<isize>, Error: Into<Error>>,
+) -> Tensor<T, B, IxD>
+where
+    DA: DimAPI,
+    DI: DimAPI,
+    T: Clone,
+    B: DeviceAPI<T>
+        + DeviceAPI<usize, Raw = Vec<usize>>
+        + DeviceAPI<isize, Raw = Vec<isize>>
+        + DeviceRawAPI<MaybeUninit<T>>
+        + DeviceCreationAnyAPI<T>
+        + DeviceTakeAlongAxisAPI<T, DA, DI>,
+{
+    take_along_axis_f(tensor, indices, axis).rstsr_unwrap()
+}
+
+impl<R, T, B, DA> TensorAny<R, T, B, DA>
+where
+    R: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
+    DA: DimAPI,
+    T: Clone,
+    B: DeviceAPI<T>
+        + DeviceAPI<usize, Raw = Vec<usize>>
+        + DeviceAPI<isize, Raw = Vec<isize>>
+        + DeviceRawAPI<MaybeUninit<T>>
+        + DeviceCreationAnyAPI<T>,
+{
+    /// Gather values along an axis using an index tensor.
+    ///
+    /// See also [`take_along_axis`].
+    pub fn take_along_axis_f<DI, AArg>(
+        &self,
+        indices: impl TensorViewAPI<Type = isize, Backend = B, Dim = DI>,
+        axis: AArg,
+    ) -> Result<Tensor<T, B, IxD>>
+    where
+        DI: DimAPI,
+        AArg: TryInto<AxisIndex<isize>, Error: Into<Error>>,
+        B: DeviceAPI<T>
+            + DeviceAPI<usize, Raw = Vec<usize>>
+            + DeviceAPI<isize, Raw = Vec<isize>>
+            + DeviceRawAPI<MaybeUninit<T>>
+            + DeviceCreationAnyAPI<T>
+            + DeviceTakeAlongAxisAPI<T, DA, DI>,
+    {
+        take_along_axis_f(self, indices, axis)
+    }
+
+    /// Gather values along an axis using an index tensor.
+    ///
+    /// See also [`take_along_axis`].
+    pub fn take_along_axis<DI, AArg>(
+        &self,
+        indices: impl TensorViewAPI<Type = isize, Backend = B, Dim = DI>,
+        axis: AArg,
+    ) -> Tensor<T, B, IxD>
+    where
+        DI: DimAPI,
+        AArg: TryInto<AxisIndex<isize>, Error: Into<Error>>,
+        B: DeviceAPI<T>
+            + DeviceAPI<usize, Raw = Vec<usize>>
+            + DeviceAPI<isize, Raw = Vec<isize>>
+            + DeviceRawAPI<MaybeUninit<T>>
+            + DeviceCreationAnyAPI<T>
+            + DeviceTakeAlongAxisAPI<T, DA, DI>,
+    {
+        take_along_axis_f(self, indices, axis).rstsr_unwrap()
+    }
+}
+
+/* #endregion */
+
 #[cfg(test)]
 mod test {
     use super::*;

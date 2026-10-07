@@ -59,14 +59,19 @@ pub mod rstsr_structs {
         TensorViewMut,
     };
 
-    pub use rstsr_common::axis_index::AxesIndex;
+    pub use rstsr_common::axis_index::{AxesIndex, AxisIndex};
 
-    pub use crate::tensor::manipulation::exports::ReshapeArgs;
+    pub use crate::operators::searching::{SearchSide, SearchSortedArgs};
+    pub use crate::operators::sorting::SortArgs;
+    pub use crate::tensor::manipulation::exports::{RepeatArg, RepeatArgs, ReshapeArgs, RollArgs};
     pub use crate::tensor::reduction::{CumulativeArgs, ReduceArgs, VarArgs};
+    pub use crate::tensor::set::{UniqueAll, UniqueCounts, UniqueInverse};
 }
 
 pub mod rstsr_funcs {
-    pub use crate::tensor::adv_indexing::{bool_select, bool_select_f, index_select, index_select_f, take, take_f};
+    pub use crate::tensor::adv_indexing::{
+        bool_select, bool_select_f, index_select, index_select_f, take, take_along_axis, take_along_axis_f, take_f,
+    };
     pub use crate::tensor::asarray::{asarray, asarray_f};
     pub use crate::tensor::creation::{
         arange, arange_f, assume_init, assume_init_f, empty, empty_f, empty_like, empty_like_f, eye, eye_f,
@@ -93,11 +98,11 @@ pub mod rstsr_funcs {
         into_permute_dims_f, into_prefer, into_prefer_f, into_reverse_axes, into_shape, into_shape_f,
         into_shape_with_args, into_shape_with_args_f, into_squeeze, into_squeeze_f, into_swapaxes, into_swapaxes_f,
         into_transpose, into_transpose_f, into_unsqueeze, into_unsqueeze_f, moveaxis, moveaxis_f, permute_dims,
-        permute_dims_f, reshape, reshape_f, reshape_with_args, reshape_with_args_f, reshapeable_without_copy,
-        reverse_axes, squeeze, squeeze_f, swapaxes, swapaxes_f, to_broadcast, to_broadcast_f, to_compatible_shape,
-        to_compatible_shape_f, to_contig, to_contig_f, to_dim, to_dim_f, to_dyn, to_layout, to_layout_f, to_prefer,
-        to_prefer_f, to_shape, to_shape_f, to_shape_with_args, to_shape_with_args_f, transpose, transpose_f, unsqueeze,
-        unsqueeze_f,
+        permute_dims_f, repeat, repeat_f, reshape, reshape_f, reshape_with_args, reshape_with_args_f,
+        reshapeable_without_copy, reverse_axes, roll, roll_f, squeeze, squeeze_f, swapaxes, swapaxes_f, tile, tile_f,
+        to_broadcast, to_broadcast_f, to_compatible_shape, to_compatible_shape_f, to_contig, to_contig_f, to_dim,
+        to_dim_f, to_dyn, to_layout, to_layout_f, to_prefer, to_prefer_f, to_shape, to_shape_f, to_shape_with_args,
+        to_shape_with_args_f, transpose, transpose_f, unsqueeze, unsqueeze_f,
     };
 
     // binary arithmetics
@@ -167,6 +172,23 @@ pub mod rstsr_funcs {
         unraveled_argmin_axes, unraveled_argmin_axes_f, unraveled_argmin_f, unraveled_argmin_with_args,
         unraveled_argmin_with_args_f, var, var_all, var_all_f, var_axes, var_axes_f, var_f, var_with_args,
         var_with_args_f, var_with_dtype, var_with_dtype_f,
+    };
+    // searching
+    pub use crate::tensor::searching::searchsorted;
+    pub use crate::tensor::searching::searchsorted_f;
+    // searching
+    pub use crate::tensor::nonzero::nonzero;
+    pub use crate::tensor::nonzero::nonzero_f;
+    // diff
+    pub use crate::tensor::diff::{diff, diff_f};
+    // set functions
+    pub use crate::tensor::set::{
+        isin, isin_f, unique_all, unique_all_f, unique_counts, unique_counts_f, unique_inverse, unique_inverse_f,
+        unique_values, unique_values_f,
+    };
+    // sorting
+    pub use crate::tensor::sorting::{
+        argsort, argsort_custom, argsort_custom_f, argsort_f, sort, sort_custom, sort_custom_f, sort_f,
     };
     // linalg (array-api's basic linalg operations, not the rstsr-linalg-traits)
     pub use crate::tensor::linalg::exports::{

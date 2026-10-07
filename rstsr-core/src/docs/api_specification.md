@@ -25,6 +25,9 @@
         - Functions decorated with `_with_output` suffix (e.g. [`add_with_output`]) write the result into caller-provided output tensor, instead of allocating a new one.
     - Explicit all-element variants:
         - Reduction families (e.g. [`sum`]) are also decorated with `_all` suffix for explicitly reducing all elements into a scalar, which behaves the same as the undecorated function (e.g. [`sum_all`]).
+    - Argument groups:
+        - A set of related arguments travels as one tuple parameter, e.g. `rt::repeat(x, (repeats, axis))`, `rt::sort(x, (axis, descending, stable))`; `rt::func(x, y)` and `rt::func((x, y))` are different signatures (two parameters vs one tuple parameter).
+        - The group types ([`RepeatArgs`], [`RollArgs`], [`SortArgs`], [`SearchSortedArgs`], ...) carry the overloads (`(a, b)`, `a`, `()`, `None`, ...), so one signature covers every documented call shape. Where `()` is accepted, `None` is accepted as well and means the same.
     - Reduction argument variants:
         - Reduction families accept grouped arguments (`axes`, `keepdims`, and for var/std `correction`) by the `_with_args` suffix (e.g. [`sum_with_args`]), with the argument types [`ReduceArgs`] / [`VarArgs`];
         - Accumulating families (sum, prod, mean, var, std) also accept an explicit output dtype by the `_with_dtype` suffix (e.g. [`sum_with_dtype`]); the fold accumulates in the requested dtype.
@@ -208,9 +211,17 @@ Device is designed to be able extended by other crates. The above devices [`Devi
 | fn | [`broadcast_shapes`] | Broadcasts shapes against each other and returns the resulting shape. |
 | assoc/fn | [`to_broadcast`] <br/> [`broadcast_to`][TensorAny::broadcast_to] | Broadcasts an array to a specified shape. |
 | assoc/fn | [`expand_dims`] <br/> [`unsqueeze`][TensorAny::unsqueeze] | Expands the shape of an array by inserting a new axis (dimension) of size one at the position specified by `axis`. |
-| assoc/fn | [`atleast_1d`] <br/> [`atleast_2d`] <br/> [`atleast_3d`] | View the input as a tensor with at least 1 / 2 / 3 dimensions. |
+| assoc/fn | [`atleast_1d`] <br/> [`atleast_2d`] <br/> [`atleast_3d`] <br/> [`into_atleast_1d`] <br/> [`into_atleast_2d`] <br/> [`into_atleast_3d`] | View the input as a tensor with at least 1 / 2 / 3 dimensions (the `into_*` forms consume ownership). |
 | assoc/fn | [`flip`] | Reverses the order of elements in an array along the given axis. |
 | assoc/fn | [`moveaxis`] | Moves array axes (dimensions) to new positions, while leaving other axes in their original positions. |
+| assoc/fn | [`searchsorted`] | Finds insertion positions of values into a sorted 1-D array (`side`, `sorter` arguments in [`SearchSortedArgs`]). |
+| assoc/fn | [`unique_values`] <br/> [`unique_counts`] <br/> [`unique_inverse`] <br/> [`unique_all`] | Unique values of the flattened tensor, with counts / inverse mapping / all fields (named structs `UniqueCounts`, `UniqueInverse`, `UniqueAll`). |
+| assoc/fn | [`isin`] | Element-wise membership of `x1` in `x2` (`invert` argument). |
+| assoc/fn | [`nonzero`] | Indices of nonzero elements, one 1-D coordinate tensor per dimension. |
+| assoc/fn | [`take_along_axis`] | Gather along an axis with an index tensor (companion of `argsort`). |
+| assoc/fn | [`repeat`] | Repeat elements of a tensor along an axis (or the flattened row-major sequence). |
+| assoc/fn | [`roll`] | Roll array elements along a given axis (the flattened form visits row-major). |
+| assoc/fn | [`tile`] | Construct an array by tiling an input array. |
 | assoc/fn | [`permute_dims`] <br/> [`transpose`] <br/> [`matrix_transpose`] | Permutes the axes (dimensions) of an array `x`. |
 | assoc/fn | [`reshape_with_args`] | Reshapes the given tensor to the specified shape, with argument specifying the order and whether to copy data. |
 | assoc/fn | [`reverse_axes`] | Reverses the order of the axes (dimensions) of an array. |
@@ -337,6 +348,8 @@ Custom user reduction (expert-level): [`reduce_all`], [`reduce_axes`], [`reduce_
 ### Sorting, searching and counting functions
 
 [`argmin`]/[`argmin_axes`], [`argmax`]/[`argmax_axes`], [`count_nonzero`]/[`count_nonzero_axes`], [`unraveled_argmin`]/[`unraveled_argmin_axes`], [`unraveled_argmax`]/[`unraveled_argmax_axes`], each with `_with_args` forms; and select function [`where`] (boolean condition, NumPy three-argument form)
+
+Sorting family: [`sort`], [`argsort`] with [`SortArgs`] (`axis` + `descending` + `stable`), plus expert comparator variants [`sort_custom`]/[`argsort_custom`]. Searching: [`searchsorted`] with [`SearchSortedArgs`]; [`nonzero`]. Gathering: [`take_along_axis`]. Discrete differences: [`diff`] (`axis` + `n` + optional `prepend`/`append`).
 
 ### Utility functions
 

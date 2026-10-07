@@ -423,3 +423,156 @@ pub fn normalize_axes_index(
 }
 
 /* #endregion */
+/* #region AxisIndex (single axis) */
+
+/// Wrapper for at most one axis, mirroring [`AxesIndex`] for the single-axis
+/// case; makes one-axis signatures distinct from none-or-multi axes.
+///
+/// [`AxisIndex::None`] carries no explicit axis and selects the last axis (the
+/// `axis = -1` convention); [`AxisIndex::Val`] carries the explicit axis, with
+/// negative values counting from the back.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AxisIndex<T> {
+    /// No explicit axis: the operation selects the last axis.
+    None,
+    /// Explicit (possibly negative) axis.
+    Val(T),
+}
+
+impl<T> AxisIndex<T> {
+    /// Unwrap the inner axis value; [`AxisIndex::None`] stays `None`.
+    pub fn into_option(self) -> Option<T> {
+        match self {
+            AxisIndex::None => None,
+            AxisIndex::Val(value) => Some(value),
+        }
+    }
+}
+
+impl AxisIndex<isize> {
+    /// Normalize into a non-negative axis for a tensor of `ndim` dimensions.
+    ///
+    /// [`AxisIndex::None`] selects the last axis; negative values count from
+    /// the back. Errors when the axis is out of range — in particular for a
+    /// 0-dimensional tensor, which has no axis at all.
+    pub fn into_normalized(self, ndim: usize) -> Result<usize> {
+        let axis = match self {
+            AxisIndex::None => -1_isize,
+            AxisIndex::Val(value) => value,
+        };
+        rstsr_check_axis!(axis, ndim)
+    }
+}
+
+impl<T> From<T> for AxisIndex<T> {
+    fn from(value: T) -> Self {
+        AxisIndex::Val(value)
+    }
+}
+
+impl<T> From<&T> for AxisIndex<T>
+where
+    T: Clone,
+{
+    fn from(value: &T) -> Self {
+        AxisIndex::Val(value.clone())
+    }
+}
+
+#[duplicate_item(T; [usize]; [isize])]
+impl From<()> for AxisIndex<T> {
+    fn from(_: ()) -> Self {
+        AxisIndex::None
+    }
+}
+
+#[duplicate_item(T; [usize]; [isize])]
+impl TryFrom<Option<T>> for AxisIndex<T> {
+    type Error = Error;
+
+    fn try_from(value: Option<T>) -> Result<Self> {
+        match value {
+            Some(v) => Ok(AxisIndex::Val(v)),
+            None => Ok(AxisIndex::None),
+        }
+    }
+}
+
+macro_rules! impl_try_from_axis_index {
+    ($t1:ty, $($t2:ty),*) => {
+        $(
+            impl TryFrom<$t2> for AxisIndex<$t1> {
+                type Error = Error;
+
+                fn try_from(value: $t2) -> Result<Self> {
+                    Ok(AxisIndex::Val(value.try_into()?))
+                }
+            }
+
+            impl TryFrom<&$t2> for AxisIndex<$t1> {
+                type Error = Error;
+
+                fn try_from(value: &$t2) -> Result<Self> {
+                    Ok(AxisIndex::Val((*value).try_into()?))
+                }
+            }
+
+            impl TryFrom<AxisIndex<$t2>> for AxisIndex<$t1> {
+                type Error = Error;
+
+                fn try_from(value: AxisIndex<$t2>) -> Result<Self> {
+                    match value {
+                        AxisIndex::None => Ok(AxisIndex::None),
+                        AxisIndex::Val(value) => Ok(AxisIndex::Val(value.try_into()?)),
+                    }
+                }
+            }
+        )*
+    };
+}
+
+impl_try_from_axis_index!(usize, isize, u32, u64, i32, i64);
+impl_try_from_axis_index!(isize, usize, u32, u64, i32, i64);
+
+/* #endregion AxisIndex (single axis) */
+
+#[cfg(test)]
+mod axis_index_tests {
+    use crate::prelude_dev::*;
+
+    #[test]
+    fn test_axis_index_from() {
+        let a: AxisIndex<isize> = 2.into();
+        assert_eq!(a.into_option(), Some(2));
+        let a: AxisIndex<isize> = (&-1_isize).into();
+        assert_eq!(a.into_option(), Some(-1));
+        let a = AxisIndex::from(3_isize);
+        let v: AxisIndex<usize> = a.try_into().unwrap();
+        assert_eq!(v.into_option(), Some(3_usize));
+        // negative axis cannot convert to unsigned: must error
+        let a = AxisIndex::from(-1_isize);
+        assert!(AxisIndex::<usize>::try_from(a).is_err());
+        // raw integer TryFrom
+        let a = AxisIndex::<isize>::try_from(4_i32).unwrap();
+        assert_eq!(a.into_option(), Some(4));
+        let a = AxisIndex::<isize>::try_from(&4_i64).unwrap();
+        assert_eq!(a.into_option(), Some(4));
+        // None and () both mean "no explicit axis"
+        let a: AxisIndex<isize> = Option::<isize>::None.try_into().unwrap();
+        assert_eq!(a, AxisIndex::None);
+        let a = AxisIndex::<isize>::from(());
+        assert_eq!(a, AxisIndex::None);
+        // None survives the cross-integer conversion
+        let a = AxisIndex::<usize>::try_from(AxisIndex::<isize>::None).unwrap();
+        assert_eq!(a, AxisIndex::None);
+    }
+
+    #[test]
+    fn test_axis_index_normalize() {
+        assert_eq!(AxisIndex::Val(1_isize).into_normalized(3).unwrap(), 1);
+        assert_eq!(AxisIndex::Val(-1_isize).into_normalized(3).unwrap(), 2);
+        assert_eq!(AxisIndex::None.into_normalized(3).unwrap(), 2);
+        assert!(AxisIndex::Val(3_isize).into_normalized(3).is_err());
+        assert!(AxisIndex::None.into_normalized(0).is_err());
+    }
+}

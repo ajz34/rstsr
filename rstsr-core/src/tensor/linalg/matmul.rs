@@ -404,9 +404,6 @@ where
     DB: DimAPI,
     DC: DimAPI,
     // operation specific
-    // `Zero` is required by the CPU-serial kernel (it must detect the
-    // `beta = 0` case to honor the BLAS non-read convention).
-    TC: Zero,
     B: DeviceMatMulAPI<TA, TB, TC, DA, DB, DC>,
 {
     op_mutc_refa_refb_matmul(c, a, b, alpha, beta)

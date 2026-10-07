@@ -1,0 +1,545 @@
+//! Roll tensor elements along axes: [`roll`], [`roll_f`].
+
+use crate::prelude_dev::*;
+
+/* #region roll args */
+
+/// Arguments for [`roll`]: the shift, and the axis (or axes) to roll along.
+///
+/// Overloaded forms (all `TryInto` [`RollArgs`]):
+///
+/// - `shift`: the shift alone; the tensor is flattened in the device default order, rolled, and
+///   reshaped back;
+/// - `(shift, axis)`: a tuple combining both (`axis = None`/`()` means the flattened form).
+///
+/// The bare `shift` accepts `isize` (so plain integer literals), arrays,
+/// slices and `Vec`s of any integer type, and [`AxesIndex<isize>`]; other
+/// scalar integer types are available through the tuple form.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RollArgs {
+    /// Shift applied to each rolled axis.
+    pub shift: AxesIndex<isize>,
+    /// Axis (or axes) to roll along; [`AxesIndex::None`] flattens the tensor first.
+    pub axis: AxesIndex<isize>,
+}
+
+impl RollArgs {
+    /// Arguments with the given shift and axis.
+    pub fn new(shift: AxesIndex<isize>, axis: AxesIndex<isize>) -> Self {
+        Self { shift, axis }
+    }
+}
+
+fn shift_to_axes<F, I>(iter: I) -> Result<AxesIndex<isize>>
+where
+    F: TryInto<isize>,
+    F::Error: Into<Error>,
+    I: Iterator<Item = F>,
+{
+    let shift: Vec<isize> = iter.map(|v| v.try_into().map_err(Into::into)).collect::<Result<Vec<isize>>>()?;
+    Ok(AxesIndex::Vec(shift))
+}
+
+impl From<AxesIndex<isize>> for RollArgs {
+    fn from(shift: AxesIndex<isize>) -> Self {
+        Self { shift, axis: AxesIndex::None }
+    }
+}
+
+impl From<isize> for RollArgs {
+    fn from(shift: isize) -> Self {
+        Self { shift: AxesIndex::Val(shift), axis: AxesIndex::None }
+    }
+}
+
+impl<F> TryFrom<Vec<F>> for RollArgs
+where
+    F: TryInto<isize>,
+    F::Error: Into<Error>,
+{
+    type Error = Error;
+
+    fn try_from(shift: Vec<F>) -> Result<Self> {
+        Ok(Self { shift: shift_to_axes(shift.into_iter())?, axis: AxesIndex::None })
+    }
+}
+
+impl<F, const N: usize> TryFrom<[F; N]> for RollArgs
+where
+    F: TryInto<isize>,
+    F::Error: Into<Error>,
+{
+    type Error = Error;
+
+    fn try_from(shift: [F; N]) -> Result<Self> {
+        Ok(Self { shift: shift_to_axes(shift.into_iter())?, axis: AxesIndex::None })
+    }
+}
+
+impl<'a, F> TryFrom<&'a [F]> for RollArgs
+where
+    F: TryInto<isize> + Clone,
+    F::Error: Into<Error>,
+{
+    type Error = Error;
+
+    fn try_from(shift: &'a [F]) -> Result<Self> {
+        Ok(Self { shift: shift_to_axes(shift.iter().cloned())?, axis: AxesIndex::None })
+    }
+}
+
+impl<'a, F> TryFrom<&'a Vec<F>> for RollArgs
+where
+    F: TryInto<isize> + Clone,
+    F::Error: Into<Error>,
+{
+    type Error = Error;
+
+    fn try_from(shift: &'a Vec<F>) -> Result<Self> {
+        Ok(Self { shift: shift_to_axes(shift.iter().cloned())?, axis: AxesIndex::None })
+    }
+}
+
+impl<S, A> TryFrom<(S, A)> for RollArgs
+where
+    S: TryInto<AxesIndex<isize>, Error: Into<Error>>,
+    A: TryInto<AxesIndex<isize>, Error: Into<Error>>,
+{
+    type Error = Error;
+
+    fn try_from((shift, axis): (S, A)) -> Result<Self> {
+        Ok(Self { shift: shift.try_into().map_err(Into::into)?, axis: axis.try_into().map_err(Into::into)? })
+    }
+}
+
+/* #endregion */
+
+/* #region roll */
+
+/// Roll tensor elements along axes.
+///
+/// See also [`roll`].
+pub fn roll_f<'a, R, T, B, D>(
+    tensor: &'a TensorAny<R, T, B, D>,
+    args: impl TryInto<RollArgs, Error: Into<Error>>,
+) -> Result<Tensor<T, B, D>>
+where
+    R: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw> + DataIntoCowAPI<'a>,
+    D: DimAPI + DimSmallerOneAPI,
+    D::SmallerOne: DimAPI,
+    T: Clone,
+    <B as DeviceRawAPI<T>>::Raw: Clone + 'a,
+    B: DeviceAPI<T>
+        + DeviceRawAPI<MaybeUninit<T>>
+        + DeviceCreationAnyAPI<T>
+        + OpAssignAPI<T, IxD>
+        + OpAssignArbitaryAPI<T, IxD, IxD>
+        + OpAssignArbitaryAPI<T, IxD, D>,
+{
+    let device = tensor.device().clone();
+    let ndim = tensor.ndim();
+    let args = args.try_into().map_err(Into::into)?;
+    let (shift, axis) = (args.shift, args.axis);
+
+    match axis {
+        AxesIndex::None => {
+            // flatten-roll-reshape in the device default order, shape preserved
+            let flat: Tensor<T, B, IxD> = {
+                let layout: Layout<IxD> = tensor.layout().to_dim()?;
+                let out_shape = vec![layout.size()];
+                let layout_c = out_shape.new_contig(None, device.default_order());
+                let (_, idx_max) = layout_c.bounds_index()?;
+                let mut storage = device.uninit_impl(idx_max)?;
+                // read in the device default order regardless of storage
+                // arrangement: walk those offsets and write one element each
+                let iter = IndexedIterLayout::new(&layout, device.default_order())?;
+                let mut offset = 0_usize;
+                if layout.ndim() == 0 {
+                    // 0-d input: single element, no axis to select
+                    let layout_result = layout_c.dim_narrow(0, slice!(0, 1))?;
+                    let (layout_result, layout_src) =
+                        broadcast_layout_to_first(&layout_result, &layout, device.default_order())?;
+                    device.assign_arbitary_uninit(storage.raw_mut(), &layout_result, tensor.raw(), &layout_src)?;
+                } else {
+                    for (index, _) in iter {
+                        let layout_result = layout_c.dim_narrow(0, slice!(offset as isize, (offset + 1) as isize))?;
+                        // `index` is the row-major multi-index of this element
+                        let index_vec: &[usize] = index.as_ref();
+                        let mut layout_src: Layout<IxD> = layout.clone();
+                        // select in descending axis order: each dim_select
+                        // removes one axis, keeping lower indices valid
+                        for (axis, &pos) in index_vec.iter().enumerate().rev() {
+                            layout_src = layout_src.dim_select(axis as isize, pos as isize)?;
+                        }
+                        let (layout_result, layout_src) =
+                            broadcast_layout_to_first(&layout_result, &layout_src, device.default_order())?;
+                        device.assign_arbitary_uninit(storage.raw_mut(), &layout_result, tensor.raw(), &layout_src)?;
+                        offset += 1;
+                    }
+                }
+                // SAFETY: the row-major iterator above visited every element of
+                // the validated layout exactly once, filling `layout_c` fully.
+                let storage = unsafe { B::assume_init_impl(storage)? };
+                Tensor::new_f(storage, layout_c)?
+            };
+            // shifts normalized mod size; 0-d/1-elem tensors roll to themselves
+            let size = flat.size().max(1);
+            let mut shift_all: isize = 0;
+            let shifts = match &shift {
+                AxesIndex::None => vec![0_isize],
+                AxesIndex::Val(v) => vec![*v],
+                AxesIndex::Vec(v) => v.clone(),
+            };
+            for &s in &shifts {
+                shift_all = shift_all.wrapping_add(s);
+            }
+            let shift_norm = shift_all.rem_euclid(size as isize) as usize;
+            let rolled = roll_axis_1d(&flat, shift_norm)?;
+            let shape_out = tensor.shape().as_ref().to_vec();
+            // freshly owned data: reinterpret to the input shape; reading order
+            // is the device default order by construction (the flatten above),
+            // so copy=false with that order is always viewable
+            let reshaped = into_shape_with_args(rolled, shape_out, ReshapeArgs::from((device.default_order(), false)));
+            Ok(reshaped.into_dim())
+        },
+        AxesIndex::Val(axis) => {
+            let axis = rstsr_check_axis!(axis, ndim)?;
+            // a tuple shift on a single axis is summed (NumPy broadcasts it)
+            let shift_list = match &shift {
+                AxesIndex::None => 0_isize,
+                AxesIndex::Val(v) => *v,
+                AxesIndex::Vec(v) => v.iter().fold(0_isize, |acc, &s| acc.wrapping_add(s)),
+            };
+            let out = roll_single_axis(tensor, shift_list, axis)?;
+            Ok(out.into_dim())
+        },
+        AxesIndex::Vec(axes) => {
+            // successive single-axis rolls (NumPy's own decomposition);
+            // duplicate axes are allowed (each occurrence rolls once)
+            let axes = normalize_axes_index(AxesIndex::Vec(axes), ndim, true, false)?;
+            // shift/axis combination follows NumPy's `broadcast(shift, axis)`
+            // then per-axis sum: a len-1 side broadcasts to the other's
+            // length; repeated axes accumulate their shifts
+            let shifts: Vec<isize> = match &shift {
+                AxesIndex::None => vec![0_isize; axes.len()],
+                AxesIndex::Val(v) => vec![*v; axes.len()],
+                AxesIndex::Vec(v) => {
+                    let mut acc: Vec<isize> = vec![0_isize; axes.len()];
+                    let paired = axes.len().max(v.len());
+                    rstsr_assert!(
+                        v.len() == 1 || axes.len() == 1 || v.len() == axes.len(),
+                        InvalidValue,
+                        "roll: shift and axis must be broadcastable (NumPy); got lengths {} and {}.",
+                        v.len(),
+                        axes.len()
+                    )?;
+                    rstsr_assert!(
+                        paired == axes.len(),
+                        InvalidValue,
+                        "roll: shift length {} is not broadcastable to axis length {}.",
+                        v.len(),
+                        axes.len()
+                    )?;
+                    if v.len() == 1 {
+                        // (1,) broadcasts to (axes.len(),)
+                        acc.iter_mut().for_each(|s| *s = v[0]);
+                    } else {
+                        // equal lengths pair elementwise; a len-axes of 1
+                        // accumulates all shifts onto that one axis
+                        for (a, &s) in acc.iter_mut().zip(v.iter()) {
+                            *a = a.wrapping_add(s);
+                        }
+                    }
+                    acc
+                },
+            };
+            let mut current: Option<Tensor<T, B, IxD>> = None;
+            for (&axis, &shift) in axes.iter().zip(shifts.iter()) {
+                let axis = axis as usize;
+                current = Some(match &current {
+                    None => roll_single_axis(tensor, shift, axis)?,
+                    Some(prev) => roll_single_axis(prev, shift, axis)?,
+                });
+            }
+            let result = match current {
+                Some(t) => t,
+                // empty axes tuple `()`: plain copy (valid input, no roll)
+                None => {
+                    rstsr_assert!(ndim > 0, InvalidValue, "roll requires ndim > 0.")?;
+                    roll_single_axis(tensor, 0, 0)?
+                },
+            };
+            Ok(result.into_dim())
+        },
+    }
+}
+
+/// One-axis roll into a fresh owned tensor; shift already normalized.
+fn roll_single_axis<R, T, B, D>(tensor: &TensorAny<R, T, B, D>, shift: isize, axis: usize) -> Result<Tensor<T, B, IxD>>
+where
+    R: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
+    D: DimAPI,
+    B: DeviceAPI<T>
+        + DeviceRawAPI<MaybeUninit<T>>
+        + DeviceCreationAnyAPI<T>
+        + OpAssignAPI<T, IxD>
+        + OpAssignArbitaryAPI<T, IxD, IxD>,
+{
+    let device = tensor.device().clone();
+    let axis_size = tensor.shape()[axis];
+    let layout: Layout<IxD> = tensor.layout().to_dim()?;
+    let shape_ref: &[usize] = layout.shape().as_ref();
+    let out_shape: Vec<usize> = shape_ref.to_vec();
+    let layout_c = out_shape.new_contig(None, device.default_order());
+    let (_, idx_max) = layout_c.bounds_index()?;
+    let mut storage = device.uninit_impl(idx_max)?;
+
+    if axis_size == 0 {
+        // nothing to roll; output is empty as well
+        // SAFETY: zero elements; `assume_init_impl` of an empty storage is the
+        // crate-wide convention for empty tensors.
+        let storage = unsafe { B::assume_init_impl(storage)? };
+        return Tensor::new_f(storage, layout_c);
+    }
+    let s = shift.rem_euclid(axis_size as isize) as usize;
+    if s == 0 {
+        device.assign_arbitary_uninit(storage.raw_mut(), &layout_c, tensor.raw(), &layout)?;
+    } else {
+        // split source into the two wrap-around blocks along `axis`
+        let split = (axis_size - s) as isize;
+        let lo = layout.dim_narrow(axis as isize, slice!(0, split))?;
+        let hi = layout.dim_narrow(axis as isize, slice!(split, axis_size as isize))?;
+        let out_lo = layout_c.dim_narrow(axis as isize, slice!(s as isize, axis_size as isize))?;
+        let out_hi = layout_c.dim_narrow(axis as isize, slice!(0, s as isize))?;
+        device.assign_arbitary_uninit(storage.raw_mut(), &out_lo, tensor.raw(), &lo)?;
+        device.assign_arbitary_uninit(storage.raw_mut(), &out_hi, tensor.raw(), &hi)?;
+    }
+    // SAFETY: the two (or one) assignments above partition the rolled axis of
+    // `layout_c` exactly once.
+    let storage = unsafe { B::assume_init_impl(storage)? };
+    Tensor::new_f(storage, layout_c)
+}
+
+/// 1-D roll of an owned tensor (fresh output); shift pre-normalized.
+fn roll_axis_1d<T, B>(tensor: &Tensor<T, B, IxD>, shift: usize) -> Result<Tensor<T, B, IxD>>
+where
+    B: DeviceAPI<T>
+        + DeviceRawAPI<MaybeUninit<T>>
+        + DeviceCreationAnyAPI<T>
+        + OpAssignAPI<T, IxD>
+        + OpAssignArbitaryAPI<T, IxD, IxD>,
+{
+    roll_single_axis(tensor, shift as isize, 0)
+}
+
+/// Roll array elements along a given axis.
+///
+/// Elements that roll beyond the last position are re-introduced at the first.
+///
+/// <div class="warning">
+///
+/// **Row/Column Major Notice**
+///
+/// Per-axis rolls behave identically under [`RowMajor`] and [`ColMajor`] device
+/// default orders (the new tensor's memory arrangement follows the device
+/// default order). The flattened form (`axis = None`) visits elements in the
+/// device default order — the `reshape(-1)` order: row-major under
+/// [`RowMajor`], column-major under [`ColMajor`] — and reinterprets the result
+/// to the input shape in that same order; its results may differ between the
+/// two orders.
+///
+/// </div>
+///
+/// See [`order_semantics`](crate::order_semantics) for the two device default orders.
+///
+/// # Parameters
+///
+/// - `tensor`: [`&TensorAny<R, T, B, D>`](TensorAny)
+///
+///   - The input tensor.
+///
+/// - `shift`: TryInto [`AxesIndex<isize>`]
+///
+///   - Number of positions by which elements are shifted.
+///   - A single integer, or a tuple/list matching the length of `axis` (a tuple shift on a single
+///     axis is summed, NumPy-compatible).
+///   - A single integer with a tuple of axes shifts every listed axis by the same amount
+///     (NumPy-compatible).
+///   - Shifts larger than the axis length wrap (modulo arithmetic); negative values shift in the
+///     opposite direction.
+///
+/// - `axis`: TryInto [`AxesIndex<isize>`]
+///
+///   - The axis or axes along which elements are shifted.
+///   - `None` (default): the tensor is flattened (in the device default order), rolled, and
+///     restored to the input shape.
+///   - Duplicate axes are allowed (the roll is applied once per occurrence).
+///   - Negative values count from the back.
+///
+/// # Returns
+///
+/// - [`Tensor<T, B, D>`][`Tensor`]
+///
+///   - A new owned tensor with the same shape as the input; the input is not modified.
+///
+/// # Examples
+///
+/// Rolling a 1-D tensor:
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let a = rt::arange((6, &device));
+/// println!("{}", rt::roll(&a, (2, None)));
+/// // [ 4 5 0 1 2 3]
+/// # assert_eq!(format!("{}", rt::roll(&a, (2, None))), "[ 4 5 0 1 2 3]");
+/// ```
+///
+/// Rolling along one axis, and along two axes at once:
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let a = rt::arange((10, &device)).into_shape([2, 5]);
+/// println!("{}", rt::roll(&a, (1, 0)));
+/// // [[ 5 6 7 8 9]
+/// //  [ 0 1 2 3 4]]
+/// println!("{}", rt::roll(&a, ((1, 1), (0, 1))));
+/// // [[ 9 5 6 7 8]
+/// //  [ 4 0 1 2 3]]
+/// # let b = rt::roll(&a, ((1, 1), (0, 1)));
+/// # assert_eq!(format!("{b}"), "[[ 9 5 6 7 8]\n [ 4 0 1 2 3]]");
+/// ```
+///
+/// Flattened roll (`axis = None`), shape preserved:
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let a = rt::arange((10, &device)).into_shape([2, 5]);
+/// println!("{}", rt::roll(&a, (1, None)));
+/// // [[ 9 0 1 2 3]
+/// //  [ 4 5 6 7 8]]
+/// # let b = rt::roll(&a, (1, None));
+/// # assert_eq!(format!("{b}"), "[[ 9 0 1 2 3]\n [ 4 5 6 7 8]]");
+/// ```
+///
+/// ## Difference between [`RowMajor`] and [`ColMajor`]
+///
+/// The flattened form (`axis = None`) visits (and restores) elements in the
+/// device default order; the same tensor rolls differently under the two
+/// orders:
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let a = rt::tensor_from_nested!([[0, 1, 2], [3, 4, 5]], &device);
+/// println!("{}", rt::roll(&a, (1, None)));
+/// // [[ 5 0 1]
+/// //  [ 2 3 4]]
+///
+/// device.set_default_order(ColMajor);
+/// let a = rt::tensor_from_nested!([[0, 1, 2], [3, 4, 5]], &device);
+/// println!("{}", rt::roll(&a, (1, None)));
+/// // [[ 5 3 4]
+/// //  [ 0 1 2]]
+/// # assert_eq!(format!("{}", rt::roll(&a, (1, None))), "[[ 5 3 4]\n [ 0 1 2]]");
+/// ```
+///
+/// # Overloads Table
+///
+/// Output is [`Tensor<T, B, D>`][`Tensor`] (same shape as the input).
+///
+/// - `roll(tensor, shift) -> Tensor<T, B, D>` (implicit `axis = None`, flattened)
+/// - `roll(tensor, (shift, axis)) -> Tensor<T, B, D>` where `shift` and `axis` are any
+///   `TryInto<AxesIndex<isize>>` forms (integer, tuple, list, `None`)
+///
+/// # Notes of API accordance
+///
+/// - Array-API: `roll(x, /, shift, *, axis=None)` ([`roll`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.roll.html))
+/// - NumPy: `numpy.roll(a, shift, axis=None)` ([`numpy.roll`](https://numpy.org/doc/stable/reference/generated/numpy.roll.html))
+/// - RSTSR: `rt::roll(tensor, (shift, axis))`
+///
+/// RSTSR's behavior matches NumPy and Array-API, including the tuple-shift /
+/// tuple-axis combinations, same-axis repeats, and the tuple-shift-on-single-axis
+/// summing behavior.
+///
+/// # Panics
+///
+/// - Panics if any axis is out of range, if the lengths of a tuple `shift` and tuple `axis` differ,
+///   or if the tensor is 0-dimensional and an axes tuple is given.
+///
+/// For a fallible version, use [`roll_f`].
+///
+/// # See also
+///
+/// ## Related functions in RSTSR
+///
+/// - [`repeat`]: repeat individual elements instead of the whole tensor.
+/// - [`flip`]: reverse the order of elements along axes.
+///
+/// ## Variants of this function
+///
+/// - [`roll_f`]: fallible version.
+/// - [`TensorAny::roll`]: associated method.
+/// - [`TensorAny::roll_f`]: associated fallible method.
+pub fn roll<'a, R, T, B, D>(
+    tensor: &'a TensorAny<R, T, B, D>,
+    args: impl TryInto<RollArgs, Error: Into<Error>>,
+) -> Tensor<T, B, D>
+where
+    R: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw> + DataIntoCowAPI<'a>,
+    D: DimAPI + DimSmallerOneAPI,
+    D::SmallerOne: DimAPI,
+    T: Clone,
+    <B as DeviceRawAPI<T>>::Raw: Clone + 'a,
+    B: DeviceAPI<T>
+        + DeviceRawAPI<MaybeUninit<T>>
+        + DeviceCreationAnyAPI<T>
+        + OpAssignAPI<T, IxD>
+        + OpAssignArbitaryAPI<T, IxD, IxD>
+        + OpAssignArbitaryAPI<T, IxD, D>,
+{
+    roll_f(tensor, args).rstsr_unwrap()
+}
+
+impl<'a, RA, T, B, D> TensorAny<RA, T, B, D>
+where
+    RA: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw> + DataIntoCowAPI<'a>,
+    D: DimAPI + DimSmallerOneAPI,
+    D::SmallerOne: DimAPI,
+    T: Clone,
+    <B as DeviceRawAPI<T>>::Raw: Clone + 'a,
+    B: DeviceAPI<T>
+        + DeviceRawAPI<MaybeUninit<T>>
+        + DeviceCreationAnyAPI<T>
+        + OpAssignAPI<T, IxD>
+        + OpAssignArbitaryAPI<T, IxD, IxD>
+        + OpAssignArbitaryAPI<T, IxD, D>,
+{
+    /// Roll array elements along a given axis.
+    ///
+    /// See also [`roll`].
+    pub fn roll_f<AArg>(&'a self, args: AArg) -> Result<Tensor<T, B, D>>
+    where
+        AArg: TryInto<RollArgs, Error: Into<Error>>,
+    {
+        roll_f(self, args)
+    }
+
+    /// Roll array elements along a given axis.
+    ///
+    /// See also [`roll`].
+    pub fn roll<AArg>(&'a self, args: AArg) -> Tensor<T, B, D>
+    where
+        AArg: TryInto<RollArgs, Error: Into<Error>>,
+    {
+        roll_f(self, args).rstsr_unwrap()
+    }
+}
+
+/* #endregion */

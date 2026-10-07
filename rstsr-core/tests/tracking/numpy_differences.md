@@ -339,3 +339,76 @@ nonzero/argwhere-style APIs rather than an overloaded `where` (none wired yet).
 
 Surface-level consequence of Rust argument syntax instead of `[]`-bracket
 indexing; documented inline on the `slice` anchor (src/docs/basic_indexing.md).
+
+## Sort/argsort decline complex dtypes
+
+- **numpy:** `np.sort` / `np.argsort` accept complex arrays; NumPy orders them
+  lexicographically (real part first, then imaginary), NaN components last
+  (`_core/tests/test_multiarray.py::TestMethods::test_sort_complex`).
+- **rstsr:** `rt::sort` / `rt::argsort` raise `UnImplemented` for `Complex<f32>` /
+  `Complex<f64>` (tensor-layer gate `decline_complex_sort`); the comparator
+  variants `sort_custom`/`argsort_custom` with `ExtSortCmp` (lexicographic,
+  NaN-part-last) remain available.
+- **tag:** intentional
+- **status:** open
+
+The Python array-API standard restricts sort/argsort to real-valued data types
+("Should have a real-valued data type"), so the decline is spec-aligned; the
+comparator is implemented in `rstsr-dtype-traits/src/ext_sort_cmp.rs` should a
+complex surface ever be wanted.
+
+## `np.sort` `kind=` stability knob absent
+
+- **numpy:** `np.sort(x, kind='stable'|'quicksort'|'heapsort'|'mergesort')` selects
+  the algorithm; `stable=` maps onto it.
+- **rstsr:** `SortArgs.stable` is honored as a requirement flag, but the kernels are
+  always the stable merge-sort lines; `stable = false` does not select an
+  unstable algorithm (documented on `SortArgs`).
+- **tag:** intentional
+- **status:** open
+
+Single-algorithm implementation; a selection knob is a registered follow-up.
+
+## `diff` `prepend`/`append` must match shape (no scalar expansion)
+
+- **numpy:** a scalar `prepend`/`append` is expanded to length 1 along `axis`
+  and to `x`'s shape on the other axes
+  (`np.diff(np.arange(4).reshape(2, 2), axis=1, prepend=0)` → `[[0, 1], [2, 1]]`);
+  otherwise the shape must match `x` except along `axis`.
+- **rstsr:** `rt::diff` takes `Option<&TensorAny>`, so both sides must be
+  tensors on the same device with the same `ndim` and the same shape as `x`
+  outside `axis`. Callers must materialize a length-1 tensor explicitly
+  (`x.full(1)`-style) to reach the scalar case.
+- **tag:** intentional
+- **status:** open
+
+Typed `&TensorAny` signature keeps the device/dtype consistent; scalar
+expansion is not performed (the array-api standard has no `prepend`/`append`
+parameters at all). `bool` input is also N/A: `rt::diff` requires
+`T: Sub<Output = T>`, and Rust's `bool` has no `Sub` (NumPy diffs bool arrays
+as XOR).
+
+## `unique_*` value order and NaN handling vs NumPy
+
+- **numpy:** `np.unique` returns values in ascending (sorted) order and collapses
+  NaNs into a single trailing entry. The array-api aliases (`np.unique_values`,
+  `np.unique_counts`, `np.unique_inverse`, `np.unique_all`) pass
+  `equal_nan=False` — so NaNs stay distinct — and, since NumPy 2.3, do not
+  guarantee any order.
+- **rstsr:** `rt::unique_values`/`unique_counts`/`unique_inverse`/`unique_all`
+  return ascending order for orderable scalar dtypes (bool, integers, real
+  floats — the `ExtSortCmp` fast path), but **first-occurrence order** over the
+  device-default-order visit sequence for other dtypes (complex via the naive
+  path). NaNs are kept as **distinct entries**.
+- **tag:** intentional
+- **status:** open
+
+rstsr targets the array-api aliases: distinct NaNs is parity with them
+(`equal_nan=False`; `np.unique_all([nan, 1, nan])` → values `[1., nan, nan]`,
+counts `[1, 1, 1]`), and diffs from `np.unique`'s collapsing. Ascending order
+matches `np.unique` (and the pre-2.3 aliases); the naive (general-bound
+`Clone + PartialEq`) algorithm cannot order complex values without the
+`ExtSortCmp` total order, so first-occurrence order stands for them
+(substituting the sorted path for complex is a registered follow-up). Signed
+zeros merge in both paths, keeping the first-seen encoding (also NumPy's
+behavior: `np.unique([-0., 1., 0.])` → `[-0., 1.]`).

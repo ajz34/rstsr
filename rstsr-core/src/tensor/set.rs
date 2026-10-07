@@ -1,0 +1,880 @@
+//! Set-function tensor API: the [`unique_*`](unique_values) family and
+//! [`isin`], with named multi-output structs.
+
+use crate::prelude_dev::*;
+
+/* #region unique output structs */
+
+/// Output of [`unique_counts`]: unique values and their multiplicities.
+///
+/// Converts into and from a plain `(values, counts)` tuple (both directions
+/// through [`From`]).
+pub struct UniqueCounts<T, B>
+where
+    B: DeviceAPI<T> + DeviceRawAPI<usize>,
+{
+    /// Unique values (ascending for orderable dtypes, first-occurrence
+    /// otherwise — the [`unique_values`] ordering contract).
+    pub values: Tensor<T, B, IxD>,
+    /// Multiplicity of each unique value, aligned with [`Self::values`].
+    pub counts: Tensor<usize, B, IxD>,
+}
+
+impl<T, B> From<UniqueCounts<T, B>> for (Tensor<T, B, IxD>, Tensor<usize, B, IxD>)
+where
+    B: DeviceAPI<T> + DeviceRawAPI<usize>,
+{
+    fn from(value: UniqueCounts<T, B>) -> Self {
+        (value.values, value.counts)
+    }
+}
+
+impl<T, B> From<(Tensor<T, B, IxD>, Tensor<usize, B, IxD>)> for UniqueCounts<T, B>
+where
+    B: DeviceAPI<T> + DeviceRawAPI<usize>,
+{
+    fn from(value: (Tensor<T, B, IxD>, Tensor<usize, B, IxD>)) -> Self {
+        Self { values: value.0, counts: value.1 }
+    }
+}
+
+/// Output of [`unique_inverse`]: unique values and the inverse mapping.
+///
+/// Converts into and from a plain `(values, inverse_indices)` tuple (both
+/// directions through [`From`]).
+pub struct UniqueInverse<T, B>
+where
+    B: DeviceAPI<T> + DeviceRawAPI<usize>,
+{
+    /// Unique values (ascending for orderable dtypes, first-occurrence
+    /// otherwise — the [`unique_values`] ordering contract).
+    pub values: Tensor<T, B, IxD>,
+    /// For every input element, the index of its unique entry; shape equals
+    /// the input shape.
+    pub inverse_indices: Tensor<usize, B, IxD>,
+}
+
+impl<T, B> From<UniqueInverse<T, B>> for (Tensor<T, B, IxD>, Tensor<usize, B, IxD>)
+where
+    B: DeviceAPI<T> + DeviceRawAPI<usize>,
+{
+    fn from(value: UniqueInverse<T, B>) -> Self {
+        (value.values, value.inverse_indices)
+    }
+}
+
+impl<T, B> From<(Tensor<T, B, IxD>, Tensor<usize, B, IxD>)> for UniqueInverse<T, B>
+where
+    B: DeviceAPI<T> + DeviceRawAPI<usize>,
+{
+    fn from(value: (Tensor<T, B, IxD>, Tensor<usize, B, IxD>)) -> Self {
+        Self { values: value.0, inverse_indices: value.1 }
+    }
+}
+
+/// Output of [`unique_all`].
+///
+/// Converts into and from a plain `(values, indices, inverse_indices,
+/// counts)` tuple (both directions through [`From`]).
+pub struct UniqueAll<T, B>
+where
+    B: DeviceAPI<T> + DeviceRawAPI<usize>,
+{
+    /// Unique values (ascending for orderable dtypes, first-occurrence
+    /// otherwise — the [`unique_values`] ordering contract).
+    pub values: Tensor<T, B, IxD>,
+    /// First-occurrence flat index of each unique value (the visit position
+    /// under the device default order).
+    pub indices: Tensor<usize, B, IxD>,
+    /// Unique-entry index for every input element (input's shape).
+    pub inverse_indices: Tensor<usize, B, IxD>,
+    /// Multiplicity of each unique value, aligned with [`Self::values`].
+    pub counts: Tensor<usize, B, IxD>,
+}
+
+#[allow(clippy::type_complexity)]
+impl<T, B> From<UniqueAll<T, B>>
+    for (Tensor<T, B, IxD>, Tensor<usize, B, IxD>, Tensor<usize, B, IxD>, Tensor<usize, B, IxD>)
+where
+    B: DeviceAPI<T> + DeviceRawAPI<usize>,
+{
+    fn from(value: UniqueAll<T, B>) -> Self {
+        (value.values, value.indices, value.inverse_indices, value.counts)
+    }
+}
+
+#[allow(clippy::type_complexity)]
+impl<T, B> From<(Tensor<T, B, IxD>, Tensor<usize, B, IxD>, Tensor<usize, B, IxD>, Tensor<usize, B, IxD>)>
+    for UniqueAll<T, B>
+where
+    B: DeviceAPI<T> + DeviceRawAPI<usize>,
+{
+    fn from(value: (Tensor<T, B, IxD>, Tensor<usize, B, IxD>, Tensor<usize, B, IxD>, Tensor<usize, B, IxD>)) -> Self {
+        Self { values: value.0, indices: value.1, inverse_indices: value.2, counts: value.3 }
+    }
+}
+
+/* #endregion */
+
+/* #region shared implementation */
+
+#[allow(clippy::type_complexity)]
+fn unique_impl<T, B, D>(
+    tensor: impl TensorViewAPI<Type = T, Backend = B, Dim = D>,
+    with_all: bool,
+) -> Result<(
+    usize,
+    Tensor<T, B, IxD>,
+    Option<Tensor<usize, B, IxD>>,
+    Option<Tensor<usize, B, IxD>>,
+    Option<Tensor<usize, B, IxD>>,
+)>
+where
+    D: DimAPI,
+    B: DeviceAPI<T>
+        + DeviceAPI<usize>
+        + DeviceRawAPI<MaybeUninit<T>>
+        + DeviceRawAPI<MaybeUninit<usize>>
+        + DeviceCreationAnyAPI<T>
+        + DeviceCreationAnyAPI<usize>
+        + OpUniqueAPI<T, D>,
+{
+    let tensor = tensor.view();
+    let device = tensor.device().clone();
+    let n = tensor.size();
+    // caller-allocated scratch of the input's count; the kernels return the
+    // unique count and the tensor level truncates
+    let values_layout = vec![n].new_contig(None, device.default_order());
+    let (v_max,) = (values_layout.bounds_index()?.1,);
+    let mut values = device.uninit_impl(v_max)?;
+    if !with_all {
+        let u = device.unique_values(tensor.raw(), tensor.layout(), values.raw_mut())?;
+        // SAFETY: the device impl truncated the raw Vec to the `u` written
+        // entries before returning (OpUniqueAPI contract).
+        let storage = unsafe { <B as DeviceCreationAnyAPI<T>>::assume_init_impl(values)? };
+        let t = Tensor::new_f(storage, vec![u].new_contig(None, device.default_order()))?;
+        return Ok((u, t, None, None, None));
+    }
+    let mut indices = device.uninit_impl(v_max)?;
+    let mut inverse = device.uninit_impl(v_max)?;
+    let mut counts = device.uninit_impl(v_max)?;
+    let u = device.unique_all(
+        tensor.raw(),
+        tensor.layout(),
+        values.raw_mut(),
+        indices.raw_mut(),
+        inverse.raw_mut(),
+        counts.raw_mut(),
+    )?;
+    // SAFETY: the device impl truncated values/indices/counts to the `u`
+    // written entries and inverse to `n` (OpUniqueAPI contract).
+    let values_t = Tensor::new_f(
+        unsafe { <B as DeviceCreationAnyAPI<T>>::assume_init_impl(values)? },
+        vec![u].new_contig(None, device.default_order()),
+    )?;
+    let indices_t = Tensor::new_f(
+        unsafe { <B as DeviceCreationAnyAPI<usize>>::assume_init_impl(indices)? },
+        vec![u].new_contig(None, device.default_order()),
+    )?;
+    let shape_in: Vec<usize> = tensor.shape().as_ref().to_vec();
+    // inverse is written in the device-order visit sequence → matching contig layout
+    let inverse_t = Tensor::new_f(
+        unsafe { <B as DeviceCreationAnyAPI<usize>>::assume_init_impl(inverse)? },
+        shape_in.new_contig(None, device.default_order()),
+    )?;
+    let counts_t = Tensor::new_f(
+        unsafe { <B as DeviceCreationAnyAPI<usize>>::assume_init_impl(counts)? },
+        vec![u].new_contig(None, device.default_order()),
+    )?;
+    Ok((u, values_t, Some(indices_t), Some(inverse_t), Some(counts_t)))
+}
+
+/* #endregion */
+
+/* #region unique_values */
+
+/// Returns the unique values of a tensor.
+///
+/// See also [`unique_values`].
+pub fn unique_values_f<T, B, D>(tensor: impl TensorViewAPI<Type = T, Backend = B, Dim = D>) -> Result<Tensor<T, B, IxD>>
+where
+    D: DimAPI,
+    B: DeviceAPI<T>
+        + DeviceAPI<usize>
+        + DeviceRawAPI<MaybeUninit<T>>
+        + DeviceRawAPI<MaybeUninit<usize>>
+        + DeviceCreationAnyAPI<T>
+        + DeviceCreationAnyAPI<usize>
+        + OpUniqueAPI<T, D>,
+{
+    let (_, values, _, _, _) = unique_impl(tensor, false)?;
+    Ok(values)
+}
+
+/// Returns the unique values of the flattened tensor.
+///
+/// The ordering depends on the dtype: orderable scalar dtypes (bool,
+/// integers, real floats) return values in **ascending order** (NumPy
+/// parity); other dtypes (e.g. complex) return values in **first-occurrence
+/// order** over the device default order visit sequence. NaNs are distinct
+/// entries (tail of the ascending order); signed zeros merge (the first-
+/// seen encoding is kept). Output shape is data-dependent (1-D).
+///
+/// <div class="warning">
+///
+/// **Row/Column Major Notice**
+///
+/// For orderable dtypes the values are in ascending order (defined by value,
+/// not visit) and are identical under both orders. The first-occurrence
+/// sequence for other dtypes, and which signed-zero encoding is kept when
+/// `-0.0` and `0.0` merge, follow the device default order — row-major under
+/// [`RowMajor`], column-major under [`ColMajor`] — and may differ between the
+/// two orders.
+///
+/// </div>
+///
+/// See [`order_semantics`](crate::order_semantics) for the two device default orders.
+///
+/// # Parameters
+///
+/// - `tensor`: [`&TensorAny<R, T, B, D>`](TensorAny): the input tensor.
+///
+/// # Returns
+///
+/// - [`Tensor<T, B, IxD>`][`Tensor`]: unique values, 1-D.
+///
+/// # Examples
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let a = rt::tensor_from_nested!([3, 1, 3, 2, 1], &device);
+/// println!("{}", rt::unique_values(&a));
+/// // [ 1 2 3]
+/// # assert_eq!(format!("{}", rt::unique_values(&a)), "[ 1 2 3]");
+/// ```
+///
+/// ## Difference between [`RowMajor`] and [`ColMajor`]
+///
+/// For orderable dtypes the values are ascending in both orders; for other
+/// dtypes (here complex) the first-occurrence sequence follows the device
+/// order. Both constructions below build the same logical tensor
+/// `[[0 1 0] [2 0 2]]` (`into_shape` fills in the device order):
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # use num::Complex;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let c = |v: f64| Complex::new(v, 0.0);
+/// let a = rt::asarray((vec![c(0.), c(1.), c(0.), c(2.), c(0.), c(2.)], &device)).into_shape([2, 3]);
+/// println!("{}", rt::unique_values(&a));
+/// // [ 0+0i 1+0i 2+0i]
+///
+/// device.set_default_order(ColMajor);
+/// let a = rt::asarray((vec![c(0.), c(2.), c(1.), c(0.), c(0.), c(2.)], &device)).into_shape([2, 3]);
+/// println!("{}", rt::unique_values(&a));
+/// // [ 0+0i 2+0i 1+0i]
+/// # assert_eq!(rt::unique_values(&a).to_vec(), vec![c(0.), c(2.), c(1.)]);
+/// ```
+///
+/// # Notes of API accordance
+///
+/// - Array-API: `unique_values(x, /)` ([`unique_values`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.unique_values.html))
+/// - NumPy: `numpy.unique(x)` ([`numpy.unique`](https://numpy.org/doc/stable/reference/generated/numpy.unique.html))
+/// - RSTSR: `rt::unique_values(tensor)`
+///
+/// Ordering note: rstsr returns ascending order for orderable scalar dtypes
+/// (bool/integers/real floats) and first-occurrence order for others (e.g.
+/// complex). This matches `numpy.unique` but not the array-api aliases
+/// (`numpy.unique_values`/`unique_all`/...), which since NumPy 2.3 do not
+/// guarantee an order. NaNs are distinct entries (parity with the array-api
+/// aliases, which pass `equal_nan=False`; differs from `numpy.unique`, which
+/// collapses them into one entry).
+///
+/// # See also
+///
+/// ## Variants of this function
+///
+/// - [`unique_values_f`]: fallible version.
+/// - [`TensorAny::unique_values`]: associated method.
+/// - [`TensorAny::unique_values_f`]: associated fallible method.
+pub fn unique_values<T, B, D>(tensor: impl TensorViewAPI<Type = T, Backend = B, Dim = D>) -> Tensor<T, B, IxD>
+where
+    D: DimAPI,
+    B: DeviceAPI<T>
+        + DeviceAPI<usize>
+        + DeviceRawAPI<MaybeUninit<T>>
+        + DeviceRawAPI<MaybeUninit<usize>>
+        + DeviceCreationAnyAPI<T>
+        + DeviceCreationAnyAPI<usize>
+        + OpUniqueAPI<T, D>,
+{
+    unique_values_f(tensor).rstsr_unwrap()
+}
+
+impl<R, T, B, D> TensorAny<R, T, B, D>
+where
+    R: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
+    D: DimAPI,
+    B: DeviceAPI<T>
+        + DeviceAPI<usize>
+        + DeviceRawAPI<MaybeUninit<T>>
+        + DeviceRawAPI<MaybeUninit<usize>>
+        + DeviceCreationAnyAPI<T>
+        + DeviceCreationAnyAPI<usize>
+        + OpUniqueAPI<T, D>,
+{
+    /// Returns the unique values of a tensor.
+    ///
+    /// See also [`unique_values`].
+    pub fn unique_values_f(&self) -> Result<Tensor<T, B, IxD>> {
+        unique_values_f(self)
+    }
+
+    /// Returns the unique values of a tensor.
+    ///
+    /// See also [`unique_values`].
+    pub fn unique_values(&self) -> Tensor<T, B, IxD> {
+        unique_values_f(self).rstsr_unwrap()
+    }
+}
+/* #endregion */
+
+/* #region unique_counts */
+
+/// Returns the unique values of a tensor and their counts.
+///
+/// See also [`unique_counts`].
+pub fn unique_counts_f<T, B, D>(
+    tensor: impl TensorViewAPI<Type = T, Backend = B, Dim = D>,
+) -> Result<UniqueCounts<T, B>>
+where
+    D: DimAPI,
+    B: DeviceAPI<T>
+        + DeviceAPI<usize>
+        + DeviceRawAPI<MaybeUninit<T>>
+        + DeviceRawAPI<MaybeUninit<usize>>
+        + DeviceCreationAnyAPI<T>
+        + DeviceCreationAnyAPI<usize>
+        + OpUniqueAPI<T, D>,
+{
+    let (_, values, _, _, counts) = unique_impl(tensor, true)?;
+    Ok(UniqueCounts { values, counts: counts.expect("unique_all returns counts") })
+}
+
+/// Returns the unique values of the flattened tensor and, for each, the
+/// number of times it appears. Values follow the [`unique_values`]
+/// ordering contract; `counts` is aligned with `values`.
+///
+/// <div class="warning">
+///
+/// **Row/Column Major Notice**
+///
+/// Values follow [`unique_values`]'s ordering behavior: ascending (identical
+/// under both orders) for orderable dtypes; the first-occurrence sequence for
+/// other dtypes follows the device default order and may differ between the
+/// two orders.
+///
+/// </div>
+///
+/// See [`order_semantics`](crate::order_semantics) for the two device default orders.
+///
+/// # Parameters
+///
+/// - `tensor`: [`&TensorAny<R, T, B, D>`](TensorAny): the input tensor.
+///
+/// # Returns
+///
+/// - [`UniqueCounts<T, B>`][`UniqueCounts`]: `values` (1-D) and `counts` (1-D, same length);
+///   converts into a `(values, counts)` tuple and back through [`From`].
+///
+/// # Examples
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let a = rt::tensor_from_nested!([3, 1, 3, 2, 1], &device);
+/// let res = rt::unique_counts(&a);
+/// println!("{}", res.values);
+/// // [ 1 2 3]
+/// println!("{}", res.counts);
+/// // [ 2 1 2]
+///
+/// // the result struct converts into a plain `(values, counts)` tuple:
+/// let (values, counts) = res.into();
+/// println!("{}", values);
+/// // [ 1 2 3]
+/// println!("{}", counts);
+/// // [ 2 1 2]
+/// # assert_eq!(format!("{}", values), "[ 1 2 3]");
+/// # assert_eq!(format!("{}", counts), "[ 2 1 2]");
+/// ```
+///
+/// # Notes of API accordance
+///
+/// - Array-API: `unique_counts(x, /)` ([`unique_counts`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.unique_counts.html))
+/// - NumPy: `numpy.unique(x, return_counts=True)`
+/// - RSTSR: `rt::unique_counts(tensor)`
+///
+/// # See also
+///
+/// ## Variants of this function
+///
+/// - [`unique_counts_f`]: fallible version.
+/// - [`TensorAny::unique_counts`]: associated method.
+/// - [`TensorAny::unique_counts_f`]: associated fallible method.
+pub fn unique_counts<T, B, D>(tensor: impl TensorViewAPI<Type = T, Backend = B, Dim = D>) -> UniqueCounts<T, B>
+where
+    D: DimAPI,
+    B: DeviceAPI<T>
+        + DeviceAPI<usize>
+        + DeviceRawAPI<MaybeUninit<T>>
+        + DeviceRawAPI<MaybeUninit<usize>>
+        + DeviceCreationAnyAPI<T>
+        + DeviceCreationAnyAPI<usize>
+        + OpUniqueAPI<T, D>,
+{
+    unique_counts_f(tensor).rstsr_unwrap()
+}
+
+impl<R, T, B, D> TensorAny<R, T, B, D>
+where
+    R: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
+    D: DimAPI,
+    B: DeviceAPI<T>
+        + DeviceAPI<usize>
+        + DeviceRawAPI<MaybeUninit<T>>
+        + DeviceRawAPI<MaybeUninit<usize>>
+        + DeviceCreationAnyAPI<T>
+        + DeviceCreationAnyAPI<usize>
+        + OpUniqueAPI<T, D>,
+{
+    /// Returns the unique values of a tensor and their counts.
+    ///
+    /// See also [`unique_counts`].
+    pub fn unique_counts_f(&self) -> Result<UniqueCounts<T, B>> {
+        unique_counts_f(self)
+    }
+
+    /// Returns the unique values of a tensor and their counts.
+    ///
+    /// See also [`unique_counts`].
+    pub fn unique_counts(&self) -> UniqueCounts<T, B> {
+        unique_counts_f(self).rstsr_unwrap()
+    }
+}
+/* #endregion */
+
+/* #region unique_inverse */
+
+/// Returns the unique values of a tensor and the inverse mapping.
+///
+/// See also [`unique_inverse`].
+pub fn unique_inverse_f<T, B, D>(
+    tensor: impl TensorViewAPI<Type = T, Backend = B, Dim = D>,
+) -> Result<UniqueInverse<T, B>>
+where
+    D: DimAPI,
+    B: DeviceAPI<T>
+        + DeviceAPI<usize>
+        + DeviceRawAPI<MaybeUninit<T>>
+        + DeviceRawAPI<MaybeUninit<usize>>
+        + DeviceCreationAnyAPI<T>
+        + DeviceCreationAnyAPI<usize>
+        + OpUniqueAPI<T, D>,
+{
+    let (_, values, _, inverse, _) = unique_impl(tensor, true)?;
+    Ok(UniqueInverse { values, inverse_indices: inverse.expect("unique_all returns inverse") })
+}
+
+/// Returns the unique values of the flattened tensor and, for every input
+/// element, the index of its unique entry. Values follow the [`unique_values`]
+/// ordering contract; `inverse_indices` has the input's shape.
+///
+/// <div class="warning">
+///
+/// **Row/Column Major Notice**
+///
+/// Values follow [`unique_values`]'s ordering behavior: ascending (identical
+/// under both orders) for orderable dtypes; the first-occurrence sequence for
+/// other dtypes follows the device default order and may differ between the
+/// two orders. The memory arrangement of `inverse_indices` follows the device
+/// default order.
+///
+/// </div>
+///
+/// See [`order_semantics`](crate::order_semantics) for the two device default orders.
+///
+/// # Parameters
+///
+/// - `tensor`: [`&TensorAny<R, T, B, D>`](TensorAny): the input tensor.
+///
+/// # Returns
+///
+/// - [`UniqueInverse<T, B>`][`UniqueInverse`]: `values` (1-D) and `inverse_indices` (input's
+///   shape); converts into a `(values, inverse_indices)` tuple and back through [`From`].
+///
+/// # Examples
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let a = rt::tensor_from_nested!([3, 1, 3], &device);
+/// let res = rt::unique_inverse(&a);
+/// println!("{}", res.values);
+/// // [ 1 3]
+/// println!("{}", res.inverse_indices);
+/// // [ 1 0 1]
+///
+/// // the result struct converts into a plain tuple:
+/// let (values, inverse_indices) = res.into();
+/// # assert_eq!(format!("{}", values), "[ 1 3]");
+/// # assert_eq!(format!("{}", inverse_indices), "[ 1 0 1]");
+/// ```
+///
+/// # Notes of API accordance
+///
+/// - Array-API: `unique_inverse(x, /)` ([`unique_inverse`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.unique_inverse.html))
+/// - NumPy: `numpy.unique(x, return_inverse=True)` — NumPy flattens `inverse_indices`; the
+///   array-api standard keeps the input shape (rstsr follows the standard).
+/// - RSTSR: `rt::unique_inverse(tensor)`
+///
+/// # See also
+///
+/// ## Variants of this function
+///
+/// - [`unique_inverse_f`]: fallible version.
+/// - [`TensorAny::unique_inverse`]: associated method.
+/// - [`TensorAny::unique_inverse_f`]: associated fallible method.
+pub fn unique_inverse<T, B, D>(tensor: impl TensorViewAPI<Type = T, Backend = B, Dim = D>) -> UniqueInverse<T, B>
+where
+    D: DimAPI,
+    B: DeviceAPI<T>
+        + DeviceAPI<usize>
+        + DeviceRawAPI<MaybeUninit<T>>
+        + DeviceRawAPI<MaybeUninit<usize>>
+        + DeviceCreationAnyAPI<T>
+        + DeviceCreationAnyAPI<usize>
+        + OpUniqueAPI<T, D>,
+{
+    unique_inverse_f(tensor).rstsr_unwrap()
+}
+
+impl<R, T, B, D> TensorAny<R, T, B, D>
+where
+    R: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
+    D: DimAPI,
+    B: DeviceAPI<T>
+        + DeviceAPI<usize>
+        + DeviceRawAPI<MaybeUninit<T>>
+        + DeviceRawAPI<MaybeUninit<usize>>
+        + DeviceCreationAnyAPI<T>
+        + DeviceCreationAnyAPI<usize>
+        + OpUniqueAPI<T, D>,
+{
+    /// Returns the unique values of a tensor and the inverse mapping.
+    ///
+    /// See also [`unique_inverse`].
+    pub fn unique_inverse_f(&self) -> Result<UniqueInverse<T, B>> {
+        unique_inverse_f(self)
+    }
+
+    /// Returns the unique values of a tensor and the inverse mapping.
+    ///
+    /// See also [`unique_inverse`].
+    pub fn unique_inverse(&self) -> UniqueInverse<T, B> {
+        unique_inverse_f(self).rstsr_unwrap()
+    }
+}
+/* #endregion */
+
+/* #region unique_all */
+
+/// Returns the unique values, first-occurrence indices, inverse mapping,
+/// and counts of a tensor.
+///
+/// See also [`unique_all`].
+pub fn unique_all_f<T, B, D>(tensor: impl TensorViewAPI<Type = T, Backend = B, Dim = D>) -> Result<UniqueAll<T, B>>
+where
+    D: DimAPI,
+    B: DeviceAPI<T>
+        + DeviceAPI<usize>
+        + DeviceRawAPI<MaybeUninit<T>>
+        + DeviceRawAPI<MaybeUninit<usize>>
+        + DeviceCreationAnyAPI<T>
+        + DeviceCreationAnyAPI<usize>
+        + OpUniqueAPI<T, D>,
+{
+    let (_, values, indices, inverse, counts) = unique_impl(tensor, true)?;
+    Ok(UniqueAll {
+        values,
+        indices: indices.expect("unique_all returns indices"),
+        inverse_indices: inverse.expect("unique_all returns inverse"),
+        counts: counts.expect("unique_all returns counts"),
+    })
+}
+
+/// Returns the unique values, first-occurrence flat indices, the
+/// inverse mapping, and multiplicities in one pass. Values follow the
+/// [`unique_values`] ordering contract; `indices` is the first occurrence
+/// (flat position in the device default order) of each unique value;
+/// `inverse_indices` has the input's shape.
+///
+/// <div class="warning">
+///
+/// **Row/Column Major Notice**
+///
+/// Values follow [`unique_values`]'s ordering behavior: ascending (identical
+/// under both orders) for orderable dtypes; the first-occurrence sequence for
+/// other dtypes, and `indices` (flat position in the device default order),
+/// follow the device default order and may differ between the two orders. The
+/// memory arrangement of `inverse_indices` follows the device default order.
+///
+/// </div>
+///
+/// See [`order_semantics`](crate::order_semantics) for the two device default orders.
+///
+/// # Parameters
+///
+/// - `tensor`: [`&TensorAny<R, T, B, D>`](TensorAny): the input tensor.
+///
+/// # Returns
+///
+/// - [`UniqueAll<T, B>`][`UniqueAll`]: fields `values`, `indices`, `inverse_indices`, `counts`;
+///   converts into a `(values, indices, inverse_indices, counts)` tuple and back through [`From`].
+///
+/// # Examples
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let a = rt::tensor_from_nested!([3, 1, 3], &device);
+/// let res = rt::unique_all(&a);
+/// println!("{}", res.values);
+/// // [ 1 3]
+/// println!("{}", res.indices);
+/// // [ 1 0]
+/// println!("{}", res.inverse_indices);
+/// // [ 1 0 1]
+/// println!("{}", res.counts);
+/// // [ 1 2]
+///
+/// // the result struct converts into a plain 4-tuple:
+/// let (values, indices, inverse_indices, counts) = res.into();
+/// # assert_eq!(format!("{}", values), "[ 1 3]");
+/// # assert_eq!(format!("{}", indices), "[ 1 0]");
+/// # assert_eq!(format!("{}", inverse_indices), "[ 1 0 1]");
+/// # assert_eq!(format!("{}", counts), "[ 1 2]");
+/// ```
+///
+/// # Notes of API accordance
+///
+/// - Array-API: `unique_all(x, /)` returning a namedtuple with fields
+///   `values`, `indices`, `inverse_indices`, `counts`
+///   ([`unique_all`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.unique_all.html))
+/// - NumPy: `numpy.unique(x, return_index=True, return_inverse=True, return_counts=True)` — NumPy's
+///   `indices` refer to the *sorted* unique sequence; rstsr refers to the first-occurrence
+///   sequence.
+/// - RSTSR: `rt::unique_all(tensor)`
+///
+/// # See also
+///
+/// ## Variants of this function
+///
+/// - [`unique_all_f`]: fallible version.
+/// - [`TensorAny::unique_all`]: associated method.
+/// - [`TensorAny::unique_all_f`]: associated fallible method.
+pub fn unique_all<T, B, D>(tensor: impl TensorViewAPI<Type = T, Backend = B, Dim = D>) -> UniqueAll<T, B>
+where
+    D: DimAPI,
+    B: DeviceAPI<T>
+        + DeviceAPI<usize>
+        + DeviceRawAPI<MaybeUninit<T>>
+        + DeviceRawAPI<MaybeUninit<usize>>
+        + DeviceCreationAnyAPI<T>
+        + DeviceCreationAnyAPI<usize>
+        + OpUniqueAPI<T, D>,
+{
+    unique_all_f(tensor).rstsr_unwrap()
+}
+
+impl<R, T, B, D> TensorAny<R, T, B, D>
+where
+    R: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
+    D: DimAPI,
+    B: DeviceAPI<T>
+        + DeviceAPI<usize>
+        + DeviceRawAPI<MaybeUninit<T>>
+        + DeviceRawAPI<MaybeUninit<usize>>
+        + DeviceCreationAnyAPI<T>
+        + DeviceCreationAnyAPI<usize>
+        + OpUniqueAPI<T, D>,
+{
+    /// Returns the unique values of a tensor with all auxiliary fields.
+    ///
+    /// See also [`unique_all`].
+    pub fn unique_all_f(&self) -> Result<UniqueAll<T, B>> {
+        unique_all_f(self)
+    }
+
+    /// Returns the unique values of a tensor with all auxiliary fields.
+    ///
+    /// See also [`unique_all`].
+    pub fn unique_all(&self) -> UniqueAll<T, B> {
+        unique_all_f(self).rstsr_unwrap()
+    }
+}
+/* #endregion */
+
+/* #region isin */
+
+/// Element membership of `x1` in `x2`.
+///
+/// See also [`isin`].
+pub fn isin_f<T, B, D1, D2>(
+    x1: impl TensorViewAPI<Type = T, Backend = B, Dim = D1>,
+    x2: impl TensorViewAPI<Type = T, Backend = B, Dim = D2>,
+    invert: bool,
+) -> Result<Tensor<bool, B, IxD>>
+where
+    D1: DimAPI,
+    D2: DimAPI,
+    B: DeviceAPI<T>
+        + DeviceAPI<bool>
+        + DeviceRawAPI<MaybeUninit<T>>
+        + DeviceRawAPI<MaybeUninit<usize>>
+        + DeviceRawAPI<MaybeUninit<bool>>
+        + DeviceCreationAnyAPI<T>
+        + DeviceCreationAnyAPI<usize>
+        + DeviceCreationAnyAPI<bool>
+        + OpIsinAPI<T, D1>,
+{
+    let (x1, x2) = (x1.view(), x2.view());
+    let device = x1.device().clone();
+    rstsr_assert!(device.same_device(x2.device()), DeviceMismatch, "isin requires x1 and x2 on the same device.")?;
+    let l2: Layout<IxD> = x2.layout().to_dim()?;
+    let (storage, layout) = device.isin(x1.raw(), x1.layout(), x2.raw(), &l2, invert)?;
+    Tensor::new_f(storage, layout)
+}
+
+/// Calculates the element-wise membership of `x1` in `x2`: the output is
+/// `true` where an element of `x1` appears in `x2` (and inverted with
+/// `invert = true`). Output shape equals `x1`'s shape. Membership is value
+/// equality, so a NaN (or NaN-bearing complex) element is never a member,
+/// even of a set containing NaN (NumPy parity).
+///
+/// This function behaves identically under [`RowMajor`] and [`ColMajor`] device
+/// default orders. (Only the memory arrangement of the new tensor follows the
+/// device default order.)
+///
+/// # Parameters
+///
+/// - `x1`: [`&TensorAny<R, T, B, D>`](TensorAny): the values to test.
+/// - `x2`: [`&TensorAny<R, T, B, D>`](TensorAny): the membership set.
+/// - `invert`: if `true`, the output is inverted.
+///
+/// # Returns
+///
+/// - [`Tensor<bool, B, IxD>`][`Tensor`]: with `x1`'s shape.
+///
+/// # Examples
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let a = rt::tensor_from_nested!([1, 2, 3, 4], &device);
+/// let b = rt::tensor_from_nested!([2, 4], &device);
+/// println!("{}", rt::isin(&a, &b, false));
+/// // [ false true false true]
+/// # assert_eq!(format!("{}", rt::isin(&a, &b, false)), "[ false true false true]");
+/// ```
+///
+/// # Notes of API accordance
+///
+/// - Array-API: `isin(x1, x2, /, *, invert=False)` (2025.12) ([`isin`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.isin.html))
+/// - NumPy: `numpy.isin(element, test_elements, invert=False)`
+/// - RSTSR: `rt::isin(x1, x2, invert)`
+///
+/// Deviation from NumPy: scalar `x1`/`x2` should be wrapped with
+/// [`asarray`](asarray()); NumPy broadcasts `element` against
+/// `test_elements`, the array-api standard does not (rstsr follows the
+/// standard).
+///
+/// # See also
+///
+/// ## Variants of this function
+///
+/// - [`isin_f`]: fallible version.
+/// - [`TensorAny::isin`]: associated method.
+/// - [`TensorAny::isin_f`]: associated fallible method.
+pub fn isin<T, B, D1, D2>(
+    x1: impl TensorViewAPI<Type = T, Backend = B, Dim = D1>,
+    x2: impl TensorViewAPI<Type = T, Backend = B, Dim = D2>,
+    invert: bool,
+) -> Tensor<bool, B, IxD>
+where
+    D1: DimAPI,
+    D2: DimAPI,
+    B: DeviceAPI<T>
+        + DeviceAPI<bool>
+        + DeviceRawAPI<MaybeUninit<T>>
+        + DeviceRawAPI<MaybeUninit<usize>>
+        + DeviceRawAPI<MaybeUninit<bool>>
+        + DeviceCreationAnyAPI<T>
+        + DeviceCreationAnyAPI<usize>
+        + DeviceCreationAnyAPI<bool>
+        + OpIsinAPI<T, D1>,
+{
+    isin_f(x1, x2, invert).rstsr_unwrap()
+}
+
+impl<R1, T, B, D1> TensorAny<R1, T, B, D1>
+where
+    R1: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
+    D1: DimAPI,
+    B: DeviceAPI<T>
+        + DeviceAPI<bool>
+        + DeviceRawAPI<MaybeUninit<T>>
+        + DeviceRawAPI<MaybeUninit<usize>>
+        + DeviceRawAPI<MaybeUninit<bool>>
+        + DeviceCreationAnyAPI<T>
+        + DeviceCreationAnyAPI<usize>
+        + DeviceCreationAnyAPI<bool>
+        + OpIsinAPI<T, D1>,
+{
+    /// Element membership of `x1` in `x2`.
+    ///
+    /// See also [`isin`].
+    pub fn isin_f<D2>(
+        &self,
+        x2: impl TensorViewAPI<Type = T, Backend = B, Dim = D2>,
+        invert: bool,
+    ) -> Result<Tensor<bool, B, IxD>>
+    where
+        D2: DimAPI,
+    {
+        isin_f(self, x2, invert)
+    }
+
+    /// Element membership of `x1` in `x2`.
+    ///
+    /// See also [`isin`].
+    pub fn isin<D2>(
+        &self,
+        x2: impl TensorViewAPI<Type = T, Backend = B, Dim = D2>,
+        invert: bool,
+    ) -> Tensor<bool, B, IxD>
+    where
+        D2: DimAPI,
+    {
+        isin_f(self, x2, invert).rstsr_unwrap()
+    }
+}
+
+/* #endregion */

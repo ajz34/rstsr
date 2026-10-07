@@ -178,7 +178,7 @@ The reference implementation (as in [`DeviceCpuSerial`] and [`DeviceFaer`]), fol
 | status | implementation | Python API | description |
 |-|-|-|-|
 | P | [`take`] | [`take`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.take.html) | Returns elements of an array along an axis. |
-| | | [`take_along_axis`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.take_along_axis.html) | Returns elements from an array at the one-dimensional indices specified by `indices` along a provided `axis`. |
+| Y | [`take_along_axis`] | [`take_along_axis`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.take_along_axis.html) | Returns elements from an array at the one-dimensional indices specified by `indices` along a provided `axis`. |
 
 **Partial implementation**
 - [`take`] currently only supports indexing from an axis, which is also the Python Array API requires. However, NumPy also allows `axis = None` to index the flattened array, which is not implemented in RSTSR.
@@ -214,13 +214,13 @@ The reference implementation (as in [`DeviceCpuSerial`] and [`DeviceFaer`]), fol
 | Y | [`flip`] | [`flip`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.flip.html) | Reverses the order of elements in an array along the given axis. |
 | Y | [`moveaxis`] | [`moveaxis`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.moveaxis.html) | Moves array axes (dimensions) to new positions, while leaving other axes in their original positions. |
 | Y | [`transpose`], [`permute_dims`] | [`permute_dims`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.permute_dims.html) | Permutes the axes (dimensions) of an array `x`. |
-| | | [`repeat`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.repeat.html) | Repeats each element of an array a specified number of times on a per-element basis. |
+| Y | [`repeat`] | [`repeat`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.repeat.html) | Repeats each element of an array a specified number of times on a per-element basis. |
 | Y | [`reshape`] | [`reshape`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.reshape.html) | Reshapes an array without changing its data. |
 | Y | [`reshape_with_args`] | [`reshape`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.reshape.html) | Reshapes an array without changing its data, with explicit control of reading order and copy policy (argument type [`ReshapeArgs`]). |
-| | | [`roll`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.roll.html) | Rolls array elements along a specified axis. |
+| Y | [`roll`] | [`roll`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.roll.html) | Rolls array elements along a specified axis. |
 | Y | [`squeeze`] | [`squeeze`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.squeeze.html) | Removes singleton axes from `x`. |
 | Y | [`stack`] | [`stack`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.stack.html) | Joins a sequence of arrays along a new axis. |
-| | | [`tile`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.tile.html) | Constructs an array by tiling an input array. |
+| Y | [`tile`] | [`tile`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.tile.html) | Constructs an array by tiling an input array. |
 | Y | [`unstack`] | [`unstack`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.unstack.html) | Splits an array into a sequence of arrays along the given axis. |
 
 **Implementation notes**
@@ -233,26 +233,26 @@ The reference implementation (as in [`DeviceCpuSerial`] and [`DeviceFaer`]), fol
 | Y | [`argmax`], [`argmax_axes`], [`argmax_with_args`] | [`argmax`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.argmax.html) | Returns the indices of the maximum values along a specified axis. |
 | Y | [`argmin`], [`argmin_axes`], [`argmin_with_args`] | [`argmin`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.argmin.html) | Returns the indices of the minimum values along a specified axis. |
 | Y | [`count_nonzero`], [`count_nonzero_axes`], [`count_nonzero_with_args`] | [`count_nonzero`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.count_nonzero.html) | Counts the number of array elements which are non-zero. |
-| | | [`nonzero`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.nonzero.html) | Returns the indices of the array elements which are non-zero. |
-| | | [`searchsorted`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.searchsorted.html) | Finds the indices into x1 such that, if the corresponding elements in x2 were inserted before the indices, the order of x1, when sorted in ascending order, would be preserved. |
+| Y | [`nonzero`] | [`nonzero`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.nonzero.html) | Returns the indices of the array elements which are non-zero. |
+| Y | [`searchsorted`] | [`searchsorted`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.searchsorted.html) | Finds the indices into x1 such that, if the corresponding elements in x2 were inserted before the indices, the order of x1, when sorted in ascending order, would be preserved. |
 | Y | [`where`], [`where_f`] | [`where`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.where.html) | Returns elements chosen from x1 or x2 depending on condition. |
 
 ## Set Functions
 
 | status | implementation | Python API | description |
 |-|-|-|-|
-| | | [`isin`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.isin.html) | Tests for each element in `x1` whether the element is in `x2`. |
-| | | [`unique_all`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.unique_all.html) | Returns the unique elements of an input array `x`, the first occurring indices for each unique element in `x`, the indices from the set of unique elements that reconstruct `x`, and the corresponding counts for each unique element in `x`. |
-| | | [`unique_counts`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.unique_counts.html) | Returns the unique elements of an input array `x` and the corresponding counts for each unique element in `x`. |
-| | | [`unique_inverse`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.unique_inverse.html) | Returns the unique elements of an input array `x` and the indices from the set of unique elements that reconstruct `x`. |
-| | | [`unique_values`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.unique_values.html) | Returns the unique elements of an input array `x`. |
+| Y | [`isin`] | [`isin`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.isin.html) | Tests for each element in `x1` whether the element is in `x2`. |
+| Y | [`unique_all`] | [`unique_all`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.unique_all.html) | Returns the unique elements of an input array `x`, the first occurring indices for each unique element in `x`, the indices from the set of unique elements that reconstruct `x`, and the corresponding counts for each unique element in `x`. |
+| Y | [`unique_counts`] | [`unique_counts`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.unique_counts.html) | Returns the unique elements of an input array `x` and the corresponding counts for each unique element in `x`. |
+| Y | [`unique_inverse`] | [`unique_inverse`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.unique_inverse.html) | Returns the unique elements of an input array `x` and the indices from the set of unique elements that reconstruct `x`. |
+| Y | [`unique_values`] | [`unique_values`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.unique_values.html) | Returns the unique elements of an input array `x`. |
 
 ## Sorting Functions
 
 | status | implementation | Python API | description |
 |-|-|-|-|
-| | | [`argsort`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.argsort.html) | Returns the indices that sort an array x along a specified axis. |
-| | | [`sort`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.sort.html) | Returns a sorted copy of an input array x. |
+| Y | [`argsort`], [`argsort_custom`] | [`argsort`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.argsort.html) | Returns the indices that sort an array x along a specified axis. |
+| Y | [`sort`], [`sort_custom`] | [`sort`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.sort.html) | Returns a sorted copy of an input array x. |
 
 ## Statistical Functions
 
@@ -274,7 +274,7 @@ The reference implementation (as in [`DeviceCpuSerial`] and [`DeviceFaer`]), fol
 |-|-|-|-|
 | Y | [`all`], [`all_axes`], [`all_with_args`] | [`all`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.all.html) | Tests whether all input array elements evaluate to `True` along a specified axis. |
 | Y | [`any`], [`any_axes`], [`any_with_args`] | [`any`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.any.html) | Tests whether any input array element evaluates to `True` along a specified axis. |
-| | | [`diff`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.diff.html) | Calculates the n-th discrete forward difference along a specified axis. |
+| Y | [`diff`] | [`diff`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.diff.html) | Calculates the n-th discrete forward difference along a specified axis. |
 
 
 ## Element-wise Functions
