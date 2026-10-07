@@ -974,10 +974,9 @@ fn var_correction_factor(size: usize, correction: f64, is_std: bool) -> f64 {
     }
 }
 
-/// Variance with [`VarArgs`] (axes, keepdims, correction).
+/// Variance with [`VarArgs`] (fallible).
 ///
-/// The correction rescales the population variance by `M / (M - correction)`
-/// on the (output-sized) result; no input-sized intermediate is created.
+/// See also [`var_with_args`].
 pub fn var_with_args_f<T, B, D>(
     tensor: impl TensorViewAPI<Type = T, Backend = B, Dim = D>,
     args: impl Into<VarArgs>,
@@ -1007,7 +1006,10 @@ where
     Ok(result)
 }
 
-/// Variance with [`VarArgs`]; panicking version of [`var_with_args_f`].
+/// Variance with [`VarArgs`] (axes, keepdims, correction).
+///
+/// The correction rescales the population variance by `M / (M - correction)`
+/// on the (output-sized) result; no input-sized intermediate is created.
 pub fn var_with_args<T, B, D>(
     tensor: impl TensorViewAPI<Type = T, Backend = B, Dim = D>,
     args: impl Into<VarArgs>,
@@ -1027,7 +1029,9 @@ where
     var_with_args_f(tensor, args).rstsr_unwrap()
 }
 
-/// Standard deviation with [`VarArgs`] (axes, keepdims, correction).
+/// Standard deviation with [`VarArgs`] (fallible).
+///
+/// See also [`std_with_args`].
 pub fn std_with_args_f<T, B, D>(
     tensor: impl TensorViewAPI<Type = T, Backend = B, Dim = D>,
     args: impl Into<VarArgs>,
@@ -1057,7 +1061,7 @@ where
     Ok(result)
 }
 
-/// Standard deviation with [`VarArgs`]; panicking version of [`std_with_args_f`].
+/// Standard deviation with [`VarArgs`] (axes, keepdims, correction).
 pub fn std_with_args<T, B, D>(
     tensor: impl TensorViewAPI<Type = T, Backend = B, Dim = D>,
     args: impl Into<VarArgs>,
@@ -2149,6 +2153,74 @@ where
 
 /* #region allclose */
 
+/// Whether two tensors are element-wise equal within tolerances, explicit
+/// all-element form (fallible).
+///
+/// See also [`allclose_all`].
+pub fn allclose_all_f<TA, TB, TE, B, DA, DB>(
+    tensor_a: impl TensorViewAPI<Type = TA, Backend = B, Dim = DA>,
+    tensor_b: impl TensorViewAPI<Type = TB, Backend = B, Dim = DB>,
+    isclose_args: impl Into<IsCloseArgs<TE>>,
+) -> Result<bool>
+where
+    DA: DimAPI,
+    DB: DimAPI,
+    B: DeviceAPI<bool> + OpAllCloseAPI<TA, TB, TE, IxD>,
+    TE: 'static,
+{
+    let tensor_a = tensor_a.view();
+    let tensor_b = tensor_b.view();
+    let isclose_args = isclose_args.into();
+    let device = tensor_a.device();
+
+    // check device
+    rstsr_assert!(tensor_a.device().same_device(tensor_b.device()), DeviceMismatch)?;
+
+    // check and broadcast layout
+
+    let la = tensor_a.layout().to_dim::<IxD>()?;
+    let lb = tensor_b.layout().to_dim::<IxD>()?;
+    let default_order = device.default_order();
+    let (la_b, lb_b) = broadcast_layout(&la, &lb, default_order)?;
+
+    device.allclose_all(tensor_a.raw(), &la_b, tensor_b.raw(), &lb_b, &isclose_args)
+}
+
+/// Whether two tensors are element-wise equal within tolerances, explicit
+/// all-element form.
+///
+/// See also [`allclose`].
+pub fn allclose_all<TA, TB, TE, B, DA, DB>(
+    tensor_a: impl TensorViewAPI<Type = TA, Backend = B, Dim = DA>,
+    tensor_b: impl TensorViewAPI<Type = TB, Backend = B, Dim = DB>,
+    isclose_args: impl Into<IsCloseArgs<TE>>,
+) -> bool
+where
+    DA: DimAPI,
+    DB: DimAPI,
+    B: DeviceAPI<bool> + OpAllCloseAPI<TA, TB, TE, IxD>,
+    TE: 'static,
+{
+    allclose_all_f(tensor_a, tensor_b, isclose_args).rstsr_unwrap()
+}
+
+/// Whether two tensors are element-wise equal within tolerances (fallible).
+///
+/// See also [`allclose`].
+pub fn allclose_f<TA, TB, TE, B, DA, DB>(
+    tensor_a: impl TensorViewAPI<Type = TA, Backend = B, Dim = DA>,
+    tensor_b: impl TensorViewAPI<Type = TB, Backend = B, Dim = DB>,
+    isclose_args: impl Into<IsCloseArgs<TE>>,
+) -> Result<bool>
+where
+    DA: DimAPI,
+    DB: DimAPI,
+    B: DeviceAPI<bool> + OpAllCloseAPI<TA, TB, TE, IxD>,
+    TE: 'static,
+{
+    allclose_all_f(tensor_a, tensor_b, isclose_args)
+}
+
 /// Whether two tensors are element-wise equal within tolerances
 /// (`all(|a - b| <= atol + rtol * |b|)`).
 ///
@@ -2209,63 +2281,6 @@ where
 /// - [`TensorAny::allclose`] / [`TensorAny::allclose_all`]: associated method forms (each with a
 ///   `_f` twin).
 /// - Macro: `allclose!(&a, &b)` (crate-level exported, same name as the function).
-pub fn allclose_all_f<TA, TB, TE, B, DA, DB>(
-    tensor_a: impl TensorViewAPI<Type = TA, Backend = B, Dim = DA>,
-    tensor_b: impl TensorViewAPI<Type = TB, Backend = B, Dim = DB>,
-    isclose_args: impl Into<IsCloseArgs<TE>>,
-) -> Result<bool>
-where
-    DA: DimAPI,
-    DB: DimAPI,
-    B: DeviceAPI<bool> + OpAllCloseAPI<TA, TB, TE, IxD>,
-    TE: 'static,
-{
-    let tensor_a = tensor_a.view();
-    let tensor_b = tensor_b.view();
-    let isclose_args = isclose_args.into();
-    let device = tensor_a.device();
-
-    // check device
-    rstsr_assert!(tensor_a.device().same_device(tensor_b.device()), DeviceMismatch)?;
-
-    // check and broadcast layout
-
-    let la = tensor_a.layout().to_dim::<IxD>()?;
-    let lb = tensor_b.layout().to_dim::<IxD>()?;
-    let default_order = device.default_order();
-    let (la_b, lb_b) = broadcast_layout(&la, &lb, default_order)?;
-
-    device.allclose_all(tensor_a.raw(), &la_b, tensor_b.raw(), &lb_b, &isclose_args)
-}
-
-pub fn allclose_all<TA, TB, TE, B, DA, DB>(
-    tensor_a: impl TensorViewAPI<Type = TA, Backend = B, Dim = DA>,
-    tensor_b: impl TensorViewAPI<Type = TB, Backend = B, Dim = DB>,
-    isclose_args: impl Into<IsCloseArgs<TE>>,
-) -> bool
-where
-    DA: DimAPI,
-    DB: DimAPI,
-    B: DeviceAPI<bool> + OpAllCloseAPI<TA, TB, TE, IxD>,
-    TE: 'static,
-{
-    allclose_all_f(tensor_a, tensor_b, isclose_args).rstsr_unwrap()
-}
-
-pub fn allclose_f<TA, TB, TE, B, DA, DB>(
-    tensor_a: impl TensorViewAPI<Type = TA, Backend = B, Dim = DA>,
-    tensor_b: impl TensorViewAPI<Type = TB, Backend = B, Dim = DB>,
-    isclose_args: impl Into<IsCloseArgs<TE>>,
-) -> Result<bool>
-where
-    DA: DimAPI,
-    DB: DimAPI,
-    B: DeviceAPI<bool> + OpAllCloseAPI<TA, TB, TE, IxD>,
-    TE: 'static,
-{
-    allclose_all_f(tensor_a, tensor_b, isclose_args)
-}
-
 pub fn allclose<TA, TB, TE, B, DA, DB>(
     tensor_a: impl TensorViewAPI<Type = TA, Backend = B, Dim = DA>,
     tensor_b: impl TensorViewAPI<Type = TB, Backend = B, Dim = DB>,
