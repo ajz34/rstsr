@@ -38,6 +38,7 @@ not pin an order themselves:
 | Broadcasting (element-wise operators, [`assign`](crate::tensor::assignment::assign()), [`broadcast_to`], ...) | shapes align from the last axis (NumPy rule) | shapes align from the first axis (Fortran/Julia rule) |
 | [`to_contig`] / [`to_prefer`] with the device default order passed as `order` | C-contiguous result | F-contiguous result |
 | Axis iteration | row-major traversal | column-major traversal |
+| Flattened visit order (the `reshape(-1)` sequence: [`repeat`] / [`roll`] with `axis = None`, [`nonzero`], the `unique_*` first-occurrence sequence) | row-major sequence | column-major sequence |
 
 Layout-only manipulations ([`transpose`], slicing, [`flip`], ...) are not
 affected at all. Element-wise computations are unaffected in their results;

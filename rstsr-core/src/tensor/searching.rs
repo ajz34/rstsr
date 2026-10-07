@@ -7,14 +7,12 @@ use crate::prelude_dev::*;
 /// Find the positions where values of `x2` would insert into sorted `x1`.
 ///
 /// See also [`searchsorted`].
-pub fn searchsorted_f<R1, R2, T, B, D1, D2, AArg>(
-    x1: &TensorAny<R1, T, B, D1>,
-    x2: &TensorAny<R2, T, B, D2>,
+pub fn searchsorted_f<T, B, D1, D2, AArg>(
+    x1: impl TensorViewAPI<Type = T, Backend = B, Dim = D1>,
+    x2: impl TensorViewAPI<Type = T, Backend = B, Dim = D2>,
     args: AArg,
 ) -> Result<Tensor<usize, B, IxD>>
 where
-    R1: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
-    R2: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
     D1: DimAPI,
     D2: DimAPI,
     AArg: TryInto<SearchSortedArgs, Error: Into<Error>>,
@@ -24,6 +22,7 @@ where
         + DeviceCreationAnyAPI<usize>
         + OpSearchSortedAPI<T, T, D2>,
 {
+    let (x1, x2) = (x1.view(), x2.view());
     let args = args.try_into().map_err(Into::into)?;
     let device = x1.device().clone();
     rstsr_assert!(
@@ -172,6 +171,65 @@ impl<R1, R2, T, B, D1, D2, AArg> SearchSortedAPI<()> for (&TensorAny<R1, T, B, D
 where
     R1: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
     R2: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
+    D1: DimAPI,
+    D2: DimAPI,
+    AArg: TryInto<SearchSortedArgs, Error: Into<Error>>,
+    B: DeviceAPI<T>
+        + DeviceAPI<usize>
+        + DeviceRawAPI<MaybeUninit<usize>>
+        + DeviceCreationAnyAPI<usize>
+        + OpSearchSortedAPI<T, T, D2>,
+{
+    type Out = Tensor<usize, B, IxD>;
+
+    fn searchsorted_f(self) -> Result<Self::Out> {
+        let (x1, x2, args) = self;
+        searchsorted_f(x1, x2, args)
+    }
+}
+
+impl<R2, T, B, D1, D2, AArg> SearchSortedAPI<()> for (TensorView<'_, T, B, D1>, &TensorAny<R2, T, B, D2>, AArg)
+where
+    R2: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
+    D1: DimAPI,
+    D2: DimAPI,
+    AArg: TryInto<SearchSortedArgs, Error: Into<Error>>,
+    B: DeviceAPI<T>
+        + DeviceAPI<usize>
+        + DeviceRawAPI<MaybeUninit<usize>>
+        + DeviceCreationAnyAPI<usize>
+        + OpSearchSortedAPI<T, T, D2>,
+{
+    type Out = Tensor<usize, B, IxD>;
+
+    fn searchsorted_f(self) -> Result<Self::Out> {
+        let (x1, x2, args) = self;
+        searchsorted_f(x1, x2, args)
+    }
+}
+
+impl<R1, T, B, D1, D2, AArg> SearchSortedAPI<()> for (&TensorAny<R1, T, B, D1>, TensorView<'_, T, B, D2>, AArg)
+where
+    R1: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
+    D1: DimAPI,
+    D2: DimAPI,
+    AArg: TryInto<SearchSortedArgs, Error: Into<Error>>,
+    B: DeviceAPI<T>
+        + DeviceAPI<usize>
+        + DeviceRawAPI<MaybeUninit<usize>>
+        + DeviceCreationAnyAPI<usize>
+        + OpSearchSortedAPI<T, T, D2>,
+{
+    type Out = Tensor<usize, B, IxD>;
+
+    fn searchsorted_f(self) -> Result<Self::Out> {
+        let (x1, x2, args) = self;
+        searchsorted_f(x1, x2, args)
+    }
+}
+
+impl<T, B, D1, D2, AArg> SearchSortedAPI<()> for (TensorView<'_, T, B, D1>, TensorView<'_, T, B, D2>, AArg)
+where
     D1: DimAPI,
     D2: DimAPI,
     AArg: TryInto<SearchSortedArgs, Error: Into<Error>>,

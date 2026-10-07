@@ -525,3 +525,73 @@ mod custom_isin {
         assert_eq!(rt::isin((&x1, &x2, true)).to_vec(), vec![true, false, true]);
     }
 }
+
+#[cfg(test)]
+mod device_order {
+    use super::*;
+    use num::Complex;
+    static FUNC: &str = "device_order";
+
+    #[test]
+    fn test_unique_all_first_occurrence_col_major() {
+        crate::specify_test!("test_unique_all_first_occurrence_col_major");
+
+        // the first-occurrence visit sequence (and the flat `indices`) follow
+        // the device default order
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(ColMajor);
+
+        // values [7 7 8 9 8 9] filled in device order: [[7 8 8], [7 9 9]]
+        let a = rt::asarray((vec![7_i32, 7, 8, 9, 8, 9], &device)).into_shape([2, 3]);
+        let u = rt::unique_all(&a);
+        assert_eq!(u.values.to_vec(), vec![7, 8, 9]); // ascending is value-defined
+        assert_eq!(u.counts.to_vec(), vec![2, 2, 2]);
+        assert_eq!(u.indices.to_vec(), vec![0, 2, 3]); // col-major first occurrence
+        assert_eq!(u.inverse_indices.stride(), &[1, 2]); // device-order contig
+        assert_eq!(format!("{}", u.inverse_indices), "[[ 0 1 1]\n [ 0 2 2]]");
+    }
+
+    #[test]
+    fn test_unique_values_complex_col_major() {
+        crate::specify_test!("test_unique_values_complex_col_major");
+
+        // complex takes the first-occurrence path (no `ExtSortCmp` order):
+        // the sequence follows the visit order, and the two orders differ
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(ColMajor);
+
+        let vals = (0..6).map(|i| Complex::new(i as f64, 0.0)).collect::<Vec<_>>();
+        let a = rt::asarray((vals, &device)).into_shape([2, 3]); // [[0 2 4], [1 3 5]]
+        let out = rt::unique_values(&a);
+        assert_eq!(out.to_vec(), (0..6).map(|i| Complex::new(i as f64, 0.0)).collect::<Vec<_>>());
+
+        // the same logical tensor filled row-major visits [0 2 4 1 3 5] instead:
+        // the first-occurrence sequence genuinely depends on the visit order
+        let mut device_rm = TESTCFG.device.clone();
+        device_rm.set_default_order(RowMajor);
+        let vals_rm: Vec<Complex<f64>> = [0.0, 2.0, 4.0, 1.0, 3.0, 5.0].iter().map(|&i| Complex::new(i, 0.0)).collect();
+        let a_rm = rt::asarray((vals_rm, &device_rm)).into_shape([2, 3]);
+        assert_eq!(format!("{a}"), format!("{a_rm}"));
+        let out_rm = rt::unique_values(&a_rm);
+        let expected_rm: Vec<Complex<f64>> =
+            [0.0, 2.0, 4.0, 1.0, 3.0, 5.0].iter().map(|&i| Complex::new(i, 0.0)).collect();
+        assert_eq!(out_rm.to_vec(), expected_rm);
+    }
+
+    #[test]
+    fn test_isin_arrangement_col_major() {
+        crate::specify_test!("test_isin_arrangement_col_major");
+
+        // values are position-mapped (order-independent); the memory
+        // arrangement of the output follows the device default order
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(ColMajor);
+
+        let a = rt::arange((6, &device)).into_shape([2, 3]); // [[0 2 4], [1 3 5]]
+        let b = rt::asarray((vec![2_i32, 3], &device));
+        let out = rt::isin((&a, &b, false));
+        assert_eq!(out.stride(), &[1, 2]);
+        // logical [[false, true, false], [false, true, false]]
+        assert_eq!(format!("{out}"), "[[ false true false]\n [ false true false]]");
+    }
+}

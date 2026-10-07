@@ -53,7 +53,7 @@ where
                     // layout, and all element access happens at `$ty`.
                     let a = unsafe { &*(a as *const Vec<T> as *const Vec<$ty>) };
                     let values = unsafe { &mut *(values as *mut Vec<MaybeUninit<T>> as *mut Vec<MaybeUninit<$ty>>) };
-                    let access = LineAccess::new(a, la)?;
+                    let access = LineAccess::new(a, la, self.default_order())?;
                     let u = unique_values_sorted_cpu_serial(values, &access)?;
                     values.truncate(u);
                     return Ok(u);
@@ -61,7 +61,7 @@ where
             }};
         }
         for_each_fast_dtype!(sorted_values);
-        let access = LineAccess::new(a, la)?;
+        let access = LineAccess::new(a, la, self.default_order())?;
         let u = unique_values_naive_cpu_serial(values, &access)?;
         values.truncate(u);
         Ok(u)
@@ -82,7 +82,7 @@ where
                     // SAFETY: as in `unique_values` above.
                     let a = unsafe { &*(a as *const Vec<T> as *const Vec<$ty>) };
                     let values = unsafe { &mut *(values as *mut Vec<MaybeUninit<T>> as *mut Vec<MaybeUninit<$ty>>) };
-                    let access = LineAccess::new(a, la)?;
+                    let access = LineAccess::new(a, la, self.default_order())?;
                     let flat_c = |i: usize| -> usize { i };
                     let u = unique_all_sorted_cpu_serial(values, indices, inverse, counts, &access, &flat_c)?;
                     // contract: only the first `u` entries are initialized; truncate
@@ -96,7 +96,7 @@ where
             }};
         }
         for_each_fast_dtype!(sorted_all);
-        let access = LineAccess::new(a, la)?;
+        let access = LineAccess::new(a, la, self.default_order())?;
         let flat_c = |i: usize| -> usize { i };
         let u = unique_all_naive_cpu_serial(values, indices, inverse, counts, &access, &flat_c)?;
         // contract: values/indices/counts hold exactly `u` entries; inverse
@@ -110,7 +110,7 @@ where
     }
 }
 
-/// Fill the `isin` output `c` (row-major visit order): the sorted
+/// Fill the `isin` output `c` (in the `order` visit sequence): the sorted
 /// binary-search path for the TypeId-listed orderable dtypes (complex
 /// included), the general linear-scan path otherwise.
 fn isin_fill_dispatch<T, D1>(
@@ -119,6 +119,7 @@ fn isin_fill_dispatch<T, D1>(
     l1: &Layout<D1>,
     x2: &Vec<T>,
     l2: &Layout<IxD>,
+    order: FlagOrder,
 ) -> Result<()>
 where
     T: Clone + PartialEq + 'static,
@@ -131,14 +132,14 @@ where
                 // Vec references address the same (dtype-independent) Vec layout.
                 let x1 = unsafe { &*(x1 as *const Vec<T> as *const Vec<$ty>) };
                 let x2 = unsafe { &*(x2 as *const Vec<T> as *const Vec<$ty>) };
-                return isin_sorted_cpu_serial(c, x1, l1, x2, l2);
+                return isin_sorted_cpu_serial(c, x1, l1, x2, l2, order);
             }
         }};
     }
     for_each_fast_dtype!(sorted_isin);
     sorted_isin!(Complex<f32>);
     sorted_isin!(Complex<f64>);
-    isin_naive_cpu_serial(c, x1, l1, x2, l2)
+    isin_naive_cpu_serial(c, x1, l1, x2, l2, order)
 }
 
 impl<T, D1> OpIsinAPI<T, D1> for DeviceCpuSerial
@@ -154,13 +155,13 @@ where
         l2: &Layout<IxD>,
         invert: bool,
     ) -> Result<(Storage<DataOwned<Vec<bool>>, bool, Self>, Layout<IxD>)> {
-        // the kernel writes in row-major visit order; the output must be
-        // C-contig regardless of the device default order (values contract)
+        // the kernel writes in the device-order visit sequence; the output
+        // layout matches it (C-contig under RowMajor, F-contig under ColMajor)
         let shape: Vec<usize> = l1.shape().as_ref().to_vec();
-        let layout_c = shape.new_c_contig(None);
+        let layout_c = shape.new_contig(None, self.default_order());
         let (_, idx_max) = layout_c.bounds_index()?;
         let mut storage = self.uninit_impl(idx_max)?;
-        isin_fill_dispatch(storage.raw_mut(), x1, l1, x2, l2)?;
+        isin_fill_dispatch(storage.raw_mut(), x1, l1, x2, l2, self.default_order())?;
         if invert {
             for slot in storage.raw_mut().iter_mut() {
                 // SAFETY: every slot was written by `isin_fill_dispatch`.

@@ -64,13 +64,12 @@ impl<const N: usize> From<&[usize; N]> for RepeatArg {
 /// Repeat elements of a tensor.
 ///
 /// See also [`repeat`].
-pub fn repeat_f<R, T, B, D>(
-    tensor: &TensorAny<R, T, B, D>,
+pub fn repeat_f<T, B, D>(
+    tensor: impl TensorViewAPI<Type = T, Backend = B, Dim = D>,
     repeats: impl Into<RepeatArg>,
     axis: impl TryInto<AxesIndex<isize>, Error: Into<Error>>,
 ) -> Result<Tensor<T, B, IxD>>
 where
-    R: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
     D: DimAPI,
     B: DeviceAPI<T>
         + DeviceRawAPI<MaybeUninit<T>>
@@ -80,6 +79,7 @@ where
 {
     let repeats = repeats.into();
     let axis = axis.try_into().map_err(Into::into)?;
+    let tensor = tensor.view();
     let device = tensor.device().clone();
     let ndim = tensor.ndim();
 
@@ -140,7 +140,8 @@ where
 
     match axis {
         None => {
-            // flattened repeat: strict row-major (C-order) visit order
+            // flattened repeat: visit in the device default order (row-major
+            // under RowMajor, column-major under ColMajor) — `reshape(-1)` order
             let layout: Layout<IxD> = tensor.layout().to_dim()?;
             let ndim_in = layout.ndim();
             if ndim_in == 0 {
@@ -150,7 +151,7 @@ where
                     broadcast_layout_to_first(&layout_result, &layout, device.default_order())?;
                 device.assign_arbitary_uninit(storage.raw_mut(), &layout_result, tensor.raw(), &layout_src)?;
             } else {
-                let iter = IndexedIterLayout::new(&layout, RowMajor)?;
+                let iter = IndexedIterLayout::new(&layout, device.default_order())?;
                 let mut offset = 0;
                 for (flat, (index, _)) in iter.enumerate() {
                     let count = count_at(flat);
@@ -219,10 +220,21 @@ where
 
 /// Repeat elements of a tensor.
 ///
-/// This function behaves identically under [`RowMajor`] and [`ColMajor`] device
-/// default orders. (Only the memory arrangement of the new tensor follows the
-/// device default order; the element visit order of the flattened form is
-/// always row-major.)
+/// <div class="warning">
+///
+/// **Row/Column Major Notice**
+///
+/// With an explicit `axis`, this function behaves identically under [`RowMajor`]
+/// and [`ColMajor`] device default orders (only the memory arrangement of the
+/// new tensor follows the device default order). The flattened form
+/// (`axis = None`) visits elements in the device default order — the
+/// `reshape(-1)` order: row-major under [`RowMajor`], column-major under
+/// [`ColMajor`] — and per-element counts follow that visit sequence; its
+/// results may differ between the two orders.
+///
+/// </div>
+///
+/// See [`order_semantics`](crate::order_semantics) for the two device default orders.
 ///
 /// # Parameters
 ///
@@ -241,9 +253,9 @@ where
 /// - `axis`: TryInto [`AxesIndex<isize>`]
 ///
 ///   - A single axis: only elements along that axis are repeated; other dimensions are preserved.
-///   - `None` (default): the tensor is flattened in strict row-major (C-order) sequence, elements
-///     are repeated, and a 1-D tensor is returned. The visit order does not depend on the device
-///     default order.
+///   - `None` (default): the tensor is flattened in the device default order (row-major under
+///     [`RowMajor`], column-major under [`ColMajor`]), elements are repeated, and a 1-D tensor is
+///     returned.
 ///   - Negative values count from the back.
 ///
 /// # Returns
@@ -292,6 +304,26 @@ where
 /// println!("{}", rt::repeat((&a, 1, None)));
 /// // [ 0 1 2 3 4 5]
 /// # assert_eq!(format!("{}", rt::repeat((&a, 1, None))), "[ 0 1 2 3 4 5]");
+/// ```
+///
+/// ## Difference between [`RowMajor`] and [`ColMajor`]
+///
+/// The flattened form (`axis = None`) visits elements in the device default
+/// order; the same tensor repeats differently under the two orders:
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let a = rt::tensor_from_nested!([[0, 1, 2], [3, 4, 5]], &device);
+/// println!("{}", rt::repeat((&a, [2, 1, 1, 1, 1, 1], None)));
+/// // [ 0 0 1 2 3 4 5]
+///
+/// device.set_default_order(ColMajor);
+/// let a = rt::tensor_from_nested!([[0, 1, 2], [3, 4, 5]], &device);
+/// println!("{}", rt::repeat((&a, [2, 1, 1, 1, 1, 1], None)));
+/// // [ 0 0 3 1 4 2 5]
+/// # assert_eq!(format!("{}", rt::repeat((&a, [2, 1, 1, 1, 1, 1], None))), "[ 0 0 3 1 4 2 5]");
 /// ```
 ///
 /// # Notes of API accordance
@@ -374,6 +406,43 @@ where
 impl<RA, T, B, D, RArg> RepeatAPI<()> for (&TensorAny<RA, T, B, D>, RArg)
 where
     RA: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
+    D: DimAPI,
+    RArg: Into<RepeatArg>,
+    B: DeviceAPI<T>
+        + DeviceRawAPI<MaybeUninit<T>>
+        + DeviceCreationAnyAPI<T>
+        + OpAssignAPI<T, IxD>
+        + OpAssignArbitaryAPI<T, IxD, IxD>,
+{
+    type Out = Tensor<T, B, IxD>;
+
+    fn repeat_f(self) -> Result<Self::Out> {
+        let (tensor, repeats) = self;
+        repeat_f(tensor, repeats, AxesIndex::<isize>::None)
+    }
+}
+
+impl<T, B, D, RArg, AArg> RepeatAPI<()> for (TensorView<'_, T, B, D>, RArg, AArg)
+where
+    D: DimAPI,
+    RArg: Into<RepeatArg>,
+    AArg: TryInto<AxesIndex<isize>, Error: Into<Error>>,
+    B: DeviceAPI<T>
+        + DeviceRawAPI<MaybeUninit<T>>
+        + DeviceCreationAnyAPI<T>
+        + OpAssignAPI<T, IxD>
+        + OpAssignArbitaryAPI<T, IxD, IxD>,
+{
+    type Out = Tensor<T, B, IxD>;
+
+    fn repeat_f(self) -> Result<Self::Out> {
+        let (tensor, repeats, axis) = self;
+        repeat_f(tensor, repeats, axis)
+    }
+}
+
+impl<T, B, D, RArg> RepeatAPI<()> for (TensorView<'_, T, B, D>, RArg)
+where
     D: DimAPI,
     RArg: Into<RepeatArg>,
     B: DeviceAPI<T>

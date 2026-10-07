@@ -6,17 +6,17 @@ use core::cmp::Ordering;
 
 use rstsr_dtype_traits::ExtSortCmp;
 
-/// Element accessor over a layout: offset + stride walk in row-major order
-/// through an arbitrary input layout.
+/// Element accessor over a layout: offset + stride walk in the given visit
+/// order through an arbitrary input layout.
 pub struct LineAccess<'a, T> {
     data: &'a [T],
     offsets: Vec<usize>,
 }
 
 impl<'a, T> LineAccess<'a, T> {
-    /// Collect the row-major offsets of every element of `la` into `data`.
-    pub fn new<D: DimAPI>(data: &'a [T], la: &Layout<D>) -> Result<Self> {
-        let iter: IndexedIterLayout<IxD> = IndexedIterLayout::new(&la.to_dim()?, RowMajor)?;
+    /// Collect the offsets of every element of `la` into `data` in `order`.
+    pub fn new<D: DimAPI>(data: &'a [T], la: &Layout<D>, order: FlagOrder) -> Result<Self> {
+        let iter: IndexedIterLayout<IxD> = IndexedIterLayout::new(&la.to_dim()?, order)?;
         let offsets = iter.map(|(_, off)| off).collect();
         Ok(Self { data, offsets })
     }
@@ -36,7 +36,7 @@ impl<'a, T> LineAccess<'a, T> {
     }
 }
 
-/// Naive unique: first-occurrence order in row-major sequence.
+/// Naive unique: first-occurrence order in the accessor's visit sequence.
 ///
 /// Writes up to `n` entries into `values`; returns the unique count `u`.
 /// Values are compared with `PartialEq` (covers complex and any dtype);
@@ -61,13 +61,13 @@ where
     Ok(count)
 }
 
-/// Naive unique_all sweep over the row-major sequence.
+/// Naive unique_all sweep over the accessor's visit sequence.
 ///
 /// Writes: unique values into `values` (first-occurrence order), their
-/// first-occurrence flat C-order index into `indices` (length `u`), the
-/// unique-entry index for every input element into `inverse` (length `n`),
-/// and the multiplicity of each unique value into `counts` (length `u`).
-/// Returns `u`.
+/// first-occurrence flat index into `indices` (length `u`; visit position
+/// under the caller's order), the unique-entry index for every input element
+/// into `inverse` (length `n`), and the multiplicity of each unique value
+/// into `counts` (length `u`). Returns `u`.
 pub fn unique_all_naive_cpu_serial<T>(
     values: &mut [MaybeUninit<T>],
     indices: &mut [MaybeUninit<usize>],
@@ -107,9 +107,9 @@ where
     Ok(count)
 }
 
-/// Isin, sorted path: sort and dedupe a copy of `x2`'s row-major values by
-/// the total order of [`ExtSortCmp`], then binary-search each `x1` element.
-/// Writes `bool`s into `c` (row-major visit order).
+/// Isin, sorted path: sort and dedupe a copy of `x2`'s values (read in
+/// `order`) by the total order of [`ExtSortCmp`], then binary-search each
+/// `x1` element. Writes `bool`s into `c` in the `order` visit sequence.
 ///
 /// Membership is value equality (`==`, array-api `isin`'s contract via
 /// `equal`): a NaN key is never a member — NumPy parity — so NaN keys short-
@@ -120,13 +120,14 @@ pub fn isin_sorted_cpu_serial<T, D1>(
     l1: &Layout<D1>,
     x2: &[T],
     l2: &Layout<IxD>,
+    order: FlagOrder,
 ) -> Result<()>
 where
     T: Clone + PartialEq + ExtSortCmp,
     D1: DimAPI,
 {
     // efficiency exception (registered): sort a deduped copy of x2's values
-    let access2 = LineAccess::new(x2, l2)?;
+    let access2 = LineAccess::new(x2, l2, order)?;
     let n2 = access2.len();
     let mut x2_sorted: Vec<T> = Vec::with_capacity(n2);
     for i in 0..n2 {
@@ -135,7 +136,7 @@ where
     x2_sorted.sort_by(|a, b| a.ext_total_cmp(b));
     x2_sorted.dedup_by(|a, b| a == b);
 
-    let access1 = LineAccess::new(x1, l1)?;
+    let access1 = LineAccess::new(x1, l1, order)?;
     let m = x2_sorted.len();
     for (i, c_slot) in c.iter_mut().take(access1.len()).enumerate() {
         let v = access1.get(i);
@@ -161,20 +162,22 @@ where
 }
 
 /// Isin, general path: linear membership scan over `x2` (value equality `==`;
-/// no ordering required). Writes `bool`s into `c` (row-major visit order).
+/// no ordering required). Writes `bool`s into `c` in the `order` visit
+/// sequence.
 pub fn isin_naive_cpu_serial<T, D1>(
     c: &mut [MaybeUninit<bool>],
     x1: &[T],
     l1: &Layout<D1>,
     x2: &[T],
     l2: &Layout<IxD>,
+    order: FlagOrder,
 ) -> Result<()>
 where
     T: PartialEq,
     D1: DimAPI,
 {
-    let access1 = LineAccess::new(x1, l1)?;
-    let access2 = LineAccess::new(x2, l2)?;
+    let access1 = LineAccess::new(x1, l1, order)?;
+    let access2 = LineAccess::new(x2, l2, order)?;
     let m = access2.len();
     for (i, c_slot) in c.iter_mut().take(access1.len()).enumerate() {
         let v = access1.get(i);
@@ -184,9 +187,10 @@ where
     Ok(())
 }
 
-/// Fast unique: copy all values (row-major) into `values` (capacity n), sort
-/// with the total order of [`ExtSortCmp`], dedupe adjacent in place. Returns
-/// the unique count `u`; values are in ascending order (NumPy parity).
+/// Fast unique: copy all values (in the accessor's visit order) into
+/// `values` (capacity n), sort with the total order of [`ExtSortCmp`], dedupe
+/// adjacent in place. Returns the unique count `u`; values are in ascending
+/// order (NumPy parity).
 pub fn unique_values_sorted_cpu_serial<T>(values: &mut [MaybeUninit<T>], access: &LineAccess<'_, T>) -> Result<usize>
 where
     T: Clone + ExtSortCmp + PartialEq,
@@ -217,9 +221,9 @@ where
 }
 
 /// Fast unique_all: values sorted ascending (NaN tail distinct), `indices`
-/// = first-occurrence flat C-order index of each unique value, `inverse` =
-/// unique-entry slot per input element, `counts` = multiplicities. Returns
-/// the unique count `u`.
+/// = first-occurrence flat index of each unique value (visit position under
+/// the caller's order), `inverse` = unique-entry slot per input element,
+/// `counts` = multiplicities. Returns the unique count `u`.
 #[allow(clippy::too_many_arguments)]
 pub fn unique_all_sorted_cpu_serial<T>(
     values: &mut [MaybeUninit<T>],

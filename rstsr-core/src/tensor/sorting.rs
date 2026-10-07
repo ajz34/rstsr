@@ -12,9 +12,11 @@ use crate::prelude_dev::*;
 /// Returns the indices that sort a tensor along an axis.
 ///
 /// See also [`argsort`].
-pub fn argsort_f<R, T, B, D>(tensor: &TensorAny<R, T, B, D>, args: impl Into<SortArgs>) -> Result<Tensor<usize, B, IxD>>
+pub fn argsort_f<T, B, D>(
+    tensor: impl TensorViewAPI<Type = T, Backend = B, Dim = D>,
+    args: impl Into<SortArgs>,
+) -> Result<Tensor<usize, B, IxD>>
 where
-    R: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
     D: DimAPI,
     T: 'static,
     B: DeviceAPI<T>
@@ -164,6 +166,25 @@ where
     }
 }
 
+impl<T, B, D, AArg> ArgSortAPI<()> for (TensorView<'_, T, B, D>, AArg)
+where
+    D: DimAPI,
+    T: 'static,
+    AArg: Into<SortArgs>,
+    B: DeviceAPI<T>
+        + DeviceAPI<usize>
+        + DeviceRawAPI<MaybeUninit<usize>>
+        + DeviceCreationAnyAPI<usize>
+        + OpArgSortAPI<T, D>,
+{
+    type Out = Tensor<usize, B, IxD>;
+
+    fn argsort_f(self) -> Result<Self::Out> {
+        let (tensor, args) = self;
+        argsort_f(tensor, args)
+    }
+}
+
 impl<R, T, B, D> TensorAny<R, T, B, D>
 where
     R: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
@@ -203,9 +224,11 @@ where
 /// Sort a tensor along an axis.
 ///
 /// See also [`sort`].
-pub fn sort_f<R, T, B, D>(tensor: &TensorAny<R, T, B, D>, args: impl Into<SortArgs>) -> Result<Tensor<T, B, IxD>>
+pub fn sort_f<T, B, D>(
+    tensor: impl TensorViewAPI<Type = T, Backend = B, Dim = D>,
+    args: impl Into<SortArgs>,
+) -> Result<Tensor<T, B, IxD>>
 where
-    R: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
     D: DimAPI,
     T: 'static,
     B: DeviceAPI<T> + DeviceRawAPI<MaybeUninit<T>> + DeviceCreationAnyAPI<T> + OpSortAPI<T, D>,
@@ -325,6 +348,21 @@ where
     }
 }
 
+impl<T, B, D, AArg> SortAPI<()> for (TensorView<'_, T, B, D>, AArg)
+where
+    D: DimAPI,
+    T: 'static,
+    AArg: Into<SortArgs>,
+    B: DeviceAPI<T> + DeviceRawAPI<MaybeUninit<T>> + DeviceCreationAnyAPI<T> + OpSortAPI<T, D>,
+{
+    type Out = Tensor<T, B, IxD>;
+
+    fn sort_f(self) -> Result<Self::Out> {
+        let (tensor, args) = self;
+        sort_f(tensor, args)
+    }
+}
+
 impl<R, T, B, D> TensorAny<R, T, B, D>
 where
     R: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
@@ -360,13 +398,12 @@ where
 /// Sort a tensor along an axis with a user comparator.
 ///
 /// See also [`sort_custom`].
-pub fn sort_custom_f<R, T, B, D, F>(
-    tensor: &TensorAny<R, T, B, D>,
+pub fn sort_custom_f<T, B, D, F>(
+    tensor: impl TensorViewAPI<Type = T, Backend = B, Dim = D>,
     axis: impl TryInto<AxisIndex<isize>, Error: Into<Error>>,
     f: F,
 ) -> Result<Tensor<T, B, IxD>>
 where
-    R: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
     D: DimAPI,
     F: Fn(&T, &T) -> Ordering + Send + Sync,
     B: DeviceAPI<T> + DeviceRawAPI<MaybeUninit<T>> + DeviceCreationAnyAPI<T> + OpSortCustomAPI<T, D>,
@@ -459,17 +496,31 @@ where
     }
 }
 
+impl<T, B, D, AArg, F> SortCustomAPI<()> for (TensorView<'_, T, B, D>, AArg, F)
+where
+    D: DimAPI,
+    AArg: TryInto<AxisIndex<isize>, Error: Into<Error>>,
+    F: Fn(&T, &T) -> Ordering + Send + Sync,
+    B: DeviceAPI<T> + DeviceRawAPI<MaybeUninit<T>> + DeviceCreationAnyAPI<T> + OpSortCustomAPI<T, D>,
+{
+    type Out = Tensor<T, B, IxD>;
+
+    fn sort_custom_f(self) -> Result<Self::Out> {
+        let (tensor, axis, f) = self;
+        sort_custom_f(tensor, axis, f)
+    }
+}
+
 /// Returns the indices that sort a tensor along an axis with a user
 /// comparator.
 ///
 /// See also [`argsort_custom`].
-pub fn argsort_custom_f<R, T, B, D, F>(
-    tensor: &TensorAny<R, T, B, D>,
+pub fn argsort_custom_f<T, B, D, F>(
+    tensor: impl TensorViewAPI<Type = T, Backend = B, Dim = D>,
     axis: impl TryInto<AxisIndex<isize>, Error: Into<Error>>,
     f: F,
 ) -> Result<Tensor<usize, B, IxD>>
 where
-    R: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
     D: DimAPI,
     F: Fn(&T, &T) -> Ordering + Send + Sync,
     B: DeviceAPI<T>
@@ -535,6 +586,25 @@ pub trait ArgSortCustomAPI<Inp> {
 impl<R, T, B, D, AArg, F> ArgSortCustomAPI<()> for (&TensorAny<R, T, B, D>, AArg, F)
 where
     R: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
+    D: DimAPI,
+    AArg: TryInto<AxisIndex<isize>, Error: Into<Error>>,
+    F: Fn(&T, &T) -> Ordering + Send + Sync,
+    B: DeviceAPI<T>
+        + DeviceAPI<usize>
+        + DeviceRawAPI<MaybeUninit<usize>>
+        + DeviceCreationAnyAPI<usize>
+        + OpSortCustomAPI<T, D>,
+{
+    type Out = Tensor<usize, B, IxD>;
+
+    fn argsort_custom_f(self) -> Result<Self::Out> {
+        let (tensor, axis, f) = self;
+        argsort_custom_f(tensor, axis, f)
+    }
+}
+
+impl<T, B, D, AArg, F> ArgSortCustomAPI<()> for (TensorView<'_, T, B, D>, AArg, F)
+where
     D: DimAPI,
     AArg: TryInto<AxisIndex<isize>, Error: Into<Error>>,
     F: Fn(&T, &T) -> Ordering + Send + Sync,

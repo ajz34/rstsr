@@ -257,3 +257,27 @@ mod custom_roll {
         assert_equal(a, &expected, None);
     }
 }
+
+#[cfg(test)]
+mod device_order {
+    use super::*;
+    static FUNC: &str = "device_order";
+
+    #[test]
+    fn test_flatten_col_major() {
+        crate::specify_test!("test_flatten_col_major");
+
+        // the flattened form (`axis = None`) visits elements in the device
+        // default order: col-major sequence [0 1 2 3 4 5] rolled by 1 becomes
+        // [5 0 1 2 3 4], restored to [2, 3] in col-major order
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(ColMajor);
+
+        let a = rt::arange((6, &device)).into_shape([2, 3]); // [[0 2 4], [1 3 5]]
+        let out = rt::roll((&a, 1, None));
+        // the restored shape follows the device order as well (F-contiguous)
+        assert_eq!(out.stride(), &[1, 2]);
+        let expected = rt::tensor_from_nested!([[5, 1, 3], [0, 2, 4]], &device);
+        assert_equal(out, &expected, None);
+    }
+}

@@ -194,3 +194,25 @@ mod custom_repeat {
         assert_eq!(out.shape(), &[0]);
     }
 }
+
+#[cfg(test)]
+mod device_order {
+    use super::*;
+    static FUNC: &str = "device_order";
+
+    #[test]
+    fn test_flatten_col_major() {
+        crate::specify_test!("test_flatten_col_major");
+
+        // the flattened form (`axis = None`) visits elements in the device
+        // default order, so per-element counts follow the col-major sequence
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(ColMajor);
+
+        // values 0..6 filled in device order: [[0 2 4], [1 3 5]] (F-contiguous)
+        let a = rt::arange((6, &device)).into_shape([2, 3]);
+        let out = rt::repeat((&a, [2, 1, 2, 1, 2, 1], None));
+        let expected = rt::tensor_from_nested!([0, 0, 1, 2, 2, 3, 4, 4, 5], &device);
+        assert_equal(out, &expected, None);
+    }
+}

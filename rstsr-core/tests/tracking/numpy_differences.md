@@ -398,8 +398,8 @@ as XOR).
 - **rstsr:** `rt::unique_values`/`unique_counts`/`unique_inverse`/`unique_all`
   return ascending order for orderable scalar dtypes (bool, integers, real
   floats — the `ExtSortCmp` fast path), but **first-occurrence order** over the
-  row-major visit sequence for other dtypes (complex via the naive path). NaNs
-  are kept as **distinct entries**.
+  device-default-order visit sequence for other dtypes (complex via the naive
+  path). NaNs are kept as **distinct entries**.
 - **tag:** intentional
 - **status:** open
 

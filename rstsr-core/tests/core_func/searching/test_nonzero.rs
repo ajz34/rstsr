@@ -223,3 +223,24 @@ mod custom_nonzero {
         assert_eq!(coords[0].to_vec(), vec![0, 2]);
     }
 }
+
+#[cfg(test)]
+mod device_order {
+    use super::*;
+    static FUNC: &str = "device_order";
+
+    #[test]
+    fn test_visit_order_col_major() {
+        crate::specify_test!("test_visit_order_col_major");
+
+        // the coordinate sequence follows the device default order visit
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(ColMajor);
+
+        let a = rt::tensor_from_nested!([[1, 0, 2], [0, 3, 0]], &device);
+        let coords = rt::nonzero(&a);
+        // col-major visit: (0,0)=1, (1,1)=3, (0,2)=2
+        assert_eq!(coords[0].to_vec(), vec![0, 1, 0]);
+        assert_eq!(coords[1].to_vec(), vec![0, 1, 2]);
+    }
+}

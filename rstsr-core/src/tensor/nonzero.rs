@@ -5,9 +5,10 @@ use crate::prelude_dev::*;
 /// Returns the indices of the elements that are non-zero.
 ///
 /// See also [`nonzero`].
-pub fn nonzero_f<R, T, B, D>(tensor: &TensorAny<R, T, B, D>) -> Result<Vec<Tensor<usize, B, IxD>>>
+pub fn nonzero_f<T, B, D>(
+    tensor: impl TensorViewAPI<Type = T, Backend = B, Dim = D>,
+) -> Result<Vec<Tensor<usize, B, IxD>>>
 where
-    R: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
     D: DimAPI,
     B: DeviceAPI<T>
         + DeviceAPI<usize>
@@ -23,7 +24,7 @@ where
     // pass 1: count (the output length is data-dependent)
     let count = device.nonzero_count(tensor.raw(), tensor.layout())?;
     // pass 2: one output buffer per dimension, filled with the coordinates of
-    // every nonzero element in row-major visit order
+    // every nonzero element in the device default order
     let mut storages = (0..ndim).map(|_| device.uninit_impl(count)).collect::<Result<Vec<_>>>()?;
     {
         let mut buffers: Vec<_> = storages.iter_mut().map(|s| s.raw_mut()).collect();
@@ -47,14 +48,22 @@ where
 /// Together the returned tensors locate every element that compares unequal
 /// to zero (`!= 0`; booleans: `true`; complex: either component nonzero;
 /// NaN is nonzero). The k-th tensor holds the k-th coordinate of each
-/// nonzero element, in strict row-major element order. All index tensors
-/// have dtype [`usize`] and equal (data-dependent) lengths; a 0-d input
-/// raises (there is no axis to index).
+/// nonzero element, in the device default order visit sequence. All index
+/// tensors have dtype [`usize`] and equal (data-dependent) lengths; a 0-d
+/// input raises (there is no axis to index).
 ///
-/// This function behaves identically under [`RowMajor`] and [`ColMajor`] device
-/// default orders. (The element visit order is row-major regardless of the
-/// device default order; the memory arrangement of the new tensors follows
-/// the device default order.)
+/// <div class="warning">
+///
+/// **Row/Column Major Notice**
+///
+/// The element visit order follows the device default order — row-major under
+/// [`RowMajor`], column-major under [`ColMajor`] (the `reshape(-1)` order) —
+/// so the coordinate sequences may differ between the two orders. The memory
+/// arrangement of the new tensors follows the device default order as well.
+///
+/// </div>
+///
+/// See [`order_semantics`](crate::order_semantics) for the two device default orders.
 ///
 /// # Parameters
 ///
@@ -79,6 +88,32 @@ where
 /// // [ 0 2 1]
 /// # assert_eq!(coords[0].to_vec(), vec![0, 0, 1]);
 /// # assert_eq!(coords[1].to_vec(), vec![0, 2, 1]);
+/// ```
+///
+/// ## Difference between [`RowMajor`] and [`ColMajor`]
+///
+/// The coordinate sequence follows the device default order visit:
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let a = rt::tensor_from_nested!([[1, 0, 2], [0, 3, 0]], &device);
+/// let coords = rt::nonzero(&a);
+/// println!("{}", coords[0]);
+/// // [ 0 0 1]
+/// println!("{}", coords[1]);
+/// // [ 0 2 1]
+///
+/// device.set_default_order(ColMajor);
+/// let a = rt::tensor_from_nested!([[1, 0, 2], [0, 3, 0]], &device);
+/// let coords = rt::nonzero(&a);
+/// println!("{}", coords[0]);
+/// // [ 0 1 0]
+/// println!("{}", coords[1]);
+/// // [ 0 1 2]
+/// # assert_eq!(coords[0].to_vec(), vec![0, 1, 0]);
+/// # assert_eq!(coords[1].to_vec(), vec![0, 1, 2]);
 /// ```
 ///
 /// # Notes of API accordance
@@ -121,6 +156,22 @@ pub trait NonzeroAPI {
 impl<R, T, B, D> NonzeroAPI for &TensorAny<R, T, B, D>
 where
     R: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
+    D: DimAPI,
+    B: DeviceAPI<T>
+        + DeviceAPI<usize>
+        + DeviceRawAPI<MaybeUninit<usize>>
+        + DeviceCreationAnyAPI<usize>
+        + OpNonzeroAPI<T, D>,
+{
+    type Out = Vec<Tensor<usize, B, IxD>>;
+
+    fn nonzero_f(self) -> Result<Self::Out> {
+        nonzero_f(self)
+    }
+}
+
+impl<T, B, D> NonzeroAPI for TensorView<'_, T, B, D>
+where
     D: DimAPI,
     B: DeviceAPI<T>
         + DeviceAPI<usize>

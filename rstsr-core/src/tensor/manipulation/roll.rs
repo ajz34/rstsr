@@ -32,16 +32,16 @@ where
 
     match axis {
         AxesIndex::None => {
-            // flatten-roll-reshape: C-order visit contract, shape preserved
+            // flatten-roll-reshape in the device default order, shape preserved
             let flat: Tensor<T, B, IxD> = {
                 let layout: Layout<IxD> = tensor.layout().to_dim()?;
                 let out_shape = vec![layout.size()];
                 let layout_c = out_shape.new_contig(None, device.default_order());
                 let (_, idx_max) = layout_c.bounds_index()?;
                 let mut storage = device.uninit_impl(idx_max)?;
-                // read in row-major order regardless of storage arrangement:
-                // walk row-major offsets and write one element each
-                let iter = IndexedIterLayout::new(&layout, RowMajor)?;
+                // read in the device default order regardless of storage
+                // arrangement: walk those offsets and write one element each
+                let iter = IndexedIterLayout::new(&layout, device.default_order())?;
                 let mut offset = 0_usize;
                 if layout.ndim() == 0 {
                     // 0-d input: single element, no axis to select
@@ -86,9 +86,9 @@ where
             let rolled = roll_axis_1d(&flat, shift_norm)?;
             let shape_out = tensor.shape().as_ref().to_vec();
             // freshly owned data: reinterpret to the input shape; reading order
-            // is C-order by construction (the flatten above), so copy=false with
-            // RowMajor is always viewable
-            let reshaped = into_shape_with_args(rolled, shape_out, ReshapeArgs::from((TensorOrder::RowMajor, false)));
+            // is the device default order by construction (the flatten above),
+            // so copy=false with that order is always viewable
+            let reshaped = into_shape_with_args(rolled, shape_out, ReshapeArgs::from((device.default_order(), false)));
             Ok(reshaped.into_dim())
         },
         AxesIndex::Val(axis) => {
@@ -231,13 +231,15 @@ where
 ///
 /// Per-axis rolls behave identically under [`RowMajor`] and [`ColMajor`] device
 /// default orders (the new tensor's memory arrangement follows the device
-/// default order). The flattened form (`axis = None`) always visits elements in
-/// row-major order, and its result is reinterpreted to the input shape in
-/// row-major order — so on a [`ColMajor`] device, the flattened form returns a
-/// row-major-strided tensor (values follow NumPy; the memory arrangement is
-/// row-major regardless of the device default).
+/// default order). The flattened form (`axis = None`) visits elements in the
+/// device default order — the `reshape(-1)` order: row-major under
+/// [`RowMajor`], column-major under [`ColMajor`] — and reinterprets the result
+/// to the input shape in that same order; its results may differ between the
+/// two orders.
 ///
 /// </div>
+///
+/// See [`order_semantics`](crate::order_semantics) for the two device default orders.
 ///
 /// # Parameters
 ///
@@ -258,8 +260,8 @@ where
 /// - `axis`: TryInto [`AxesIndex<isize>`]
 ///
 ///   - The axis or axes along which elements are shifted.
-///   - `None` (default): the tensor is flattened (row-major sequence), rolled, and restored to the
-///     input shape.
+///   - `None` (default): the tensor is flattened (in the device default order), rolled, and
+///     restored to the input shape.
 ///   - Duplicate axes are allowed (the roll is applied once per occurrence).
 ///   - Negative values count from the back.
 ///
@@ -312,6 +314,29 @@ where
 /// //  [ 4 5 6 7 8]]
 /// # let b = rt::roll((&a, 1, None));
 /// # assert_eq!(format!("{b}"), "[[ 9 0 1 2 3]\n [ 4 5 6 7 8]]");
+/// ```
+///
+/// ## Difference between [`RowMajor`] and [`ColMajor`]
+///
+/// The flattened form (`axis = None`) visits (and restores) elements in the
+/// device default order; the same tensor rolls differently under the two
+/// orders:
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let a = rt::tensor_from_nested!([[0, 1, 2], [3, 4, 5]], &device);
+/// println!("{}", rt::roll((&a, 1, None)));
+/// // [[ 5 0 1]
+/// //  [ 2 3 4]]
+///
+/// device.set_default_order(ColMajor);
+/// let a = rt::tensor_from_nested!([[0, 1, 2], [3, 4, 5]], &device);
+/// println!("{}", rt::roll((&a, 1, None)));
+/// // [[ 5 3 4]
+/// //  [ 0 1 2]]
+/// # assert_eq!(format!("{}", rt::roll((&a, 1, None))), "[[ 5 3 4]\n [ 0 1 2]]");
 /// ```
 ///
 /// # Overloads Table

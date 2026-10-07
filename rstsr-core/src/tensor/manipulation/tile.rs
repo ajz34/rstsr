@@ -7,12 +7,11 @@ use crate::prelude_dev::*;
 /// Tile a tensor by repeating it along axes.
 ///
 /// See also [`tile`].
-pub fn tile_f<R, T, B, D>(
-    tensor: &TensorAny<R, T, B, D>,
+pub fn tile_f<T, B, D>(
+    tensor: impl TensorViewAPI<Type = T, Backend = B, Dim = D>,
     repetitions: impl TryInto<AxesIndex<usize>, Error: Into<Error>>,
 ) -> Result<Tensor<T, B, IxD>>
 where
-    R: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
     D: DimAPI,
     B: DeviceAPI<T>
         + DeviceRawAPI<MaybeUninit<T>>
@@ -20,6 +19,7 @@ where
         + OpAssignAPI<T, IxD>
         + OpAssignArbitaryAPI<T, IxD, IxD>,
 {
+    let tensor = tensor.view();
     let device = tensor.device().clone();
     let ndim = tensor.ndim();
     let repetitions = repetitions.try_into().map_err(Into::into)?;
@@ -57,7 +57,10 @@ where
     // (length 1 on the leading promoted axes)
     let layout: Layout<IxD> = tensor.layout().to_dim()?;
     let grid_shape: Vec<usize> = reps.clone();
-    for multi in NdIndex::new(&grid_shape) {
+    // the repetition grid is only a shape to enumerate: reuse the common
+    // layout iterator for its row-major multi-index sequence
+    let grid_layout = grid_shape.new_c_contig(None);
+    for (multi, _) in IndexedIterLayout::new(&grid_layout, RowMajor)? {
         let mut start = vec![0_usize; ndim_out];
         let in_shape = tensor.shape().as_ref();
         let offset_idx = if reps.len() > ndim { reps.len() - ndim } else { 0 };
@@ -77,41 +80,6 @@ where
     // (blocks are disjoint and cover the tiled shape).
     let storage = unsafe { B::assume_init_impl(storage)? };
     Tensor::new_f(storage, layout_c)
-}
-
-/// Row-major multi-index iterator over a shape (host-side index generator).
-struct NdIndex {
-    shape: Vec<usize>,
-    index: Vec<usize>,
-    done: bool,
-}
-
-impl NdIndex {
-    fn new(shape: &[usize]) -> Self {
-        let done = shape.contains(&0);
-        Self { shape: shape.to_vec(), index: vec![0; shape.len()], done }
-    }
-}
-
-impl Iterator for NdIndex {
-    type Item = Vec<usize>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.done {
-            return None;
-        }
-        let out = self.index.clone();
-        self.done = true;
-        for i in (0..self.shape.len()).rev() {
-            self.index[i] += 1;
-            if self.index[i] < self.shape[i] {
-                self.done = false;
-                break;
-            }
-            self.index[i] = 0;
-        }
-        Some(out)
-    }
 }
 
 /// Construct an array by tiling an input array.
@@ -233,6 +201,24 @@ pub trait TileAPI<Inp> {
 impl<RA, T, B, D, RArg> TileAPI<()> for (&TensorAny<RA, T, B, D>, RArg)
 where
     RA: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
+    D: DimAPI,
+    RArg: TryInto<AxesIndex<usize>, Error: Into<Error>>,
+    B: DeviceAPI<T>
+        + DeviceRawAPI<MaybeUninit<T>>
+        + DeviceCreationAnyAPI<T>
+        + OpAssignAPI<T, IxD>
+        + OpAssignArbitaryAPI<T, IxD, IxD>,
+{
+    type Out = Tensor<T, B, IxD>;
+
+    fn tile_f(self) -> Result<Self::Out> {
+        let (tensor, repetitions) = self;
+        tile_f(tensor, repetitions)
+    }
+}
+
+impl<T, B, D, RArg> TileAPI<()> for (TensorView<'_, T, B, D>, RArg)
+where
     D: DimAPI,
     RArg: TryInto<AxesIndex<usize>, Error: Into<Error>>,
     B: DeviceAPI<T>

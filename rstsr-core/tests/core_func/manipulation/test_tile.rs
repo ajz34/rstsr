@@ -188,3 +188,24 @@ mod custom_tile {
         assert_equal(out, &expected, None);
     }
 }
+
+#[cfg(test)]
+mod device_order {
+    use super::*;
+    static FUNC: &str = "device_order";
+
+    #[test]
+    fn test_0d_no_repetitions() {
+        crate::specify_test!("test_0d_no_repetitions");
+
+        // 0-d input with empty repetitions: the repetition grid is a single
+        // empty index (no rank promotion happens)
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        let a = rt::full(([], 5, &device));
+        let out = a.tile(None);
+        assert_eq!(out.shape(), &[]);
+        assert_equal(out, &a, None);
+    }
+}
