@@ -237,6 +237,9 @@ SURFACE = [
     # --- indexing (basic indexing via Tensor::i) ---
     ("_core/tests/test_indexing.py", "TestIndexing", "test_single_int_index"),
     ("_core/tests/test_indexing.py", "TestIndexing", "test_ellipsis_index"),
+    ("_core/tests/test_indexing.py", "TestIndexing", "test_empty_fancy_index"),
+    ("_core/tests/test_indexing.py", "TestIndexing", "test_broaderrors_indexing"),
+    ("_core/tests/test_indexing.py", "TestIndexing", "test_nontuple_ndindex"),
     # --- manipulation: repeat / tile (roll above) ---
     ("_core/tests/test_multiarray.py", "TestRepeat", "test_basic"),
     ("_core/tests/test_multiarray.py", "TestRepeat", "test_broadcast1"),

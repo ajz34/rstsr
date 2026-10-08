@@ -361,3 +361,20 @@ axis still raises "empty sequence is not allowed for reduce_arg".
 `tril_cpu_serial`/`triu_cpu_serial` reached `dim_split_at(-2)` first, surfacing
 `AxisError { axis: -2, ndim: 1 }` (mapped to `IndexError` by the array-API wrapper). Found
 2026-10-06 through the rstsr-faer-py review; the kernels now assert `ndim >= 2` up front.
+
+## `dim_narrow` mishandled explicit negative bounds with a negative step (FIXED)
+
+- **numpy:** `a[::-1]` reverses an axis (the default stop is the `-1` sentinel, "before the
+  first element"), while `a[4:-1:-1]` and `a[-4::-1]` are *empty*: an explicit negative bound
+  counts from the back and clamps into `[-1, len-1]` (Python's `slice.indices`).
+- **rstsr:** entry_row_cpu::core_func::indexing::test_array_index::custom_array_index::test_numpy_generated_diff
+- **tag:** bug
+- **status:** fixed
+
+`Layout::dim_narrow`'s `step < 0` branch used `-1` as the sentinel for *every* stop and
+clamped a negative start into `[0, len-1]`, so explicit negative bounds silently selected
+instead of emptying: `a[4:-1:-1]` reversed the axis and `a[-4::-1]` returned one element.
+Surfaced 2026-10-08 by the array-indexing differential harness (a NumPy-generated case set);
+the branch now follows Python's slicing rules (explicit bounds count from the back and clamp
+into `[-1, len-1]`; the default stop keeps the `-1` sentinel).
+

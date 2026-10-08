@@ -54,21 +54,16 @@ where
             bulk_multi[d] = rem % bulk_shape[d];
             rem /= bulk_shape[d];
         }
-        for d in 0..fancy_ndim {
-            out_multi[consec + d] = bulk_multi[d];
-        }
+        out_multi[consec..consec + fancy_ndim].copy_from_slice(&bulk_multi[..fancy_ndim]);
         for base_flat in 0..n_base {
             let mut rem = base_flat;
             for d in (0..ndim_base).rev() {
                 base_multi[d] = rem % base_shape[d];
                 rem /= base_shape[d];
             }
-            for d in 0..consec {
-                out_multi[d] = base_multi[d];
-            }
-            for d in consec..ndim_base {
-                out_multi[d + fancy_ndim] = base_multi[d];
-            }
+            out_multi[..consec].copy_from_slice(&base_multi[..consec]);
+            out_multi[consec + fancy_ndim..ndim_base + fancy_ndim]
+                .copy_from_slice(&base_multi[consec..ndim_base]);
             let out_off = lc.index_uncheck(&out_multi) as usize;
             let mut src_off: isize = base_layout.index_uncheck(&base_multi);
             for (src_axis, indices, layout) in indexers {

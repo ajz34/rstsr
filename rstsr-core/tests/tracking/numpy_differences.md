@@ -412,3 +412,22 @@ matches `np.unique` (and the pre-2.3 aliases); the naive (general-bound
 (substituting the sorted path for complex is a registered follow-up). Signed
 zeros merge in both paths, keeping the first-seen encoding (also NumPy's
 behavior: `np.unique([-0., 1., 0.])` → `[-0., 1.]`).
+
+## Array indexing: no grouped index tuples, no boolean index arrays
+
+- **numpy:** `x[1:3, ([0, 1, 2], [0, 2, 1])]` groups index arrays into one advanced indexer;
+  a boolean array may also be mixed into any position of an index tuple.
+- **rstsr:** entry_row_cpu::core_func::indexing::test_array_index (numpy_array_index + custom_array_index)
+- **tag:** intentional
+- **status:** open
+
+`rt::array_index` implements NumPy's *vectorized indexing* for ungrouped keys
+(`x[1:3, [0, 1, 2], [0, 2, 1]]`) including the placement rule for the broadcast dimensions,
+but not grouped ("parenthesized") index tuples. Boolean index arrays are out of scope as
+well: a lone boolean array is whole-tensor mask indexing (`rt::mask_select`, i.e. `x[mask]`
+in the Python layer) and a boolean array mixed into a tuple raises `UnImplemented`. Advanced
+key assignment (`x[idx] = value`) is likewise not implemented. The index argument is a
+dedicated argument type ([`ArrayIndexArgs`]) rather than `AxesIndex<ArrayIndexer<B>>`,
+because the latter's conversions cannot be implemented outside `rstsr-common` (the orphan
+rule); the `AxesIndex` form is still accepted through `TryFrom`.
+

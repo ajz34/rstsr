@@ -307,9 +307,173 @@ impl Display for DebugShape<'_> {
     }
 }
 
-/// Array indexing (fancy indexing) of a tensor by integer arrays.
+/// Indexes a tensor by integer arrays (array indexing, *fancy indexing*).
 ///
-/// See also [`array_index`].
+/// Array indexing gathers the elements selected by index arrays, in the sense
+/// of NumPy's *vectorized indexing*: each index array consumes one axis, the
+/// index arrays broadcast against each other (aligning from the last axis),
+/// and the gathered elements are the coordinates they describe together.
+/// Contrary to basic slicing it is a copying operation; basic indexers may be
+/// mixed freely with the index arrays in the same index ([`ArrayIndexer`]).
+///
+/// - With no index array at all, the index degenerates to basic slicing and
+///   the result is a **view**.
+/// - With one or more index arrays, the broadcast result of the index arrays
+///   forms the *advanced* dimensions, which are placed following NumPy's rule:
+///   at the position of the advanced indexers when those are consecutive, at
+///   the front otherwise. A plain integer index counts as an "advanced"
+///   indexer for this grouping.
+///
+/// This function behaves identically under [`RowMajor`] and [`ColMajor`] device
+/// default orders. (Only the memory arrangement of the new tensor follows the
+/// device default order.)
+///
+/// # Overloads Table
+///
+/// ## Whole-index forms
+///
+/// - `array_index(tensor, indexer: impl Into<ArrayIndexer<B>>)`: a single
+///   per-axis indexer, applied to the first axis. A host list or vector is
+///   *one* index array here, not a tuple of integer indexers.
+/// - `array_index(tensor, indexers: (F1, .., F6))`: a tuple of up to six
+///   per-axis indexers, one per indexed axis (the preferred form).
+/// - `array_index(tensor, indexers: Vec<ArrayIndexer<B>>)`: an explicit list.
+/// - `array_index(tensor, indexers: AxesIndex<ArrayIndexer<B>>)`: the `Val` /
+///   `Vec` forms; [`AxesIndex::None`] is rejected.
+///
+/// ## Per-axis indexers (elements of the forms above)
+///
+/// - basic indexers: any [`Indexer`] source (integer, range, [`slice!`] result,
+///   `None` / [`NewAxis`], [`Ellipsis`]);
+/// - index arrays: `Vec` / `&Vec` / `&[T]` / `[T; N]` / `&[T; N]` of
+///   `isize`/`usize`/`i32`/`i64`/`u32`/`u64` (a one-dimensional index array),
+///   or an integer tensor / tensor view of any rank.
+///
+/// # Parameters
+///
+/// - `tensor`: [`&TensorAny<R, T, B, D>`][TensorAny]: the tensor to index.
+///
+/// - `indexer`: Into [`ArrayIndexArgs<B>`]: the indexers, one per indexed axis.
+///
+///   - Overloads: a single indexer, a tuple of indexers, a host list/vector, a
+///     vector of [`ArrayIndexer`], or an [`AxesIndex<ArrayIndexer<B>>`][AxesIndex].
+///
+/// # Returns
+///
+/// - [`TensorCow<'a, T, B, IxD>`][TensorCow]: a borrowed **view** when the index
+///   contains no index array (basic slicing), an **owned** gathered tensor
+///   otherwise.
+///
+/// # Examples
+///
+/// A host list indexes the first axis by a one-dimensional index array:
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let a = rt::arange((12, &device)).into_shape([3, 4]);
+/// let result = rt::array_index(&a, [2, 0]);
+/// println!("{result}");
+/// // [[ 8 9 10 11]
+/// //  [ 0 1 2 3]]
+/// # assert_eq!(format!("{result}"), "[[ 8 9 10 11]\n [ 0 1 2 3]]");
+/// ```
+///
+/// A tuple of index arrays zips them together (one index array per axis):
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let a = rt::arange((12, &device)).into_shape([3, 4]);
+/// let idx = rt::asarray((vec![0_isize, 2], &device));
+/// let result = rt::array_index(&a, (&idx, [1, 3]));
+/// println!("{result}");
+/// // [ 1 11]
+/// # assert_eq!(format!("{result}"), "[ 1 11]");
+/// ```
+///
+/// # Elaborated examples
+///
+/// ## Mixing basic indexers with index arrays
+///
+/// Basic indexers may appear between the index arrays. Here a slice is taken
+/// first, then two index arrays select along the remaining axes (they are
+/// consecutive, so the broadcast dimension is inserted in place):
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let b = rt::arange((36, &device)).into_shape([4, 3, 3]);
+/// let result = rt::array_index(&b, (1..3, [0, 1, 2], [0, 2, 1]));
+/// println!("{result}");
+/// // [[ 9 14 16]
+/// //  [18 23 25]]
+/// # assert_eq!(format!("{result}"), "[[ 9 14 16]\n [ 18 23 25]]");
+/// ```
+///
+/// ## Placement of the broadcast dimensions
+///
+/// When the advanced indexers are separated by a basic indexer, the broadcast
+/// dimensions move to the front instead of staying in place:
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let x = rt::arange((2 * 3 * 4, &device)).into_shape([2, 3, 4]);
+/// // the two index arrays are consecutive: the broadcast dimension stays at
+/// // position 1
+/// println!("{:?}", rt::array_index(&x, (.., [1, 0], 1)).shape());
+/// // [2, 2]
+/// // separated by a slice: it moves to the front
+/// println!("{:?}", rt::array_index(&x, ([1, 0], .., 1)).shape());
+/// // [2, 3]
+/// # assert_eq!(rt::array_index(&x, (.., [1, 0], 1)).shape(), &[2, 2]);
+/// # assert_eq!(rt::array_index(&x, ([1, 0], .., 1)).shape(), &[2, 3]);
+/// ```
+///
+/// # Notes of API accordance
+///
+/// - Array-API: `x[k1, .., kN]` ([`indexing`](https://data-apis.org/array-api/2024.12/API_specification/indexing.html)): the standard defines the
+///   *reduced* integer-array form (every indexer an integer or an integer
+///   array, broadcast together, zipped). RSTSR accepts that form as a special
+///   case; mixing slices with index arrays is left implementation-defined by
+///   the standard.
+/// - NumPy: `x[k1, .., kN]` (`numpy.ndarray.__getitem__`): RSTSR implements
+///   NumPy's vectorized indexing, including the placement rule for the
+///   broadcast dimensions, but not grouped ("parenthesized") index tuples, and
+///   not boolean index arrays (use [`mask_select`] / [`bool_select`], or a lone
+///   boolean mask through `x[mask]`).
+/// - RSTSR: `rt::array_index(&tensor, indexers)`.
+///
+/// # Panics
+///
+/// - Panics if an axis index is out of range, if an index array entry (after
+///   resolving negative values) is out of range on its axis, if the index
+///   arrays cannot be broadcast together, if the index consumes more axes than
+///   the tensor has, if the index tensors live on a different device, or if a
+///   boolean index array is used.
+///
+/// For a fallible version, use [`array_index_f`].
+///
+/// # See also
+///
+/// ## Related functions in RSTSR
+///
+/// - [`slice`](crate::tensor::indexing::slice()): basic indexing, always a view.
+/// - [`take`](crate::tensor::adv_indexing::take) / [`index_select`](crate::tensor::adv_indexing::index_select):
+///   gather along one axis by a host integer list.
+/// - [`take_along_axis`](crate::tensor::adv_indexing::take_along_axis): gather along one axis by an index tensor of the same rank.
+/// - [`mask_select`](crate::tensor::adv_indexing::mask_select): gather by a boolean mask.
+///
+/// ## Variants of this function
+///
+/// - [`array_index_f`]: fallible version.
+/// - Associated methods on [`TensorAny`]: [`TensorAny::array_index`] /
+///   [`TensorAny::array_index_f`].
 #[allow(clippy::type_complexity)]
 pub fn array_index<'a, R, T, B, D, I>(tensor: &'a TensorAny<R, T, B, D>, indexer: I) -> TensorCow<'a, T, B, IxD>
 where
