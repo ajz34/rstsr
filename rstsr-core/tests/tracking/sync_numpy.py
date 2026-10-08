@@ -240,6 +240,7 @@ SURFACE = [
     ("_core/tests/test_indexing.py", "TestIndexing", "test_empty_fancy_index"),
     ("_core/tests/test_indexing.py", "TestIndexing", "test_broaderrors_indexing"),
     ("_core/tests/test_indexing.py", "TestIndexing", "test_nontuple_ndindex"),
+    ("_core/tests/test_indexing.py", "TestMultiIndexingAutomated", "test_1d"),
     # --- manipulation: repeat / tile (roll above) ---
     ("_core/tests/test_multiarray.py", "TestRepeat", "test_basic"),
     ("_core/tests/test_multiarray.py", "TestRepeat", "test_broadcast1"),

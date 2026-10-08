@@ -25,6 +25,7 @@ mod doc_array_index {
         // [[ 8 9 10 11]
         //  [ 0 1 2 3]]
         assert_eq!(format!("{result}"), "[[ 8 9 10 11]\n [ 0 1 2 3]]");
+        assert_eq!(result.into_shape([-1]).to_vec(), vec![8, 9, 10, 11, 0, 1, 2, 3]);
 
         // a tuple of index arrays zips them together
         let idx = rt::asarray((vec![0_isize, 2], &device));
@@ -32,6 +33,7 @@ mod doc_array_index {
         println!("{result}");
         // [ 1 11]
         assert_eq!(format!("{result}"), "[ 1 11]");
+        assert_eq!(result.into_shape([-1]).to_vec(), vec![1, 11]);
 
         // basic indexers mix with index arrays
         let b = rt::arange((36, &device)).into_shape([4, 3, 3]);
@@ -40,6 +42,7 @@ mod doc_array_index {
         // [[ 9 14 16]
         //  [18 23 25]]
         assert_eq!(format!("{result}"), "[[ 9 14 16]\n [ 18 23 25]]");
+        assert_eq!(result.into_shape([-1]).to_vec(), vec![9, 14, 16, 18, 23, 25]);
 
         // placement of the broadcast dimensions
         let x = rt::arange((2 * 3 * 4, &device)).into_shape([2, 3, 4]);
@@ -52,5 +55,7 @@ mod doc_array_index {
         // [2, 3]
         assert_eq!(rt::array_index(&x, (.., [1, 0], 1)).shape(), &[2, 2]);
         assert_eq!(rt::array_index(&x, ([1, 0], .., 1)).shape(), &[2, 3]);
+        assert_eq!(rt::array_index(&x, (.., [1, 0], 1)).into_shape([-1]).to_vec(), vec![5, 1, 17, 13]);
+        assert_eq!(rt::array_index(&x, ([1, 0], .., 1)).into_shape([-1]).to_vec(), vec![13, 17, 21, 1, 5, 9]);
     }
 }

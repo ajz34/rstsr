@@ -60,7 +60,9 @@ def build_case(rng):
     axes_left = len(shape)
     # optionally let an ellipsis cover a trailing run of axes
     use_ellipsis = rng.random() < 0.3 and len(shape) > 1
-    ellipsis_cover = int(rng.integers(1, len(shape))) if use_ellipsis else 0
+    # a cover of 0 is a *zero-width* ellipsis (every axis consumed explicitly),
+    # which still separates the advanced indexers around it
+    ellipsis_cover = int(rng.integers(0, len(shape))) if use_ellipsis else 0
     n_explicit = len(shape) - ellipsis_cover
     for axis in range(n_explicit):
         token, _ = rand_axis_indexer(rng, shape[axis])

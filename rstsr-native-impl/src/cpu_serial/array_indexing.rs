@@ -41,50 +41,62 @@ where
         return Ok(());
     }
 
+    let lc_stride: &[isize] = &lc.stride()[..];
+    let la_stride: &[isize] = &la.stride()[..];
 
-    let la_stride: &[isize] = la.stride().as_ref();
-
-    let mut out_multi = vec![0_usize; ndim_c];
-    let mut base_multi = vec![0_usize; ndim_base];
+    // Per-bulk tables (independent of the subspace): the source offset
+    // contributed by the index arrays, and the output offset contributed by the
+    // bulk dimensions.
+    let mut src_bulk = vec![0_isize; n_bulk];
+    let mut out_bulk = vec![0_isize; n_bulk];
     let mut bulk_multi = vec![0_usize; fancy_ndim];
-
-    for bulk_flat in 0..n_bulk {
+    for (bulk_flat, (src, out)) in src_bulk.iter_mut().zip(out_bulk.iter_mut()).enumerate() {
         let mut rem = bulk_flat;
         for d in (0..fancy_ndim).rev() {
             bulk_multi[d] = rem % bulk_shape[d];
             rem /= bulk_shape[d];
         }
-        out_multi[consec..consec + fancy_ndim].copy_from_slice(&bulk_multi[..fancy_ndim]);
-        for base_flat in 0..n_base {
-            let mut rem = base_flat;
-            for d in (0..ndim_base).rev() {
-                base_multi[d] = rem % base_shape[d];
-                rem /= base_shape[d];
+        for (d, &m) in bulk_multi.iter().enumerate() {
+            *out += lc_stride[consec + d] * m as isize;
+        }
+        for (src_axis, indices, layout) in indexers {
+            let ndim_idx = layout.ndim();
+            let idx_shape: &[usize] = &layout.shape()[..];
+            let idx_stride: &[isize] = &layout.stride()[..];
+            let mut idx_off = layout.offset() as isize;
+            for d in 0..ndim_idx {
+                // dim `d` of an index array aligns with the trailing bulk
+                // dimensions; a size-1 dim reuses its single slice
+                let m = if idx_shape[d] == 1 { 0 } else { bulk_multi[fancy_ndim - ndim_idx + d] };
+                idx_off += idx_stride[d] * m as isize;
             }
-            out_multi[..consec].copy_from_slice(&base_multi[..consec]);
-            out_multi[consec + fancy_ndim..ndim_base + fancy_ndim]
-                .copy_from_slice(&base_multi[consec..ndim_base]);
-            let out_off = lc.index_uncheck(&out_multi) as usize;
-            let mut src_off: isize = base_layout.index_uncheck(&base_multi);
-            for (src_axis, indices, layout) in indexers {
-                let ndim_idx = layout.ndim();
-                let idx_shape: &[usize] = &layout.shape()[..];
-                let idx_stride: &[isize] = &layout.stride()[..];
-                let mut idx_off = layout.offset() as isize;
-                for d in 0..ndim_idx {
-                    // dim `d` of an index array aligns with the trailing bulk
-                    // dimensions; a size-1 dim reuses its single slice
-                    let m = if idx_shape[d] == 1 { 0 } else { bulk_multi[fancy_ndim - ndim_idx + d] };
-                    idx_off += idx_stride[d] * m as isize;
-                }
-                src_off += la_stride[*src_axis] * indices[idx_off as usize] as isize;
-            }
-            // SAFETY: the tensor level validated every index against its
-            // axis; the subspace offset is an input-stride dot-product over
-            // in-range positions (see the layout bounds checks), and the
-            // output position is the layout's own index.
-            let src = a[src_off as usize].clone();
-            c[out_off].write(src);
+            *src += la_stride[*src_axis] * indices[idx_off as usize] as isize;
+        }
+    }
+
+    // Outer loop over the subspace, inner over the bulk dimensions; the
+    // subspace-side offsets are computed once per subspace position.
+    let mut base_multi = vec![0_usize; ndim_base];
+    for base_flat in 0..n_base {
+        let mut rem = base_flat;
+        for d in (0..ndim_base).rev() {
+            base_multi[d] = rem % base_shape[d];
+            rem /= base_shape[d];
+        }
+        let src_base = base_layout.index_uncheck(&base_multi);
+        let mut out_base = 0_isize;
+        for (d, &m) in base_multi.iter().enumerate() {
+            let stride = if d < consec { lc_stride[d] } else { lc_stride[d + fancy_ndim] };
+            out_base += stride * m as isize;
+        }
+        for bulk_flat in 0..n_bulk {
+            let out_off = (out_base + out_bulk[bulk_flat]) as usize;
+            let src_off = (src_base + src_bulk[bulk_flat]) as usize;
+            // SAFETY: the tensor level validated every index against its axis;
+            // both offsets are layout dot-products over in-range positions
+            // (see the layouts' own bounds checks), so they address initialized
+            // elements of `a` and slots of the fresh output buffer.
+            c[out_off].write(a[src_off].clone());
         }
     }
     Ok(())

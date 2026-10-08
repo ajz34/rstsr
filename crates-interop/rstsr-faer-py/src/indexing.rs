@@ -92,17 +92,22 @@ fn parse_key<'py>(key: &Bound<'py, PyTuple>) -> PyResult<Vec<KeyItem>> {
     Ok(items)
 }
 
-fn to_indexers(items: &[KeyItem]) -> Vec<Indexer> {
+fn to_indexers(items: &[KeyItem]) -> PyResult<Vec<Indexer>> {
     items
         .iter()
         .map(|it| match it {
-            KeyItem::Select(i) => Indexer::Select(*i),
-            KeyItem::Slice(a, b, c) => sl(*a, *b, *c),
-            KeyItem::NewAxis => Indexer::Insert,
-            KeyItem::Ellipsis => Indexer::Ellipsis,
-            KeyItem::Array(_) => unreachable!("array keys do not take the basic path"),
+            KeyItem::Select(i) => Ok(Indexer::Select(*i)),
+            KeyItem::Slice(a, b, c) => Ok(sl(*a, *b, *c)),
+            KeyItem::NewAxis => Ok(Indexer::Insert),
+            KeyItem::Ellipsis => Ok(Indexer::Ellipsis),
+            // integer-array keys are served by `op_getitem_array`; item
+            // assignment with an index array is not implemented (G-039)
+            KeyItem::Array(_) => type_err(
+                "integer-array (fancy) item assignment is not implemented; only boolean-mask \
+                 assignment (x[mask] = value) is supported",
+            ),
         })
-        .collect()
+        .collect::<PyResult<Vec<Indexer>>>()
 }
 
 /* #endregion */
@@ -149,7 +154,7 @@ pub fn getitem_basic(x: &NativeArray, key: &Bound<'_, PyTuple>) -> PyResult<Nati
     if items.iter().any(|it| matches!(it, KeyItem::Array(_))) {
         return Ok(NativeArray { t: dispatch_t!(x.t, op_getitem_array(&items))? });
     }
-    let idx = to_indexers(&items);
+    let idx = to_indexers(&items)?;
     Ok(NativeArray { t: dispatch_t!(x.t, op_getitem_basic(&idx))? })
 }
 
@@ -171,7 +176,7 @@ impl NativeArray {
     /// Basic-key assignment; `value` is an array of the same dtype.
     pub fn setitem_basic_arr(&mut self, key: &Bound<'_, PyTuple>, value: &NativeArray) -> PyResult<()> {
         let items = parse_key(key)?;
-        let idx = to_indexers(&items);
+        let idx = to_indexers(&items)?;
         macro_rules! arms {
             ($($dv:ident);* $(;)?) => {
                 match (&mut self.t, &value.t) {
@@ -189,7 +194,7 @@ impl NativeArray {
     /// Basic-key assignment with a Python scalar value.
     pub fn setitem_basic_scalar(&mut self, key: &Bound<'_, PyTuple>, value: PyScalar) -> PyResult<()> {
         let items = parse_key(key)?;
-        let idx = to_indexers(&items);
+        let idx = to_indexers(&items)?;
         match &mut self.t {
             AnyTensor::Bool(ref mut a) => {
                 let v = <bool as ScalarCastTarget>::from_scalar(value)?;

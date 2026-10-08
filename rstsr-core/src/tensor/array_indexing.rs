@@ -19,7 +19,7 @@ enum Entry {
     Array { src_axis: usize, indices: Vec<usize>, layout: Layout<IxD> },
 }
 
-/// Array indexing (fancy indexing) of a tensor by integer arrays.
+/// Indexes a tensor by integer arrays (array indexing, *fancy indexing*).
 ///
 /// See also [`array_index`].
 #[allow(clippy::type_complexity)]
@@ -48,8 +48,14 @@ where
     // lower host carriers; a zero-dimensional integer tensor is a scalar index
     enum Lowered {
         Basic(Indexer),
-        Array { values: Vec<isize>, layout: Layout<IxD> },
+        Array {
+            values: Vec<isize>,
+            layout: Layout<IxD>,
+        },
         Bool,
+        /// A zero-width ellipsis: it selects nothing, but still separates the
+        /// advanced indexers around it (NumPy's placement rule).
+        Noop,
     }
 
     let mut lowered: Vec<Lowered> = Vec::with_capacity(indexers.len());
@@ -84,6 +90,26 @@ where
         }
     }
 
+    // expand ellipsis and validate the number of consumed axes
+    let mut consumed = 0_usize;
+    let mut n_ellipsis = 0_usize;
+    for entry in &lowered {
+        match entry {
+            Lowered::Basic(Indexer::Insert) => {},
+            Lowered::Basic(Indexer::Ellipsis) => n_ellipsis += 1,
+            _ => consumed += 1,
+        }
+    }
+    rstsr_assert!(n_ellipsis <= 1, InvalidValue, "Only one ellipsis indexer is allowed in array indexing.")?;
+    rstsr_assert!(
+        consumed <= ndim,
+        IndexError,
+        "Too many indices for the tensor: the index consumes {} axes, but the tensor has only {}.",
+        consumed,
+        ndim
+    )?;
+    let n_fill = ndim - consumed;
+
     // without any array indexer, array indexing degenerates to basic slicing,
     // which is a view
     if !lowered.iter().any(|e| matches!(e, Lowered::Array { .. })) {
@@ -96,6 +122,7 @@ where
                     "boolean-array indexing is not supported by array_index; use mask_select or bool_select instead."
                 )?,
                 Lowered::Array { .. } => unreachable!(),
+                Lowered::Noop => {},
             }
         }
         return Ok(into_slice_f(tensor.view(), AxesIndex::<Indexer>::Vec(basic))?.into_cow());
@@ -110,35 +137,16 @@ where
         )?;
     }
 
-    // expand ellipsis and validate the number of consumed axes
-    let mut consumed = 0_usize;
-    let mut n_ellipsis = 0_usize;
-    for entry in &lowered {
-        match entry {
-            Lowered::Basic(Indexer::Insert) => {},
-            Lowered::Basic(Indexer::Ellipsis) => n_ellipsis += 1,
-            _ => consumed += 1,
-        }
-    }
-    rstsr_assert!(
-        n_ellipsis <= 1,
-        InvalidValue,
-        "Only one ellipsis indexer is allowed in array indexing."
-    )?;
-    rstsr_assert!(
-        consumed <= ndim,
-        ValueOutOfRange,
-        "Too many indices for the tensor: the index consumes {} axes, but the tensor has only {}.",
-        consumed,
-        ndim
-    )?;
-    let n_fill = ndim - consumed;
     let mut expanded: Vec<Lowered> = Vec::with_capacity(lowered.len() + n_fill);
     for entry in lowered {
         match entry {
             Lowered::Basic(Indexer::Ellipsis) => {
-                for _ in 0..n_fill {
-                    expanded.push(Lowered::Basic(Indexer::Slice(SliceI::new(None, None, None))));
+                if n_fill == 0 {
+                    expanded.push(Lowered::Noop);
+                } else {
+                    for _ in 0..n_fill {
+                        expanded.push(Lowered::Basic(Indexer::Slice(SliceI::new(None, None, None))));
+                    }
                 }
             },
             other => expanded.push(other),
@@ -198,6 +206,7 @@ where
             // `Indexer` is `non_exhaustive`: every variant is handled above
             Lowered::Basic(_) => unreachable!(),
             Lowered::Bool => unreachable!(),
+            Lowered::Noop => {},
             Lowered::Array { values, layout } => {
                 let axis_size = la.shape()[curr_axis] as isize;
                 let mut indices = Vec::with_capacity(values.len());
@@ -321,13 +330,12 @@ impl Display for DebugShape<'_> {
 /// Contrary to basic slicing it is a copying operation; basic indexers may be
 /// mixed freely with the index arrays in the same index ([`ArrayIndexer`]).
 ///
-/// - With no index array at all, the index degenerates to basic slicing and
-///   the result is a **view**.
-/// - With one or more index arrays, the broadcast result of the index arrays
-///   forms the *advanced* dimensions, which are placed following NumPy's rule:
-///   at the position of the advanced indexers when those are consecutive, at
-///   the front otherwise. A plain integer index counts as an "advanced"
-///   indexer for this grouping.
+/// - With no index array at all, the index degenerates to basic slicing and the result is a
+///   **view**.
+/// - With one or more index arrays, the broadcast result of the index arrays forms the *advanced*
+///   dimensions, which are placed following NumPy's rule: at the position of the advanced indexers
+///   when those are consecutive, at the front otherwise. A plain integer index counts as an
+///   "advanced" indexer for this grouping.
 ///
 /// This function behaves identically under [`RowMajor`] and [`ColMajor`] device
 /// default orders. (Only the memory arrangement of the new tensor follows the
@@ -335,24 +343,25 @@ impl Display for DebugShape<'_> {
 ///
 /// # Overloads Table
 ///
-/// ## Whole-index forms
+/// ## Output `TensorCow<'a, T, B, IxD>`
 ///
-/// - `array_index(tensor, indexer: impl Into<ArrayIndexer<B>>)`: a single
-///   per-axis indexer, applied to the first axis. A host list or vector is
-///   *one* index array here, not a tuple of integer indexers.
-/// - `array_index(tensor, indexers: (F1, .., F6))`: a tuple of up to six
-///   per-axis indexers, one per indexed axis (the preferred form).
-/// - `array_index(tensor, indexers: Vec<ArrayIndexer<B>>)`: an explicit list.
-/// - `array_index(tensor, indexers: AxesIndex<ArrayIndexer<B>>)`: the `Val` /
-///   `Vec` forms; [`AxesIndex::None`] is rejected.
+/// - `array_index(tensor, indexer: impl Into<ArrayIndexer<B>>) -> TensorCow<'a, T, B, IxD>` — a
+///   single per-axis indexer, applied to the first axis. A host list or vector is *one* index array
+///   here, not a tuple of integer indexers.
+/// - `array_index(tensor, indexers: (F1, .., F6)) -> TensorCow<'a, T, B, IxD>` — a tuple of up to
+///   six per-axis indexers, one per indexed axis (the preferred form).
+/// - `array_index(tensor, indexers: Vec<ArrayIndexer<B>>) -> TensorCow<'a, T, B, IxD>` — an
+///   explicit list of indexers.
+/// - `array_index(tensor, indexers: AxesIndex<ArrayIndexer<B>>) -> TensorCow<'a, T, B, IxD>` — the
+///   `Val` / `Vec` forms; [`AxesIndex::None`] is rejected.
 ///
-/// ## Per-axis indexers (elements of the forms above)
+/// Also, per-axis indexer overloads (the elements of the forms above):
 ///
-/// - basic indexers: any [`Indexer`] source (integer, range, [`slice!`] result,
-///   `None` / [`NewAxis`], [`Ellipsis`]);
-/// - index arrays: `Vec` / `&Vec` / `&[T]` / `[T; N]` / `&[T; N]` of
-///   `isize`/`usize`/`i32`/`i64`/`u32`/`u64` (a one-dimensional index array),
-///   or an integer tensor / tensor view of any rank.
+/// - integer (`isize` / `usize` / `i32` / `i64` / `u32` / `u64`): one axis dropped (`Select`);
+/// - range (`1..4`) or [`slice!`] result: one axis narrowed (`Slice`);
+/// - `None` / [`NewAxis`]: one new size-1 axis (`Insert`); [`Ellipsis`]: the ellipsis;
+/// - host list (`Vec` / `&Vec` / `&[T]` / `[T; N]` / `&[T; N]`): a one-dimensional index array;
+/// - integer tensor or tensor view of any rank: an index array.
 ///
 /// # Parameters
 ///
@@ -360,14 +369,13 @@ impl Display for DebugShape<'_> {
 ///
 /// - `indexer`: Into [`ArrayIndexArgs<B>`]: the indexers, one per indexed axis.
 ///
-///   - Overloads: a single indexer, a tuple of indexers, a host list/vector, a
-///     vector of [`ArrayIndexer`], or an [`AxesIndex<ArrayIndexer<B>>`][AxesIndex].
+///   - Overloads: a single indexer, a tuple of indexers, a host list/vector, a vector of
+///     [`ArrayIndexer`], or an [`AxesIndex<ArrayIndexer<B>>`][AxesIndex].
 ///
 /// # Returns
 ///
-/// - [`TensorCow<'a, T, B, IxD>`][TensorCow]: a borrowed **view** when the index
-///   contains no index array (basic slicing), an **owned** gathered tensor
-///   otherwise.
+/// - [`TensorCow<'a, T, B, IxD>`][TensorCow]: a borrowed **view** when the index contains no index
+///   array (basic slicing), an **owned** gathered tensor otherwise.
 ///
 /// # Examples
 ///
@@ -442,35 +450,38 @@ impl Display for DebugShape<'_> {
 ///
 /// # Notes of API accordance
 ///
-/// - Array-API: `x[k1, .., kN]` ([`indexing`](https://data-apis.org/array-api/2024.12/API_specification/indexing.html)): the standard defines the
-///   *reduced* integer-array form (every indexer an integer or an integer
-///   array, broadcast together, zipped). RSTSR accepts that form as a special
-///   case; mixing slices with index arrays is left implementation-defined by
-///   the standard.
-/// - NumPy: `x[k1, .., kN]` (`numpy.ndarray.__getitem__`): RSTSR implements
-///   NumPy's vectorized indexing, including the placement rule for the
-///   broadcast dimensions, but not grouped ("parenthesized") index tuples, and
-///   not boolean index arrays (use [`mask_select`] / [`bool_select`], or a lone
-///   boolean mask through `x[mask]`).
+/// - Array-API: `x[k1, .., kN]` ([`indexing`](https://data-apis.org/array-api/2024.12/API_specification/indexing.html)):
+///   the standard defines the *reduced* integer-array form (every indexer an integer or an integer
+///   array, broadcast together, zipped). RSTSR accepts that form as a special case; mixing slices
+///   with index arrays is left implementation-defined by the standard.
+/// - NumPy: `x[k1, .., kN]` (`numpy.ndarray.__getitem__`): RSTSR implements NumPy's vectorized
+///   indexing, including the placement rule for the broadcast dimensions, but not grouped
+///   ("parenthesized") index tuples, and not boolean index arrays (use [`mask_select`] /
+///   [`bool_select`], or a lone boolean mask through `x[mask]`).
 /// - RSTSR: `rt::array_index(&tensor, indexers)`.
 ///
 /// # Panics
 ///
-/// - Panics if an axis index is out of range, if an index array entry (after
-///   resolving negative values) is out of range on its axis, if the index
-///   arrays cannot be broadcast together, if the index consumes more axes than
-///   the tensor has, if the index tensors live on a different device, or if a
-///   boolean index array is used.
+/// - Panics if an axis index is out of range, if an index array entry (after resolving negative
+///   values) is out of range on its axis, if the index arrays cannot be broadcast together, if the
+///   index consumes more axes than the tensor has, if the index tensors live on a different device,
+///   or if a boolean index array is used.
 ///
 /// For a fallible version, use [`array_index_f`].
 ///
 /// # See also
 ///
+/// ## Similar function from other crates/libraries
+///
+/// - NumPy: `x[k1, .., kN]` ([`numpy.ndarray.__getitem__`](https://numpy.org/doc/stable/reference/arrays.indexing.html#advanced-indexing))
+///   — `array_index` is the function form of NumPy's vectorized (advanced) indexing.
+/// - Python Array API standard: [`indexing`](https://data-apis.org/array-api/2024.12/API_specification/indexing.html)
+///   (`x[k1, .., kN]` with integer arrays).
+///
 /// ## Related functions in RSTSR
 ///
 /// - [`slice`](crate::tensor::indexing::slice()): basic indexing, always a view.
-/// - [`take`] / [`index_select`]:
-///   gather along one axis by a host integer list.
+/// - [`take`] / [`index_select`]: gather along one axis by a host integer list.
 /// - [`take_along_axis`]: gather along one axis by an index tensor of the same rank.
 /// - [`mask_select`]: gather by a boolean mask.
 ///
@@ -508,7 +519,7 @@ where
         + DeviceCreationAnyAPI<T>
         + DeviceArrayIndexAPI<T>,
 {
-    /// Array indexing (fancy indexing) of the tensor by integer arrays.
+    /// Indexes a tensor by integer arrays (array indexing, *fancy indexing*).
     ///
     /// See also [`array_index`].
     pub fn array_index_f<I>(&'a self, indexer: I) -> Result<TensorCow<'a, T, B, IxD>>
@@ -518,7 +529,7 @@ where
         array_index_f(self, indexer)
     }
 
-    /// Array indexing (fancy indexing) of the tensor by integer arrays.
+    /// Indexes a tensor by integer arrays (array indexing, *fancy indexing*).
     ///
     /// See also [`array_index`].
     pub fn array_index<I>(&'a self, indexer: I) -> TensorCow<'a, T, B, IxD>
@@ -535,7 +546,8 @@ mod test {
 
     #[test]
     fn test_array_index_workable() {
-        let device = DeviceCpu::default();
+        let mut device = DeviceCpu::default();
+        device.set_default_order(RowMajor);
         let a = arange((12, &device)).into_shape([3, 4]);
 
         // one host list: one index array on axis 0 (not a tuple of selects)
@@ -556,7 +568,8 @@ mod test {
 
     #[test]
     fn test_array_index_placement() {
-        let device = DeviceCpu::default();
+        let mut device = DeviceCpu::default();
+        device.set_default_order(RowMajor);
         let a = arange((36, &device)).into_shape([4, 3, 3]);
 
         // slice first, then two consecutive index arrays: the broadcast
@@ -568,7 +581,8 @@ mod test {
 
     #[test]
     fn test_array_index_placement_separated() {
-        let device = DeviceCpu::default();
+        let mut device = DeviceCpu::default();
+        device.set_default_order(RowMajor);
         let a = arange((24, &device)).into_shape([2, 3, 4]);
 
         // an array separated from an integer by a slice: the broadcast
@@ -585,7 +599,8 @@ mod test {
 
     #[test]
     fn test_array_index_broadcast() {
-        let device = DeviceCpu::default();
+        let mut device = DeviceCpu::default();
+        device.set_default_order(RowMajor);
         let a = arange((12, &device)).into_shape([3, 4]);
         let idx0 = asarray((vec![0_isize, 2], &device)).into_shape([2, 1]);
         let idx1 = asarray((vec![1_isize, 3, 0, 2], &device)).into_shape([1, 4]);
@@ -597,7 +612,8 @@ mod test {
 
     #[test]
     fn test_array_index_scalar_and_empty() {
-        let device = DeviceCpu::default();
+        let mut device = DeviceCpu::default();
+        device.set_default_order(RowMajor);
         let a = arange((12, &device)).into_shape([3, 4]);
 
         // a zero-dimensional integer array is a scalar index (a view)
@@ -616,7 +632,8 @@ mod test {
 
     #[test]
     fn test_array_index_errors() {
-        let device = DeviceCpu::default();
+        let mut device = DeviceCpu::default();
+        device.set_default_order(RowMajor);
         let a = arange((12, &device)).into_shape([3, 4]);
 
         // out of range

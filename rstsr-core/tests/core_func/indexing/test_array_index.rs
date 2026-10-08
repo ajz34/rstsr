@@ -14,7 +14,13 @@ use crate::TESTCFG;
 /// `I<n>` (integer), `S<a>:<b>:<c>` (slice), `A<d0>x..:<v..>` (index array),
 /// `N` (new axis) or `E` (ellipsis).
 fn parse_indexers(device: &DeviceType, spec: &str) -> ArrayIndexArgs<DeviceType> {
-    let parse_opt = |s: &str| -> Option<isize> { if s.is_empty() { None } else { Some(s.parse().unwrap()) } };
+    let parse_opt = |s: &str| -> Option<isize> {
+        if s.is_empty() {
+            None
+        } else {
+            Some(s.parse().unwrap())
+        }
+    };
     let mut indexers: Vec<ArrayIndexer<DeviceType>> = Vec::new();
     for token in spec.split('|') {
         if token.is_empty() {
@@ -46,6 +52,12 @@ fn parse_indexers(device: &DeviceType, spec: &str) -> ArrayIndexArgs<DeviceType>
     ArrayIndexArgs::new(indexers)
 }
 
+/// `true` when the error is an `IndexError` — the kind NumPy raises for a bad
+/// index (and the kind the rstsr-faer-py shim maps to Python's `IndexError`).
+fn is_index_error(err: &rt::Error) -> bool {
+    matches!(err.inner, rstsr_core::prelude_dev::RSTSRError::IndexError(_))
+}
+
 #[cfg(test)]
 mod numpy_array_index {
     use super::*;
@@ -54,9 +66,6 @@ mod numpy_array_index {
     #[test]
     fn test_empty_fancy_index() {
         // numpy: v2.5.2 | _core/tests/test_indexing.py::TestIndexing::test_empty_fancy_index (L127)
-        // `a[[]]` gives an empty result with the same dtype. The float-dtype
-        // case (`np.array([])` raises IndexError) is type-level N/A: rstsr
-        // index tensors are typed `isize`.
         crate::specify_test!("test_empty_fancy_index");
 
         let mut device = TESTCFG.device.clone();
@@ -64,10 +73,14 @@ mod numpy_array_index {
 
         let a = rt::arange((3, &device));
         let empty = rt::asarray((Vec::<isize>::new(), &device));
+        // `assert_equal(a[[]], [])` — an empty index array gives an empty result
         let b = a.array_index(&empty);
         assert_eq!(b.shape(), &vec![0]);
-        // dtype preservation is structural in rstsr: the result element type
-        // is the input's `T` by construction
+        assert_eq!(b.into_shape([-1]).to_vec(), Vec::<i32>::new());
+        // `assert_equal(a[[]].dtype, a.dtype)` — dtype preservation is
+        // structural in rstsr: the result element type is the input's `T`.
+        // `b = np.array([]); assert_raises(IndexError, a.__getitem__, b)` is
+        // type-level N/A: rstsr index tensors are typed `isize`.
 
         // an empty index array on a higher-rank tensor keeps the trailing axes
         let c = rt::arange((12, &device)).into_shape([3, 4]);
@@ -77,17 +90,19 @@ mod numpy_array_index {
 
     #[test]
     fn test_broaderrors_indexing() {
-        // numpy: v2.5.2 | _core/tests/test_indexing.py::TestIndexing::test_broaderrors_indexing (L365)
-        // Index arrays that cannot be broadcast together raise IndexError.
-        // (The `__setitem__` half is N/A: advanced-key assignment is not
-        // implemented yet.)
+        // numpy: v2.5.2 | _core/tests/test_indexing.py::TestIndexing::test_broaderrors_indexing
+        // (L365)
         crate::specify_test!("test_broaderrors_indexing");
 
         let mut device = TESTCFG.device.clone();
         device.set_default_order(RowMajor);
 
         let a: Tensor<f64, _> = rt::zeros(([5, 5], &device));
-        assert!(a.array_index_f(([0, 1], [0, 1, 2])).is_err());
+        // `assert_raises(IndexError, a.__getitem__, ([0, 1], [0, 1, 2]))`
+        let err = a.array_index_f(([0, 1], [0, 1, 2])).unwrap_err();
+        assert!(is_index_error(&err), "expected an IndexError, got {err}");
+        // `assert_raises(IndexError, a.__setitem__, ([0, 1], [0, 1, 2]), 0)` is
+        // N/A: advanced-key assignment is not implemented yet (registered).
     }
 
     #[test]
@@ -103,7 +118,9 @@ mod numpy_array_index {
         device.set_default_order(RowMajor);
 
         let a = rt::arange((25, &device)).into_shape([5, 5]);
+        // `assert_equal(a[[0, 1]], np.array([a[0], a[1]]))`
         assert_equal(a.array_index([0, 1]), a.slice((0..2, ..)), None);
+        // `assert_equal(a[[0, 1], [0, 1]], np.array([0, 6]))`
         assert_eq!(a.array_index(([0, 1], [0, 1])).into_shape([-1]).to_vec(), vec![0, 6]);
     }
 }
@@ -158,6 +175,32 @@ mod custom_array_index {
         assert_eq!(f.array_index((.., &i01, 1, ..)).shape(), &vec![2, 2, 5]);
     }
 
+    /// A zero-width ellipsis (every axis consumed explicitly) selects nothing,
+    /// but still separates the advanced indexers around it, so the broadcast
+    /// dimensions move to the front (NumPy parity; regression 2026-10-08).
+    #[test]
+    fn test_zero_width_ellipsis() {
+        crate::specify_test!("test_zero_width_ellipsis");
+
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        let x = rt::arange((20, &device)).into_shape([4, 5]);
+        let a = x.array_index((None, [0, 1, 2], Ellipsis, 2));
+        assert_eq!(a.shape(), &vec![3, 1]);
+        assert_eq!(a.into_shape([-1]).to_vec(), vec![2, 7, 12]);
+
+        let t = rt::arange((60, &device)).into_shape([3, 4, 5]);
+        let b = t.array_index((0..2, [0, 1], Ellipsis, [3, 2]));
+        assert_eq!(b.shape(), &vec![2, 2]);
+        assert_eq!(b.into_shape([-1]).to_vec(), vec![3, 23, 7, 27]);
+
+        let y = rt::arange((18, &device)).into_shape([2, 3, 3]);
+        let c = y.array_index((.., [0], Ellipsis, [1]));
+        assert_eq!(c.shape(), &vec![1, 2]);
+        assert_eq!(c.into_shape([-1]).to_vec(), vec![1, 10]);
+    }
+
     #[test]
     fn test_edges() {
         crate::specify_test!("test_edges");
@@ -183,8 +226,11 @@ mod custom_array_index {
         assert_eq!(c.shape(), &vec![3, 2]);
 
         // out of range / too many indexers
-        assert!(a.array_index_f([3]).is_err());
-        assert!(a.array_index_f((1, 2, 3)).is_err());
+        let err = a.array_index_f([3]).unwrap_err();
+        assert!(is_index_error(&err), "expected an IndexError, got {err}");
+        // too many indexers is also an IndexError (the Python exception kind)
+        let err = a.array_index_f((1, 2, 3)).unwrap_err();
+        assert!(is_index_error(&err), "expected an IndexError, got {err}");
     }
 
     /// Differential check against NumPy: every line of

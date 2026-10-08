@@ -22,9 +22,8 @@ use crate::prelude_dev::*;
 /// - [`ArrayIndexer::Basic`]: basic indexer, see [`Indexer`].
 /// - [`ArrayIndexer::ArrayIndex`]: an integer tensor indexing one axis.
 /// - [`ArrayIndexer::ArrayBool`]: a boolean tensor indexing axes.
-/// - [`ArrayIndexer::OneDimIndex`] / [`ArrayIndexer::OneDimBool`]: host slices
-///   carried through the `From` conversions; lowering turns them into the
-///   tensor variants.
+/// - [`ArrayIndexer::OneDimIndex`] / [`ArrayIndexer::OneDimBool`]: host slices carried through the
+///   `From` conversions; lowering turns them into the tensor variants.
 pub enum ArrayIndexer<B>
 where
     B: DeviceRawAPI<isize> + DeviceRawAPI<bool>,
@@ -61,14 +60,13 @@ where
 /// One entry per indexed axis, exactly like NumPy's `x[i, j, k]`; axes not
 /// mentioned are taken in full. The argument accepts:
 ///
-/// - a single indexer ([`ArrayIndexer`], an integer, a range/slice, a host
-///   integer/boolean list, or an integer/boolean tensor) — the one-entry form;
-/// - a tuple of indexers (arity up to 6) — the multi-axis form, e.g.
-///   `(1..3, [0, 1, 2], [0, 2, 1])`;
-/// - host lists, as in the single-entry form, but written directly
-///   (`array_index(&a, [2, 0])`);
-/// - an [`AxesIndex<ArrayIndexer<B>>`][AxesIndex] (`AxesIndex::None` is
-///   rejected: array indexing requires an explicit index).
+/// - a single indexer ([`ArrayIndexer`], an integer, a range/slice, a host integer/boolean list, or
+///   an integer/boolean tensor) — the one-entry form;
+/// - a tuple of indexers (arity up to 6) — the multi-axis form, e.g. `(1..3, [0, 1, 2], [0, 2,
+///   1])`;
+/// - host lists, as in the single-entry form, but written directly (`array_index(&a, [2, 0])`);
+/// - an [`AxesIndex<ArrayIndexer<B>>`][AxesIndex] (`AxesIndex::None` is rejected: array indexing
+///   requires an explicit index).
 ///
 /// Note that a list *is* one indexer (`[2, 0]` indexes one axis by two
 /// entries), while a tuple is a group of indexers (`(2, 0)` selects two axes).
