@@ -117,6 +117,8 @@ To use remainder (modular) function correctly, one may use [`rt::rem`] (as funct
 | Y | [`IndexMut`] | [`__setitem__`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.array.__setitem__.html) | Sets `self[key]` to `value`. |
 | P | [`DeviceChangeAPI::to_device`] | [`to_device`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.array.to_device.html) | Copy the array from the device on which it currently resides to the specified `device`. |
 
+Boolean-mask indexing (`x[mask]` and `x[mask] = value`) is provided by [`mask_select`] / [`mask_fill`]; see **Indexing Functions** below for the mask-shape contract and the element order.
+
 ## Creation Functions
 
 | status | implementation | Python API | description |
@@ -177,11 +179,20 @@ The reference implementation (as in [`DeviceCpuSerial`] and [`DeviceFaer`]), fol
 
 | status | implementation | Python API | description |
 |-|-|-|-|
+| Y | [`bool_select`] | — | Returns elements of an array along one axis at the positions where a boolean mask is `True` (RSTSR extension). |
+| Y | [`index_select`] | — | Returns elements of an array along one axis at the given integer indices (RSTSR extension). |
+| Y | [`mask_fill`] | [`__setitem__`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.array.__setitem__.html) | Writes a scalar into the elements where a boolean mask is `True` (`x[mask] = value`). |
+| Y | [`mask_select`] | [`__getitem__`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.array.__getitem__.html) | Returns the elements where a boolean mask is `True` (`x[mask]`). |
 | P | [`take`] | [`take`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.take.html) | Returns elements of an array along an axis. |
 | Y | [`take_along_axis`] | [`take_along_axis`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.take_along_axis.html) | Returns elements from an array at the one-dimensional indices specified by `indices` along a provided `axis`. |
 
 **Partial implementation**
 - [`take`] currently only supports indexing from an axis, which is also the Python Array API requires. However, NumPy also allows `axis = None` to index the flattened array, which is not implemented in RSTSR.
+
+**Notes**
+- Boolean-mask indexing requires the mask to have no more axes than the indexed array, each matching the indexed array's corresponding leading axis **or be `0`** (NumPy parity); the result is `(count,) + x.shape[mask.ndim() ..]`, where `count` is the number of `True` entries. The element and block order follow the device default order — deliberately not the row-major rule the Python Array API prescribes for boolean index arrays, so that a column-major device stays column-major (see the [`mask_select`] Row/Column Major Notice).
+- Integer-array (fancy) indexing (`x[int_array]`) is not implemented (gap G-039).
+- [`bool_select`] and [`index_select`] select along a single axis (PyTorch-style); `nonzero` gives the coordinates of every non-zero element (see Searching Functions).
 
 ## Inspection
 

@@ -652,6 +652,280 @@ where
 
 /* #endregion */
 
+/* #region mask_select / mask_fill */
+
+/// A boolean-mask index is valid when it has no more axes than the tensor and
+/// each of its axes matches the tensor's leading axis, or is zero (NumPy
+/// allows a zero-size mask axis; it selects nothing).
+fn check_mask_axes<DA, DM>(la: &Layout<DA>, lm: &Layout<DM>) -> Result<()>
+where
+    DA: DimAPI,
+    DM: DimAPI,
+{
+    rstsr_assert!(
+        lm.ndim() <= la.ndim(),
+        IndexError,
+        "boolean-mask index has {} axes, but the indexed tensor has only {}",
+        lm.ndim(),
+        la.ndim()
+    )?;
+    #[allow(clippy::needless_range_loop)] // reads both shapes
+    for d in 0..lm.ndim() {
+        let (m, x) = (lm.shape()[d], la.shape()[d]);
+        rstsr_assert!(
+            m == x || m == 0,
+            IndexError,
+            "boolean-mask axis {} has size {}, but the indexed tensor has size {} (must match, or be 0)",
+            d,
+            m,
+            x
+        )?;
+    }
+    Ok(())
+}
+
+/// Select the elements of `tensor` where `mask` is true (Array API `x[mask]`).
+///
+/// See also [`mask_select`].
+pub fn mask_select_f<T, B, DA, DM>(
+    tensor: impl TensorViewAPI<Type = T, Backend = B, Dim = DA>,
+    mask: impl TensorViewAPI<Type = bool, Backend = B, Dim = DM>,
+) -> Result<Tensor<T, B, IxD>>
+where
+    DA: DimAPI,
+    DM: DimAPI,
+    T: Clone,
+    B: DeviceAPI<T>
+        + DeviceAPI<bool>
+        + DeviceRawAPI<MaybeUninit<T>>
+        + DeviceRawAPI<MaybeUninit<usize>>
+        + DeviceCreationAnyAPI<T>
+        + OpNonzeroAPI<bool, DM>
+        + DeviceMaskIndexAPI<T, DA, DM>,
+{
+    let (tensor, mask) = (tensor.view(), mask.view());
+    let device = tensor.device().clone();
+    rstsr_assert!(device.same_device(mask.device()), DeviceMismatch)?;
+    let (la, lm) = (tensor.layout(), mask.layout());
+    check_mask_axes(la, lm)?;
+    // the leading output length is data-dependent: one element per true entry
+    let count = device.nonzero_count(mask.raw(), lm)?;
+    let mut out_shape: Vec<usize> = Vec::with_capacity(la.ndim() - lm.ndim() + 1);
+    out_shape.push(count);
+    out_shape.extend_from_slice(&la.shape().as_ref()[lm.ndim()..]);
+    let layout_c: Layout<IxD> = out_shape.new_contig(None, device.default_order());
+    let (_, size) = layout_c.bounds_index()?;
+    let mut storage = device.uninit_impl(size)?;
+    device.mask_select(storage.raw_mut(), tensor.raw(), la, mask.raw(), lm)?;
+    // SAFETY: `mask_select` wrote exactly `count * prod(shape[lm.ndim()..])`
+    // elements = `size`.
+    let storage = unsafe { <B as DeviceCreationAnyAPI<T>>::assume_init_impl(storage)? };
+    Tensor::new_f(storage, layout_c)
+}
+
+/// Select the elements of `tensor` where `mask` is true (Array API `x[mask]`).
+///
+/// <div class="warning">
+///
+/// **Row/Column Major Notice**
+///
+/// This function behaves differently on default orders ([`RowMajor`] and [`ColMajor`]) of device.
+///
+/// </div>
+///
+/// The mask may have at most `x.ndim()` axes; each of its axes must match the
+/// corresponding leading axis of `x` (a zero-size mask axis selects nothing).
+/// The result is `(count,) + x.shape[mask.ndim() ..]`, where `count` is the
+/// number of true entries.
+///
+/// The mask entries are visited in the device default order, and the selected
+/// elements (for a prefix mask, each trailing block) are emitted in that same
+/// order — row-major under [`RowMajor`], column-major under [`ColMajor`]. The
+/// result's memory arrangement likewise follows the device default order. This
+/// is intentionally *not* the Python array API rule, which prescribes
+/// row-major (C-style) iteration of a boolean index array regardless of
+/// device; RSTSR keeps its device-order convention for flattened visit
+/// orders, as in [`crate::tensor::nonzero::nonzero`].
+///
+/// # Examples
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let a = rt::arange((12, &device)).into_shape([3, 4]);
+/// let mask = rt::tensor_from_nested!([[true, false, true, false], [false, false, false, true], [false, false, true, false]], &device);
+/// println!("{}", rt::mask_select(&a, &mask));
+/// // [ 0 2 7 10]
+/// # assert_eq!(rt::mask_select(&a, &mask).to_vec(), vec![0, 2, 7, 10]);
+/// ```
+///
+/// # Notes of API accordance
+///
+/// - Array-API: `x[mask]` ([`indexing`](https://data-apis.org/array-api/2024.12/API_specification/indexing.html))
+/// - NumPy: `x[mask]` (`numpy.ndarray.__getitem__`)
+/// - RSTSR: `rt::mask_select(x, mask)`
+///
+/// # Panics
+///
+/// - Panics if the mask has more axes than `x`, or an axis whose size is neither `x`'s nor zero.
+///
+/// For a fallible version, use [`mask_select_f`].
+///
+/// # See also
+///
+/// ## Related functions in RSTSR
+///
+/// - [`bool_select`]: select along one axis by a per-axis mask.
+/// - [`crate::tensor::nonzero::nonzero`]: the coordinates of the true entries.
+///
+/// ## Variants of this function
+///
+/// - [`mask_select_f`]: fallible version.
+/// - Associated methods on [`TensorAny`]: [`TensorAny::mask_select`] /
+///   [`TensorAny::mask_select_f`].
+pub fn mask_select<T, B, DA, DM>(
+    tensor: impl TensorViewAPI<Type = T, Backend = B, Dim = DA>,
+    mask: impl TensorViewAPI<Type = bool, Backend = B, Dim = DM>,
+) -> Tensor<T, B, IxD>
+where
+    DA: DimAPI,
+    DM: DimAPI,
+    T: Clone,
+    B: DeviceAPI<T>
+        + DeviceAPI<bool>
+        + DeviceRawAPI<MaybeUninit<T>>
+        + DeviceRawAPI<MaybeUninit<usize>>
+        + DeviceCreationAnyAPI<T>
+        + OpNonzeroAPI<bool, DM>
+        + DeviceMaskIndexAPI<T, DA, DM>,
+{
+    mask_select_f(tensor, mask).rstsr_unwrap()
+}
+
+/// Write `value` into every element of `tensor` where `mask` is true (Array API
+/// `x[mask] = value`).
+///
+/// See also [`mask_fill`].
+pub fn mask_fill_f<RA, T, B, DA, DM>(
+    tensor: &mut TensorAny<RA, T, B, DA>,
+    mask: impl TensorViewAPI<Type = bool, Backend = B, Dim = DM>,
+    value: T,
+) -> Result<()>
+where
+    RA: DataMutAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
+    DA: DimAPI,
+    DM: DimAPI,
+    T: Clone,
+    B: DeviceAPI<T> + DeviceAPI<bool> + DeviceRawAPI<MaybeUninit<T>> + DeviceMaskIndexAPI<T, DA, DM>,
+{
+    let mask = mask.view();
+    let device = tensor.device().clone();
+    rstsr_assert!(device.same_device(mask.device()), DeviceMismatch)?;
+    check_mask_axes(tensor.layout(), mask.layout())?;
+    let la = tensor.layout().clone();
+    device.mask_fill(tensor.raw_mut(), &la, mask.raw(), mask.layout(), value)
+}
+
+/// Write `value` into every element of `tensor` where `mask` is true (Array API
+/// `x[mask] = value`).
+///
+/// See [`mask_select`] for the mask-shape contract. Only a scalar `value` is
+/// supported.
+///
+/// # Notes of API accordance
+///
+/// - Array-API: `x[mask] = value` ([`indexing`](https://data-apis.org/array-api/2024.12/API_specification/indexing.html))
+/// - NumPy: `x[mask] = value`
+/// - RSTSR: `rt::mask_fill(&mut x, mask, value)`
+///
+/// # Panics
+///
+/// - Panics if the mask has more axes than `x`, or an axis whose size is neither `x`'s nor zero.
+///
+/// For a fallible version, use [`mask_fill_f`].
+///
+/// # See also
+///
+/// ## Variants of this function
+///
+/// - [`mask_fill_f`]: fallible version.
+/// - Associated methods on [`TensorAny`]: [`TensorAny::mask_fill`] / [`TensorAny::mask_fill_f`].
+pub fn mask_fill<RA, T, B, DA, DM>(
+    tensor: &mut TensorAny<RA, T, B, DA>,
+    mask: impl TensorViewAPI<Type = bool, Backend = B, Dim = DM>,
+    value: T,
+) where
+    RA: DataMutAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
+    DA: DimAPI,
+    DM: DimAPI,
+    T: Clone,
+    B: DeviceAPI<T> + DeviceAPI<bool> + DeviceRawAPI<MaybeUninit<T>> + DeviceMaskIndexAPI<T, DA, DM>,
+{
+    mask_fill_f(tensor, mask, value).rstsr_unwrap()
+}
+
+impl<R, T, B, DA> TensorAny<R, T, B, DA>
+where
+    R: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
+    DA: DimAPI,
+    T: Clone,
+    B: DeviceAPI<T>
+        + DeviceAPI<bool>
+        + DeviceRawAPI<MaybeUninit<T>>
+        + DeviceRawAPI<MaybeUninit<usize>>
+        + DeviceCreationAnyAPI<T>,
+{
+    pub fn mask_select_f<DM>(
+        &self,
+        mask: impl TensorViewAPI<Type = bool, Backend = B, Dim = DM>,
+    ) -> Result<Tensor<T, B, IxD>>
+    where
+        DM: DimAPI,
+        B: OpNonzeroAPI<bool, DM> + DeviceMaskIndexAPI<T, DA, DM>,
+    {
+        mask_select_f(self, mask)
+    }
+
+    pub fn mask_select<DM>(&self, mask: impl TensorViewAPI<Type = bool, Backend = B, Dim = DM>) -> Tensor<T, B, IxD>
+    where
+        DM: DimAPI,
+        B: OpNonzeroAPI<bool, DM> + DeviceMaskIndexAPI<T, DA, DM>,
+    {
+        mask_select(self, mask)
+    }
+}
+
+impl<RA, T, B, DA> TensorAny<RA, T, B, DA>
+where
+    RA: DataMutAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
+    DA: DimAPI,
+    T: Clone,
+    B: DeviceAPI<T> + DeviceAPI<bool> + DeviceRawAPI<MaybeUninit<T>>,
+{
+    pub fn mask_fill_f<DM>(
+        &mut self,
+        mask: impl TensorViewAPI<Type = bool, Backend = B, Dim = DM>,
+        value: T,
+    ) -> Result<()>
+    where
+        DM: DimAPI,
+        B: DeviceMaskIndexAPI<T, DA, DM>,
+    {
+        mask_fill_f(self, mask, value)
+    }
+
+    pub fn mask_fill<DM>(&mut self, mask: impl TensorViewAPI<Type = bool, Backend = B, Dim = DM>, value: T)
+    where
+        DM: DimAPI,
+        B: DeviceMaskIndexAPI<T, DA, DM>,
+    {
+        mask_fill(self, mask, value)
+    }
+}
+
+/* #endregion */
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -722,5 +996,35 @@ mod test {
         let a = arange(24).into_shape((2, 3, 4));
         let b = a.bool_select(-2, [true, false, true]);
         println!("{b:?}");
+    }
+
+    #[test]
+    fn test_mask_indexing_workable() {
+        #[cfg(not(feature = "col_major"))]
+        {
+            let device = DeviceCpu::default();
+            let a = arange((12, &device)).into_shape([3, 4]);
+
+            // full mask: 1-D result in row-major visit order
+            let m = asarray((
+                vec![true, false, true, false, false, false, false, true, false, false, true, false],
+                &device,
+            ))
+            .into_shape([3, 4]);
+            let out = a.mask_select(&m);
+            assert_eq!(out.shape(), &vec![4]);
+            assert_eq!(out.to_vec(), vec![0, 2, 7, 10]);
+
+            // prefix mask: (count,) + the trailing shape
+            let pm = asarray((vec![true, false, true], &device));
+            let out = a.mask_select(&pm);
+            assert_eq!(out.shape(), &vec![2, 4]);
+            assert_eq!(out.into_shape([-1]).to_vec(), vec![0, 1, 2, 3, 8, 9, 10, 11]);
+
+            // scatter a scalar into the true positions
+            let mut c = zeros(([3, 4], &device));
+            c.mask_fill(&m, 9);
+            assert_eq!(c.into_shape([-1]).to_vec(), vec![9, 0, 9, 0, 0, 0, 0, 9, 0, 0, 9, 0]);
+        }
     }
 }

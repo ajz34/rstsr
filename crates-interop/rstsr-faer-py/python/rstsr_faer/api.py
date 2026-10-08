@@ -286,6 +286,11 @@ def _wrap(h, /):
     return Array.__new__(Array, h)
 
 
+def _is_single_bool_mask(key, /):
+    """True when `key` is a lone boolean Array (whole-tensor mask indexing)."""
+    return builtins.len(key) == 1 and isinstance(key[0], Array) and _kind(key[0].dtype) == "bool"
+
+
 def _scalar_operand(value, ref_dtype, /):
     """Weak-scalar marshalling: cast a Python scalar to the reference dtype.
 
@@ -414,8 +419,8 @@ class Array:
             return self  # () is a no-op index at any dimensionality
         key = index if isinstance(index, tuple) else (index,)
         # A 0-d integer array is a scalar index (NumPy semantics), not
-        # integer-array indexing: marshal it through __index__ (G-038/G-039
-        # stay for genuine mask / integer-array keys).
+        # integer-array indexing: marshal it through __index__ (fancy indexing
+        # stays a rust-side gap, G-039).
         key = tuple(
             _py_int(k)
             if isinstance(k, Array) and k.ndim == 0 and _kind(k.dtype) == "integral"
@@ -423,13 +428,22 @@ class Array:
             for k in key
         )
         if builtins.any(isinstance(k, Array) for k in key):
-            _unimplemented("boolean-mask / integer-array indexing (rstsr gaps G-038/G-039)")
+            if _is_single_bool_mask(key):
+                return _wrap(_pkg.getitem_mask(self._h, key[0]._h))
+            _unimplemented("integer-array (fancy) indexing (rstsr gap G-039)")
         return _wrap(_pkg.getitem_basic(self._h, key))
 
     def __setitem__(self, key, value, /):
         key = key if isinstance(key, tuple) else (key,)
         if builtins.any(isinstance(k, Array) for k in key):
-            _unimplemented("boolean-mask item assignment (rstsr gap G-038)")
+            if not _is_single_bool_mask(key):
+                _unimplemented("integer-array (fancy) item assignment (rstsr gap G-039)")
+            mask = key[0]._h
+            if isinstance(value, Array):
+                _pkg.setitem_mask(self._h, mask, value._h)
+            else:
+                _pkg.setitem_mask_scalar(self._h, mask, value)
+            return
         if isinstance(value, Array):
             _pkg.setitem_basic(self._h, key, value._h)
         else:

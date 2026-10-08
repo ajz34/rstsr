@@ -272,6 +272,9 @@ fn rstsr_faer(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(indexing::getitem_basic, m)?)?;
     m.add_function(wrap_pyfunction!(indexing::setitem_basic, m)?)?;
     m.add_function(wrap_pyfunction!(indexing::setitem_scalar, m)?)?;
+    m.add_function(wrap_pyfunction!(indexing::getitem_mask, m)?)?;
+    m.add_function(wrap_pyfunction!(indexing::setitem_mask, m)?)?;
+    m.add_function(wrap_pyfunction!(indexing::setitem_mask_scalar, m)?)?;
     m.add_function(wrap_pyfunction!(indexing::take_along_axis, m)?)?;
 
     m.add_function(wrap_pyfunction!(dlpack::dlpack_export, m)?)?;
