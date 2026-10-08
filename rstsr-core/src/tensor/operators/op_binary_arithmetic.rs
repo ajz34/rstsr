@@ -24,6 +24,12 @@
 //!
 //! </div>
 //!
+//! For floating-point dtypes, [`rem`](rem()) follows the array API / NumPy
+//! `remainder` — the result takes the sign of the *divisor* (Python's `%`),
+//! unlike Rust's `%` which takes the sign of the dividend; the signed-zero and
+//! infinite-divisor special cases are handled too. Integer operands keep Rust's
+//! `%`.
+//!
 //! # Examples
 //!
 //! ```rust

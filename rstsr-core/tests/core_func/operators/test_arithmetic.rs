@@ -125,4 +125,41 @@ mod custom_rem {
         // impl in linalg/matmul.rs applies). a % b == a.matmul(b) == [[135, 187], [319, 440]].
         assert_equal(&a % &b, rt::tensor_from_nested!([[135, 187], [319, 440]], &device), None);
     }
+
+    // `assert_equal` goes through `allclose`, which conflates `+0.0`/`-0.0`, so the
+    // float remainder special cases are checked on the bit pattern.
+    fn bits(v: &[f64]) -> Vec<u64> {
+        v.iter().map(|x| x.to_bits()).collect()
+    }
+
+    #[test]
+    fn test_float_floored_and_special() {
+        crate::specify_test!("test_float_floored_and_special");
+
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        // Floored (sign-of-divisor) remainder for finite operands.
+        // np.remainder([-7, 7, -7, 7], [3, -3, -3, 3]) == [2, -2, -1, 1]
+        let a = rt::tensor_from_nested!([-7.0, 7.0, -7.0, 7.0], &device);
+        let b = rt::tensor_from_nested!([3.0, -3.0, -3.0, 3.0], &device);
+        assert_eq!(bits(&rt::rem(&a, &b).to_vec()), bits(&[2.0, -2.0, -1.0, 1.0]));
+
+        // Array-API special cases: signed zero and opposite-sign infinite divisor.
+        // np.remainder([-0.0, 0.0, -1.0, 1.0], [2.0, -2.0, inf, -inf]) == [+0, -0, inf, -inf]
+        let z = rt::tensor_from_nested!([-0.0, 0.0, -1.0, 1.0], &device);
+        let d = rt::tensor_from_nested!([2.0, -2.0, f64::INFINITY, f64::NEG_INFINITY], &device);
+        assert_eq!(bits(&rt::rem(&z, &d).to_vec()), bits(&[0.0, -0.0, f64::INFINITY, f64::NEG_INFINITY]));
+
+        // Same-sign infinite divisor keeps the dividend.
+        // np.remainder([1.0, -1.0], [inf, -inf]) == [1.0, -1.0]
+        let s = rt::tensor_from_nested!([1.0, -1.0], &device);
+        let di = rt::tensor_from_nested!([f64::INFINITY, f64::NEG_INFINITY], &device);
+        assert_eq!(bits(&rt::rem(&s, &di).to_vec()), bits(&[1.0, -1.0]));
+
+        // Exact multiple carries the divisor's sign: np.remainder(4.0, -2.0) == -0.0
+        let m = rt::tensor_from_nested!([4.0], &device);
+        let n = rt::tensor_from_nested!([-2.0], &device);
+        assert_eq!(bits(&rt::rem(&m, &n).to_vec()), bits(&[-0.0]));
+    }
 }

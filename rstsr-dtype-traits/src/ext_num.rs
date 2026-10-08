@@ -38,6 +38,20 @@ pub trait ExtNum: Clone {
 
     /* #endregion */
 
+    /* #region remainder */
+
+    /// Computes the floored remainder — NumPy's `remainder` / Python's `%`
+    /// (the array-API `remainder`).
+    ///
+    /// Unlike Rust's `%`, the result takes the sign of `other`, so that
+    /// `ext_floor_divide(x, y) * y + ext_rem(x, y) == x`. For floats this also
+    /// covers the array-API special cases: a zero dividend and an infinite
+    /// divisor keep `other`'s sign / value. Complex operands have no floored
+    /// form and delegate to the Gaussian `%` of [`num::Complex`].
+    fn ext_rem(self, other: Self) -> Self;
+
+    /* #endregion */
+
     /* #region real-imag */
 
     /// Returns the real part of the number.
@@ -89,6 +103,18 @@ impl ExtNum for T {
     }
     /* #endregion */
 
+    /* #region remainder */
+    #[inline]
+    fn ext_rem(self, other: Self) -> Self {
+        // no negative values: C and floored remainders coincide
+        if other == 0 {
+            0
+        } else {
+            self % other
+        }
+    }
+    /* #endregion */
+
     /* #region real-imag */
     #[inline]
     fn ext_real(self) -> Self {
@@ -134,6 +160,27 @@ impl ExtNum for T {
     }
     /* #endregion */
 
+    /* #region remainder */
+    #[inline]
+    fn ext_rem(self, other: Self) -> Self {
+        if other == 0 {
+            return 0;
+        }
+        // `% -1` overflows at the type's minimum in debug builds; the quotient is
+        // exact, so the remainder is 0.
+        if other == -1 {
+            return 0;
+        }
+        let r = self % other;
+        // `r + other` cannot overflow: `r` and `other` have opposite signs.
+        if r != 0 && (r < 0) != (other < 0) {
+            r + other
+        } else {
+            r
+        }
+    }
+    /* #endregion */
+
     /* #region real-imag */
     #[inline]
     fn ext_real(self) -> Self {
@@ -174,6 +221,40 @@ impl ExtNum for T {
             -1.0
         } else {
             0.0
+        }
+    }
+    /* #endregion */
+
+    /* #region remainder */
+    fn ext_rem(self, other: Self) -> Self {
+        let zero = 0.0 as Self;
+        if self.is_nan() || other.is_nan() {
+            return Self::NAN;
+        }
+        // infinite dividend (finite divisor) is NaN
+        if self.is_infinite() {
+            return Self::NAN;
+        }
+        if other.is_infinite() {
+            // finite dividend, infinite divisor: `other` when the signs differ,
+            // else `self`; a zero dividend keeps the divisor's sign
+            if self == zero {
+                return zero.copysign(other);
+            }
+            return if self.is_sign_positive() == other.is_sign_positive() { self } else { other };
+        }
+        if other == zero {
+            return Self::NAN;
+        }
+        let r = self % other; // sign of the dividend
+        if r == zero {
+            // exact multiple (including a ±0 dividend): carry `other`'s sign
+            return zero.copysign(other);
+        }
+        if r.is_sign_positive() != other.is_sign_positive() {
+            r + other
+        } else {
+            r
         }
     }
     /* #endregion */
@@ -230,6 +311,14 @@ impl ExtNum for T {
     }
     /* #endregion */
 
+    /* #region remainder */
+    #[inline]
+    fn ext_rem(self, other: Self) -> Self {
+        // round-trip through f32: exact in, one rounding out
+        Self::from_f32(f32::from(self).ext_rem(f32::from(other)))
+    }
+    /* #endregion */
+
     /* #region real-imag */
     #[inline]
     fn ext_real(self) -> Self {
@@ -277,6 +366,14 @@ impl ExtNum for T {
         } else {
             self / abs
         }
+    }
+    /* #endregion */
+
+    /* #region remainder */
+    #[inline]
+    fn ext_rem(self, other: Self) -> Self {
+        // complex has no floored remainder; keep num-complex's Gaussian `%`
+        self % other
     }
     /* #endregion */
 
