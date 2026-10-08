@@ -48,3 +48,40 @@ where
         axis: usize,
     ) -> Result<()>;
 }
+
+/// Whole-tensor boolean-mask gather / scatter (see [`mask_select`] /
+/// [`mask_fill`]).
+///
+/// The mask has `dm <= da` axes matching `a`'s leading axes; a `true` selects
+/// the trailing block `a[i_0, .., i_{dm-1}, ..]` of size
+/// `B = prod(a.shape()[dm..])`. Mask entries are visited in the device default
+/// order.
+pub trait DeviceMaskIndexAPI<TA, DA, DM>
+where
+    DA: DimAPI,
+    DM: DimAPI,
+    Self: DeviceAPI<TA> + DeviceAPI<bool> + DeviceRawAPI<MaybeUninit<TA>>,
+{
+    /// Gather the blocks of `a` selected by `mask` into `c`.
+    ///
+    /// `c` has capacity `count * B` (`count` = number of `true` entries in
+    /// `mask`), written front-to-back in the mask visit order.
+    fn mask_select(
+        &self,
+        c: &mut <Self as DeviceRawAPI<MaybeUninit<TA>>>::Raw,
+        a: &<Self as DeviceRawAPI<TA>>::Raw,
+        la: &Layout<DA>,
+        mask: &<Self as DeviceRawAPI<bool>>::Raw,
+        lm: &Layout<DM>,
+    ) -> Result<()>;
+
+    /// Write `value` into every element of `a` selected by `mask`.
+    fn mask_fill(
+        &self,
+        a: &mut <Self as DeviceRawAPI<TA>>::Raw,
+        la: &Layout<DA>,
+        mask: &<Self as DeviceRawAPI<bool>>::Raw,
+        lm: &Layout<DM>,
+        value: TA,
+    ) -> Result<()>;
+}

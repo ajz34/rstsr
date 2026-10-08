@@ -71,7 +71,8 @@ pub mod rstsr_structs {
 
 pub mod rstsr_funcs {
     pub use crate::tensor::adv_indexing::{
-        bool_select, bool_select_f, index_select, index_select_f, take, take_along_axis, take_along_axis_f, take_f,
+        bool_select, bool_select_f, index_select, index_select_f, mask_fill, mask_fill_f, mask_select, mask_select_f,
+        take, take_along_axis, take_along_axis_f, take_f,
     };
     pub use crate::tensor::asarray::{asarray, asarray_f};
     pub use crate::tensor::creation::{

@@ -1077,6 +1077,11 @@ mod test {
         assert!(layout.check_strides(false).is_ok());
         assert!(layout.is_broadcasted());
         assert!(!Layout::new([3, 1], [1, 3], 0).unwrap().is_broadcasted());
+        // zero-size layouts are exempt: a zero-size shape propagates zero strides
+        // into outer axes (contiguous (3, 0) -> [0, 1]), but with no elements
+        // nothing can alias, so the layout is writable
+        assert!(![3, 0].c().is_broadcasted());
+        assert!(!vec![0, 0].c().is_broadcasted());
     }
 
     #[test]

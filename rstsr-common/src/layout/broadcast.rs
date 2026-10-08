@@ -272,9 +272,13 @@ where
 
     /// Check whether current layout has been broadcasted.
     ///
-    /// This check is done by checking whether any stride of axis is zero.
+    /// This check is done by checking whether any stride of axis is zero. A layout
+    /// with no elements is never broadcasted: with zero elements nothing can alias,
+    /// so any stride (including a zero one) is writable. This mirrors
+    /// [`check_strides`](Layout::check_strides) and [`bounds_index`](Layout::bounds_index),
+    /// which also short-circuit on an empty layout.
     pub fn is_broadcasted(&self) -> bool {
-        self.stride().as_ref().contains(&0)
+        self.size() != 0 && self.stride().as_ref().contains(&0)
     }
 }
 

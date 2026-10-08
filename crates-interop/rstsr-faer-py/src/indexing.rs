@@ -1,10 +1,11 @@
 //! Indexing surface: spec `__getitem__`/`__setitem__` over DeviceFaer.
 //!
-//! Basic keys only (int/slice/newaxis/ellipsis), riding rstsr's layout
-//! slicing (`i_f`/`i_mut_f`) and its assign/fill. Boolean-mask and
-//! integer-array indexing are registered rust-side gaps (G-038/G-039) and
-//! are declined here per the wrapper-only rule. Results are fresh owned
-//! tensors — the handle model has no shared storage (register G-036).
+//! Basic keys (int/slice/newaxis/ellipsis) ride rstsr's layout slicing
+//! (`i_f`/`i_mut_f`) and its assign/fill; whole-tensor boolean-mask keys ride
+//! `rt::mask_select` / `rt::mask_fill` (rust-side, G-038). Integer-array
+//! (fancy) indexing stays a registered rust-side gap (G-039) and is declined
+//! here per the wrapper-only rule. Results are fresh owned tensors — the
+//! handle model has no shared storage (register G-036).
 
 use core::mem::MaybeUninit;
 use num::Complex;
@@ -16,8 +17,9 @@ use rstsr::prelude::rt;
 use rstsr::prelude::*;
 
 use rstsr_common::layout::exports::{Indexer, SliceI};
-use rstsr_core::operators::adv_indexing::{DeviceIndexSelectAPI, DeviceTakeAlongAxisAPI};
+use rstsr_core::operators::adv_indexing::{DeviceIndexSelectAPI, DeviceMaskIndexAPI, DeviceTakeAlongAxisAPI};
 use rstsr_core::operators::assignment::OpAssignAPI;
+use rstsr_core::operators::searching::OpNonzeroAPI;
 use rstsr_core::storage::exports::{DeviceCreationAnyAPI, DeviceRawAPI};
 
 use crate::any_tensor::{dispatch_t, err_py, lift, parse_leaf, type_err, AnyTensor, FTensor, NativeArray, PyScalar};
@@ -36,8 +38,10 @@ fn sl(start: Option<isize>, stop: Option<isize>, step: Option<isize>) -> Indexer
     Indexer::Slice(SliceI::new(start, stop, step))
 }
 
-/// Duck-typed key parse: int / slice / None / Ellipsis. Array keys are
-/// declined here (mask/fancy indexing is a registered rust-side gap).
+/// Duck-typed key parse: int / slice / None / Ellipsis. Whole-tensor boolean
+/// masks are routed to [`getitem_mask`] / [`setitem_mask`] by the Python
+/// layer, so an array key reaching here is integer-array (fancy) indexing,
+/// declined as a registered rust-side gap (G-039).
 fn parse_key<'py>(key: &Bound<'py, PyTuple>) -> PyResult<Vec<KeyItem>> {
     let mut items = Vec::new();
     for item in key.iter() {
@@ -55,9 +59,7 @@ fn parse_key<'py>(key: &Bound<'py, PyTuple>) -> PyResult<Vec<KeyItem>> {
         } else if item.is_instance_of::<PyEllipsis>() {
             items.push(KeyItem::Ellipsis);
         } else if item.extract::<PyRef<'py, NativeArray>>().is_ok() {
-            return Err(PyTypeError::new_err(
-                "array indexing (boolean mask / integer array) is not provided by rstsr (gap)",
-            ));
+            return Err(PyTypeError::new_err("integer-array (fancy) indexing is not provided by rstsr (gap G-039)"));
         } else {
             return Err(PyTypeError::new_err(format!("invalid index element of type {}", item.get_type().name()?)));
         }
@@ -217,6 +219,84 @@ pub fn setitem_basic(x: &mut NativeArray, key: &Bound<'_, PyTuple>, value: &Nati
 pub fn setitem_scalar(x: &mut NativeArray, key: &Bound<'_, PyTuple>, value: &Bound<'_, PyAny>) -> PyResult<()> {
     let s = parse_leaf(value)?;
     x.setitem_basic_scalar(key, s)
+}
+
+/* #endregion */
+
+/* #region mask (G-038) */
+
+/// Extract the boolean mask from a key array; integer-array keys stay declined
+/// (G-039) and are routed away by the Python layer.
+fn as_bool_mask(m: &NativeArray) -> PyResult<&FTensor<bool>> {
+    match &m.t {
+        AnyTensor::Bool(t) => Ok(t),
+        _ => Err(PyTypeError::new_err("boolean-mask indexing requires a bool array")),
+    }
+}
+
+fn op_getitem_mask<T>(t: &FTensor<T>, m: &FTensor<bool>) -> rt::Result<FTensor<T>>
+where
+    T: Clone + Send + Sync + 'static,
+    DeviceFaer: DeviceAPI<T, Raw = Vec<T>>
+        + DeviceAPI<bool>
+        + DeviceRawAPI<MaybeUninit<T>>
+        + DeviceRawAPI<MaybeUninit<usize>>
+        + DeviceCreationAnyAPI<T>
+        + OpNonzeroAPI<bool, IxD>
+        + DeviceMaskIndexAPI<T, IxD, IxD>,
+{
+    rt::mask_select_f(t, m)
+}
+
+#[pyfunction]
+pub fn getitem_mask(x: &NativeArray, mask: &NativeArray) -> PyResult<NativeArray> {
+    let m = as_bool_mask(mask)?;
+    Ok(NativeArray { t: dispatch_t!(x.t, op_getitem_mask(m))? })
+}
+
+fn op_setitem_mask<T>(t: &mut FTensor<T>, m: &FTensor<bool>, v: T) -> rt::Result<()>
+where
+    T: Clone + Send + Sync + 'static,
+    DeviceFaer:
+        DeviceAPI<T, Raw = Vec<T>> + DeviceAPI<bool> + DeviceRawAPI<MaybeUninit<T>> + DeviceMaskIndexAPI<T, IxD, IxD>,
+{
+    rt::mask_fill_f(t, m, v)
+}
+
+/// `x[mask] = value` with an array value (scalar or size-1, same dtype).
+#[pyfunction]
+pub fn setitem_mask(x: &mut NativeArray, mask: &NativeArray, value: &NativeArray) -> PyResult<()> {
+    let m = as_bool_mask(mask)?;
+    macro_rules! arms {
+        ($($dv:ident : $ty:ty);* $(;)?) => {
+            match (&mut x.t, &value.t) {
+                $((AnyTensor::$dv(ref mut a), AnyTensor::$dv(v)) => {
+                    let val: $ty = err_py(v.to_scalar_f())?;
+                    err_py(op_setitem_mask(a, m, val))
+                }),*
+                _ => type_err("boolean-mask assignment requires the value dtype to match the array dtype"),
+            }
+        };
+    }
+    arms!(Bool: bool; I8: i8; I16: i16; I32: i32; I64: i64; U8: u8; U16: u16; U32: u32; U64: u64; F32: f32; F64: f64; C32: Complex<f32>; C64: Complex<f64>)
+}
+
+/// `x[mask] = value` with a Python scalar value.
+#[pyfunction]
+pub fn setitem_mask_scalar(x: &mut NativeArray, mask: &NativeArray, value: &Bound<'_, PyAny>) -> PyResult<()> {
+    let m = as_bool_mask(mask)?;
+    let s = parse_leaf(value)?;
+    macro_rules! arms {
+        ($($dv:ident : $ty:ty);* $(;)?) => {
+            match &mut x.t {
+                $(AnyTensor::$dv(ref mut a) => {
+                    let v = <$ty as ScalarCastTarget>::from_scalar(s)?;
+                    err_py(op_setitem_mask(a, m, v))
+                }),*
+            }
+        };
+    }
+    arms!(Bool: bool; I8: i8; I16: i16; I32: i32; I64: i64; U8: u8; U16: u16; U32: u32; U64: u64; F32: f32; F64: f64; C32: Complex<f32>; C64: Complex<f64>)
 }
 
 /* #endregion */
