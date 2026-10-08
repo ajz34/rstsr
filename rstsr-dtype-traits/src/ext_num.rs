@@ -38,6 +38,16 @@ pub trait ExtNum: Clone {
 
     /* #endregion */
 
+    /* #region neg */
+
+    /// Computes the arithmetic negative of the number — NumPy's unary `-`.
+    ///
+    /// Integer results wrap around the two's complement modulus (so `-3u8` is
+    /// `253`), matching NumPy; floats and complex negate element-wise.
+    fn ext_neg(self) -> Self;
+
+    /* #endregion */
+
     /* #region remainder */
 
     /// Computes the floored remainder — NumPy's `remainder` / Python's `%`
@@ -127,6 +137,14 @@ impl ExtNum for T {
     }
     /* #endregion */
 
+    /* #region neg */
+    #[inline]
+    fn ext_neg(self) -> Self {
+        // two's complement wrap, as NumPy's unary minus
+        self.wrapping_neg()
+    }
+    /* #endregion */
+
     /* #region remainder */
     #[inline]
     fn ext_rem(self, other: Self) -> Self {
@@ -196,6 +214,14 @@ impl ExtNum for T {
         } else {
             0
         }
+    }
+    /* #endregion */
+
+    /* #region neg */
+    #[inline]
+    fn ext_neg(self) -> Self {
+        // two's complement wrap (no overflow panic at the type's minimum)
+        self.wrapping_neg()
     }
     /* #endregion */
 
@@ -284,6 +310,13 @@ impl ExtNum for T {
         } else {
             0.0
         }
+    }
+    /* #endregion */
+
+    /* #region neg */
+    #[inline]
+    fn ext_neg(self) -> Self {
+        -self
     }
     /* #endregion */
 
@@ -388,6 +421,13 @@ impl ExtNum for T {
     }
     /* #endregion */
 
+    /* #region neg */
+    #[inline]
+    fn ext_neg(self) -> Self {
+        -self
+    }
+    /* #endregion */
+
     /* #region remainder */
     #[inline]
     fn ext_rem(self, other: Self) -> Self {
@@ -462,6 +502,13 @@ impl ExtNum for T {
         } else {
             self / abs
         }
+    }
+    /* #endregion */
+
+    /* #region neg */
+    #[inline]
+    fn ext_neg(self) -> Self {
+        -self
     }
     /* #endregion */
 

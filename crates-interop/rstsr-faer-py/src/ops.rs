@@ -24,8 +24,8 @@ use rstsr_core::operators::reduction::{
 use rstsr_core::storage::exports::{DeviceCreationAnyAPI, DeviceRawAPI};
 use rstsr_core::tensor::operators::exports::{
     TensorATan2API, TensorAddAPI, TensorBitAndAPI, TensorBitOrAPI, TensorBitXorAPI, TensorCopySignAPI, TensorDivAPI,
-    TensorEqualAPI, TensorFloorDivideAPI, TensorGreaterAPI, TensorGreaterEqualAPI, TensorHypotAPI, TensorLessAPI,
-    TensorLessEqualAPI, TensorLogAddExpAPI, TensorMaximumAPI, TensorMinimumAPI, TensorMulAPI, TensorNegAPI,
+    TensorEqualAPI, TensorExtNegAPI, TensorFloorDivideAPI, TensorGreaterAPI, TensorGreaterEqualAPI, TensorHypotAPI,
+    TensorLessAPI, TensorLessEqualAPI, TensorLogAddExpAPI, TensorMaximumAPI, TensorMinimumAPI, TensorMulAPI,
     TensorNextAfterAPI, TensorNotEqualAPI, TensorPositiveAPI, TensorReciprocalAPI, TensorRemAPI, TensorShlAPI,
     TensorShrAPI, TensorSquareAPI, TensorSubAPI,
 };
@@ -35,8 +35,8 @@ use crate::any_tensor::{
     device_faer, dispatch_bin_bool_self, dispatch_bin_int_bool_self, dispatch_bin_int_self, dispatch_bin_numeric_self,
     dispatch_bin_pow, dispatch_bin_promote, dispatch_bin_promote_eq, dispatch_t, dispatch_t_bool,
     dispatch_t_float_complex_same, dispatch_t_index_ord, dispatch_t_index_zero, dispatch_t_into_float,
-    dispatch_t_numeric_same, dispatch_t_real_bool, dispatch_t_real_numeric_same, dispatch_t_signed, dispatch_where,
-    err_py, lift, type_err, AnyTensor, FTensor, NativeArray,
+    dispatch_t_numeric_same, dispatch_t_real_bool, dispatch_t_real_numeric_same, dispatch_where, err_py, lift,
+    type_err, AnyTensor, FTensor, NativeArray,
 };
 use crate::creation::dim_from;
 
@@ -68,11 +68,11 @@ where
     rt::any_with_args_f(&truthy, reduce_args(axes, keepdims))
 }
 
-fn op_neg<T>(t: &FTensor<T>) -> rt::Result<FTensor<T>>
+fn op_ext_neg<T>(t: &FTensor<T>) -> rt::Result<FTensor<T>>
 where
-    for<'a> &'a FTensor<T>: TensorNegAPI<Output = FTensor<T>>,
+    for<'a> &'a FTensor<T>: TensorExtNegAPI<Output = FTensor<T>>,
 {
-    rt::neg_f(t)
+    rt::ext_neg_f(t)
 }
 
 // isnan/isfinite/isinf: rstsr's is_nan_f/is_finite_f/is_inf_f exist only for
@@ -571,11 +571,12 @@ pub fn divide(x1: &NativeArray, x2: &NativeArray) -> PyResult<NativeArray> {
     Ok(NativeArray { t: dispatch_bin_numeric_self!(x1.t, x2.t, "divide", op_div)? })
 }
 
-/// negative: signed numeric dtypes only (bool/unsigned rejected; unsigned
-/// wrap semantics are not defined by the standard).
+/// negative: numeric dtypes (bool rejected); integers, unsigned included,
+/// wrap around the two's-complement modulus, matching NumPy's unary minus
+/// (G-044). `__neg__` shares this path.
 #[pyfunction]
 pub fn negative(x: &NativeArray) -> PyResult<NativeArray> {
-    Ok(NativeArray { t: dispatch_t_signed!(x.t, op_neg())? })
+    Ok(NativeArray { t: dispatch_t_numeric_same!(x.t, "negative", op_ext_neg())? })
 }
 
 /// abs: numeric only; complex abs yields a REAL tensor (device TOut is the

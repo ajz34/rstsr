@@ -131,6 +131,34 @@ where
     }
 }
 
+// NumPy-style unary minus: covers unsigned dtypes (two's complement wrap)
+impl<T, D> OpExtNegAPI<T, D> for DeviceRayonAutoImpl
+where
+    T: Clone + Send + Sync + ExtNum,
+    D: DimAPI,
+{
+    type TOut = T;
+
+    fn op_muta_refb(
+        &self,
+        a: &mut Vec<MaybeUninit<Self::TOut>>,
+        la: &Layout<D>,
+        b: &Vec<T>,
+        lb: &Layout<D>,
+    ) -> Result<()> {
+        self.op_muta_refb_func(a, la, b, lb, &mut |a, b| {
+            a.write(b.clone().ext_neg());
+        })
+    }
+
+    fn op_muta(&self, a: &mut Vec<MaybeUninit<Self::TOut>>, la: &Layout<D>) -> Result<()> {
+        self.op_muta_func(a, la, &mut |a| unsafe {
+            // SAFETY: in-place op — reads an initialized element, then overwrites it via `write`.
+            a.write(a.assume_init_read().ext_neg());
+        })
+    }
+}
+
 impl<T, D> OpSquareAPI<T, D> for DeviceRayonAutoImpl
 where
     T: Clone + Send + Sync + Mul<Output = T>,

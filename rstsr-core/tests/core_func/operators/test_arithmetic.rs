@@ -235,3 +235,46 @@ mod custom_pow {
         let _ = rt::pow(&a, &neg);
     }
 }
+
+#[cfg(test)]
+mod custom_ext_neg {
+    use super::*;
+    static FUNC: &str = "custom_ext_neg";
+
+    #[test]
+    fn test_unsigned_wrap() {
+        crate::specify_test!("test_unsigned_wrap");
+
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        // np.arange(5, dtype=np.uint8) negated wraps modulo 256
+        let a = rt::arange((5u8, &device));
+        assert_equal(rt::ext_neg(&a), rt::tensor_from_nested!([0u8, 255, 254, 253, 252], &device), None);
+        // method form (owned) for the same-type path
+        assert_equal(
+            rt::arange((5u8, &device)).ext_neg(),
+            rt::tensor_from_nested!([0u8, 255, 254, 253, 252], &device),
+            None,
+        );
+    }
+
+    #[test]
+    fn test_signed_and_float() {
+        crate::specify_test!("test_signed_and_float");
+
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        let a = rt::tensor_from_nested!([-1, 2, -3], &device);
+        assert_equal(rt::ext_neg(&a), rt::tensor_from_nested!([1, -2, 3], &device), None);
+
+        // signed wrap at the type's minimum (no panic); compared raw, since
+        // `allclose` treats the signed minimum as a missing-value sentinel
+        let a = rt::tensor_from_nested!([i8::MIN, 0, 1], &device);
+        assert_eq!(rt::ext_neg(&a).to_vec(), vec![i8::MIN, 0, -1]);
+
+        let x = rt::tensor_from_nested!([1.5, -2.0, 0.0], &device);
+        assert_equal(rt::ext_neg(&x), rt::tensor_from_nested!([-1.5, 2.0, 0.0], &device), None);
+    }
+}

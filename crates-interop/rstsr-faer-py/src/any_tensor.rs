@@ -219,27 +219,6 @@ macro_rules! dispatch_t_bool {
 }
 pub(crate) use dispatch_t_bool;
 
-/// Dispatch over signed numeric dtypes only (bool/unsigned rejected —
-/// `Neg` has no unsigned impls; unsigned negative semantics are not
-/// defined by the standard).
-macro_rules! dispatch_t_signed {
-    ($scrut:expr, $f:ident ( $($arg:expr),* )) => {
-        match &$scrut {
-            AnyTensor::Bool(_) | AnyTensor::U8(_) | AnyTensor::U16(_) | AnyTensor::U32(_)
-            | AnyTensor::U64(_) => type_err("negative: not defined for bool/unsigned dtypes"),
-            AnyTensor::I8(t) => lift(($f::<i8>)(&t, $($arg),*), AnyTensor::I8),
-            AnyTensor::I16(t) => lift(($f::<i16>)(&t, $($arg),*), AnyTensor::I16),
-            AnyTensor::I32(t) => lift(($f::<i32>)(&t, $($arg),*), AnyTensor::I32),
-            AnyTensor::I64(t) => lift(($f::<i64>)(&t, $($arg),*), AnyTensor::I64),
-            AnyTensor::F32(t) => lift(($f::<f32>)(&t, $($arg),*), AnyTensor::F32),
-            AnyTensor::F64(t) => lift(($f::<f64>)(&t, $($arg),*), AnyTensor::F64),
-            AnyTensor::C32(t) => lift(($f::<Complex<f32>>)(&t, $($arg),*), AnyTensor::C32),
-            AnyTensor::C64(t) => lift(($f::<Complex<f64>>)(&t, $($arg),*), AnyTensor::C64),
-        }
-    };
-}
-pub(crate) use dispatch_t_signed;
-
 macro_rules! dispatch_fn {
     ($scrut:expr, $f:ident ( $($arg:expr),* )) => {
         match &$scrut {
