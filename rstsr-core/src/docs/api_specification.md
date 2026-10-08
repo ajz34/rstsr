@@ -286,9 +286,19 @@ Device is designed to be able extended by other crates. The above devices [`Devi
 ### Binary functions
 
 - Arithmetics: [`add`], [`div`], [`mul`], [`sub`], [`rem`];
+- Arithmetics with dtype promotion: [`ext_add`], [`ext_sub`], [`ext_mul`], [`ext_div`];
 - Arithmetics with assignment: [`add_assign`], [`div_assign`], [`mul_assign`], [`rem_assign`], [`sub_assign`];
 - Bitwise: [`bitand`], [`bitor`], [`bitxor`], [`shl`], [`shr`];
+- Bitwise with dtype promotion: [`ext_bitand`], [`ext_bitor`], [`ext_bitxor`], [`ext_shl`], [`ext_shr`];
 - Bitwise with assignment: [`bitand_assign`], [`bitor_assign`], [`bitxor_assign`], [`shl_assign`], [`shr_assign`].
+
+The `ext_` binary functions promote mixed-dtype operands to their common data type (following [`DTypePromoteAPI`], the same rule as NumPy) and compute the result in that type: they back the Array API `add` / `subtract` / `multiply` / `divide` and the `bitwise_*` functions. The same-dtype functions ([`add`], [`bitand`], ...) and the Rust operators (`+`, `-`, `*`, `/`, `&`, `|`, `^`, `<<`, `>>`) instead require matching operand dtypes. [`ext_shl`] / [`ext_shr`] additionally follow the Array API shift rule at the bit-width boundary (a left shift by at least the bit width yields `0`; a right shift saturates to the sign), unlike Rust's masking `<<` / `>>`.
+
+<div class="warning">
+
+**Prefer the Rust operators** (`+`, `-`, `*`, `/`, `&`, `|`, `^`, `<<`, `>>`) and the same-dtype functions ([`add`], [`mul`], [`bitand`], ...) in Rust code. The `ext_` binary functions exist primarily to fulfill the Array API's mixed-dtype promotion contract; they are **not** the idiomatic rstsr surface, and the operators/functions above are the recommended way when the operands already share a dtype.
+
+</div>
 
 <div class="warning">
 

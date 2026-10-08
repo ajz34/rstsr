@@ -30,6 +30,13 @@
 //! infinite-divisor special cases are handled too. Integer operands keep Rust's
 //! `%`.
 //!
+//! For mixed-dtype operands (the Array API `add` / `subtract` / `multiply` /
+//! `divide` contract), the promoted counterparts `ext_add` / `ext_sub` /
+//! `ext_mul` / `ext_div` (and the bitwise `ext_*`) live in
+//! [`op_binary_common`](crate::tensor::operators::op_binary_common); the
+//! operators and functions here are the recommended surface when the operands
+//! already share a dtype.
+//!
 //! # Examples
 //!
 //! ```rust

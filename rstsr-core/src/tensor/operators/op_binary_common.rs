@@ -18,6 +18,16 @@
 //! (the array API leaves it unspecified; NumPy raises there too), and a
 //! complex base uses the principal branch `exp(exponent * ln(base))`.
 //!
+//! The `ext_*` promoted binary family — [`ext_add`](ext_add()),
+//! [`ext_sub`](ext_sub()), [`ext_mul`](ext_mul()), [`ext_div`](ext_div()),
+//! [`ext_bitand`](ext_bitand()), [`ext_bitor`](ext_bitor()),
+//! [`ext_bitxor`](ext_bitxor()), [`ext_shl`](ext_shl()), [`ext_shr`](ext_shr())
+//! — also promotes mixed operand dtypes, serving the Array API binary
+//! functions. In Rust code, prefer the native operators (`+`, `-`, `*`, `/`,
+//! `&`, `|`, `^`, `<<`, `>>`) and the same-dtype functions (`rt::add`,
+//! `rt::bitand`, ...); the `ext_*` family exists for Array API fulfillment and
+//! is not the idiomatic rstsr surface.
+//!
 //! # Examples
 //!
 //! ```rust
@@ -80,6 +90,15 @@ Exception functions:
    [not_equal    ] [not_equal_f    ] [TensorNotEqualAPI    ];
    [pow          ] [pow_f          ] [TensorPowAPI         ];
    [nextafter    ] [nextafter_f    ] [TensorNextAfterAPI   ];
+   [ext_add      ] [ext_add_f      ] [TensorExtAddAPI      ];
+   [ext_sub      ] [ext_sub_f      ] [TensorExtSubAPI      ];
+   [ext_mul      ] [ext_mul_f      ] [TensorExtMulAPI      ];
+   [ext_div      ] [ext_div_f      ] [TensorExtDivAPI      ];
+   [ext_bitand   ] [ext_bitand_f   ] [TensorExtBitAndAPI   ];
+   [ext_bitor    ] [ext_bitor_f    ] [TensorExtBitOrAPI    ];
+   [ext_bitxor   ] [ext_bitxor_f   ] [TensorExtBitXorAPI   ];
+   [ext_shl      ] [ext_shl_f      ] [TensorExtShlAPI      ];
+   [ext_shr      ] [ext_shr_f      ] [TensorExtShrAPI      ];
 )]
 pub trait TensorOpAPI<TRB> {
     type Output;
@@ -109,6 +128,15 @@ pub trait TensorOpAPI<TRB> {
    [not_equal_f    ] [TensorNotEqualAPI    ] [OpNotEqualAPI    ];
    [pow_f          ] [TensorPowAPI         ] [OpPowAPI         ];
    [nextafter_f    ] [TensorNextAfterAPI   ] [OpNextAfterAPI   ];
+   [ext_add_f      ] [TensorExtAddAPI      ] [OpExtAddAPI      ];
+   [ext_sub_f      ] [TensorExtSubAPI      ] [OpExtSubAPI      ];
+   [ext_mul_f      ] [TensorExtMulAPI      ] [OpExtMulAPI      ];
+   [ext_div_f      ] [TensorExtDivAPI      ] [OpExtDivAPI      ];
+   [ext_bitand_f   ] [TensorExtBitAndAPI   ] [OpExtBitAndAPI   ];
+   [ext_bitor_f    ] [TensorExtBitOrAPI    ] [OpExtBitOrAPI    ];
+   [ext_bitxor_f   ] [TensorExtBitXorAPI   ] [OpExtBitXorAPI   ];
+   [ext_shl_f      ] [TensorExtShlAPI      ] [OpExtShlAPI      ];
+   [ext_shr_f      ] [TensorExtShrAPI      ] [OpExtShrAPI      ];
 )]
 mod impl_trait_binary {
     use super::*;
@@ -311,6 +339,15 @@ mod func_binary {
     func_binary!(greater_equal , greater_equal_f   , TensorGreaterEqualAPI     , DeviceGreaterEqualAPI     , ge, ge_f, greater_equal_to, greater_equal_to_f);
     func_binary!(not_equal     , not_equal_f       , TensorNotEqualAPI         , DeviceNotEqualAPI         , ne, ne_f, not_equal_to    , not_equal_to_f    );
     func_binary!(nextafter     , nextafter_f       , TensorNextAfterAPI        , DeviceNextAfterAPI        ,);
+    func_binary!(ext_add       , ext_add_f         , TensorExtAddAPI           , OpExtAddAPI               ,);
+    func_binary!(ext_sub       , ext_sub_f         , TensorExtSubAPI           , OpExtSubAPI               ,);
+    func_binary!(ext_mul       , ext_mul_f         , TensorExtMulAPI           , OpExtMulAPI               ,);
+    func_binary!(ext_div       , ext_div_f         , TensorExtDivAPI           , OpExtDivAPI               ,);
+    func_binary!(ext_bitand    , ext_bitand_f      , TensorExtBitAndAPI        , OpExtBitAndAPI            ,);
+    func_binary!(ext_bitor     , ext_bitor_f       , TensorExtBitOrAPI         , OpExtBitOrAPI             ,);
+    func_binary!(ext_bitxor    , ext_bitxor_f      , TensorExtBitXorAPI        , OpExtBitXorAPI            ,);
+    func_binary!(ext_shl       , ext_shl_f         , TensorExtShlAPI           , OpExtShlAPI               ,);
+    func_binary!(ext_shr       , ext_shr_f         , TensorExtShrAPI           , OpExtShrAPI               ,);
 }
 
 pub use func_binary::*;
@@ -431,5 +468,69 @@ mod test {
         assert_eq!(b.raw(), &[1.0, 9.0, 4.0, 25.0, 25.0, 4.0]);
         let b = 2.0.pow(a.view());
         assert_eq!(b.raw(), &[2.0, 8.0, 4.0, 32.0, 32.0, 4.0]);
+    }
+
+    #[test]
+    fn test_ext_arith() {
+        // same type: promotion is the identity, so `ext_*` matches `+`
+        let a = asarray(vec![1.0_f64, 2.0, 3.0]);
+        let b = asarray(vec![10.0_f64, 20.0, 30.0]);
+        assert_eq!(ext_add(&a, &b).raw(), &[11.0, 22.0, 33.0]);
+
+        // mixed int x int: promote to the wider type
+        let a = asarray(vec![1_i8, 2, 3]);
+        let b = asarray(vec![10_i16, 20, 30]);
+        assert_eq!(ext_add(&a, &b).raw(), &[11_i16, 22, 33]);
+
+        // mixed signed x unsigned: promote to int16
+        let a = asarray(vec![-1_i8, 2, 3]);
+        let b = asarray(vec![1_u8, 2, 3]);
+        assert_eq!(ext_add(&a, &b).raw(), &[0_i16, 4, 6]);
+
+        // mixed float widths: promote to float64
+        let a = asarray(vec![1.5_f32, 2.5]);
+        let b = asarray(vec![1.0_f64, 1.0]);
+        assert_eq!(ext_sub(&a, &b).raw(), &[0.5_f64, 1.5]);
+
+        // method form + mixed multiply
+        let a = asarray(vec![2_i8, 3, 4]);
+        let b = asarray(vec![10_i32, 10, 10]);
+        assert_eq!(a.ext_mul(&b).raw(), &[20_i32, 30, 40]);
+
+        // float divide keeps the promoted float dtype
+        let a = asarray(vec![1.0_f64, 2.0, 3.0]);
+        let b = asarray(vec![2.0_f32, 4.0, 1.0]);
+        assert_eq!(ext_div(&a, &b).raw(), &[0.5, 0.5, 3.0]);
+    }
+
+    #[test]
+    fn test_ext_bitwise() {
+        // mixed int widths: promote then bit-op
+        let a = asarray(vec![0b1100_i8, 0b1010]);
+        let b = asarray(vec![0b1010_i16, 0b0110]);
+        assert_eq!(ext_bitand(&a, &b).raw(), &[0b1000_i16, 0b0010]);
+        assert_eq!(ext_bitor(&a, &b).raw(), &[0b1110_i16, 0b1110]);
+        assert_eq!(ext_bitxor(&a, &b).raw(), &[0b0110_i16, 0b1100]);
+
+        // shifts promote the amount type as well
+        let a = asarray(vec![1_u8, 2, 4]);
+        let b = asarray(vec![1_i16, 1, 2]);
+        assert_eq!(ext_shl(&a, &b).raw(), &[2_i16, 4, 16]);
+        let c = asarray(vec![8_i16, 16, 32]);
+        let d = asarray(vec![1_u8, 2, 3]);
+        assert_eq!(ext_shr(&c, &d).raw(), &[4_i16, 4, 4]);
+
+        // shift amount >= bit width: left yields 0, right saturates to the sign
+        // (not Rust's masked `<<`/`>>`)
+        let e = asarray(vec![1_i8, 1, -1]);
+        let f = asarray(vec![8_i8, 9, 8]);
+        assert_eq!(ext_shl(&e, &f).raw(), &[0_i8, 0, 0]);
+        assert_eq!(ext_shr(&e, &f).raw(), &[0_i8, 0, -1]);
+
+        // bool stays bool
+        let a = asarray(vec![true, false, true]);
+        let b = asarray(vec![false, false, true]);
+        assert_eq!(ext_bitand(&a, &b).raw(), &[false, false, true]);
+        assert_eq!(ext_bitor(&a, &b).raw(), &[true, false, true]);
     }
 }
