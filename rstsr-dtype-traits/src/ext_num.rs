@@ -38,6 +38,16 @@ pub trait ExtNum: Clone {
 
     /* #endregion */
 
+    /* #region neg */
+
+    /// Computes the arithmetic negative of the number — NumPy's unary `-`.
+    ///
+    /// Integer results wrap around the two's complement modulus (so `-3u8` is
+    /// `253`), matching NumPy; floats and complex negate element-wise.
+    fn ext_neg(self) -> Self;
+
+    /* #endregion */
+
     /* #region remainder */
 
     /// Computes the floored remainder — NumPy's `remainder` / Python's `%`
@@ -49,6 +59,30 @@ pub trait ExtNum: Clone {
     /// divisor keep `other`'s sign / value. Complex operands have no floored
     /// form and delegate to the Gaussian `%` of [`num::Complex`].
     fn ext_rem(self, other: Self) -> Self;
+
+    /* #endregion */
+
+    /* #region pow */
+
+    /// Raises the number to the power `other` — the array-API `pow`.
+    ///
+    /// Returns `None` when `other` falls outside this type's integer-power
+    /// domain, i.e. a negative exponent for an integer type (the array API
+    /// leaves `int ** int` with a negative exponent unspecified; NumPy
+    /// rejects it). Float and complex accept any exponent; complex uses the
+    /// principal branch `exp(other * ln(self))`.
+    fn ext_pow(self, other: Self) -> Option<Self>;
+
+    /* #endregion */
+
+    /* #region round */
+
+    /// Rounds to the nearest integral value, with halfway cases to the even
+    /// neighbor — the array-API `round`.
+    ///
+    /// Identity for integer types. Complex rounds the real and imaginary parts
+    /// independently (array-API 2024.12).
+    fn ext_round(self) -> Self;
 
     /* #endregion */
 
@@ -103,6 +137,14 @@ impl ExtNum for T {
     }
     /* #endregion */
 
+    /* #region neg */
+    #[inline]
+    fn ext_neg(self) -> Self {
+        // two's complement wrap, as NumPy's unary minus
+        self.wrapping_neg()
+    }
+    /* #endregion */
+
     /* #region remainder */
     #[inline]
     fn ext_rem(self, other: Self) -> Self {
@@ -112,6 +154,21 @@ impl ExtNum for T {
         } else {
             self % other
         }
+    }
+    /* #endregion */
+
+    /* #region pow */
+    #[inline]
+    #[allow(clippy::unnecessary_cast)] // identity cast for u32 itself
+    fn ext_pow(self, other: Self) -> Option<Self> {
+        Some(self.pow(other as u32))
+    }
+    /* #endregion */
+
+    /* #region round */
+    #[inline]
+    fn ext_round(self) -> Self {
+        self
     }
     /* #endregion */
 
@@ -160,6 +217,14 @@ impl ExtNum for T {
     }
     /* #endregion */
 
+    /* #region neg */
+    #[inline]
+    fn ext_neg(self) -> Self {
+        // two's complement wrap (no overflow panic at the type's minimum)
+        self.wrapping_neg()
+    }
+    /* #endregion */
+
     /* #region remainder */
     #[inline]
     fn ext_rem(self, other: Self) -> Self {
@@ -181,6 +246,25 @@ impl ExtNum for T {
     }
     /* #endregion */
 
+    /* #region pow */
+    #[inline]
+    fn ext_pow(self, other: Self) -> Option<Self> {
+        if other < 0 {
+            // the array API leaves this unspecified and NumPy rejects it
+            None
+        } else {
+            Some(self.pow(other as u32))
+        }
+    }
+    /* #endregion */
+
+    /* #region round */
+    #[inline]
+    fn ext_round(self) -> Self {
+        self
+    }
+    /* #endregion */
+
     /* #region real-imag */
     #[inline]
     fn ext_real(self) -> Self {
@@ -193,7 +277,11 @@ impl ExtNum for T {
     /* #endregion */
 }
 
-#[duplicate_item(T; [f32]; [f64];)]
+#[duplicate_item(
+    T       roundeven;
+    [f32]   [libm::roundevenf];
+    [f64]   [libm::roundeven];
+)]
 impl ExtNum for T {
     /* #region abs */
     type AbsOut = Self;
@@ -222,6 +310,13 @@ impl ExtNum for T {
         } else {
             0.0
         }
+    }
+    /* #endregion */
+
+    /* #region neg */
+    #[inline]
+    fn ext_neg(self) -> Self {
+        -self
     }
     /* #endregion */
 
@@ -256,6 +351,21 @@ impl ExtNum for T {
         } else {
             r
         }
+    }
+    /* #endregion */
+
+    /* #region pow */
+    #[inline]
+    fn ext_pow(self, other: Self) -> Option<Self> {
+        Some(self.powf(other))
+    }
+    /* #endregion */
+
+    /* #region round */
+    #[inline]
+    fn ext_round(self) -> Self {
+        // ties-to-even, exactly (libm is a `no_std` dependency of this crate)
+        roundeven(self)
     }
     /* #endregion */
 
@@ -311,11 +421,33 @@ impl ExtNum for T {
     }
     /* #endregion */
 
+    /* #region neg */
+    #[inline]
+    fn ext_neg(self) -> Self {
+        -self
+    }
+    /* #endregion */
+
     /* #region remainder */
     #[inline]
     fn ext_rem(self, other: Self) -> Self {
         // round-trip through f32: exact in, one rounding out
         Self::from_f32(f32::from(self).ext_rem(f32::from(other)))
+    }
+    /* #endregion */
+
+    /* #region pow */
+    #[inline]
+    fn ext_pow(self, other: Self) -> Option<Self> {
+        Some(Self::from_f32(f32::from(self).powf(f32::from(other))))
+    }
+    /* #endregion */
+
+    /* #region round */
+    #[inline]
+    fn ext_round(self) -> Self {
+        // round through f32: the result is integral and f16/bf16-exact
+        Self::from_f32(libm::roundevenf(f32::from(self)))
     }
     /* #endregion */
 
@@ -339,7 +471,11 @@ impl ExtNum for T {
     /* #endregion */
 }
 
-#[duplicate_item(T; [Complex<f32>]; [Complex<f64>];)]
+#[duplicate_item(
+    T                roundeven;
+    [Complex<f32>]   [libm::roundevenf];
+    [Complex<f64>]   [libm::roundeven];
+)]
 impl ExtNum for T {
     /* #region abs */
     type AbsOut = <T as ComplexFloat>::Real;
@@ -369,11 +505,34 @@ impl ExtNum for T {
     }
     /* #endregion */
 
+    /* #region neg */
+    #[inline]
+    fn ext_neg(self) -> Self {
+        -self
+    }
+    /* #endregion */
+
     /* #region remainder */
     #[inline]
     fn ext_rem(self, other: Self) -> Self {
         // complex has no floored remainder; keep num-complex's Gaussian `%`
         self % other
+    }
+    /* #endregion */
+
+    /* #region pow */
+    #[inline]
+    fn ext_pow(self, other: Self) -> Option<Self> {
+        // principal branch: exp(other * ln(self))
+        Some(self.powc(other))
+    }
+    /* #endregion */
+
+    /* #region round */
+    #[inline]
+    fn ext_round(self) -> Self {
+        // real and imaginary parts round independently (array-API 2024.12)
+        Self::new(roundeven(self.re), roundeven(self.im))
     }
     /* #endregion */
 

@@ -219,27 +219,6 @@ macro_rules! dispatch_t_bool {
 }
 pub(crate) use dispatch_t_bool;
 
-/// Dispatch over signed numeric dtypes only (bool/unsigned rejected —
-/// `Neg` has no unsigned impls; unsigned negative semantics are not
-/// defined by the standard).
-macro_rules! dispatch_t_signed {
-    ($scrut:expr, $f:ident ( $($arg:expr),* )) => {
-        match &$scrut {
-            AnyTensor::Bool(_) | AnyTensor::U8(_) | AnyTensor::U16(_) | AnyTensor::U32(_)
-            | AnyTensor::U64(_) => type_err("negative: not defined for bool/unsigned dtypes"),
-            AnyTensor::I8(t) => lift(($f::<i8>)(&t, $($arg),*), AnyTensor::I8),
-            AnyTensor::I16(t) => lift(($f::<i16>)(&t, $($arg),*), AnyTensor::I16),
-            AnyTensor::I32(t) => lift(($f::<i32>)(&t, $($arg),*), AnyTensor::I32),
-            AnyTensor::I64(t) => lift(($f::<i64>)(&t, $($arg),*), AnyTensor::I64),
-            AnyTensor::F32(t) => lift(($f::<f32>)(&t, $($arg),*), AnyTensor::F32),
-            AnyTensor::F64(t) => lift(($f::<f64>)(&t, $($arg),*), AnyTensor::F64),
-            AnyTensor::C32(t) => lift(($f::<Complex<f32>>)(&t, $($arg),*), AnyTensor::C32),
-            AnyTensor::C64(t) => lift(($f::<Complex<f64>>)(&t, $($arg),*), AnyTensor::C64),
-        }
-    };
-}
-pub(crate) use dispatch_t_signed;
-
 macro_rules! dispatch_fn {
     ($scrut:expr, $f:ident ( $($arg:expr),* )) => {
         match &$scrut {
@@ -482,37 +461,6 @@ macro_rules! dispatch_t_into_float {
 }
 pub(crate) use dispatch_t_into_float;
 
-/// Unary dispatch whose spec output dtype equals the input dtype, restricted
-/// to real floating dtypes (`f32`/`f64`): bool, integer and complex inputs
-/// are declined. Integer inputs are declined because rstsr's kernels promote
-/// them to float64 while the spec requires dtype preservation (register
-/// G-052: dtype-preserving integer kernels).
-macro_rules! dispatch_t_real_float_same {
-    ($scrut:expr, $opname:expr, $f:ident ( $($arg:expr),* )) => {
-        match &$scrut {
-            AnyTensor::Bool(_) => type_err(format!(
-                "{}: not defined for bool dtype",
-                $opname
-            )),
-            AnyTensor::I8(_) | AnyTensor::I16(_) | AnyTensor::I32(_) | AnyTensor::I64(_)
-            | AnyTensor::U8(_) | AnyTensor::U16(_) | AnyTensor::U32(_) | AnyTensor::U64(_) => type_err(
-                format!(
-                    "{}: integer inputs are not provided by rstsr (the kernel promotes to float64; \
-                     the spec requires dtype preservation) — register G-052",
-                    $opname
-                ),
-            ),
-            AnyTensor::C32(_) | AnyTensor::C64(_) => type_err(format!(
-                "{}: complex inputs are not provided by rstsr (gap)",
-                $opname
-            )),
-            AnyTensor::F32(t) => lift(($f::<f32>)(&t, $($arg),*), AnyTensor::F32),
-            AnyTensor::F64(t) => lift(($f::<f64>)(&t, $($arg),*), AnyTensor::F64),
-        }
-    };
-}
-pub(crate) use dispatch_t_real_float_same;
-
 /// Unary dispatch over every numeric dtype but bool, output dtype == input
 /// dtype (rstsr `ExtNum` kernels: sign, conj).
 macro_rules! dispatch_t_numeric_same {
@@ -588,6 +536,32 @@ macro_rules! dispatch_t_real_numeric_same {
     };
 }
 pub(crate) use dispatch_t_real_numeric_same;
+
+/// Unary dispatch over real numeric dtypes (ints + floats) with a boolean
+/// result (`signbit`). Complex is declined: the sign bit is undefined for
+/// complex numbers.
+macro_rules! dispatch_t_real_bool {
+    ($scrut:expr, $opname:expr, $f:ident ( $($arg:expr),* )) => {
+        match &$scrut {
+            AnyTensor::Bool(_) => type_err(format!("{}: not defined for bool dtype", $opname)),
+            AnyTensor::I8(t) => lift(($f::<i8>)(&t, $($arg),*), AnyTensor::Bool),
+            AnyTensor::I16(t) => lift(($f::<i16>)(&t, $($arg),*), AnyTensor::Bool),
+            AnyTensor::I32(t) => lift(($f::<i32>)(&t, $($arg),*), AnyTensor::Bool),
+            AnyTensor::I64(t) => lift(($f::<i64>)(&t, $($arg),*), AnyTensor::Bool),
+            AnyTensor::U8(t) => lift(($f::<u8>)(&t, $($arg),*), AnyTensor::Bool),
+            AnyTensor::U16(t) => lift(($f::<u16>)(&t, $($arg),*), AnyTensor::Bool),
+            AnyTensor::U32(t) => lift(($f::<u32>)(&t, $($arg),*), AnyTensor::Bool),
+            AnyTensor::U64(t) => lift(($f::<u64>)(&t, $($arg),*), AnyTensor::Bool),
+            AnyTensor::F32(t) => lift(($f::<f32>)(&t, $($arg),*), AnyTensor::Bool),
+            AnyTensor::F64(t) => lift(($f::<f64>)(&t, $($arg),*), AnyTensor::Bool),
+            AnyTensor::C32(_) | AnyTensor::C64(_) => type_err(format!(
+                "{}: the sign bit is not defined for complex dtypes",
+                $opname
+            )),
+        }
+    };
+}
+pub(crate) use dispatch_t_real_bool;
 
 /// Binary dispatch for ops whose rstsr device kernel promotes mixed dtypes
 /// (`DTypePromoteAPI` bound; real dtypes only — bool and complex are out of
@@ -708,6 +682,30 @@ macro_rules! dispatch_bin_promote {
     };
 }
 pub(crate) use dispatch_bin_promote;
+
+/// Binary dispatch for `pow`: the promoted real arms (`dispatch_bin_promote!`)
+/// plus the complex (`complex64`/`complex128`) pairs. The result variant is
+/// the promoted type via `any_of`, i.e. the array-API pow result dtype.
+macro_rules! dispatch_bin_pow {
+    ($a:expr, $b:expr, $opname:expr, $f:ident) => {
+        match (&$a, &$b) {
+            (AnyTensor::C32(a), AnyTensor::C32(b)) => {
+                lift(($f::<Complex<f32>, Complex<f32>>)(a, b), crate::any_tensor::any_of)
+            },
+            (AnyTensor::C64(a), AnyTensor::C32(b)) => {
+                lift(($f::<Complex<f64>, Complex<f32>>)(a, b), crate::any_tensor::any_of)
+            },
+            (AnyTensor::C32(a), AnyTensor::C64(b)) => {
+                lift(($f::<Complex<f32>, Complex<f64>>)(a, b), crate::any_tensor::any_of)
+            },
+            (AnyTensor::C64(a), AnyTensor::C64(b)) => {
+                lift(($f::<Complex<f64>, Complex<f64>>)(a, b), crate::any_tensor::any_of)
+            },
+            _ => dispatch_bin_promote!($a, $b, $opname, $f),
+        }
+    };
+}
+pub(crate) use dispatch_bin_pow;
 
 /// Same-dtype binary dispatch over integer and boolean dtypes only (bitwise
 /// family; the spec excludes floats and complexes).

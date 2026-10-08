@@ -6,12 +6,16 @@
 //! [`square`](square()), [`reciprocal`](reciprocal())), rounding
 //! ([`ceil`](ceil()), [`floor`](floor()), [`round`](round()),
 //! [`trunc`](trunc())), and queries ([`abs`](abs()), [`sign`](sign()),
-//! [`signbit`](signbit()), [`is_finite`](is_finite()), [`is_inf`](is_inf()),
-//! [`is_nan`](is_nan()), [`conj`](conj()), [`real`](real()),
-//! [`imag`](imag()), [`inv`](inv())).
+//! [`ext_neg`](ext_neg()), [`signbit`](signbit()), [`is_finite`](is_finite()),
+//! [`is_inf`](is_inf()), [`is_nan`](is_nan()), [`conj`](conj()),
+//! [`real`](real()), [`imag`](imag()), [`inv`](inv())).
 //!
 //! Most functions require float or complex dtypes; queries
 //! ([`is_finite`](is_finite()), ...) return boolean tensors.
+//!
+//! [`signbit`](signbit()) tests the IEEE 754 sign *bit* rather than `< 0`: the
+//! result is `true` for negative values, `-0.0` and negatively-signed NaN, and
+//! `false` for every other real value (every unsigned integer included).
 //!
 //! # Examples
 //!
@@ -48,6 +52,7 @@ Most unary functions are of the same type. However, there are some exceptions, a
     - complex: generalized, not for inplace.
     - real: specialized, for inplace.
 - `Sign`: any `ExtNum` dtype (integers, floats, complex), same-type output, for inplace.
+- `ExtNeg`: any `ExtNum` dtype (integers incl. unsigned, floats, complex), same-type output, for inplace.
 
 */
 
@@ -122,6 +127,7 @@ mod trait_unary {
     trait_unary!(real , real_f , TensorRealAPI );
     trait_unary!(imag , imag_f , TensorImagAPI );
     trait_unary!(sign , sign_f , TensorSignAPI );
+    trait_unary!(ext_neg, ext_neg_f, TensorExtNegAPI);
 }
 
 pub use trait_unary::*;
@@ -167,6 +173,7 @@ pub use trait_unary::*;
    [imag_f      ] [TensorImagAPI      ] [OpImagAPI      ];
    [real_f      ] [TensorRealAPI      ] [OpRealAPI      ];
    [sign_f      ] [TensorSignAPI      ] [OpSignAPI      ];
+   [ext_neg_f   ] [TensorExtNegAPI    ] [OpExtNegAPI    ];
 )]
 mod impl_tensor_unary_common {
     use super::*;

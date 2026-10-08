@@ -1,7 +1,8 @@
 use crate::prelude_dev::*;
+use core::sync::atomic::{AtomicBool, Ordering};
 use num::complex::ComplexFloat;
-use num::{pow::Pow, Float};
-use rstsr_dtype_traits::{DTypeIntoFloatAPI, DTypePromoteAPI, ExtFloat, ExtReal};
+use num::Float;
+use rstsr_dtype_traits::{DTypeIntoFloatAPI, DTypePromoteAPI, ExtFloat, ExtNum, ExtReal};
 
 // output with special promotion
 #[duplicate_item(
@@ -138,16 +139,15 @@ where
     }
 }
 
-// Special case for pow
+// pow: the output is the promoted type, and the kernel is `ExtNum::ext_pow`
 impl<TA, TB, D> OpPowAPI<TA, TB, D> for DeviceCpuSerial
 where
-    TA: Clone,
+    TA: Clone + DTypePromoteAPI<TB>,
     TB: Clone,
-    TA: Pow<TB>,
-    TA::Output: Clone,
+    TA::Res: ExtNum,
     D: DimAPI,
 {
-    type TOut = TA::Output;
+    type TOut = TA::Res;
 
     fn op_mutc_refa_refb(
         &self,
@@ -158,9 +158,22 @@ where
         b: &Vec<TB>,
         lb: &Layout<D>,
     ) -> Result<()> {
+        let bad_exp = AtomicBool::new(false);
         self.op_mutc_refa_refb_func(c, lc, a, la, b, lb, &mut |c, a, b| {
-            c.write(a.clone().pow(b.clone()));
-        })
+            let (a, b) = TA::promote_pair(a.clone(), b.clone());
+            match a.ext_pow(b) {
+                Some(v) => {
+                    c.write(v);
+                },
+                None => {
+                    bad_exp.store(true, Ordering::Relaxed);
+                },
+            }
+        })?;
+        if bad_exp.load(Ordering::Relaxed) {
+            return Err(rstsr_error!(InvalidValue, "integer power requires a non-negative exponent"));
+        }
+        Ok(())
     }
 
     fn op_mutc_refa_numb(
@@ -171,9 +184,22 @@ where
         la: &Layout<D>,
         b: TB,
     ) -> Result<()> {
+        let bad_exp = AtomicBool::new(false);
         self.op_mutc_refa_numb_func(c, lc, a, la, b, &mut |c, a, b| {
-            c.write(a.clone().pow(b.clone()));
-        })
+            let (a, b) = TA::promote_pair(a.clone(), b.clone());
+            match a.ext_pow(b) {
+                Some(v) => {
+                    c.write(v);
+                },
+                None => {
+                    bad_exp.store(true, Ordering::Relaxed);
+                },
+            }
+        })?;
+        if bad_exp.load(Ordering::Relaxed) {
+            return Err(rstsr_error!(InvalidValue, "integer power requires a non-negative exponent"));
+        }
+        Ok(())
     }
 
     fn op_mutc_numa_refb(
@@ -184,9 +210,22 @@ where
         b: &<Self as DeviceRawAPI<TB>>::Raw,
         lb: &Layout<D>,
     ) -> Result<()> {
+        let bad_exp = AtomicBool::new(false);
         self.op_mutc_numa_refb_func(c, lc, a, b, lb, &mut |c, a, b| {
-            c.write(a.clone().pow(b.clone()));
-        })
+            let (a, b) = TA::promote_pair(a.clone(), b.clone());
+            match a.ext_pow(b) {
+                Some(v) => {
+                    c.write(v);
+                },
+                None => {
+                    bad_exp.store(true, Ordering::Relaxed);
+                },
+            }
+        })?;
+        if bad_exp.load(Ordering::Relaxed) {
+            return Err(rstsr_error!(InvalidValue, "integer power requires a non-negative exponent"));
+        }
+        Ok(())
     }
 }
 

@@ -279,7 +279,9 @@ Device is designed to be able extended by other crates. The above devices [`Devi
 
 ### Unary functions
 
-- Arithmetics: [`neg`], [`not`]
+- Arithmetics: [`neg`], [`ext_neg`], [`positive`], [`not`]
+
+[`ext_neg`]: unary negation with NumPy semantics — preserves the input dtype and wraps unsigned integers around the two's-complement modulus (the Array API `negative`; the `-` operator and [`neg`] cover signed integers, floats and complex, but not unsigned dtypes).
 
 ### Binary functions
 
@@ -323,7 +325,7 @@ Note we leave einsum and vectordot not implemented. For those functions, current
 
 ### Unary functions
 
-[`abs`], [`acos`], [`acosh`], [`asin`], [`asinh`], [`atan`], [`atanh`], [`ceil`], [`conj`], [`cos`], [`cosh`], [`exp`], [`expm1`], [`floor`], [`imag`], [`inv`], [`is_finite`], [`is_inf`], [`is_nan`], [`log`], [`log10`], [`log2`], [`real`], [`reciprocal`], [`round`], [`sign`], [`signbit`], [`sin`], [`sinh`], [`sqrt`], [`square`], [`tan`], [`tanh`], [`trunc`]
+[`abs`], [`acos`], [`acosh`], [`asin`], [`asinh`], [`atan`], [`atanh`], [`ceil`], [`conj`], [`cos`], [`cosh`], [`exp`], [`expm1`], [`floor`], [`imag`], [`inv`], [`is_finite`], [`is_inf`], [`is_nan`], [`log`], [`log10`], [`log1p`], [`log2`], [`real`], [`reciprocal`], [`round`], [`sign`], [`signbit`], [`sin`], [`sinh`], [`sqrt`], [`square`], [`tan`], [`tanh`], [`trunc`]
 
 ### Binary functions
 

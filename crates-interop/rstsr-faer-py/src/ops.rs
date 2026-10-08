@@ -24,8 +24,8 @@ use rstsr_core::operators::reduction::{
 use rstsr_core::storage::exports::{DeviceCreationAnyAPI, DeviceRawAPI};
 use rstsr_core::tensor::operators::exports::{
     TensorATan2API, TensorAddAPI, TensorBitAndAPI, TensorBitOrAPI, TensorBitXorAPI, TensorCopySignAPI, TensorDivAPI,
-    TensorEqualAPI, TensorFloorDivideAPI, TensorGreaterAPI, TensorGreaterEqualAPI, TensorHypotAPI, TensorLessAPI,
-    TensorLessEqualAPI, TensorLogAddExpAPI, TensorMaximumAPI, TensorMinimumAPI, TensorMulAPI, TensorNegAPI,
+    TensorEqualAPI, TensorExtNegAPI, TensorFloorDivideAPI, TensorGreaterAPI, TensorGreaterEqualAPI, TensorHypotAPI,
+    TensorLessAPI, TensorLessEqualAPI, TensorLogAddExpAPI, TensorMaximumAPI, TensorMinimumAPI, TensorMulAPI,
     TensorNextAfterAPI, TensorNotEqualAPI, TensorPositiveAPI, TensorReciprocalAPI, TensorRemAPI, TensorShlAPI,
     TensorShrAPI, TensorSquareAPI, TensorSubAPI,
 };
@@ -33,9 +33,9 @@ use rstsr_dtype_traits::{DTypeIntoFloatAPI, DTypePromoteAPI};
 
 use crate::any_tensor::{
     device_faer, dispatch_bin_bool_self, dispatch_bin_int_bool_self, dispatch_bin_int_self, dispatch_bin_numeric_self,
-    dispatch_bin_promote, dispatch_bin_promote_eq, dispatch_t, dispatch_t_bool, dispatch_t_float_complex_same,
-    dispatch_t_index_ord, dispatch_t_index_zero, dispatch_t_into_float, dispatch_t_numeric_same,
-    dispatch_t_real_float_same, dispatch_t_real_numeric_same, dispatch_t_signed, dispatch_where, err_py, lift,
+    dispatch_bin_pow, dispatch_bin_promote, dispatch_bin_promote_eq, dispatch_t, dispatch_t_bool,
+    dispatch_t_float_complex_same, dispatch_t_index_ord, dispatch_t_index_zero, dispatch_t_into_float,
+    dispatch_t_numeric_same, dispatch_t_real_bool, dispatch_t_real_numeric_same, dispatch_where, err_py, lift,
     type_err, AnyTensor, FTensor, NativeArray,
 };
 use crate::creation::dim_from;
@@ -68,11 +68,11 @@ where
     rt::any_with_args_f(&truthy, reduce_args(axes, keepdims))
 }
 
-fn op_neg<T>(t: &FTensor<T>) -> rt::Result<FTensor<T>>
+fn op_ext_neg<T>(t: &FTensor<T>) -> rt::Result<FTensor<T>>
 where
-    for<'a> &'a FTensor<T>: TensorNegAPI<Output = FTensor<T>>,
+    for<'a> &'a FTensor<T>: TensorExtNegAPI<Output = FTensor<T>>,
 {
-    rt::neg_f(t)
+    rt::ext_neg_f(t)
 }
 
 // isnan/isfinite/isinf: rstsr's is_nan_f/is_finite_f/is_inf_f exist only for
@@ -182,9 +182,8 @@ where
 //
 // Binding-only additions: every wrapper is a thin call into `rt::`; dtype
 // policy lives in the dispatch macros of any_tensor.rs. Divergences that a
-// binding cannot fix (integer inputs to the dtype-preserving rounding family,
-// integer/complex kernels rstsr lacks, mixed-dtype arithmetic) are declined
-// with a register reference instead of worked around.
+// binding cannot fix (integer/complex kernels rstsr lacks, mixed-dtype
+// arithmetic) are declined with a register reference instead of worked around.
 
 /// Output-type shape is taken from rstsr's own dtype traits (`FloatType`,
 /// promoted `Res`), so no dtype table is duplicated in the shim.
@@ -232,7 +231,7 @@ unary_wrapper!(op_sqrt, sqrt_f, TensorSqrtAPI);
 unary_wrapper!(op_tan, tan_f, TensorTanAPI);
 unary_wrapper!(op_tanh, tanh_f, TensorTanhAPI);
 unary_wrapper!(op_expm1, expm1_f, TensorExpm1API);
-// real-only kernels
+// dtype-preserving rounding (integers are already integral; `round` also complex)
 unary_wrapper_same!(op_ceil, ceil_f, TensorCeilAPI);
 unary_wrapper_same!(op_floor, floor_f, TensorFloorAPI);
 unary_wrapper_same!(op_trunc, trunc_f, TensorTruncAPI);
@@ -253,12 +252,12 @@ macro_rules! py_unary_into_float {
     };
 }
 
-macro_rules! py_unary_real_float_same {
+macro_rules! py_unary_real_numeric_same {
     ($($pyname:ident => $wrapper:ident),* $(,)?) => {
         $(
             #[pyfunction]
             pub fn $pyname(x: &NativeArray) -> PyResult<NativeArray> {
-                Ok(NativeArray { t: dispatch_t_real_float_same!(x.t, stringify!($pyname), $wrapper())? })
+                Ok(NativeArray { t: dispatch_t_real_numeric_same!(x.t, stringify!($pyname), $wrapper())? })
             }
         )*
     };
@@ -310,12 +309,8 @@ py_unary_into_float!(
     tan => op_tan,
     tanh => op_tanh,
 );
-py_unary_real_float_same!(
-    ceil => op_ceil,
-    floor => op_floor,
-    trunc => op_trunc,
-    round => op_round,
-);
+py_unary_real_numeric_same!(ceil => op_ceil, floor => op_floor, trunc => op_trunc);
+py_unary_numeric_same!(round => op_round);
 /// `positive`: identity function, routed through rstsr's `TensorPositiveAPI`
 /// (rust-side trait added 2026-10-05; no operator trait bound on the dtype).
 fn op_positive<T>(t: &FTensor<T>) -> rt::Result<FTensor<T>>
@@ -333,16 +328,18 @@ py_unary_numeric_same!(positive => op_positive);
 
 py_unary_float_complex_same!(conj => op_conj);
 
-/// `signbit` is present in rstsr but its kernel writes `is_positive()` —
-/// the inverse of the standard's sign-bit test (verified: `signbit(-2.0)` is
-/// False). The shim declines instead of returning wrong values; rust-side fix
-/// requested (register G-054).
+/// `signbit`: the IEEE 754 sign bit as a boolean tensor (true for negative
+/// values, `-0.0` and negatively-signed NaN; real dtypes only).
+fn op_signbit<T>(t: &FTensor<T>) -> rt::Result<FTensor<bool>>
+where
+    for<'x> &'x FTensor<T>: TensorSignBitAPI<Output = FTensor<bool>>,
+{
+    rt::signbit_f(t)
+}
+
 #[pyfunction]
-pub fn signbit(_x: &NativeArray) -> PyResult<NativeArray> {
-    type_err(
-        "signbit: rstsr's kernel returns is_positive (inverted sign-bit semantics) — \
-         rust-side fix required (register G-054)",
-    )
+pub fn signbit(x: &NativeArray) -> PyResult<NativeArray> {
+    Ok(NativeArray { t: dispatch_t_real_bool!(x.t, "signbit", op_signbit())? })
 }
 
 #[pyfunction]
@@ -524,20 +521,12 @@ py_bin_int!(
     bitwise_right_shift => op_bitwise_right_shift,
 );
 
-/// `pow`: same-dtype only, floats — rstsr's `Pow` bound needs an unsigned
-/// exponent for integer bases and `num` provides no `Complex: Pow<Complex>`,
-/// so integer and complex pow are rust-side gaps (registered G-053).
+bin_promote_wrapper!(op_pow, pow_f, TensorPowAPI);
+
+/// `pow`: promoted result dtype over integer, real and complex operands.
 #[pyfunction]
 pub fn pow(x1: &NativeArray, x2: &NativeArray) -> PyResult<NativeArray> {
-    let t: AnyTensor = match (&x1.t, &x2.t) {
-        (AnyTensor::F32(a), AnyTensor::F32(b)) => lift(rt::pow_f(a, b), AnyTensor::F32)?,
-        (AnyTensor::F64(a), AnyTensor::F64(b)) => lift(rt::pow_f(a, b), AnyTensor::F64)?,
-        (AnyTensor::F32(_) | AnyTensor::F64(_), _) | (_, AnyTensor::F32(_) | AnyTensor::F64(_)) => {
-            return type_err("pow: mixed-dtype operands are not provided by rstsr (gap G-009)")
-        },
-        _ => return type_err("pow: integer/bool/complex bases are not provided by rstsr (gap G-053)"),
-    };
-    Ok(NativeArray { t })
+    Ok(NativeArray { t: dispatch_bin_pow!(x1.t, x2.t, "pow", op_pow)? })
 }
 
 /// `logical_and/or/xor`: boolean inputs only, boolean output.
@@ -582,11 +571,12 @@ pub fn divide(x1: &NativeArray, x2: &NativeArray) -> PyResult<NativeArray> {
     Ok(NativeArray { t: dispatch_bin_numeric_self!(x1.t, x2.t, "divide", op_div)? })
 }
 
-/// negative: signed numeric dtypes only (bool/unsigned rejected; unsigned
-/// wrap semantics are not defined by the standard).
+/// negative: numeric dtypes (bool rejected); integers, unsigned included,
+/// wrap around the two's-complement modulus, matching NumPy's unary minus
+/// (G-044). `__neg__` shares this path.
 #[pyfunction]
 pub fn negative(x: &NativeArray) -> PyResult<NativeArray> {
-    Ok(NativeArray { t: dispatch_t_signed!(x.t, op_neg())? })
+    Ok(NativeArray { t: dispatch_t_numeric_same!(x.t, "negative", op_ext_neg())? })
 }
 
 /// abs: numeric only; complex abs yields a REAL tensor (device TOut is the

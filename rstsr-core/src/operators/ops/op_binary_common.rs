@@ -14,6 +14,7 @@ use crate::prelude_dev::*;
    [OpCoshAPI      ];
    [OpExpAPI       ];
    [OpExpm1API     ];
+   [OpExtNegAPI    ];
    [OpFloorAPI     ];
    [OpInvAPI       ];
    [OpIsFiniteAPI  ];
@@ -61,5 +62,6 @@ where
 // not implemented types
 // DeviceBitwiseInvertAPI, (implemented in Not)
 // DeviceLogicalNotAPI, (implemented in Not)
-// DeviceNegativeAPI, (implemented in Neg)
+// DeviceNegativeAPI, (implemented in Neg; `OpExtNegAPI` additionally carries
+// the NumPy `ext_neg` semantics that cover unsigned dtypes)
 // DevicePositiveAPI, (not implemented)
