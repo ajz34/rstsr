@@ -1276,6 +1276,8 @@ def _join_parts(arrays, opname, /):
 
 def concat(arrays, /, *, axis=0):
     parts = _join_parts(arrays, "concat")
+    # cross-dtype joins cast each part to the promoted common dtype first
+    parts = _cast_parts(parts, "concat")
     if axis is None:
         # spec: axis=None flattens every array before concatenation
         parts = [_reshape(h, (-1,)) for h in parts]
@@ -1284,7 +1286,8 @@ def concat(arrays, /, *, axis=0):
 
 
 def stack(arrays, /, *, axis=0):
-    return _wrap(_stack(_join_parts(arrays, "stack"), axis))
+    parts = _cast_parts(_join_parts(arrays, "stack"), "stack")
+    return _wrap(_stack(parts, axis))
 
 
 def unstack(x, /, *, axis=0):
@@ -1566,19 +1569,19 @@ _INT_PROMOTE = {
 }
 
 
-def _common_int_dtype(d1, d2, /):
+def _common_int_dtype(d1, d2, /, opname="isin"):
     """Common integer dtype of two int dtypes (the standard's promotion table).
 
-    rstsr's isin kernel is single-dtype, so mixed integer pairs are brought to
-    their promoted dtype through the existing astype path (value-preserving);
-    mixed non-integer pairs stay declined (G-009).
+    rstsr's isin/join kernels are single-dtype, so mixed integer pairs are
+    brought to their promoted dtype through the existing astype path
+    (value-preserving); mixed non-integer pairs stay declined (G-009).
     """
     try:
         r1, s1 = _INT_PROMOTE[d1.name]
         r2, s2 = _INT_PROMOTE[d2.name]
     except KeyError:
         raise TypeError(
-            f"isin: mixed-dtype operands {d1.name}/{d2.name} are not provided by "
+            f"{opname}: mixed-dtype operands {d1.name}/{d2.name} are not provided by "
             f"rstsr (gap G-009); use matching dtypes or cast first"
         ) from None
     if s1 == s2:
@@ -1588,10 +1591,57 @@ def _common_int_dtype(d1, d2, /):
     width = _py_max(r1 if s1 else r1 + 1, r2 if s2 else r2 + 1)
     if width > 4:
         raise TypeError(
-            f"isin: mixed-dtype operands {d1.name}/{d2.name} have no promotable "
+            f"{opname}: mixed-dtype operands {d1.name}/{d2.name} have no promotable "
             f"common integer dtype (gap G-009); use matching dtypes or cast first"
         )
     return (int8, int16, int32, int64)[width - 1]
+
+
+def _promote_pair(d1, d2, /, opname="concat"):
+    """The array-API common dtype of two dtypes (bool / int / uint / float /
+    complex). Used by the joins: their rstsr kernels are single-dtype, so parts
+    are cast to their common dtype first — the same cast-then-apply shape as
+    `isin` and the accumulation-dtype path."""
+    if d1.name == d2.name:
+        return d1
+    if d1.name == "bool":
+        return d2
+    if d2.name == "bool":
+        return d1
+    k1, k2 = _kind(d1), _kind(d2)
+    if k1 == "integral" and k2 == "integral":
+        return _common_int_dtype(d1, d2, opname)
+    # integral < real floating < complex floating
+    lo, hi = (d1, d2) if _KIND_ORDER[k1] <= _KIND_ORDER[k2] else (d2, d1)
+    lo_kind, hi_kind = _kind(lo), _kind(hi)
+    if hi_kind == "complex floating":
+        # complex64 only if both operands are representable in float32
+        fits32 = hi.name == "complex64" and (
+            (lo_kind == "complex floating" and lo.name == "complex64")
+            or (lo_kind == "real floating" and lo.name == "float32")
+            or (lo_kind == "integral" and _INT_PROMOTE[lo.name][0] <= 2)
+        )
+        return complex64 if fits32 else complex128
+    if hi_kind == "real floating":
+        fits32 = (
+            hi.name == "float32"
+            and lo_kind == "integral"
+            and _INT_PROMOTE[lo.name][0] <= 2
+        )
+        return float32 if fits32 else float64
+    raise TypeError(f"{opname}: cannot promote {d1.name}/{d2.name}")
+
+
+def _cast_parts(handles, /, opname="concat"):
+    """Bring same-device join parts to their common dtype (no-op when they
+    already agree), reusing the astype path."""
+    dtypes = [h.dtype() for h in handles]
+    common = dtypes[0]
+    for d in dtypes[1:]:
+        common = _promote_pair(common, d, opname)
+    if builtins.all(d.name == common.name for d in dtypes):
+        return handles
+    return [_astype(h, common, True) for h in handles]
 
 
 def isin(x1, x2, /, *, invert=False):

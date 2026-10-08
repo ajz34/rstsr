@@ -225,6 +225,7 @@ The reference implementation (as in [`DeviceCpuSerial`] and [`DeviceFaer`]), fol
 
 **Implementation notes**
 - [`reshape`]: full functionality (explicit reading order and copy policy) is provided by [`reshape_with_args`]. See also [`order_semantics`](crate::order_semantics).
+- [`concat`](concat()) / [`stack`]: the Array API promotes mixed input dtypes to their common data type; rstsr's joins are single-dtype kernels (a join's inputs share one element type), so cast the inputs to the promoted dtype first (see [`DTypePromoteAPI`] and [`DTypeCastAPI`]) — the reference Array-API shim does this.
 
 ## Searching Functions
 
