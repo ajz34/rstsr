@@ -33,3 +33,34 @@ mod numpy_min {
         assert_equal(b.min_axes(1), rt::tensor_from_nested!([3.0, 4.0, 2.0], &device), None);
     }
 }
+
+#[cfg(test)]
+mod custom_nan_propagation {
+    use super::*;
+    static FUNC: &str = "custom_nan_propagation";
+
+    #[test]
+    fn test_nan() {
+        crate::specify_test!("test_nan");
+
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        // NaN propagates through the reduction (array-API `min`).
+        let a = rt::tensor_from_nested!([1.0, f64::NAN, 3.0], &device);
+        assert!(a.min_all().is_nan());
+
+        // per-axis: only the reductions whose slice holds a NaN become NaN
+        let b = rt::tensor_from_nested!([[1.0, f64::NAN], [3.0, -2.0]], &device);
+        let v0 = b.min_axes(0).to_vec();
+        assert_eq!(v0[0], 1.0);
+        assert!(v0[1].is_nan());
+        let v1 = b.min_axes(1).to_vec();
+        assert!(v1[0].is_nan());
+        assert_eq!(v1[1], -2.0);
+
+        // integers are unaffected
+        let c = rt::tensor_from_nested!([1, 5, 3], &device);
+        assert_eq!(c.min_all(), 1);
+    }
+}

@@ -62,4 +62,30 @@ mod custom_maximum_minimum {
         // np.minimum(a, b) == [1, 2, 3]
         assert_equal(rt::minimum(&a, &b), rt::tensor_from_nested!([1, 2, 3], &device), None);
     }
+
+    #[test]
+    fn test_elementwise_nan() {
+        crate::specify_test!("test_elementwise_nan");
+
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        // array-API maximum/minimum propagate NaN from either operand, in either order.
+        let nan = f64::NAN;
+        let a = rt::tensor_from_nested!([nan, 1.0, nan, 1.0], &device);
+        let b = rt::tensor_from_nested!([1.0, nan, nan, 2.0], &device);
+        // first three positions have a NaN on one side or both; the last has none.
+        let mx = rt::maximum(&a, &b).to_vec();
+        assert!(mx[..3].iter().all(|x| x.is_nan()), "maximum must propagate NaN: {mx:?}");
+        assert_eq!(mx[3], 2.0);
+        let mn = rt::minimum(&a, &b).to_vec();
+        assert!(mn[..3].iter().all(|x| x.is_nan()), "minimum must propagate NaN: {mn:?}");
+        assert_eq!(mn[3], 1.0);
+
+        // non-NaN elements keep the plain element-wise max/min
+        let c = rt::tensor_from_nested!([1.0, 5.0, 3.0], &device);
+        let d = rt::tensor_from_nested!([4.0, 2.0, 6.0], &device);
+        assert_eq!(rt::maximum(&c, &d).to_vec(), vec![4.0, 5.0, 6.0]);
+        assert_eq!(rt::minimum(&c, &d).to_vec(), vec![1.0, 2.0, 3.0]);
+    }
 }

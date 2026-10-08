@@ -6,8 +6,8 @@ use num::Complex;
 /// Total-order comparison for sortable dtypes: integers, booleans, real
 /// floats, and complex floats.
 ///
-/// Unlike [`ExtReal::ext_min`](crate::ExtReal::ext_min) (IEEE NaN-skipping
-/// semantics), this trait provides a consistent total order usable by sorting,
+/// Unlike [`ExtReal::ext_min`](crate::ExtReal::ext_min) (which propagates
+/// NaN), this trait provides a consistent total order usable by sorting,
 /// following NumPy's ordering semantics:
 ///
 /// - values equal under `==` (including `-0.0` and `0.0`) compare [`Ordering::Equal`];

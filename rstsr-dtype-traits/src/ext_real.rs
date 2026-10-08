@@ -10,8 +10,8 @@ pub trait ExtReal: Clone {
     ///
     /// # Note
     ///
-    /// For floats, this uses the `min` method which handles NaNs according to IEEE 754-2008 (the
-    /// std library of rust).
+    /// For floats, NaN propagates (IEEE 754-2019 `minimum`, as the array-API requires): if either
+    /// operand is NaN, the result is NaN.
     fn ext_min(self, other: Self) -> Self;
 
     /// The minimum value that can be represented by this type.
@@ -21,8 +21,8 @@ pub trait ExtReal: Clone {
     ///
     /// # Note
     ///
-    /// For floats, this uses the `min` method which handles NaNs according to IEEE 754-2008 (the
-    /// std library of rust).
+    /// For floats, NaN propagates (IEEE 754-2019 `maximum`, as the array-API requires): if either
+    /// operand is NaN, the result is NaN.
     fn ext_max(self, other: Self) -> Self;
 
     /// The maximum value that can be represented by this type.
@@ -89,13 +89,25 @@ impl ExtReal for T {
         Float::floor(self / other)
     }
     fn ext_min(self, other: Self) -> Self {
-        T::min(self, other)
+        if self.is_nan() {
+            self
+        } else if other.is_nan() {
+            other
+        } else {
+            T::min(self, other)
+        }
     }
     fn ext_min_value() -> Self {
         Self::MIN
     }
     fn ext_max(self, other: Self) -> Self {
-        T::max(self, other)
+        if self.is_nan() {
+            self
+        } else if other.is_nan() {
+            other
+        } else {
+            T::max(self, other)
+        }
     }
     fn ext_max_value() -> Self {
         Self::MAX
@@ -112,13 +124,25 @@ impl ExtReal for T {
         Float::floor(self / other)
     }
     fn ext_min(self, other: Self) -> Self {
-        T::min(self, other)
+        if self.is_nan() {
+            self
+        } else if other.is_nan() {
+            other
+        } else {
+            T::min(self, other)
+        }
     }
     fn ext_min_value() -> Self {
         Self::MIN
     }
     fn ext_max(self, other: Self) -> Self {
-        T::max(self, other)
+        if self.is_nan() {
+            self
+        } else if other.is_nan() {
+            other
+        } else {
+            T::max(self, other)
+        }
     }
     fn ext_max_value() -> Self {
         Self::MAX
