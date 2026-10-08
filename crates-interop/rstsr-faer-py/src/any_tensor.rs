@@ -683,6 +683,115 @@ macro_rules! dispatch_bin_promote {
 }
 pub(crate) use dispatch_bin_promote;
 
+/// Binary dispatch for the promoted arithmetic ops (`add`/`subtract`/
+/// `multiply`/`divide`): the real-type promotion arms plus the complex pairs
+/// (the standard defines these on every numeric dtype; bool is excluded).
+macro_rules! dispatch_bin_promote_arith {
+    ($a:expr, $b:expr, $opname:expr, $f:ident) => {
+        match (&$a, &$b) {
+            (AnyTensor::Bool(_), _) | (_, AnyTensor::Bool(_)) => {
+                type_err(format!("{}: not defined for bool dtype", $opname))
+            },
+            (AnyTensor::C32(a), AnyTensor::C32(b)) => {
+                lift(($f::<Complex<f32>, Complex<f32>>)(a, b), crate::any_tensor::any_of)
+            },
+            (AnyTensor::C64(a), AnyTensor::C64(b)) => {
+                lift(($f::<Complex<f64>, Complex<f64>>)(a, b), crate::any_tensor::any_of)
+            },
+            (AnyTensor::C32(a), AnyTensor::C64(b)) => {
+                lift(($f::<Complex<f32>, Complex<f64>>)(a, b), crate::any_tensor::any_of)
+            },
+            (AnyTensor::C64(a), AnyTensor::C32(b)) => {
+                lift(($f::<Complex<f64>, Complex<f32>>)(a, b), crate::any_tensor::any_of)
+            },
+            _ => dispatch_bin_promote!($a, $b, $opname, $f),
+        }
+    };
+}
+pub(crate) use dispatch_bin_promote_arith;
+
+/// Binary dispatch for the promoted bitwise/shift ops over the integer dtypes:
+/// mixed int/uint operands promote to their common integer dtype (rstsr
+/// `ext_bitand`-family). Float/complex/bool fall through to the error arm.
+macro_rules! dispatch_bin_promote_int {
+    ($a:expr, $b:expr, $opname:expr, $f:ident) => {
+        match (&$a, &$b) {
+            (AnyTensor::I8(a), AnyTensor::I8(b)) => lift(($f::<i8, i8>)(a, b), crate::any_tensor::any_of),
+            (AnyTensor::I16(a), AnyTensor::I16(b)) => lift(($f::<i16, i16>)(a, b), crate::any_tensor::any_of),
+            (AnyTensor::I32(a), AnyTensor::I32(b)) => lift(($f::<i32, i32>)(a, b), crate::any_tensor::any_of),
+            (AnyTensor::I64(a), AnyTensor::I64(b)) => lift(($f::<i64, i64>)(a, b), crate::any_tensor::any_of),
+            (AnyTensor::U8(a), AnyTensor::U8(b)) => lift(($f::<u8, u8>)(a, b), crate::any_tensor::any_of),
+            (AnyTensor::U16(a), AnyTensor::U16(b)) => lift(($f::<u16, u16>)(a, b), crate::any_tensor::any_of),
+            (AnyTensor::U32(a), AnyTensor::U32(b)) => lift(($f::<u32, u32>)(a, b), crate::any_tensor::any_of),
+            (AnyTensor::U64(a), AnyTensor::U64(b)) => lift(($f::<u64, u64>)(a, b), crate::any_tensor::any_of),
+            (AnyTensor::I16(a), AnyTensor::I32(b)) => lift(($f::<i16, i32>)(a, b), crate::any_tensor::any_of),
+            (AnyTensor::I16(a), AnyTensor::I64(b)) => lift(($f::<i16, i64>)(a, b), crate::any_tensor::any_of),
+            (AnyTensor::I16(a), AnyTensor::I8(b)) => lift(($f::<i16, i8>)(a, b), crate::any_tensor::any_of),
+            (AnyTensor::I16(a), AnyTensor::U16(b)) => lift(($f::<i16, u16>)(a, b), crate::any_tensor::any_of),
+            (AnyTensor::I16(a), AnyTensor::U32(b)) => lift(($f::<i16, u32>)(a, b), crate::any_tensor::any_of),
+            (AnyTensor::I16(a), AnyTensor::U8(b)) => lift(($f::<i16, u8>)(a, b), crate::any_tensor::any_of),
+            (AnyTensor::I32(a), AnyTensor::I16(b)) => lift(($f::<i32, i16>)(a, b), crate::any_tensor::any_of),
+            (AnyTensor::I32(a), AnyTensor::I64(b)) => lift(($f::<i32, i64>)(a, b), crate::any_tensor::any_of),
+            (AnyTensor::I32(a), AnyTensor::I8(b)) => lift(($f::<i32, i8>)(a, b), crate::any_tensor::any_of),
+            (AnyTensor::I32(a), AnyTensor::U16(b)) => lift(($f::<i32, u16>)(a, b), crate::any_tensor::any_of),
+            (AnyTensor::I32(a), AnyTensor::U32(b)) => lift(($f::<i32, u32>)(a, b), crate::any_tensor::any_of),
+            (AnyTensor::I32(a), AnyTensor::U8(b)) => lift(($f::<i32, u8>)(a, b), crate::any_tensor::any_of),
+            (AnyTensor::I64(a), AnyTensor::I16(b)) => lift(($f::<i64, i16>)(a, b), crate::any_tensor::any_of),
+            (AnyTensor::I64(a), AnyTensor::I32(b)) => lift(($f::<i64, i32>)(a, b), crate::any_tensor::any_of),
+            (AnyTensor::I64(a), AnyTensor::I8(b)) => lift(($f::<i64, i8>)(a, b), crate::any_tensor::any_of),
+            (AnyTensor::I64(a), AnyTensor::U16(b)) => lift(($f::<i64, u16>)(a, b), crate::any_tensor::any_of),
+            (AnyTensor::I64(a), AnyTensor::U32(b)) => lift(($f::<i64, u32>)(a, b), crate::any_tensor::any_of),
+            (AnyTensor::I64(a), AnyTensor::U8(b)) => lift(($f::<i64, u8>)(a, b), crate::any_tensor::any_of),
+            (AnyTensor::I8(a), AnyTensor::I32(b)) => lift(($f::<i8, i32>)(a, b), crate::any_tensor::any_of),
+            (AnyTensor::I8(a), AnyTensor::I64(b)) => lift(($f::<i8, i64>)(a, b), crate::any_tensor::any_of),
+            (AnyTensor::I8(a), AnyTensor::U16(b)) => lift(($f::<i8, u16>)(a, b), crate::any_tensor::any_of),
+            (AnyTensor::I8(a), AnyTensor::U32(b)) => lift(($f::<i8, u32>)(a, b), crate::any_tensor::any_of),
+            (AnyTensor::I8(a), AnyTensor::U8(b)) => lift(($f::<i8, u8>)(a, b), crate::any_tensor::any_of),
+            (AnyTensor::U16(a), AnyTensor::I16(b)) => lift(($f::<u16, i16>)(a, b), crate::any_tensor::any_of),
+            (AnyTensor::U16(a), AnyTensor::I32(b)) => lift(($f::<u16, i32>)(a, b), crate::any_tensor::any_of),
+            (AnyTensor::U16(a), AnyTensor::I64(b)) => lift(($f::<u16, i64>)(a, b), crate::any_tensor::any_of),
+            (AnyTensor::U16(a), AnyTensor::I8(b)) => lift(($f::<u16, i8>)(a, b), crate::any_tensor::any_of),
+            (AnyTensor::U16(a), AnyTensor::U32(b)) => lift(($f::<u16, u32>)(a, b), crate::any_tensor::any_of),
+            (AnyTensor::U16(a), AnyTensor::U64(b)) => lift(($f::<u16, u64>)(a, b), crate::any_tensor::any_of),
+            (AnyTensor::U16(a), AnyTensor::U8(b)) => lift(($f::<u16, u8>)(a, b), crate::any_tensor::any_of),
+            (AnyTensor::U32(a), AnyTensor::I16(b)) => lift(($f::<u32, i16>)(a, b), crate::any_tensor::any_of),
+            (AnyTensor::U32(a), AnyTensor::I32(b)) => lift(($f::<u32, i32>)(a, b), crate::any_tensor::any_of),
+            (AnyTensor::U32(a), AnyTensor::I64(b)) => lift(($f::<u32, i64>)(a, b), crate::any_tensor::any_of),
+            (AnyTensor::U32(a), AnyTensor::I8(b)) => lift(($f::<u32, i8>)(a, b), crate::any_tensor::any_of),
+            (AnyTensor::U32(a), AnyTensor::U16(b)) => lift(($f::<u32, u16>)(a, b), crate::any_tensor::any_of),
+            (AnyTensor::U32(a), AnyTensor::U64(b)) => lift(($f::<u32, u64>)(a, b), crate::any_tensor::any_of),
+            (AnyTensor::U32(a), AnyTensor::U8(b)) => lift(($f::<u32, u8>)(a, b), crate::any_tensor::any_of),
+            (AnyTensor::U64(a), AnyTensor::U16(b)) => lift(($f::<u64, u16>)(a, b), crate::any_tensor::any_of),
+            (AnyTensor::U64(a), AnyTensor::U32(b)) => lift(($f::<u64, u32>)(a, b), crate::any_tensor::any_of),
+            (AnyTensor::U64(a), AnyTensor::U8(b)) => lift(($f::<u64, u8>)(a, b), crate::any_tensor::any_of),
+            (AnyTensor::U8(a), AnyTensor::I16(b)) => lift(($f::<u8, i16>)(a, b), crate::any_tensor::any_of),
+            (AnyTensor::U8(a), AnyTensor::I32(b)) => lift(($f::<u8, i32>)(a, b), crate::any_tensor::any_of),
+            (AnyTensor::U8(a), AnyTensor::I64(b)) => lift(($f::<u8, i64>)(a, b), crate::any_tensor::any_of),
+            (AnyTensor::U8(a), AnyTensor::I8(b)) => lift(($f::<u8, i8>)(a, b), crate::any_tensor::any_of),
+            (AnyTensor::U8(a), AnyTensor::U16(b)) => lift(($f::<u8, u16>)(a, b), crate::any_tensor::any_of),
+            (AnyTensor::U8(a), AnyTensor::U32(b)) => lift(($f::<u8, u32>)(a, b), crate::any_tensor::any_of),
+            (AnyTensor::U8(a), AnyTensor::U64(b)) => lift(($f::<u8, u64>)(a, b), crate::any_tensor::any_of),
+            _ => type_err(format!("{}: only integer or boolean dtypes are allowed", $opname)),
+        }
+    };
+}
+pub(crate) use dispatch_bin_promote_int;
+
+/// `bitwise_and/or/xor`: the integer promotion arms plus `bool`.
+macro_rules! dispatch_bin_promote_bitwise {
+    ($a:expr, $b:expr, $opname:expr, $f:ident) => {
+        match (&$a, &$b) {
+            (AnyTensor::Bool(a), AnyTensor::Bool(b)) => lift(($f::<bool, bool>)(a, b), crate::any_tensor::any_of),
+            (AnyTensor::F32(_) | AnyTensor::F64(_) | AnyTensor::C32(_) | AnyTensor::C64(_), _)
+            | (_, AnyTensor::F32(_) | AnyTensor::F64(_) | AnyTensor::C32(_) | AnyTensor::C64(_)) => {
+                type_err(format!("{}: only integer or boolean dtypes are allowed", $opname))
+            },
+            _ => dispatch_bin_promote_int!($a, $b, $opname, $f),
+        }
+    };
+}
+pub(crate) use dispatch_bin_promote_bitwise;
+
 /// Binary dispatch for `pow`: the promoted real arms (`dispatch_bin_promote!`)
 /// plus the complex (`complex64`/`complex128`) pairs. The result variant is
 /// the promoted type via `any_of`, i.e. the array-API pow result dtype.
@@ -706,52 +815,6 @@ macro_rules! dispatch_bin_pow {
     };
 }
 pub(crate) use dispatch_bin_pow;
-
-/// Same-dtype binary dispatch over integer and boolean dtypes only (bitwise
-/// family; the spec excludes floats and complexes).
-macro_rules! dispatch_bin_int_bool_self {
-    ($a:expr, $b:expr, $opname:expr, $f:ident) => {
-        match (&$a, &$b) {
-            (AnyTensor::Bool(a), AnyTensor::Bool(b)) => lift(($f)(a, b), AnyTensor::Bool),
-            (AnyTensor::I8(a), AnyTensor::I8(b)) => lift(($f)(a, b), AnyTensor::I8),
-            (AnyTensor::I16(a), AnyTensor::I16(b)) => lift(($f)(a, b), AnyTensor::I16),
-            (AnyTensor::I32(a), AnyTensor::I32(b)) => lift(($f)(a, b), AnyTensor::I32),
-            (AnyTensor::I64(a), AnyTensor::I64(b)) => lift(($f)(a, b), AnyTensor::I64),
-            (AnyTensor::U8(a), AnyTensor::U8(b)) => lift(($f)(a, b), AnyTensor::U8),
-            (AnyTensor::U16(a), AnyTensor::U16(b)) => lift(($f)(a, b), AnyTensor::U16),
-            (AnyTensor::U32(a), AnyTensor::U32(b)) => lift(($f)(a, b), AnyTensor::U32),
-            (AnyTensor::U64(a), AnyTensor::U64(b)) => lift(($f)(a, b), AnyTensor::U64),
-            (AnyTensor::F32(_) | AnyTensor::F64(_) | AnyTensor::C32(_) | AnyTensor::C64(_), _)
-            | (_, AnyTensor::F32(_) | AnyTensor::F64(_) | AnyTensor::C32(_) | AnyTensor::C64(_)) => {
-                type_err(format!("{}: only integer or boolean dtypes are allowed", $opname))
-            },
-            _ => type_err(format!(
-                "{}: mixed-dtype operands require type promotion (rstsr gap G-009); use astype()",
-                $opname
-            )),
-        }
-    };
-}
-pub(crate) use dispatch_bin_int_bool_self;
-
-/// Same-dtype binary dispatch over integer dtypes only (shift family: the
-/// spec allows integers only, and `Shl`/`Shr` are undefined for bool).
-macro_rules! dispatch_bin_int_self {
-    ($a:expr, $b:expr, $opname:expr, $f:ident) => {
-        match (&$a, &$b) {
-            (AnyTensor::I8(a), AnyTensor::I8(b)) => lift(($f::<i8>)(a, b), AnyTensor::I8),
-            (AnyTensor::I16(a), AnyTensor::I16(b)) => lift(($f::<i16>)(a, b), AnyTensor::I16),
-            (AnyTensor::I32(a), AnyTensor::I32(b)) => lift(($f::<i32>)(a, b), AnyTensor::I32),
-            (AnyTensor::I64(a), AnyTensor::I64(b)) => lift(($f::<i64>)(a, b), AnyTensor::I64),
-            (AnyTensor::U8(a), AnyTensor::U8(b)) => lift(($f::<u8>)(a, b), AnyTensor::U8),
-            (AnyTensor::U16(a), AnyTensor::U16(b)) => lift(($f::<u16>)(a, b), AnyTensor::U16),
-            (AnyTensor::U32(a), AnyTensor::U32(b)) => lift(($f::<u32>)(a, b), AnyTensor::U32),
-            (AnyTensor::U64(a), AnyTensor::U64(b)) => lift(($f::<u64>)(a, b), AnyTensor::U64),
-            _ => type_err(format!("{}: only integer dtypes of matching kind are allowed", $opname)),
-        }
-    };
-}
-pub(crate) use dispatch_bin_int_self;
 
 /// Boolean-only same-dtype binary dispatch (`logical_*`).
 macro_rules! dispatch_bin_bool_self {

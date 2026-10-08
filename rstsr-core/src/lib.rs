@@ -69,6 +69,7 @@ pub mod api_specification {
     use rt::*;
     extern crate alloc;
     use crate as rstsr_core;
+    use rstsr_dtype_traits::*;
 }
 
 pub mod order_semantics {

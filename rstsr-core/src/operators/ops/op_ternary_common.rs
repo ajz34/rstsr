@@ -17,6 +17,15 @@ use crate::prelude_dev::*;
    [OpNotEqualAPI    ];
    [OpPowAPI         ];
    [OpNextAfterAPI   ];
+   [OpExtAddAPI      ];
+   [OpExtSubAPI      ];
+   [OpExtMulAPI      ];
+   [OpExtDivAPI      ];
+   [OpExtBitAndAPI   ];
+   [OpExtBitOrAPI    ];
+   [OpExtBitXorAPI   ];
+   [OpExtShlAPI      ];
+   [OpExtShrAPI      ];
 )]
 pub trait OpAPI<TA, TB, D>
 where

@@ -23,20 +23,20 @@ use rstsr_core::operators::reduction::{
 };
 use rstsr_core::storage::exports::{DeviceCreationAnyAPI, DeviceRawAPI};
 use rstsr_core::tensor::operators::exports::{
-    TensorATan2API, TensorAddAPI, TensorBitAndAPI, TensorBitOrAPI, TensorBitXorAPI, TensorCopySignAPI, TensorDivAPI,
-    TensorEqualAPI, TensorExtNegAPI, TensorFloorDivideAPI, TensorGreaterAPI, TensorGreaterEqualAPI, TensorHypotAPI,
-    TensorLessAPI, TensorLessEqualAPI, TensorLogAddExpAPI, TensorMaximumAPI, TensorMinimumAPI, TensorMulAPI,
-    TensorNextAfterAPI, TensorNotEqualAPI, TensorPositiveAPI, TensorReciprocalAPI, TensorRemAPI, TensorShlAPI,
-    TensorShrAPI, TensorSquareAPI, TensorSubAPI,
+    TensorATan2API, TensorCopySignAPI, TensorEqualAPI, TensorExtAddAPI, TensorExtBitAndAPI, TensorExtBitOrAPI,
+    TensorExtBitXorAPI, TensorExtDivAPI, TensorExtMulAPI, TensorExtNegAPI, TensorExtShlAPI, TensorExtShrAPI,
+    TensorExtSubAPI, TensorFloorDivideAPI, TensorGreaterAPI, TensorGreaterEqualAPI, TensorHypotAPI, TensorLessAPI,
+    TensorLessEqualAPI, TensorLogAddExpAPI, TensorMaximumAPI, TensorMinimumAPI, TensorNextAfterAPI, TensorNotEqualAPI,
+    TensorPositiveAPI, TensorReciprocalAPI, TensorRemAPI, TensorSquareAPI,
 };
 use rstsr_dtype_traits::{DTypeIntoFloatAPI, DTypePromoteAPI};
 
 use crate::any_tensor::{
-    device_faer, dispatch_bin_bool_self, dispatch_bin_int_bool_self, dispatch_bin_int_self, dispatch_bin_numeric_self,
-    dispatch_bin_pow, dispatch_bin_promote, dispatch_bin_promote_eq, dispatch_t, dispatch_t_bool,
-    dispatch_t_float_complex_same, dispatch_t_index_ord, dispatch_t_index_zero, dispatch_t_into_float,
-    dispatch_t_numeric_same, dispatch_t_real_bool, dispatch_t_real_numeric_same, dispatch_where, err_py, lift,
-    type_err, AnyTensor, FTensor, NativeArray,
+    device_faer, dispatch_bin_bool_self, dispatch_bin_numeric_self, dispatch_bin_pow, dispatch_bin_promote,
+    dispatch_bin_promote_arith, dispatch_bin_promote_bitwise, dispatch_bin_promote_eq, dispatch_bin_promote_int,
+    dispatch_t, dispatch_t_bool, dispatch_t_float_complex_same, dispatch_t_index_ord, dispatch_t_index_zero,
+    dispatch_t_into_float, dispatch_t_numeric_same, dispatch_t_real_bool, dispatch_t_real_numeric_same, dispatch_where,
+    err_py, lift, type_err, AnyTensor, FTensor, NativeArray,
 };
 use crate::creation::dim_from;
 
@@ -108,33 +108,8 @@ where
 
 // ------------------------------------------------------------ bin wrappers --
 
-fn op_add<T>(a: &FTensor<T>, b: &FTensor<T>) -> rt::Result<FTensor<T>>
-where
-    for<'x> &'x FTensor<T>: TensorAddAPI<&'x FTensor<T>, Output = FTensor<T>>,
-{
-    rt::add_f(a, b)
-}
-
-fn op_sub<T>(a: &FTensor<T>, b: &FTensor<T>) -> rt::Result<FTensor<T>>
-where
-    for<'x> &'x FTensor<T>: TensorSubAPI<&'x FTensor<T>, Output = FTensor<T>>,
-{
-    rt::sub_f(a, b)
-}
-
-fn op_mul<T>(a: &FTensor<T>, b: &FTensor<T>) -> rt::Result<FTensor<T>>
-where
-    for<'x> &'x FTensor<T>: TensorMulAPI<&'x FTensor<T>, Output = FTensor<T>>,
-{
-    rt::mul_f(a, b)
-}
-
-fn op_div<T>(a: &FTensor<T>, b: &FTensor<T>) -> rt::Result<FTensor<T>>
-where
-    for<'x> &'x FTensor<T>: TensorDivAPI<&'x FTensor<T>, Output = FTensor<T>>,
-{
-    rt::div_f(a, b)
-}
+// `add`/`subtract`/`multiply`/`divide` are promoted (mixed-dtype) wrappers and
+// live below, next to `bin_promote_wrapper!`.
 
 fn op_equal<T, U>(a: &FTensor<T>, b: &FTensor<U>) -> rt::Result<FTensor<bool>>
 where
@@ -420,6 +395,11 @@ macro_rules! bin_promote_float_wrapper {
 bin_promote_wrapper!(op_maximum, maximum_f, TensorMaximumAPI);
 bin_promote_wrapper!(op_minimum, minimum_f, TensorMinimumAPI);
 bin_promote_wrapper!(op_floor_divide, floor_divide_f, TensorFloorDivideAPI);
+// promoted arithmetic (mixed-dtype operands promote to their common dtype)
+bin_promote_wrapper!(op_ext_add, ext_add_f, TensorExtAddAPI);
+bin_promote_wrapper!(op_ext_sub, ext_sub_f, TensorExtSubAPI);
+bin_promote_wrapper!(op_ext_mul, ext_mul_f, TensorExtMulAPI);
+bin_promote_wrapper!(op_ext_div, ext_div_f, TensorExtDivAPI);
 bin_promote_float_wrapper!(op_atan2, atan2_f, TensorATan2API);
 bin_promote_float_wrapper!(op_copysign, copysign_f, TensorCopySignAPI);
 bin_promote_float_wrapper!(op_hypot, hypot_f, TensorHypotAPI);
@@ -463,11 +443,12 @@ macro_rules! bin_self_wrapper {
 }
 
 bin_self_wrapper!(op_remainder, rem_f, TensorRemAPI);
-bin_self_wrapper!(op_bitwise_and, bitand_f, TensorBitAndAPI);
-bin_self_wrapper!(op_bitwise_or, bitor_f, TensorBitOrAPI);
-bin_self_wrapper!(op_bitwise_xor, bitxor_f, TensorBitXorAPI);
-bin_self_wrapper!(op_bitwise_left_shift, shl_f, TensorShlAPI);
-bin_self_wrapper!(op_bitwise_right_shift, shr_f, TensorShrAPI);
+// promoted bitwise / shifts (mixed int/uint operands promote to a common dtype)
+bin_promote_wrapper!(op_bitwise_and, ext_bitand_f, TensorExtBitAndAPI);
+bin_promote_wrapper!(op_bitwise_or, ext_bitor_f, TensorExtBitOrAPI);
+bin_promote_wrapper!(op_bitwise_xor, ext_bitxor_f, TensorExtBitXorAPI);
+bin_promote_wrapper!(op_bitwise_left_shift, ext_shl_f, TensorExtShlAPI);
+bin_promote_wrapper!(op_bitwise_right_shift, ext_shr_f, TensorExtShrAPI);
 
 macro_rules! py_bin_self {
     ($($pyname:ident => $wrapper:ident),* $(,)?) => {
@@ -490,7 +471,7 @@ macro_rules! py_bin_int_bool {
             #[pyfunction]
             pub fn $pyname(x1: &NativeArray, x2: &NativeArray) -> PyResult<NativeArray> {
                 Ok(NativeArray {
-                    t: dispatch_bin_int_bool_self!(x1.t, x2.t, stringify!($pyname), $wrapper)?,
+                    t: dispatch_bin_promote_bitwise!(x1.t, x2.t, stringify!($pyname), $wrapper)?,
                 })
             }
         )*
@@ -509,7 +490,7 @@ macro_rules! py_bin_int {
             #[pyfunction]
             pub fn $pyname(x1: &NativeArray, x2: &NativeArray) -> PyResult<NativeArray> {
                 Ok(NativeArray {
-                    t: dispatch_bin_int_self!(x1.t, x2.t, stringify!($pyname), $wrapper)?,
+                    t: dispatch_bin_promote_int!(x1.t, x2.t, stringify!($pyname), $wrapper)?,
                 })
             }
         )*
@@ -551,25 +532,27 @@ py_logical!(
 
 // ------------------------------------------------------------ arithmetic ----
 
-#[pyfunction]
-pub fn add(x1: &NativeArray, x2: &NativeArray) -> PyResult<NativeArray> {
-    Ok(NativeArray { t: dispatch_bin_numeric_self!(x1.t, x2.t, "add", op_add)? })
+// Promoted arithmetic: mixed-dtype operands promote to their common dtype
+// (rstsr `ext_add` family); bool is excluded, complex is served same/promoted.
+macro_rules! py_bin_promote_arith {
+    ($($pyname:ident => $wrapper:ident),* $(,)?) => {
+        $(
+            #[pyfunction]
+            pub fn $pyname(x1: &NativeArray, x2: &NativeArray) -> PyResult<NativeArray> {
+                Ok(NativeArray {
+                    t: dispatch_bin_promote_arith!(x1.t, x2.t, stringify!($pyname), $wrapper)?,
+                })
+            }
+        )*
+    };
 }
 
-#[pyfunction]
-pub fn subtract(x1: &NativeArray, x2: &NativeArray) -> PyResult<NativeArray> {
-    Ok(NativeArray { t: dispatch_bin_numeric_self!(x1.t, x2.t, "subtract", op_sub)? })
-}
-
-#[pyfunction]
-pub fn multiply(x1: &NativeArray, x2: &NativeArray) -> PyResult<NativeArray> {
-    Ok(NativeArray { t: dispatch_bin_numeric_self!(x1.t, x2.t, "multiply", op_mul)? })
-}
-
-#[pyfunction]
-pub fn divide(x1: &NativeArray, x2: &NativeArray) -> PyResult<NativeArray> {
-    Ok(NativeArray { t: dispatch_bin_numeric_self!(x1.t, x2.t, "divide", op_div)? })
-}
+py_bin_promote_arith!(
+    add => op_ext_add,
+    subtract => op_ext_sub,
+    multiply => op_ext_mul,
+    divide => op_ext_div,
+);
 
 /// negative: numeric dtypes (bool rejected); integers, unsigned included,
 /// wrap around the two's-complement modulus, matching NumPy's unary minus

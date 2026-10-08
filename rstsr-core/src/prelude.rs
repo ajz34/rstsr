@@ -26,9 +26,10 @@ pub mod rstsr_traits {
     pub use crate::tensor::ext_conversion::IntoRSTSR;
     pub use crate::tensor::manipulation::exports::BroadcastArraysAPI;
     pub use crate::tensor::operators::op_binary_common::{
-        TensorATan2API, TensorCopySignAPI, TensorEqualAPI, TensorFloorDivideAPI, TensorGreaterAPI,
-        TensorGreaterEqualAPI, TensorHypotAPI, TensorLessAPI, TensorLessEqualAPI, TensorLogAddExpAPI, TensorMaximumAPI,
-        TensorMinimumAPI, TensorNotEqualAPI, TensorPowAPI,
+        TensorATan2API, TensorCopySignAPI, TensorEqualAPI, TensorExtAddAPI, TensorExtBitAndAPI, TensorExtBitOrAPI,
+        TensorExtBitXorAPI, TensorExtDivAPI, TensorExtMulAPI, TensorExtShlAPI, TensorExtShrAPI, TensorExtSubAPI,
+        TensorFloorDivideAPI, TensorGreaterAPI, TensorGreaterEqualAPI, TensorHypotAPI, TensorLessAPI,
+        TensorLessEqualAPI, TensorLogAddExpAPI, TensorMaximumAPI, TensorMinimumAPI, TensorNotEqualAPI, TensorPowAPI,
     };
     pub use crate::tensor::operators::op_unary_common::{
         TensorAbsAPI, TensorAcosAPI, TensorAcoshAPI, TensorAsinAPI, TensorAsinhAPI, TensorAtanAPI, TensorAtanhAPI,
@@ -140,12 +141,14 @@ pub mod rstsr_funcs {
     };
     // binary common functions
     pub use crate::tensor::operators::exports::{
-        atan2, atan2_f, copysign, copysign_f, eq, eq_f, equal, equal_f, equal_than, equal_than_f, floor_divide,
-        floor_divide_f, ge, ge_f, greater, greater_equal, greater_equal_f, greater_equal_to, greater_equal_to_f,
-        greater_f, greater_than, greater_than_f, gt, gt_f, hypot, hypot_f, le, le_f, less, less_equal, less_equal_f,
-        less_equal_to, less_equal_to_f, less_f, less_than, less_than_f, log_add_exp, log_add_exp_f, lt, lt_f, maximum,
-        maximum_f, minimum, minimum_f, ne, ne_f, nextafter, nextafter_f, not_equal, not_equal_f, not_equal_to,
-        not_equal_to_f, pow, pow_f, r#where, where_f,
+        atan2, atan2_f, copysign, copysign_f, eq, eq_f, equal, equal_f, equal_than, equal_than_f, ext_add, ext_add_f,
+        ext_bitand, ext_bitand_f, ext_bitor, ext_bitor_f, ext_bitxor, ext_bitxor_f, ext_div, ext_div_f, ext_mul,
+        ext_mul_f, ext_shl, ext_shl_f, ext_shr, ext_shr_f, ext_sub, ext_sub_f, floor_divide, floor_divide_f, ge, ge_f,
+        greater, greater_equal, greater_equal_f, greater_equal_to, greater_equal_to_f, greater_f, greater_than,
+        greater_than_f, gt, gt_f, hypot, hypot_f, le, le_f, less, less_equal, less_equal_f, less_equal_to,
+        less_equal_to_f, less_f, less_than, less_than_f, log_add_exp, log_add_exp_f, lt, lt_f, maximum, maximum_f,
+        minimum, minimum_f, ne, ne_f, nextafter, nextafter_f, not_equal, not_equal_f, not_equal_to, not_equal_to_f,
+        pow, pow_f, r#where, where_f,
     };
     // reduction
     pub use crate::tensor::reduction::{

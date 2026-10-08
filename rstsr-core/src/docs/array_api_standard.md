@@ -27,10 +27,10 @@ To use remainder (modular) function correctly, one may use [`rt::rem`] (as funct
 |-|-|-|-|
 | Y | [`positive`] | [`__pos__`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.array.__pos__.html) | `+x` |
 | Y | `-`[^3] | [`__neg__`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.array.__neg__.html) | `-x` |
-| Y | `+` | [`__add__`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.array.__add__.html) | `x1 + x2` |
-| Y | `-` | [`__sub__`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.array.__sub__.html) | `x1 - x2` |
-| Y | `*` | [`__mul__`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.array.__mul__.html) | `x1 * x2` |
-| Y | `/` | [`__truediv__`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.array.__truediv__.html) | `x1 / x2` |
+| Y | `+`, [`ext_add`][^5] | [`__add__`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.array.__add__.html) | `x1 + x2` |
+| Y | `-`, [`ext_sub`][^5] | [`__sub__`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.array.__sub__.html) | `x1 - x2` |
+| Y | `*`, [`ext_mul`][^5] | [`__mul__`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.array.__mul__.html) | `x1 * x2` |
+| Y | `/`, [`ext_div`][^5] | [`__truediv__`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.array.__truediv__.html) | `x1 / x2` |
 | Y | [`floor_divide`] | [`__floordiv__`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.array.__floordiv__.html) | `x1 // x2` |
 | **C** | [`rt::rem`][^2] | [`__mod__`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.array.__mod__.html) | `x1 % x2` |
 | Y | [`pow`] | [`__pow__`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.array.__pow__.html) | `x1 ** x2` |
@@ -69,11 +69,11 @@ To use remainder (modular) function correctly, one may use [`rt::rem`] (as funct
 | status | implementation | Python API | description |
 |-|-|-|-|
 | Y | `!` [`Not`] | [`__invert__`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.array.__invert__.html) | `~x` |
-| Y | `&` [`BitAnd`] | [`__and__`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.array.__and__.html) | `x1 & x2` |
-| Y | `\|` [`BitOr`] | [`__or__`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.array.__or__.html) | `x1 \| x2` |
-| Y | `^`  [`BitXor`] | [`__xor__`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.array.__xor__.html) | `x1 ^ x2` |
-| Y | `<<` [`Shl`] | [`__lshift__`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.array.__lshift__.html) | `x1 << x2` |
-| Y | `>>` [`Shr`] | [`__rshift__`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.array.__rshift__.html) | `x1 >> x2` |
+| Y | `&` [`BitAnd`], [`ext_bitand`][^5] | [`__and__`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.array.__and__.html) | `x1 & x2` |
+| Y | `\|` [`BitOr`], [`ext_bitor`][^5] | [`__or__`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.array.__or__.html) | `x1 \| x2` |
+| Y | `^`  [`BitXor`], [`ext_bitxor`][^5] | [`__xor__`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.array.__xor__.html) | `x1 ^ x2` |
+| Y | `<<` [`Shl`], [`ext_shl`][^5] | [`__lshift__`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.array.__lshift__.html) | `x1 << x2` |
+| Y | `>>` [`Shr`], [`ext_shr`][^5] | [`__rshift__`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.array.__rshift__.html) | `x1 >> x2` |
 | Y | `&=` [`BitAndAssign`] | `__iand__` | `x1 &= x2` |
 | Y | `\|=` [`BitOrAssign`] | `__ior__` | `x1 \|= x2` |
 | Y | `^=` [`BitXorAssign`] | `__ixor__` | `x1 ^= x2` |
@@ -326,19 +326,21 @@ The reference implementation (as in [`DeviceCpuSerial`] and [`DeviceFaer`]), fol
 
 [^4]: [`ceil`], [`floor`], [`trunc`] and [`round`] preserve the input data type (the Array API rule "the same data type as `x`"): integers are returned unchanged, and [`round`] additionally accepts complex dtypes, rounding the real and imaginary parts independently.
 
+[^5]: In Rust code, prefer the native operators (`+`, `-`, `*`, `/`, `&`, `|`, `^`, `<<`, `>>`) and the same-dtype functions (`add`, `bitand`, ...); the `ext_*` functions exist for the Array API's mixed-dtype contract, not as the idiomatic rstsr surface. The Array API binary `add` / `subtract` / `multiply` / `divide` and the `bitwise_*` functions promote mixed-dtype operands to their common data type ([`DTypePromoteAPI`], the same rule as NumPy) and compute the result in that type; this is served by the `ext_*` functions ([`ext_add`], [`ext_sub`], [`ext_mul`], [`ext_div`], [`ext_bitand`], [`ext_bitor`], [`ext_bitxor`], [`ext_shl`], [`ext_shr`]) and their associated methods. The Rust operators and same-dtype functions instead require matching operand dtypes and are unaffected. `ext_shl` / `ext_shr` additionally follow the Array API shift rule at the bit-width boundary: a left shift by at least the bit width yields `0`, and a right shift saturates to the sign — unlike Rust's `<<` / `>>`, which mask the amount.
+
 ### Binary Functions
 
 | status | implementation | Python API | description |
 |-|-|-|-|
-| [`Add`] | `+`, [`add`] | [`add`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.add.html) | Calculates the sum for each element x1_i of the input array x1 with the respective element x2_i of the input array x2. |
+| [`Add`] | `+`, [`add`], [`ext_add`][^5] | [`add`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.add.html) | Calculates the sum for each element x1_i of the input array x1 with the respective element x2_i of the input array x2. |
 | [`Float`] | [`atan2`] | [`atan2`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.atan2.html) | Calculates an implementation-dependent approximation of the inverse tangent of the quotient x1/x2, having domain [-infinity, +infinity] x [-infinity, +infinity] (where the x notation denotes the set of ordered pairs of elements (x1_i, x2_i)) and codomain [-π, +π], for each pair of elements (x1_i, x2_i) of the input arrays x1 and x2, respectively. |
-| [`BitAnd`] | `&`, [`bitand`] | [`bitwise_and`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.bitwise_and.html) | Computes the bitwise AND of the underlying binary representation of each element x1_i of the input array x1 with the respective element x2_i of the input array x2. |
-| [`Shl`] | `<<`, [`shl`] | [`bitwise_left_shift`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.bitwise_left_shift.html) | Shifts the bits of each element x1_i of the input array x1 to the left by appending x2_i (i.e., the respective element in the input array x2) zeros to the right of x1_i. |
-| [`BitOr`] | `\|`, [`bitor`] | [`bitwise_or`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.bitwise_or.html) | Computes the bitwise OR of the underlying binary representation of each element x1_i of the input array x1 with the respective element x2_i of the input array x2. |
-| [`Shr`] | `>>`, [`shr`] | [`bitwise_right_shift`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.bitwise_right_shift.html) | Shifts the bits of each element x1_i of the input array x1 to the right according to the respective element x2_i of the input array x2. |
-| [`BitXor`] | `^`, [`bitxor`] | [`bitwise_xor`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.bitwise_xor.html) | Computes the bitwise XOR of the underlying binary representation of each element x1_i of the input array x1 with the respective element x2_i of the input array x2. |
+| [`BitAnd`] | `&`, [`bitand`], [`ext_bitand`][^5] | [`bitwise_and`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.bitwise_and.html) | Computes the bitwise AND of the underlying binary representation of each element x1_i of the input array x1 with the respective element x2_i of the input array x2. |
+| [`Shl`] | `<<`, [`shl`], [`ext_shl`][^5] | [`bitwise_left_shift`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.bitwise_left_shift.html) | Shifts the bits of each element x1_i of the input array x1 to the left by appending x2_i (i.e., the respective element in the input array x2) zeros to the right of x1_i. |
+| [`BitOr`] | `\|`, [`bitor`], [`ext_bitor`][^5] | [`bitwise_or`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.bitwise_or.html) | Computes the bitwise OR of the underlying binary representation of each element x1_i of the input array x1 with the respective element x2_i of the input array x2. |
+| [`Shr`] | `>>`, [`shr`], [`ext_shr`][^5] | [`bitwise_right_shift`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.bitwise_right_shift.html) | Shifts the bits of each element x1_i of the input array x1 to the right according to the respective element x2_i of the input array x2. |
+| [`BitXor`] | `^`, [`bitxor`], [`ext_bitxor`][^5] | [`bitwise_xor`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.bitwise_xor.html) | Computes the bitwise XOR of the underlying binary representation of each element x1_i of the input array x1 with the respective element x2_i of the input array x2. |
 | [`Float`] | [`copysign`] | [`copysign`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.copysign.html) | Composes a floating-point value with the magnitude of x1_i and the sign of x2_i for each element of the input array x1. |
-| [`Div`] | `/`, [`div`] | [`divide`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.divide.html) | Calculates the division of each element x1_i of the input array x1 with the respective element x2_i of the input array x2. |
+| [`Div`] | `/`, [`div`], [`ext_div`][^5] | [`divide`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.divide.html) | Calculates the division of each element x1_i of the input array x1 with the respective element x2_i of the input array x2. |
 | [`PartialEq`] | [`eq`], [`equal`] | [`equal`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.equal.html) | Computes the truth value of x1_i == x2_i for each element x1_i of the input array x1 with the respective element x2_i of the input array x2. |
 | [`ExtReal`] | [`floor_divide`] | [`floor_divide`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.floor_divide.html) | Rounds the result of dividing each element x1_i of the input array x1 by the respective element x2_i of the input array x2 to the greatest (i.e., closest to +infinity) integer-value number that is not greater than the division result. |
 | [`PartialOrd`] | [`gt`], [`greater`] | [`greater`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.greater.html) | Computes the truth value of x1_i > x2_i for each element x1_i of the input array x1 with the respective element x2_i of the input array x2. |
@@ -352,12 +354,12 @@ The reference implementation (as in [`DeviceCpuSerial`] and [`DeviceFaer`]), fol
 | | [`bitxor`] instead | [`logical_xor`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.logical_xor.html) | Computes the logical XOR for each element x1_i of the input array x1 with the respective element x2_i of the input array x2. |
 | [`ExtReal`] | [`maximum`] | [`maximum`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.maximum.html) | Computes the maximum value for each element x1_i of the input array x1 relative to the respective element x2_i of the input array x2. |
 | [`ExtReal`] | [`minimum`] | [`minimum`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.minimum.html) | Computes the minimum value for each element x1_i of the input array x1 relative to the respective element x2_i of the input array x2. |
-| [`Mul`] | [`mul`] | [`multiply`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.multiply.html) | Calculates the product for each element x1_i of the input array x1 with the respective element x2_i of the input array x2. |
+| [`Mul`] | [`mul`], [`ext_mul`][^5] | [`multiply`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.multiply.html) | Calculates the product for each element x1_i of the input array x1 with the respective element x2_i of the input array x2. |
 | [`ExtFloat`] | [`nextafter`] | [`nextafter`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.nextafter.html) | Returns the next representable floating-point value for each element x1_i of the input array x1 in the direction of the respective element x2_i of the input array x2. |
 | [`PartialEq`] | [`ne`], [`not_equal`] | [`not_equal`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.not_equal.html) | Computes the truth value of x1_i != x2_i for each element x1_i of the input array x1 with the respective element x2_i of the input array x2. |
 | [`ExtNum`] | [`pow`] | [`pow`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.pow.html) | Calculates an implementation-dependent approximation of exponentiation by raising each element x1_i (the base) of the input array x1 to the power of x2_i (the exponent), where x2_i is the corresponding element of the input array x2. |
 | [`Rem`] | [`rt::rem`][^2] | [`remainder`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.remainder.html) | Returns the remainder of division for each element x1_i of the input array x1 and the respective element x2_i of the input array x2. |
-| [`Sub`] | `-`, [`sub`] | [`subtract`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.subtract.html) | Calculates the difference for each element x1_i of the input array x1 with the respective element x2_i of the input array x2. |
+| [`Sub`] | `-`, [`sub`], [`ext_sub`][^5] | [`subtract`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.subtract.html) | Calculates the difference for each element x1_i of the input array x1 with the respective element x2_i of the input array x2. |
 
 ### Other functions
 
