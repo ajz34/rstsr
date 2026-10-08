@@ -1,7 +1,7 @@
 #![cfg(not(feature = "col_major"))]
 
 use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
+use rand::{RngExt, SeedableRng};
 
 #[cfg(test)]
 mod test {
@@ -17,7 +17,7 @@ mod test {
             use rstsr_core::prelude::*;
             let mut rng = StdRng::seed_from_u64(42);
 
-            let vec_b: Vec<f64> = (0..4 * n * n).map(|_| rng.gen()).collect::<_>();
+            let vec_b: Vec<f64> = (0..4 * n * n).map(|_| rng.random()).collect::<_>();
             let b_full = rt::asarray((vec_b, [4, n, n], &DeviceCpuSerial::default()));
             b_full.sum_axes(0)
         };
@@ -29,7 +29,7 @@ mod test {
             use rstsr_core::prelude::*;
             let mut rng = StdRng::seed_from_u64(42);
 
-            let vec_b: Vec<f64> = (0..4 * n * n).map(|_| rng.gen()).collect::<_>();
+            let vec_b: Vec<f64> = (0..4 * n * n).map(|_| rng.random()).collect::<_>();
             let b_full = rt::asarray((vec_b, [4, n, n]));
             b_full.sum_axes(0)
         };
@@ -41,12 +41,12 @@ mod test {
             use ndarray::prelude::*;
 
             let mut rng = StdRng::seed_from_u64(42);
-            let vec_b: Vec<f64> = (0..4 * n * n).map(|_| rng.gen()).collect::<_>();
+            let vec_b: Vec<f64> = (0..4 * n * n).map(|_| rng.random()).collect::<_>();
             let b_full = Array::from_shape_vec((4, n, n), vec_b).unwrap();
             b_full.sum_axis(Axis(0))
         };
         println!("{:} usec", time.elapsed().as_micros());
-        let t_ndarray = t_ndarray.into_raw_vec();
+        let t_ndarray = t_ndarray.into_raw_vec_and_offset().0;
 
         let diff =
             t_rstsr.iter().zip(t_ndarray.iter()).map(|(a, b)| (a - b).abs()).max_by(|a, b| a.total_cmp(b)).unwrap();
@@ -65,7 +65,7 @@ mod test {
             use rstsr_core::prelude::*;
             let mut rng = StdRng::seed_from_u64(42);
 
-            let vec_b: Vec<f64> = (0..4 * n * n).map(|_| rng.gen()).collect::<_>();
+            let vec_b: Vec<f64> = (0..4 * n * n).map(|_| rng.random()).collect::<_>();
             let b_full = rt::asarray((vec_b, [4, n, n], &DeviceCpuSerial::default()));
             b_full.sum_axes([-1, -2])
         };
@@ -77,7 +77,7 @@ mod test {
             use rstsr_core::prelude::*;
             let mut rng = StdRng::seed_from_u64(42);
 
-            let vec_b: Vec<f64> = (0..4 * n * n).map(|_| rng.gen()).collect::<_>();
+            let vec_b: Vec<f64> = (0..4 * n * n).map(|_| rng.random()).collect::<_>();
             let b_full = rt::asarray((vec_b, [4, n, n]));
             b_full.sum_axes([-1, -2])
         };
@@ -89,12 +89,12 @@ mod test {
             use ndarray::prelude::*;
 
             let mut rng = StdRng::seed_from_u64(42);
-            let vec_b: Vec<f64> = (0..4 * n * n).map(|_| rng.gen()).collect::<_>();
+            let vec_b: Vec<f64> = (0..4 * n * n).map(|_| rng.random()).collect::<_>();
             let b_full = Array::from_shape_vec((4, n, n), vec_b).unwrap();
             b_full.sum_axis(Axis(2)).sum_axis(Axis(1))
         };
         println!("{:} usec", time.elapsed().as_micros());
-        let t_ndarray = t_ndarray.into_raw_vec();
+        let t_ndarray = t_ndarray.into_raw_vec_and_offset().0;
 
         let diff =
             t_rstsr.iter().zip(t_ndarray.iter()).map(|(a, b)| (a - b).abs()).max_by(|a, b| a.total_cmp(b)).unwrap();

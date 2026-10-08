@@ -1,5 +1,166 @@
 # Changelog
 
+## v0.10.0-alpha.1 -- 2026-10-08
+
+Its theme is conformance to the Python array API standard, so the surface is still
+moving: further API-breaking changes are expected within the alpha series while
+rstsr-core is fitted to the standard.
+
+This release also introduces `rstsr-cpu-dlpack`, which will be beneficial for interop with Python and other languages.
+
+New features
+
+- New crate `rstsr-cpu-dlpack` (`crates-interop/`): CPU DLPack interchange for rstsr
+  tensors, pure Rust and without Python bindings. Foreign capsules import zero-copy
+  and read-only (the tensor carries the producer's deleter and owns its lifetime),
+  and tensors export as movable, copied, or shared capsules, including a zero-copy
+  basic-indexed view of a shared base. Exposed through the `rstsr` prelude behind the
+  `dlpack` cargo feature as `rt::dlpack::*`. (RESTGroup/rstsr#107)
+- `rt::where` / `rt::where_f` (method `cond.r#where(x, y)`): element-wise select
+  following NumPy's three-argument `np.where` and the array API `where(condition,
+  x1, x2)`. The condition is a strict boolean tensor; `x` / `y` accept tensors
+  (reference or by-value view) or scalars, broadcasting the three inputs together
+  under the device default order with house-strong promotion. Built on a new
+  quaternary (output + three inputs) elementwise kernel family.
+  (RESTGroup/rstsr#114, #116)
+- `rt::from_scalar(value, &device)`: the 0-d tensor owning a value — rstsr's spelling
+  of NumPy's 0-d `numpy.array(value)`. The 0-d result broadcasts with any tensor,
+  giving the sanctioned way to pass constants, bool included, to tensor-level APIs
+  (`&rt::from_scalar(false, &device)` for a bool scalar). (RESTGroup/rstsr#115)
+- `rt::positive` as a first-class unary op (`TensorPositiveAPI` / `OpPositiveAPI`),
+  with no element-type bound on the kernel. (RESTGroup/rstsr#108)
+- Reduction argument structs `ReduceArgs { axes, keepdims }` and
+  `VarArgs { axes, keepdims, correction }`, with `<fam>_with_args` for every
+  reduction family (keepdims without moving to the `_axes` form) and
+  `*_with_dtype::<TOut>` for sum / prod / mean / var / std (cast per element inside
+  the fold, no input-sized intermediate). `var` / `std` gain NumPy's `ddof` as
+  `correction`. (RESTGroup/rstsr#110)
+- Expert custom reductions `rt::reduce_all` / `rt::reduce_axes` / `rt::reduce_with_args`
+  over a user-provided init/fold/combine/finalize closure with a generic accumulator
+  and output (e.g. an Lp-norm or a multi-accumulator mean in one pass), and the
+  array API cumulative scans `rt::cumulative_sum` / `rt::cumulative_prod` with
+  `CumulativeArgs { axis, include_initial }`. (RESTGroup/rstsr#111)
+- Manipulation, sorting, searching and set-function wave, all device-independent:
+  `rt::repeat` / `rt::roll` / `rt::tile`; `rt::sort` / `rt::argsort` with
+  `SortArgs { axis, descending, stable }` plus the `*_custom` comparator forms
+  (NaN ordered last in both directions); `rt::searchsorted` with a NumPy-style
+  `sorter`; `rt::nonzero`; `rt::take_along_axis`; `rt::diff`; and the set family
+  `rt::unique_values` / `unique_counts` / `unique_inverse` / `unique_all` (named
+  structs) and `rt::isin`. New support types `ExtSortCmp` / `ExtZero` /
+  `AxisIndex` and matching `Op*API` device traits are implemented across the serial,
+  rayon/faer and BLAS backends. (RESTGroup/rstsr#118)
+- `AxesPairIndex<isize>` accepts a single axes collection as the pair `(axes, axes)`,
+  so `rt::vecdot(a, b, axes)` and `tensordot` take the same axes for both operands
+  (write the pair explicitly as `(0, 1)` when the axes differ). (RESTGroup/rstsr#120)
+- `rt::log1p` (implemented on every device, and prelude-exported at last), and
+  complex support for `expm1`. Both avoid the cancellation of `ln(1 + z)` / `exp(z)
+  - 1` for complex input. Backed by a new `ExtComplexFloat` trait so one device-table
+  row serves real and complex element types. (RESTGroup/rstsr#121)
+- C99-conformant complex elementary functions (`sqrt`, `cosh`, `sinh`, `tanh`, `tan`,
+  `acos`, `asin`, `acosh`, `asinh`, `atanh`) via the new `c99_complex` module:
+  NumPy-compatible branch cuts and special values in place of the NaN components
+  `num-complex` returns, and better accuracy for large `|z|`. (RESTGroup/rstsr#122)
+- `AxesIndex` conversions accept one-element tuples, so `a.i((1..4,))` indexes like
+  `a.i(1..4)`. (RESTGroup/rstsr#117)
+- `Clone` for `DataArc` and `TensorArc`: a zero-copy handle clone with copy-on-write
+  through `Arc::make_mut`. (RESTGroup/rstsr#107)
+
+Python array-API conformance (validation instrument, not published)
+
+- New `rstsr-faer-py` crate (`crates-interop/`): a pyo3 binding exposing the array-API
+  namespace `rstsr_faer.api` over `DeviceFaer`, used to grade rstsr with the official
+  data-apis `array-api-tests` suite. Wrapper-only by design — marshalling in Python,
+  dtype dispatch and `rt::` calls in Rust, no algorithms in either layer — and never
+  published (`publish = false`, no wheels). Divergences are recorded as gap/register
+  entries rather than worked around in the shim. (RESTGroup/rstsr#108)
+- Surface bound over the cycle: elementwise/operator dunders, creation,
+  manipulation, searching/indexing, statistical reductions and cumulative scans,
+  `where`, `log1p` and the other transcendental entries, with the `"data-dependent
+  shapes"` capability reported. (RESTGroup/rstsr#108, #112, #113, #116, #118, #121)
+- Against `array-api-tests` (pinned `6c0b59f`, spec 2025.12) the current standing is
+  1144 passed / 156 failed / 82 skipped of 1382. (RESTGroup/rstsr#108, #112, #113,
+  #116, #118, #121, #122)
+
+Enhancement
+
+- Adopt the tensor-tier API conventions across the new surface: `func_f` carries
+  exactly the signature of its panicking twin; every tensor-first function gains an
+  associated `TensorAny` method (views borrowed, not consumed); argument groups
+  travel as one tuple parameter supplying overloads via `From` / `TryFrom`, with
+  `None` accepted wherever `()` is; read-only parameters take `impl TensorViewAPI`;
+  and tuple-style constructors accept `TensorView` values. (RESTGroup/rstsr#118)
+- Move element-type bounds off the tensor layer onto the device impls, and make the
+  flattened visit order follow the device default order for `repeat` / `roll`
+  (axis = None), `nonzero`, and the `unique_*` first-occurrence sequence.
+  (RESTGroup/rstsr#118)
+- FFI dependency refresh: `rstsr-openblas-ffi` 0.5 → 0.6 (Linux-only affinity API plus
+  generator hardening), `rstsr-mkl-ffi` 0.2 → 0.3 (Intel oneAPI MKL 2026.1), and
+  `rstsr-aocl-ffi` 0.2 → 0.3 (AOCL 5.3.0). Released from the sibling `rstsr-ffi` repo.
+- Refresh the other dependencies toward their latest releases: `itertools` 0.13 → 0.15,
+  `num-bigint` 0.4 → 0.5, `npyz` 0.8 → 0.9 and `criterion` 0.5 → 0.8 drop in with no
+  source changes; `rand` 0.8 → 0.10 and `ndarray` 0.15 → 0.17 needed a test-code
+  migration (`RngExt::random`, `into_raw_vec_and_offset`).
+- Rewrite the slice basic-indexing documentation around the `tensor.i()` + tuple call
+  forms, as an `include_str!`-attached docs page with `doc_draft`-verified examples
+  (NumPy-parity of newaxis/ellipsis placement against the pinned NumPy 2.5.2), plus
+  `compile_fail` fences carrying real diagnostics. (RESTGroup/rstsr#117)
+- Move the anchor docstrings of `allclose`, `var_with_args` and `std_with_args` onto
+  the panicking forms, restoring the "fallible twin defers with See also"
+  convention. (RESTGroup/rstsr#119)
+
+Bug Fix
+
+- Fix `Layout::diagonal` gating the super-diagonal range on rows instead of columns
+  (`eye(2, 4, k=2)` returned an all-zero matrix and `eye(3, 1, k=2)` a bogus
+  layout-overflow error); all `diagonal` consumers share the fix. (RESTGroup/rstsr#113)
+- Fix `triu` indexing past the row when the diagonal leaves the matrix (a panic for
+  `k >= ncols` or `M > N`), and `tril` / `triu` surfacing a bare `AxisError` for
+  rank-1 input. (RESTGroup/rstsr#113)
+- Fix `linspace` not including the endpoint exactly and the serial kernel's
+  accumulated drift; both kernels now compute `start + i * step`. (RESTGroup/rstsr#113)
+- Fix `squeeze` accepting a mixed axis list containing an invalid negative axis, and
+  `take` / `index_select` raising on empty indices against a zero-length axis;
+  `argmax` / `argmin` no longer reject an empty (but non-reduced) output.
+  (RESTGroup/rstsr#113)
+- Fix axes reductions over broadcast (stride-0) inputs returning silently wrong
+  values, an out-of-bounds panic when reducing all axes via an axis list, and
+  zero-size inputs panicking through an all-axes list (they now return the identity
+  value per output cell, with empty mean as NaN). (RESTGroup/rstsr#110)
+- Fix the promotion matrix missing `DTypePromoteAPI<i16> for i8` (the impl line had
+  been swallowed by a section comment since 2025-09-29), so every promotion-bound op
+  — maximum/minimum, floor_divide, atan2, copysign, hypot, nextafter, logaddexp,
+  comparisons — now accepts int8 x int16 pairs. (RESTGroup/rstsr#116)
+- Fix the contiguous-assignment fast path panicking on zero-size assignments in both
+  the serial and rayon kernels. (RESTGroup/rstsr#118)
+- Fix `DataArc::into_owned` panicking when the buffer is shared; it now falls back to
+  a data clone, as documented. (RESTGroup/rstsr#107)
+- `rt::round` resolves halfway cases to the even integer (IEEE ties-to-even, matching
+  NumPy) instead of Rust's ties-away `f64::round`. (RESTGroup/rstsr#112)
+- `arange` with a step pointing away from the stop is now direction-aware:
+  sign-mismatched ranges and `start == end` return empty instead of looping
+  unboundedly (float) or coming back empty (narrow integers). (RESTGroup/rstsr#108)
+- Complex `sqrt`/`cosh`/`sinh`/`tanh`/`tan`/`acos`/`asin`/`acosh`/`asinh`/`atanh`
+  return the standard's special values instead of NaN; `expm1(±0 ± 0i)` returns
+  `+0 + 0i`; `tanh(±inf + iy)` takes its imaginary zero from the standard's fixed
+  `+0`. (RESTGroup/rstsr#122)
+- `rstsr-faer-py`: `meshgrid()` with zero vectors returns an empty tuple; `all` /
+  `any` on a 0-d input keep the input shape; `searchsorted` with a float scalar
+  against an integer array raises `TypeError`, and negative `repeat` / `tile` /
+  `sorter` arguments raise `ValueError`. (RESTGroup/rstsr#113, #118)
+
+Dev infrastructure
+
+- New `rstsr-cpu-dlpack-test.yml` workflow covering the crate's tests (default and
+  col-major) and the `rt::dlpack` prelude test. (RESTGroup/rstsr#107)
+- Move `rstsr-dtype-traits` tests out of `src/` into `tests/` (one file per module),
+  so the library is always tested in its `no_std` form. (RESTGroup/rstsr#122)
+- Grow the NumPy-parity test surface and tracking for every new wave
+  (`numpy_coverage.csv` 204 → 250 rows, `sync_numpy.py` oracle reporting zero
+  MISSING, `numpy_differences.md` divergence entries), with `doc_draft` twins for the
+  new docstrings. (RESTGroup/rstsr#110, #113, #114, #118)
+- Add the `rstsr-faer-py-tests` harness skill (in `rstsr-agents`) for grading against
+  `array-api-tests`. (RESTGroup/rstsr#108)
+
 ## v0.9.0 -- 2026-10-02
 
 v0.9 will mark as the final version of full human-driven. We will be more aggressive in

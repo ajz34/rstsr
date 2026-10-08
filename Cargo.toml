@@ -20,7 +20,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.9.0"
+version = "0.10.0-alpha.1"
 edition = "2021"
 rust-version = "1.82.0"
 description = "An n-Dimension Rust Tensor Toolkit"
@@ -30,39 +30,39 @@ categories = ["science"]
 license = "Apache-2.0"
 
 [workspace.dependencies]
-rstsr = { path = "./rstsr", default-features = false, version = "0.9.0" }
-rstsr-core = { path = "./rstsr-core", default-features = false, version = "0.9.0" }
+rstsr = { path = "./rstsr", default-features = false, version = "0.10.0-alpha.1" }
+rstsr-core = { path = "./rstsr-core", default-features = false, version = "0.10.0-alpha.1" }
 # members (without core)
-rstsr-common = { path = "./rstsr-common", default-features = false, version = "0.9.0" }
-rstsr-dtype-traits = { path = "./rstsr-dtype-traits", default-features = false, version = "0.9.0" }
-rstsr-native-impl = { path = "./rstsr-native-impl", default-features = false, version = "0.9.0" }
+rstsr-common = { path = "./rstsr-common", default-features = false, version = "0.10.0-alpha.1" }
+rstsr-dtype-traits = { path = "./rstsr-dtype-traits", default-features = false, version = "0.10.0-alpha.1" }
+rstsr-native-impl = { path = "./rstsr-native-impl", default-features = false, version = "0.10.0-alpha.1" }
 # members (traits and core-extensions)
-rstsr-blas-traits = { path = "./rstsr-blas-traits", default-features = false, version = "0.9.0" }
-rstsr-linalg-traits = { path = "./rstsr-linalg-traits", default-features = false, version = "0.9.0" }
-rstsr-sci-traits = { path = "./rstsr-sci-traits", default-features = false, version = "0.9.0" }
+rstsr-blas-traits = { path = "./rstsr-blas-traits", default-features = false, version = "0.10.0-alpha.1" }
+rstsr-linalg-traits = { path = "./rstsr-linalg-traits", default-features = false, version = "0.10.0-alpha.1" }
+rstsr-sci-traits = { path = "./rstsr-sci-traits", default-features = false, version = "0.10.0-alpha.1" }
 # members (device)
-rstsr-openblas = { path = "./crates-device/rstsr-openblas", default-features = false, version = "0.9.0" }
-rstsr-mkl = { path = "./crates-device/rstsr-mkl", default-features = false, version = "0.9.0" }
-rstsr-blis = { path = "./crates-device/rstsr-blis", default-features = false, version = "0.9.0" }
-rstsr-aocl = { path = "./crates-device/rstsr-aocl", default-features = false, version = "0.9.0" }
-rstsr-kml = { path = "./crates-device/rstsr-kml", default-features = false, version = "0.9.0" }
+rstsr-openblas = { path = "./crates-device/rstsr-openblas", default-features = false, version = "0.10.0-alpha.1" }
+rstsr-mkl = { path = "./crates-device/rstsr-mkl", default-features = false, version = "0.10.0-alpha.1" }
+rstsr-blis = { path = "./crates-device/rstsr-blis", default-features = false, version = "0.10.0-alpha.1" }
+rstsr-aocl = { path = "./crates-device/rstsr-aocl", default-features = false, version = "0.10.0-alpha.1" }
+rstsr-kml = { path = "./crates-device/rstsr-kml", default-features = false, version = "0.10.0-alpha.1" }
 # members (plugin)
-rstsr-tblis = { path = "./crates-plugin/rstsr-tblis", default-features = false, version = "0.9.0" }
+rstsr-tblis = { path = "./crates-plugin/rstsr-tblis", default-features = false, version = "0.10.0-alpha.1" }
 # members (interop)
-rstsr-cpu-dlpack = { path = "./crates-interop/rstsr-cpu-dlpack", default-features = false, version = "0.9.0" }
+rstsr-cpu-dlpack = { path = "./crates-interop/rstsr-cpu-dlpack", default-features = false, version = "0.10.0-alpha.1" }
 # develop dependencies that should not publish
 rstsr-test-manifest = { path = "./rstsr-test-manifest", default-features = false }
 # ffi dependencies
 dlpack-ffi = { version = "1.3" }
 rstsr-cblas-base = { version = "0.1" }
-rstsr-openblas-ffi = { version = "0.5", default-features = false, features = ["blas", "cblas", "lapack"] }
-rstsr-mkl-ffi = { version = "0.2", default-features = false, features = ["blas", "cblas", "lapack"] }
+rstsr-openblas-ffi = { version = "0.6", default-features = false, features = ["blas", "cblas", "lapack"] }
+rstsr-mkl-ffi = { version = "0.3", default-features = false, features = ["blas", "cblas", "lapack"] }
 rstsr-blis-ffi = { version = "0.2", default-features = false, features = ["lapack"] }
-rstsr-aocl-ffi = { version = "0.2", default-features = false, features = ["blis", "lapack"] }
+rstsr-aocl-ffi = { version = "0.3", default-features = false, features = ["blis", "lapack"] }
 rstsr-kml-ffi = { version = "0.2", default-features = false, features = ["kblas", "lapack"] }
 # basic dependencies
 num = { version = "0.4", default-features = false, features = ["alloc", "libm"] }
-itertools = { version = "0.13", default-features = false, features = ["use_alloc"] }
+itertools = { version = "0.15", default-features = false, features = ["use_alloc"] }
 half = { version = "2.7", default-features = false, features = ["alloc", "num-traits"] }
 libm = { version = "0.2" }
 derive_builder = { version = "0.20", default-features = false, features = ["alloc"] }
@@ -75,12 +75,12 @@ faer-ext = { version = "0.6" }
 tblis = { version = "0.2" }
 opt-einsum-path = { version = "0.2", features = ["par_rand"] }
 # dev dependencies
-num-bigint = { version = "0.4" }
-npyz = { version = "0.8", features = ["complex"] }
-rand = { version = "0.8" }
+num-bigint = { version = "0.5" }
+npyz = { version = "0.9", features = ["complex"] }
+rand = { version = "0.10" }
 approx = { version = "0.5" }
-ndarray = { version = "0.15" }
-criterion = { version = "0.5" }
+ndarray = { version = "0.17" }
+criterion = { version = "0.8" }
 cpu-time = { version = "1.0" }
 tblis-src = { version = "0.2" }
 
