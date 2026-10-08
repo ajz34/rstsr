@@ -2,10 +2,10 @@
 //!
 //! Basic keys (int/slice/newaxis/ellipsis) ride rstsr's layout slicing
 //! (`i_f`/`i_mut_f`) and its assign/fill; whole-tensor boolean-mask keys ride
-//! `rt::mask_select` / `rt::mask_fill` (rust-side, G-038). Integer-array
-//! (fancy) indexing stays a registered rust-side gap (G-039) and is declined
-//! here per the wrapper-only rule. Results are fresh owned tensors — the
-//! handle model has no shared storage (register G-036).
+//! `rt::mask_select` / `rt::mask_fill` (rust-side, G-038); keys containing an
+//! integer array ride `rt::array_index` (rust-side array indexing, G-039), and
+//! may freely mix basic indexers with index arrays. Results are fresh owned
+//! tensors — the handle model has no shared storage (register G-036).
 
 use core::mem::MaybeUninit;
 use num::Complex;
@@ -17,7 +17,9 @@ use rstsr::prelude::rt;
 use rstsr::prelude::*;
 
 use rstsr_common::layout::exports::{Indexer, SliceI};
-use rstsr_core::operators::adv_indexing::{DeviceIndexSelectAPI, DeviceMaskIndexAPI, DeviceTakeAlongAxisAPI};
+use rstsr_core::operators::adv_indexing::{
+    DeviceArrayIndexAPI, DeviceIndexSelectAPI, DeviceMaskIndexAPI, DeviceTakeAlongAxisAPI,
+};
 use rstsr_core::operators::assignment::OpAssignAPI;
 use rstsr_core::operators::searching::OpNonzeroAPI;
 use rstsr_core::storage::exports::{DeviceCreationAnyAPI, DeviceRawAPI};
@@ -32,16 +34,39 @@ enum KeyItem {
     Slice(Option<isize>, Option<isize>, Option<isize>),
     NewAxis,
     Ellipsis,
+    /// An integer index array (same device as the indexed tensor).
+    Array(FTensor<isize>),
 }
 
 fn sl(start: Option<isize>, stop: Option<isize>, step: Option<isize>) -> Indexer {
     Indexer::Slice(SliceI::new(start, stop, step))
 }
 
-/// Duck-typed key parse: int / slice / None / Ellipsis. Whole-tensor boolean
-/// masks are routed to [`getitem_mask`] / [`setitem_mask`] by the Python
-/// layer, so an array key reaching here is integer-array (fancy) indexing,
-/// declined as a registered rust-side gap (G-039).
+/// Convert an integer index array (any integer dtype) into the `isize` index
+/// dtype of rstsr's array indexing. Boolean arrays are only supported as a
+/// lone whole-tensor mask, which the Python layer routes to
+/// [`getitem_mask`]; every other array dtype is not an index.
+fn index_array_to_isize(x: &NativeArray) -> PyResult<FTensor<isize>> {
+    match &x.t {
+        AnyTensor::I8(t) => Ok(t.mapv(|v| v as isize)),
+        AnyTensor::I16(t) => Ok(t.mapv(|v| v as isize)),
+        AnyTensor::I32(t) => Ok(t.mapv(|v| v as isize)),
+        AnyTensor::I64(t) => Ok(t.mapv(|v| v as isize)),
+        AnyTensor::U8(t) => Ok(t.mapv(|v| v as isize)),
+        AnyTensor::U16(t) => Ok(t.mapv(|v| v as isize)),
+        AnyTensor::U32(t) => Ok(t.mapv(|v| v as isize)),
+        AnyTensor::U64(t) => Ok(t.mapv(|v| v as isize)),
+        AnyTensor::Bool(_) => type_err(
+            "boolean-array indexing cannot be mixed with other indexers; use a lone boolean mask \
+             (x[mask]) or rt::mask_select / rt::bool_select",
+        ),
+        _ => type_err("integer-array (fancy) indexing requires an integer index array"),
+    }
+}
+
+/// Duck-typed key parse: int / slice / None / Ellipsis / integer array.
+/// Whole-tensor boolean masks are routed to [`getitem_mask`] /
+/// [`setitem_mask`] by the Python layer.
 fn parse_key<'py>(key: &Bound<'py, PyTuple>) -> PyResult<Vec<KeyItem>> {
     let mut items = Vec::new();
     for item in key.iter() {
@@ -58,8 +83,8 @@ fn parse_key<'py>(key: &Bound<'py, PyTuple>) -> PyResult<Vec<KeyItem>> {
             items.push(KeyItem::NewAxis);
         } else if item.is_instance_of::<PyEllipsis>() {
             items.push(KeyItem::Ellipsis);
-        } else if item.extract::<PyRef<'py, NativeArray>>().is_ok() {
-            return Err(PyTypeError::new_err("integer-array (fancy) indexing is not provided by rstsr (gap G-039)"));
+        } else if let Ok(handle) = item.extract::<PyRef<'py, NativeArray>>() {
+            items.push(KeyItem::Array(index_array_to_isize(&handle)?));
         } else {
             return Err(PyTypeError::new_err(format!("invalid index element of type {}", item.get_type().name()?)));
         }
@@ -75,6 +100,7 @@ fn to_indexers(items: &[KeyItem]) -> Vec<Indexer> {
             KeyItem::Slice(a, b, c) => sl(*a, *b, *c),
             KeyItem::NewAxis => Indexer::Insert,
             KeyItem::Ellipsis => Indexer::Ellipsis,
+            KeyItem::Array(_) => unreachable!("array keys do not take the basic path"),
         })
         .collect()
 }
@@ -92,9 +118,37 @@ where
     Ok(view.into_owned())
 }
 
+/// Array indexing (fancy indexing): basic indexers may be mixed with integer
+/// index arrays; see `rt::array_index`.
+fn op_getitem_array<T>(t: &FTensor<T>, items: &[KeyItem]) -> rt::Result<FTensor<T>>
+where
+    T: Clone + Send + Sync + 'static,
+    DeviceFaer: DeviceAPI<T, Raw = Vec<T>>
+        + DeviceAPI<isize, Raw = Vec<isize>>
+        + DeviceAPI<bool, Raw = Vec<bool>>
+        + DeviceRawAPI<MaybeUninit<T>>
+        + DeviceCreationAnyAPI<T>
+        + DeviceArrayIndexAPI<T>,
+{
+    let indexers = items
+        .iter()
+        .map(|it| match it {
+            KeyItem::Select(i) => ArrayIndexer::Basic(Indexer::Select(*i)),
+            KeyItem::Slice(a, b, c) => ArrayIndexer::Basic(sl(*a, *b, *c)),
+            KeyItem::NewAxis => ArrayIndexer::Basic(Indexer::Insert),
+            KeyItem::Ellipsis => ArrayIndexer::Basic(Indexer::Ellipsis),
+            KeyItem::Array(idx) => ArrayIndexer::ArrayIndex(idx.clone()),
+        })
+        .collect::<Vec<_>>();
+    Ok(rt::array_index_f(t, ArrayIndexArgs::new(indexers))?.into_owned())
+}
+
 #[pyfunction]
 pub fn getitem_basic(x: &NativeArray, key: &Bound<'_, PyTuple>) -> PyResult<NativeArray> {
     let items = parse_key(key)?;
+    if items.iter().any(|it| matches!(it, KeyItem::Array(_))) {
+        return Ok(NativeArray { t: dispatch_t!(x.t, op_getitem_array(&items))? });
+    }
     let idx = to_indexers(&items);
     Ok(NativeArray { t: dispatch_t!(x.t, op_getitem_basic(&idx))? })
 }

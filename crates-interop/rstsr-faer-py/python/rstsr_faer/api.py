@@ -419,8 +419,7 @@ class Array:
             return self  # () is a no-op index at any dimensionality
         key = index if isinstance(index, tuple) else (index,)
         # A 0-d integer array is a scalar index (NumPy semantics), not
-        # integer-array indexing: marshal it through __index__ (fancy indexing
-        # stays a rust-side gap, G-039).
+        # integer-array indexing: marshal it through __index__.
         key = tuple(
             _py_int(k)
             if isinstance(k, Array) and k.ndim == 0 and _kind(k.dtype) == "integral"
@@ -428,9 +427,12 @@ class Array:
             for k in key
         )
         if builtins.any(isinstance(k, Array) for k in key):
+            # A lone boolean array is whole-tensor mask indexing; any other
+            # array key rides rust-side array indexing (`rt::array_index`),
+            # which accepts mixed basic + integer-array indexers.
             if _is_single_bool_mask(key):
                 return _wrap(_pkg.getitem_mask(self._h, key[0]._h))
-            _unimplemented("integer-array (fancy) indexing (rstsr gap G-039)")
+            key = tuple(k._h if isinstance(k, Array) else k for k in key)
         return _wrap(_pkg.getitem_basic(self._h, key))
 
     def __setitem__(self, key, value, /):
