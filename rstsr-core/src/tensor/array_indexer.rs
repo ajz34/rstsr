@@ -7,7 +7,7 @@
 //! lowered to the array variants while parsing.
 //!
 //! [`ArrayIndexArgs`] is the argument group of
-//! [`array_index`](crate::tensor::array_indexing::array_index): a list of
+//! [`array_index`]: a list of
 //! indexers, one per indexed axis, supplied as a single indexer, a tuple, a
 //! host slice/vector (a one-dimensional index array), or an
 //! [`AxesIndex<ArrayIndexer>`][AxesIndex].
@@ -16,7 +16,7 @@ use crate::prelude_dev::*;
 
 /// Indexer of array indexing.
 ///
-/// The indexers of [`array_index`](crate::tensor::array_indexing::array_index)
+/// The indexers of [`array_index`]
 /// mirror the per-axis indexers of NumPy's `x[...]`:
 ///
 /// - [`ArrayIndexer::Basic`]: basic indexer, see [`Indexer`].
@@ -35,8 +35,8 @@ where
     ArrayIndex(Tensor<isize, B, IxD>),
     /// Boolean-array indexer: the tensor indexes axes by its true entries.
     ///
-    /// Not implemented yet; use [`mask_select`][crate::tensor::adv_indexing::mask_select]
-    /// or [`bool_select`][crate::tensor::adv_indexing::bool_select].
+    /// Not implemented yet; use [`mask_select`]
+    /// or [`bool_select`].
     ArrayBool(Tensor<bool, B, IxD>),
     /// One-dimensional host integer list, lowered to
     /// [`ArrayIndexer::ArrayIndex`].
@@ -392,7 +392,7 @@ where
 ///
 /// A zero-dimensional tensor is *not* an array indexer: it is equivalent to
 /// [`Indexer::Select`] of its only entry, and is lowered accordingly while
-/// parsing (see [`array_index`](crate::tensor::array_indexing::array_index)).
+/// parsing (see [`array_index`]).
 impl<R, B> From<TensorAny<R, isize, B, IxD>> for ArrayIndexer<B>
 where
     R: DataCloneAPI<Data = <B as DeviceRawAPI<isize>>::Raw>,

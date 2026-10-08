@@ -1,7 +1,7 @@
 //! Array indexing device impls for [`DeviceRayonAutoImpl`] (generic rayon
-//! device; also [`DeviceFaer`](crate::device_faer::DeviceFaer)'s impl through
-//! the `rayon_auto_impl` symlink). Delegates to the serial kernel (a parallel
-//! split over the output can follow with the perf pass).
+//! device; also `DeviceFaer`'s impl through the `rayon_auto_impl` symlink).
+//! Delegates to the serial kernel (a parallel split over the output can follow
+//! with the perf pass).
 
 use crate::prelude_dev::*;
 

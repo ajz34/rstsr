@@ -1,6 +1,6 @@
 //! Array indexing (fancy indexing) by integer arrays.
 //!
-//! Contrary to basic slicing ([`slice`](crate::tensor::indexing::slice)),
+//! Contrary to basic slicing ([`slice`](crate::tensor::indexing::slice())),
 //! which only moves the layout, array indexing gathers elements and therefore
 //! returns an owned tensor (or a view, when no array indexer is actually
 //! involved; see [`array_index`]).
@@ -464,10 +464,10 @@ impl Display for DebugShape<'_> {
 /// ## Related functions in RSTSR
 ///
 /// - [`slice`](crate::tensor::indexing::slice()): basic indexing, always a view.
-/// - [`take`](crate::tensor::adv_indexing::take) / [`index_select`](crate::tensor::adv_indexing::index_select):
+/// - [`take`] / [`index_select`]:
 ///   gather along one axis by a host integer list.
-/// - [`take_along_axis`](crate::tensor::adv_indexing::take_along_axis): gather along one axis by an index tensor of the same rank.
-/// - [`mask_select`](crate::tensor::adv_indexing::mask_select): gather by a boolean mask.
+/// - [`take_along_axis`]: gather along one axis by an index tensor of the same rank.
+/// - [`mask_select`]: gather by a boolean mask.
 ///
 /// ## Variants of this function
 ///

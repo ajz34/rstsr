@@ -102,7 +102,7 @@ pub struct ArrayAuxIndexer<'a> {
 
 /// Array indexing (fancy indexing) by integer arrays on one or more axes.
 ///
-/// See [`array_index`](crate::tensor::array_indexing::array_index). The result
+/// See [`array_index`]. The result
 /// is fully described by `lc` (the output layout, with the broadcast index
 /// dimensions placed at `consec`) and `base_layout` (the layout of the
 /// non-array-indexed subspace, whose strides are those of `la` and whose offset
