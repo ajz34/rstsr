@@ -25,7 +25,6 @@ pub use crate::cpu_serial::set::*;
 pub use crate::cpu_serial::sorting::*;
 pub use crate::cpu_serial::transpose::*;
 pub use crate::cpu_serial::vecdot::*;
-pub use crate::scalar_math::*;
 
 #[cfg(feature = "rayon")]
 mod cpu_rayon {

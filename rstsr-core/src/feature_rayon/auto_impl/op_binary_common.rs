@@ -1,6 +1,5 @@
 use crate::prelude_dev::*;
 use num::complex::ComplexFloat;
-use num::Float;
 use rstsr_dtype_traits::{DTypeIntoFloatAPI, ExtComplexFloat, ExtNum, ExtReal};
 
 /* #region same type */
@@ -13,26 +12,22 @@ use rstsr_dtype_traits::{DTypeIntoFloatAPI, ExtComplexFloat, ExtNum, ExtReal};
     [OpAsinhAPI     ] [ExtComplexFloat] [b.ext_asinh() ];
     [OpAtanAPI      ] [ComplexFloat] [b.atan()  ];
     [OpAtanhAPI     ] [ExtComplexFloat] [b.ext_atanh() ];
-    [OpCeilAPI      ] [Float       ] [b.ceil()  ];
     [OpConjAPI      ] [ComplexFloat] [b.conj()  ];
     [OpCosAPI       ] [ComplexFloat] [b.cos()   ];
     [OpCoshAPI      ] [ExtComplexFloat] [b.ext_cosh()  ];
     [OpExpAPI       ] [ComplexFloat] [b.exp()   ];
     [OpExpm1API     ] [ExtComplexFloat] [b.ext_exp_m1()];
-    [OpFloorAPI     ] [Float       ] [b.floor() ];
     [OpInvAPI       ] [ComplexFloat] [b.recip() ];
     [OpLogAPI       ] [ComplexFloat] [b.ln()    ];
     [OpLog1pAPI     ] [ExtComplexFloat] [b.ext_log_1p() ];
     [OpLog2API      ] [ComplexFloat] [b.log2()  ];
     [OpLog10API     ] [ComplexFloat] [b.log10() ];
     [OpReciprocalAPI] [ComplexFloat] [b.recip() ];
-    [OpRoundAPI     ] [Float       ] [round_ties_even_f(b) ];
     [OpSinAPI       ] [ComplexFloat] [b.sin()   ];
     [OpSinhAPI      ] [ExtComplexFloat] [b.ext_sinh()  ];
     [OpSqrtAPI      ] [ExtComplexFloat] [b.ext_sqrt()  ];
     [OpTanAPI       ] [ExtComplexFloat] [b.ext_tan()   ];
     [OpTanhAPI      ] [ExtComplexFloat] [b.ext_tanh()  ];
-    [OpTruncAPI     ] [Float       ] [b.trunc() ];
 )]
 impl<T, D> OpAPI<T, D> for DeviceRayonAutoImpl
 where
@@ -61,6 +56,76 @@ where
             // read then overwritten via `write`.
             let b = unsafe { a.assume_init_read() };
             a.write(func_inner);
+        };
+        self.op_muta_func(a, la, &mut func)
+    }
+}
+
+// dtype-preserving rounding (integers are already integral)
+#[duplicate_item(
+     OpAPI           func_inner;
+    [OpCeilAPI   ] [ExtReal::ext_ceil(b.clone())  ];
+    [OpFloorAPI  ] [ExtReal::ext_floor(b.clone()) ];
+    [OpTruncAPI  ] [ExtReal::ext_trunc(b.clone()) ];
+)]
+impl<T, D> OpAPI<T, D> for DeviceRayonAutoImpl
+where
+    T: Clone + Send + Sync + ExtReal,
+    D: DimAPI,
+{
+    type TOut = T;
+
+    fn op_muta_refb(
+        &self,
+        a: &mut Vec<MaybeUninit<Self::TOut>>,
+        la: &Layout<D>,
+        b: &Vec<T>,
+        lb: &Layout<D>,
+    ) -> Result<()> {
+        let mut func = |a: &mut MaybeUninit<Self::TOut>, b: &T| {
+            a.write(func_inner);
+        };
+        self.op_muta_refb_func(a, la, b, lb, &mut func)
+    }
+
+    fn op_muta(&self, a: &mut Vec<MaybeUninit<Self::TOut>>, la: &Layout<D>) -> Result<()> {
+        let mut func = |a: &mut MaybeUninit<Self::TOut>| {
+            // SAFETY: in-place op — `a` is an initialized element of the caller's buffer;
+            // read then overwritten via `write`.
+            let b = unsafe { a.assume_init_read() };
+            a.write(func_inner);
+        };
+        self.op_muta_func(a, la, &mut func)
+    }
+}
+
+// `round` also covers complex: real and imaginary parts rounded independently
+impl<T, D> OpRoundAPI<T, D> for DeviceRayonAutoImpl
+where
+    T: Clone + Send + Sync + ExtNum,
+    D: DimAPI,
+{
+    type TOut = T;
+
+    fn op_muta_refb(
+        &self,
+        a: &mut Vec<MaybeUninit<Self::TOut>>,
+        la: &Layout<D>,
+        b: &Vec<T>,
+        lb: &Layout<D>,
+    ) -> Result<()> {
+        let mut func = |a: &mut MaybeUninit<Self::TOut>, b: &T| {
+            a.write(b.clone().ext_round());
+        };
+        self.op_muta_refb_func(a, la, b, lb, &mut func)
+    }
+
+    fn op_muta(&self, a: &mut Vec<MaybeUninit<Self::TOut>>, la: &Layout<D>) -> Result<()> {
+        let mut func = |a: &mut MaybeUninit<Self::TOut>| {
+            // SAFETY: in-place op — `a` is an initialized element of the caller's buffer;
+            // read then overwritten via `write`.
+            let b = unsafe { a.assume_init_read() };
+            a.write(b.clone().ext_round());
         };
         self.op_muta_func(a, la, &mut func)
     }

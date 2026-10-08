@@ -94,6 +94,47 @@ mod custom_math_basic {
         assert!(r[2].is_nan());
         assert!(r[3].is_infinite());
     }
+
+    #[test]
+    fn test_integer_rounding_dtypes() {
+        crate::specify_test!("test_integer_rounding_dtypes");
+
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        // ceil/floor/trunc/round must return the input dtype (array-API "the
+        // returned array must have the same data type as x"). Integers are
+        // already integral, so they are the identity — not promoted to float64.
+        let i = rt::tensor_from_nested!([-3, -1, 0, 2, 5], &device);
+        assert_eq!(rt::ceil(&i).to_vec(), vec![-3, -1, 0, 2, 5]);
+        assert_eq!(rt::floor(&i).to_vec(), vec![-3, -1, 0, 2, 5]);
+        assert_eq!(rt::trunc(&i).to_vec(), vec![-3, -1, 0, 2, 5]);
+        assert_eq!(rt::round(&i).to_vec(), vec![-3, -1, 0, 2, 5]);
+
+        // unsigned stays unsigned the same way
+        let u: Tensor<u8, _> = rt::tensor_from_nested!([0, 7, 255], &device);
+        assert_eq!(rt::ceil(&u).to_vec(), vec![0u8, 7u8, 255u8]);
+        assert_eq!(rt::floor(&u).to_vec(), vec![0u8, 7u8, 255u8]);
+        assert_eq!(rt::trunc(&u).to_vec(), vec![0u8, 7u8, 255u8]);
+        assert_eq!(rt::round(&u).to_vec(), vec![0u8, 7u8, 255u8]);
+    }
+
+    #[test]
+    fn test_round_complex() {
+        crate::specify_test!("test_round_complex");
+
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        use num::Complex;
+        // array-API 2024.12: complex components round independently, ties-to-even.
+        let z: Tensor<Complex<f64>, _> = rt::asarray((vec![Complex::new(1.5, 2.5), Complex::new(-0.5, 3.4)], &device));
+        let r = rt::round(&z).to_vec();
+        assert_eq!(r[0], Complex::new(2.0, 2.0)); // 1.5 -> 2, 2.5 -> 2 (even)
+        assert_eq!(r[1].im, 3.0); // 3.4 -> 3
+        assert_eq!(r[1].re, 0.0);
+        assert!(r[1].re.is_sign_negative()); // -0.5 -> -0.0 (IEEE keeps the sign)
+    }
 }
 
 #[cfg(test)]

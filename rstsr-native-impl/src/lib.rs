@@ -4,6 +4,5 @@ extern crate alloc;
 #[cfg(feature = "rayon")]
 pub mod cpu_rayon;
 pub mod cpu_serial;
-pub mod scalar_math;
 
 pub mod prelude_dev;

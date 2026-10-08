@@ -482,37 +482,6 @@ macro_rules! dispatch_t_into_float {
 }
 pub(crate) use dispatch_t_into_float;
 
-/// Unary dispatch whose spec output dtype equals the input dtype, restricted
-/// to real floating dtypes (`f32`/`f64`): bool, integer and complex inputs
-/// are declined. Integer inputs are declined because rstsr's kernels promote
-/// them to float64 while the spec requires dtype preservation (register
-/// G-052: dtype-preserving integer kernels).
-macro_rules! dispatch_t_real_float_same {
-    ($scrut:expr, $opname:expr, $f:ident ( $($arg:expr),* )) => {
-        match &$scrut {
-            AnyTensor::Bool(_) => type_err(format!(
-                "{}: not defined for bool dtype",
-                $opname
-            )),
-            AnyTensor::I8(_) | AnyTensor::I16(_) | AnyTensor::I32(_) | AnyTensor::I64(_)
-            | AnyTensor::U8(_) | AnyTensor::U16(_) | AnyTensor::U32(_) | AnyTensor::U64(_) => type_err(
-                format!(
-                    "{}: integer inputs are not provided by rstsr (the kernel promotes to float64; \
-                     the spec requires dtype preservation) — register G-052",
-                    $opname
-                ),
-            ),
-            AnyTensor::C32(_) | AnyTensor::C64(_) => type_err(format!(
-                "{}: complex inputs are not provided by rstsr (gap)",
-                $opname
-            )),
-            AnyTensor::F32(t) => lift(($f::<f32>)(&t, $($arg),*), AnyTensor::F32),
-            AnyTensor::F64(t) => lift(($f::<f64>)(&t, $($arg),*), AnyTensor::F64),
-        }
-    };
-}
-pub(crate) use dispatch_t_real_float_same;
-
 /// Unary dispatch over every numeric dtype but bool, output dtype == input
 /// dtype (rstsr `ExtNum` kernels: sign, conj).
 macro_rules! dispatch_t_numeric_same {

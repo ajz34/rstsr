@@ -65,6 +65,17 @@ pub trait ExtNum: Clone {
 
     /* #endregion */
 
+    /* #region round */
+
+    /// Rounds to the nearest integral value, with halfway cases to the even
+    /// neighbor — the array-API `round`.
+    ///
+    /// Identity for integer types. Complex rounds the real and imaginary parts
+    /// independently (array-API 2024.12).
+    fn ext_round(self) -> Self;
+
+    /* #endregion */
+
     /* #region real-imag */
 
     /// Returns the real part of the number.
@@ -133,6 +144,13 @@ impl ExtNum for T {
     #[allow(clippy::unnecessary_cast)] // identity cast for u32 itself
     fn ext_pow(self, other: Self) -> Option<Self> {
         Some(self.pow(other as u32))
+    }
+    /* #endregion */
+
+    /* #region round */
+    #[inline]
+    fn ext_round(self) -> Self {
+        self
     }
     /* #endregion */
 
@@ -214,6 +232,13 @@ impl ExtNum for T {
     }
     /* #endregion */
 
+    /* #region round */
+    #[inline]
+    fn ext_round(self) -> Self {
+        self
+    }
+    /* #endregion */
+
     /* #region real-imag */
     #[inline]
     fn ext_real(self) -> Self {
@@ -226,7 +251,11 @@ impl ExtNum for T {
     /* #endregion */
 }
 
-#[duplicate_item(T; [f32]; [f64];)]
+#[duplicate_item(
+    T       roundeven;
+    [f32]   [libm::roundevenf];
+    [f64]   [libm::roundeven];
+)]
 impl ExtNum for T {
     /* #region abs */
     type AbsOut = Self;
@@ -299,6 +328,14 @@ impl ExtNum for T {
     }
     /* #endregion */
 
+    /* #region round */
+    #[inline]
+    fn ext_round(self) -> Self {
+        // ties-to-even, exactly (libm is a `no_std` dependency of this crate)
+        roundeven(self)
+    }
+    /* #endregion */
+
     /* #region real-imag */
     #[inline]
     fn ext_real(self) -> Self {
@@ -366,6 +403,14 @@ impl ExtNum for T {
     }
     /* #endregion */
 
+    /* #region round */
+    #[inline]
+    fn ext_round(self) -> Self {
+        // round through f32: the result is integral and f16/bf16-exact
+        Self::from_f32(libm::roundevenf(f32::from(self)))
+    }
+    /* #endregion */
+
     /* #region real-imag */
     #[inline]
     fn ext_real(self) -> Self {
@@ -386,7 +431,11 @@ impl ExtNum for T {
     /* #endregion */
 }
 
-#[duplicate_item(T; [Complex<f32>]; [Complex<f64>];)]
+#[duplicate_item(
+    T                roundeven;
+    [Complex<f32>]   [libm::roundevenf];
+    [Complex<f64>]   [libm::roundeven];
+)]
 impl ExtNum for T {
     /* #region abs */
     type AbsOut = <T as ComplexFloat>::Real;
@@ -429,6 +478,14 @@ impl ExtNum for T {
     fn ext_pow(self, other: Self) -> Option<Self> {
         // principal branch: exp(other * ln(self))
         Some(self.powc(other))
+    }
+    /* #endregion */
+
+    /* #region round */
+    #[inline]
+    fn ext_round(self) -> Self {
+        // real and imaginary parts round independently (array-API 2024.12)
+        Self::new(roundeven(self.re), roundeven(self.im))
     }
     /* #endregion */
 

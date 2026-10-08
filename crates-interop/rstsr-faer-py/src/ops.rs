@@ -35,8 +35,8 @@ use crate::any_tensor::{
     device_faer, dispatch_bin_bool_self, dispatch_bin_int_bool_self, dispatch_bin_int_self, dispatch_bin_numeric_self,
     dispatch_bin_pow, dispatch_bin_promote, dispatch_bin_promote_eq, dispatch_t, dispatch_t_bool,
     dispatch_t_float_complex_same, dispatch_t_index_ord, dispatch_t_index_zero, dispatch_t_into_float,
-    dispatch_t_numeric_same, dispatch_t_real_bool, dispatch_t_real_float_same, dispatch_t_real_numeric_same,
-    dispatch_t_signed, dispatch_where, err_py, lift, type_err, AnyTensor, FTensor, NativeArray,
+    dispatch_t_numeric_same, dispatch_t_real_bool, dispatch_t_real_numeric_same, dispatch_t_signed, dispatch_where,
+    err_py, lift, type_err, AnyTensor, FTensor, NativeArray,
 };
 use crate::creation::dim_from;
 
@@ -182,9 +182,8 @@ where
 //
 // Binding-only additions: every wrapper is a thin call into `rt::`; dtype
 // policy lives in the dispatch macros of any_tensor.rs. Divergences that a
-// binding cannot fix (integer inputs to the dtype-preserving rounding family,
-// integer/complex kernels rstsr lacks, mixed-dtype arithmetic) are declined
-// with a register reference instead of worked around.
+// binding cannot fix (integer/complex kernels rstsr lacks, mixed-dtype
+// arithmetic) are declined with a register reference instead of worked around.
 
 /// Output-type shape is taken from rstsr's own dtype traits (`FloatType`,
 /// promoted `Res`), so no dtype table is duplicated in the shim.
@@ -232,7 +231,7 @@ unary_wrapper!(op_sqrt, sqrt_f, TensorSqrtAPI);
 unary_wrapper!(op_tan, tan_f, TensorTanAPI);
 unary_wrapper!(op_tanh, tanh_f, TensorTanhAPI);
 unary_wrapper!(op_expm1, expm1_f, TensorExpm1API);
-// real-only kernels
+// dtype-preserving rounding (integers are already integral; `round` also complex)
 unary_wrapper_same!(op_ceil, ceil_f, TensorCeilAPI);
 unary_wrapper_same!(op_floor, floor_f, TensorFloorAPI);
 unary_wrapper_same!(op_trunc, trunc_f, TensorTruncAPI);
@@ -253,12 +252,12 @@ macro_rules! py_unary_into_float {
     };
 }
 
-macro_rules! py_unary_real_float_same {
+macro_rules! py_unary_real_numeric_same {
     ($($pyname:ident => $wrapper:ident),* $(,)?) => {
         $(
             #[pyfunction]
             pub fn $pyname(x: &NativeArray) -> PyResult<NativeArray> {
-                Ok(NativeArray { t: dispatch_t_real_float_same!(x.t, stringify!($pyname), $wrapper())? })
+                Ok(NativeArray { t: dispatch_t_real_numeric_same!(x.t, stringify!($pyname), $wrapper())? })
             }
         )*
     };
@@ -310,12 +309,8 @@ py_unary_into_float!(
     tan => op_tan,
     tanh => op_tanh,
 );
-py_unary_real_float_same!(
-    ceil => op_ceil,
-    floor => op_floor,
-    trunc => op_trunc,
-    round => op_round,
-);
+py_unary_real_numeric_same!(ceil => op_ceil, floor => op_floor, trunc => op_trunc);
+py_unary_numeric_same!(round => op_round);
 /// `positive`: identity function, routed through rstsr's `TensorPositiveAPI`
 /// (rust-side trait added 2026-10-05; no operator trait bound on the dtype).
 fn op_positive<T>(t: &FTensor<T>) -> rt::Result<FTensor<T>>

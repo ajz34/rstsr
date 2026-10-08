@@ -6,6 +6,21 @@ pub trait ExtReal: Clone {
     /// Computes the floor division of two numbers.
     fn ext_floor_divide(self, other: Self) -> Self;
 
+    /// Rounds toward negative infinity to an integral value — the array-API `floor`.
+    ///
+    /// Identity for integer types (already integral).
+    fn ext_floor(self) -> Self;
+
+    /// Rounds toward positive infinity to an integral value — the array-API `ceil`.
+    ///
+    /// Identity for integer types.
+    fn ext_ceil(self) -> Self;
+
+    /// Rounds toward zero to an integral value — the array-API `trunc`.
+    ///
+    /// Identity for integer types.
+    fn ext_trunc(self) -> Self;
+
     /// Returns the minimum of two numbers.
     ///
     /// # Note
@@ -43,6 +58,15 @@ impl ExtReal for T {
     fn ext_floor_divide(self, other: Self) -> Self {
         Integer::div_floor(&self, &other)
     }
+    fn ext_floor(self) -> Self {
+        self
+    }
+    fn ext_ceil(self) -> Self {
+        self
+    }
+    fn ext_trunc(self) -> Self {
+        self
+    }
     fn ext_min(self, other: Self) -> Self {
         Ord::min(self, other)
     }
@@ -64,6 +88,15 @@ impl ExtReal for T {
     }
     fn ext_floor_divide(self, other: Self) -> Self {
         Integer::div_floor(&self, &other)
+    }
+    fn ext_floor(self) -> Self {
+        self
+    }
+    fn ext_ceil(self) -> Self {
+        self
+    }
+    fn ext_trunc(self) -> Self {
+        self
     }
     fn ext_min(self, other: Self) -> Self {
         Ord::min(self, other)
@@ -87,6 +120,15 @@ impl ExtReal for T {
     }
     fn ext_floor_divide(self, other: Self) -> Self {
         Float::floor(self / other)
+    }
+    fn ext_floor(self) -> Self {
+        Float::floor(self)
+    }
+    fn ext_ceil(self) -> Self {
+        Float::ceil(self)
+    }
+    fn ext_trunc(self) -> Self {
+        Float::trunc(self)
     }
     fn ext_min(self, other: Self) -> Self {
         if self.is_nan() {
@@ -122,6 +164,15 @@ impl ExtReal for T {
     }
     fn ext_floor_divide(self, other: Self) -> Self {
         Float::floor(self / other)
+    }
+    fn ext_floor(self) -> Self {
+        Float::floor(self)
+    }
+    fn ext_ceil(self) -> Self {
+        Float::ceil(self)
+    }
+    fn ext_trunc(self) -> Self {
+        Float::trunc(self)
     }
     fn ext_min(self, other: Self) -> Self {
         if self.is_nan() {
