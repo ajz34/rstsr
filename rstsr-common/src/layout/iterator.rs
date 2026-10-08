@@ -180,7 +180,7 @@ where
                 }
             },
             _ => {
-                for (d, t, idx) in izip!(shape, stride, index.as_mut()) {
+                for (d, t, idx) in izip!(shape, stride, index) {
                     *idx += 1;
                     offset += t;
                     if idx == d {
@@ -264,7 +264,7 @@ where
                 }
             },
             _ => {
-                for (d, t, idx) in izip!(shape, stride, index.as_mut()) {
+                for (d, t, idx) in izip!(shape, stride, index) {
                     if *idx == 0 {
                         *idx = *d - 1;
                         offset += (*d - 1) as isize * t;
@@ -503,7 +503,7 @@ where
                 }
             },
             _ => {
-                for (d, t, idx) in izip!(shape, stride, index.as_mut()).rev() {
+                for (d, t, idx) in izip!(shape, stride, index).rev() {
                     *idx += 1;
                     offset += t;
                     if idx == d {
@@ -587,7 +587,7 @@ where
                 }
             },
             _ => {
-                for (d, t, idx) in izip!(shape, stride, index.as_mut()).rev() {
+                for (d, t, idx) in izip!(shape, stride, index).rev() {
                     if *idx == 0 {
                         *idx = *d - 1;
                         offset += (*d - 1) as isize * t;
