@@ -1,5 +1,6 @@
 pub mod adv_indexing;
 pub mod adv_indexing_take_along;
+pub mod array_indexing;
 pub mod assignment;
 pub mod creation;
 pub mod mask_indexing;

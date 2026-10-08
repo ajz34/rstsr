@@ -1,6 +1,7 @@
 //! Backend for CPU, serial only.
 
 pub mod adv_indexing;
+pub mod array_indexing;
 pub mod assignment;
 pub mod conversion;
 pub mod creation;

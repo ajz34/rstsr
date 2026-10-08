@@ -85,3 +85,42 @@ where
         value: TA,
     ) -> Result<()>;
 }
+
+/// One array indexer at the device boundary (see
+/// [`DeviceArrayIndexAPI::array_index`]).
+///
+/// The tensor level resolves and validates everything, so a device only ever
+/// sees non-negative in-bounds `usize` entries.
+pub struct ArrayAuxIndexer<'a> {
+    /// Source axis consumed by this index array.
+    pub src_axis: usize,
+    /// Resolved index values, in C (row-major) order over `layout`.
+    pub indices: &'a [usize],
+    /// Contiguous layout of the index array's own shape.
+    pub layout: Layout<IxD>,
+}
+
+/// Array indexing (fancy indexing) by integer arrays on one or more axes.
+///
+/// See [`array_index`](crate::tensor::array_indexing::array_index). The result
+/// is fully described by `lc` (the output layout, with the broadcast index
+/// dimensions placed at `consec`) and `base_layout` (the layout of the
+/// non-array-indexed subspace, whose strides are those of `la` and whose offset
+/// already carries the integer selections).
+pub trait DeviceArrayIndexAPI<T>
+where
+    Self: DeviceAPI<T> + DeviceRawAPI<MaybeUninit<T>>,
+{
+    /// Gather `a` into `c` by integer arrays on selected axes.
+    #[allow(clippy::too_many_arguments)]
+    fn array_index(
+        &self,
+        c: &mut <Self as DeviceRawAPI<MaybeUninit<T>>>::Raw,
+        lc: &Layout<IxD>,
+        a: &<Self as DeviceRawAPI<T>>::Raw,
+        la: &Layout<IxD>,
+        base_layout: &Layout<IxD>,
+        indexers: &[ArrayAuxIndexer<'_>],
+        consec: usize,
+    ) -> Result<()>;
+}

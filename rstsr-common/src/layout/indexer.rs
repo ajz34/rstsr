@@ -170,29 +170,28 @@ where
             return Self::new(shape, stride, offset);
         } else {
             // step < 0
-            // default start = len_prev - 1 and stop = -1
-            let mut start = slice.start().unwrap_or(len_prev - 1);
-            let mut stop = slice.stop().unwrap_or(-1);
+            // Python slicing rules: negative bounds count from the back and
+            // clamp into [-1, len - 1]; the default start is `len - 1` and the
+            // default stop is the sentinel `-1` ("before the first element")
+            let mut start = match slice.start() {
+                None => len_prev - 1,
+                Some(start) if start < 0 => (len_prev + start).max(-1),
+                Some(start) => start.min(len_prev - 1),
+            };
+            let stop = match slice.stop() {
+                None => -1,
+                Some(stop) if stop < 0 => (len_prev + stop).max(-1),
+                Some(stop) => stop.min(len_prev - 1),
+            };
 
-            // handle negative slice
-            if start < 0 {
-                start = (len_prev + start).max(0);
-            }
-            if stop < -1 {
-                stop = (len_prev + stop).max(-1);
-            }
-
-            if stop > len_prev - 1 || stop > start {
-                // zero size slice caused by inproper start and stop
+            let len = if start > stop { (start - stop - 1) / (-step) + 1 } else { 0 };
+            if len == 0 {
+                // zero size slice; keep the offset in-bounds
                 start = 0;
-                stop = 0;
-            } else if start > len_prev - 1 {
-                // start is out of bound, set it to len_prev
-                start = len_prev - 1;
             }
 
             let offset = (self.offset() as isize + stride[axis] * start) as usize;
-            shape[axis] = ((stop - start + step + 1) / step).max(0) as usize;
+            shape[axis] = len as usize;
             stride[axis] *= step;
             return Self::new(shape, stride, offset);
         }
