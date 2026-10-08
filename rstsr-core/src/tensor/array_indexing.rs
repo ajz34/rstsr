@@ -62,6 +62,11 @@ where
             },
             ArrayIndexer::OneDimBool(_) | ArrayIndexer::ArrayBool(_) => lowered.push(Lowered::Bool),
             ArrayIndexer::ArrayIndex(index) => {
+                rstsr_assert!(
+                    device.same_device(index.device()),
+                    DeviceMismatch,
+                    "array_index requires the index arrays on the same device as the tensor."
+                )?;
                 if index.ndim() == 0 {
                     // a zero-dimensional integer array is an integer index
                     let offset = index.layout().index_uncheck(&[]) as usize;
