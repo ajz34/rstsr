@@ -195,4 +195,24 @@ mod custom_math_classify {
         assert_eq!(rt::is_finite(&a).to_vec(), vec![true, false, false, false]);
         assert_eq!(rt::is_inf(&a).to_vec(), vec![false, false, true, true]);
     }
+
+    #[test]
+    fn test_signbit() {
+        crate::specify_test!("test_signbit");
+
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        // sign bit (not `< 0`): set for negative values, -0.0, -inf and -NaN
+        let a: Tensor<f64, _> =
+            rt::asarray((vec![2.0, -2.0, 0.0, -0.0, f64::INFINITY, f64::NEG_INFINITY, f64::NAN, -f64::NAN], &device));
+        assert_eq!(rt::signbit(&a).to_vec(), vec![false, true, false, true, false, true, false, true]);
+
+        let i = rt::tensor_from_nested!([3, -3, 0], &device);
+        assert_eq!(rt::signbit(&i).to_vec(), vec![false, true, false]);
+
+        // unsigned: the sign bit is never set
+        let u: Tensor<u8, _> = rt::asarray((vec![0u8, 1, 255], &device));
+        assert_eq!(rt::signbit(&u).to_vec(), vec![false, false, false]);
+    }
 }

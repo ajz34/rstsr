@@ -589,6 +589,32 @@ macro_rules! dispatch_t_real_numeric_same {
 }
 pub(crate) use dispatch_t_real_numeric_same;
 
+/// Unary dispatch over real numeric dtypes (ints + floats) with a boolean
+/// result (`signbit`). Complex is declined: the sign bit is undefined for
+/// complex numbers.
+macro_rules! dispatch_t_real_bool {
+    ($scrut:expr, $opname:expr, $f:ident ( $($arg:expr),* )) => {
+        match &$scrut {
+            AnyTensor::Bool(_) => type_err(format!("{}: not defined for bool dtype", $opname)),
+            AnyTensor::I8(t) => lift(($f::<i8>)(&t, $($arg),*), AnyTensor::Bool),
+            AnyTensor::I16(t) => lift(($f::<i16>)(&t, $($arg),*), AnyTensor::Bool),
+            AnyTensor::I32(t) => lift(($f::<i32>)(&t, $($arg),*), AnyTensor::Bool),
+            AnyTensor::I64(t) => lift(($f::<i64>)(&t, $($arg),*), AnyTensor::Bool),
+            AnyTensor::U8(t) => lift(($f::<u8>)(&t, $($arg),*), AnyTensor::Bool),
+            AnyTensor::U16(t) => lift(($f::<u16>)(&t, $($arg),*), AnyTensor::Bool),
+            AnyTensor::U32(t) => lift(($f::<u32>)(&t, $($arg),*), AnyTensor::Bool),
+            AnyTensor::U64(t) => lift(($f::<u64>)(&t, $($arg),*), AnyTensor::Bool),
+            AnyTensor::F32(t) => lift(($f::<f32>)(&t, $($arg),*), AnyTensor::Bool),
+            AnyTensor::F64(t) => lift(($f::<f64>)(&t, $($arg),*), AnyTensor::Bool),
+            AnyTensor::C32(_) | AnyTensor::C64(_) => type_err(format!(
+                "{}: the sign bit is not defined for complex dtypes",
+                $opname
+            )),
+        }
+    };
+}
+pub(crate) use dispatch_t_real_bool;
+
 /// Binary dispatch for ops whose rstsr device kernel promotes mixed dtypes
 /// (`DTypePromoteAPI` bound; real dtypes only — bool and complex are out of
 /// the spec contract for these ops). Arms mirror the promotion table in
@@ -708,6 +734,30 @@ macro_rules! dispatch_bin_promote {
     };
 }
 pub(crate) use dispatch_bin_promote;
+
+/// Binary dispatch for `pow`: the promoted real arms (`dispatch_bin_promote!`)
+/// plus the complex (`complex64`/`complex128`) pairs. The result variant is
+/// the promoted type via `any_of`, i.e. the array-API pow result dtype.
+macro_rules! dispatch_bin_pow {
+    ($a:expr, $b:expr, $opname:expr, $f:ident) => {
+        match (&$a, &$b) {
+            (AnyTensor::C32(a), AnyTensor::C32(b)) => {
+                lift(($f::<Complex<f32>, Complex<f32>>)(a, b), crate::any_tensor::any_of)
+            },
+            (AnyTensor::C64(a), AnyTensor::C32(b)) => {
+                lift(($f::<Complex<f64>, Complex<f32>>)(a, b), crate::any_tensor::any_of)
+            },
+            (AnyTensor::C32(a), AnyTensor::C64(b)) => {
+                lift(($f::<Complex<f32>, Complex<f64>>)(a, b), crate::any_tensor::any_of)
+            },
+            (AnyTensor::C64(a), AnyTensor::C64(b)) => {
+                lift(($f::<Complex<f64>, Complex<f64>>)(a, b), crate::any_tensor::any_of)
+            },
+            _ => dispatch_bin_promote!($a, $b, $opname, $f),
+        }
+    };
+}
+pub(crate) use dispatch_bin_pow;
 
 /// Same-dtype binary dispatch over integer and boolean dtypes only (bitwise
 /// family; the spec excludes floats and complexes).

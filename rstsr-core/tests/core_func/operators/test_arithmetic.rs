@@ -163,3 +163,75 @@ mod custom_rem {
         assert_eq!(bits(&rt::rem(&m, &n).to_vec()), bits(&[-0.0]));
     }
 }
+
+#[cfg(test)]
+mod custom_pow {
+    use super::*;
+    static FUNC: &str = "custom_pow";
+
+    #[test]
+    fn test_int_base() {
+        crate::specify_test!("test_int_base");
+
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        // integer base raised to an integer exponent (not expressible with `num::Pow`)
+        let a = rt::tensor_from_nested!([2, 3, 4], &device);
+        let b = rt::tensor_from_nested!([3, 2, 0], &device);
+        assert_equal(rt::pow(&a, &b), rt::tensor_from_nested!([8, 9, 1], &device), None);
+
+        // mixed-width integer operands promote to the wider type
+        let a8: Tensor<i8, _> = rt::asarray((vec![2i8, 3], &device));
+        let b16: Tensor<i16, _> = rt::asarray((vec![3i16, 2], &device));
+        let out: Tensor<i16, _> = rt::pow(&a8, &b16);
+        assert_equal(out, rt::tensor_from_nested!([8i16, 9], &device), None);
+    }
+
+    #[test]
+    fn test_complex_base() {
+        crate::specify_test!("test_complex_base");
+
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        use num::Complex;
+        // (1 + i) ** 2 == 2i (principal branch, num-complex has no Complex: Pow<Complex>)
+        let c: Tensor<Complex<f64>, _> = rt::asarray((vec![Complex::new(1.0, 1.0)], &device));
+        let two: Tensor<Complex<f64>, _> = rt::asarray((vec![Complex::new(2.0, 0.0)], &device));
+        let expected: Tensor<Complex<f64>, _> = rt::asarray((vec![Complex::new(0.0, 2.0)], &device));
+        assert_equal(rt::pow(&c, &two), expected, None);
+    }
+
+    #[test]
+    fn test_negative_int_exponent_errors() {
+        crate::specify_test!("test_negative_int_exponent_errors");
+
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        // a negative integer exponent has no representable integer result: the
+        // fallible form errors (the panic form `rt::pow` unwraps it)
+        let a = rt::tensor_from_nested!([2, 3], &device);
+        let neg = rt::tensor_from_nested!([-1, 2], &device);
+        assert!(rt::pow_f(&a, &neg).is_err());
+
+        // float bases accept negative exponents
+        let f = rt::tensor_from_nested!([2.0], &device);
+        let n = rt::tensor_from_nested!([-1.0], &device);
+        assert_equal(rt::pow(&f, &n), rt::tensor_from_nested!([0.5], &device), None);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_negative_int_exponent_panics() {
+        crate::specify_test!("test_negative_int_exponent_panics");
+
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        let a = rt::tensor_from_nested!([2, 3], &device);
+        let neg = rt::tensor_from_nested!([-1, 2], &device);
+        let _ = rt::pow(&a, &neg);
+    }
+}

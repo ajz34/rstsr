@@ -52,6 +52,19 @@ pub trait ExtNum: Clone {
 
     /* #endregion */
 
+    /* #region pow */
+
+    /// Raises the number to the power `other` — the array-API `pow`.
+    ///
+    /// Returns `None` when `other` falls outside this type's integer-power
+    /// domain, i.e. a negative exponent for an integer type (the array API
+    /// leaves `int ** int` with a negative exponent unspecified; NumPy
+    /// rejects it). Float and complex accept any exponent; complex uses the
+    /// principal branch `exp(other * ln(self))`.
+    fn ext_pow(self, other: Self) -> Option<Self>;
+
+    /* #endregion */
+
     /* #region real-imag */
 
     /// Returns the real part of the number.
@@ -112,6 +125,14 @@ impl ExtNum for T {
         } else {
             self % other
         }
+    }
+    /* #endregion */
+
+    /* #region pow */
+    #[inline]
+    #[allow(clippy::unnecessary_cast)] // identity cast for u32 itself
+    fn ext_pow(self, other: Self) -> Option<Self> {
+        Some(self.pow(other as u32))
     }
     /* #endregion */
 
@@ -177,6 +198,18 @@ impl ExtNum for T {
             r + other
         } else {
             r
+        }
+    }
+    /* #endregion */
+
+    /* #region pow */
+    #[inline]
+    fn ext_pow(self, other: Self) -> Option<Self> {
+        if other < 0 {
+            // the array API leaves this unspecified and NumPy rejects it
+            None
+        } else {
+            Some(self.pow(other as u32))
         }
     }
     /* #endregion */
@@ -259,6 +292,13 @@ impl ExtNum for T {
     }
     /* #endregion */
 
+    /* #region pow */
+    #[inline]
+    fn ext_pow(self, other: Self) -> Option<Self> {
+        Some(self.powf(other))
+    }
+    /* #endregion */
+
     /* #region real-imag */
     #[inline]
     fn ext_real(self) -> Self {
@@ -319,6 +359,13 @@ impl ExtNum for T {
     }
     /* #endregion */
 
+    /* #region pow */
+    #[inline]
+    fn ext_pow(self, other: Self) -> Option<Self> {
+        Some(Self::from_f32(f32::from(self).powf(f32::from(other))))
+    }
+    /* #endregion */
+
     /* #region real-imag */
     #[inline]
     fn ext_real(self) -> Self {
@@ -374,6 +421,14 @@ impl ExtNum for T {
     fn ext_rem(self, other: Self) -> Self {
         // complex has no floored remainder; keep num-complex's Gaussian `%`
         self % other
+    }
+    /* #endregion */
+
+    /* #region pow */
+    #[inline]
+    fn ext_pow(self, other: Self) -> Option<Self> {
+        // principal branch: exp(other * ln(self))
+        Some(self.powc(other))
     }
     /* #endregion */
 

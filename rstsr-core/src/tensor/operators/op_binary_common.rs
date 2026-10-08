@@ -12,6 +12,12 @@
 //! (`==`, `<`, ...) between tensors are not overloaded, so use these
 //! functions.
 //!
+//! [`pow`](pow()) promotes mixed operand dtypes to their common type (which
+//! is also the result dtype) and accepts integer, floating-point and complex
+//! operands. An integer base with a negative integer exponent is rejected
+//! (the array API leaves it unspecified; NumPy raises there too), and a
+//! complex base uses the principal branch `exp(exponent * ln(base))`.
+//!
 //! # Examples
 //!
 //! ```rust

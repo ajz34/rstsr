@@ -1,7 +1,7 @@
 use crate::prelude_dev::*;
 use num::complex::ComplexFloat;
-use num::{Float, Signed};
-use rstsr_dtype_traits::{DTypeIntoFloatAPI, ExtComplexFloat, ExtNum};
+use num::Float;
+use rstsr_dtype_traits::{DTypeIntoFloatAPI, ExtComplexFloat, ExtNum, ExtReal};
 
 /* #region same type */
 
@@ -101,7 +101,6 @@ where
 
 #[duplicate_item(
      OpAPI           NumTrait       func                         ;
-    [OpSignBitAPI ] [Signed      ] [|a, b| { a.write(b.is_positive()); } ];
     [OpIsFiniteAPI] [ComplexFloat] [|a, b| { a.write(b.is_finite()  ); } ];
     [OpIsInfAPI   ] [ComplexFloat] [|a, b| { a.write(b.is_infinite()); } ];
     [OpIsNanAPI   ] [ComplexFloat] [|a, b| { a.write(b.is_nan()     ); } ];
@@ -115,6 +114,29 @@ where
 
     fn op_muta_refb(&self, a: &mut Vec<MaybeUninit<bool>>, la: &Layout<D>, b: &Vec<T>, lb: &Layout<D>) -> Result<()> {
         self.op_muta_refb_func(a, la, b, lb, &mut func)
+    }
+
+    fn op_muta(&self, _a: &mut Vec<MaybeUninit<bool>>, _la: &Layout<D>) -> Result<()> {
+        let type_b = core::any::type_name::<T>();
+        unreachable!("{:?} is not supported in this function.", type_b);
+    }
+}
+
+/* #endregion */
+
+/* #region signbit */
+
+impl<T, D> OpSignBitAPI<T, D> for DeviceCpuSerial
+where
+    T: ExtReal,
+    D: DimAPI,
+{
+    type TOut = bool;
+
+    fn op_muta_refb(&self, a: &mut Vec<MaybeUninit<bool>>, la: &Layout<D>, b: &Vec<T>, lb: &Layout<D>) -> Result<()> {
+        self.op_muta_refb_func(a, la, b, lb, &mut |a, b| {
+            a.write(b.clone().ext_signbit());
+        })
     }
 
     fn op_muta(&self, _a: &mut Vec<MaybeUninit<bool>>, _la: &Layout<D>) -> Result<()> {

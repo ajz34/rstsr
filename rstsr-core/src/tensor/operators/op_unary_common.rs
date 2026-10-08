@@ -13,6 +13,10 @@
 //! Most functions require float or complex dtypes; queries
 //! ([`is_finite`](is_finite()), ...) return boolean tensors.
 //!
+//! [`signbit`](signbit()) tests the IEEE 754 sign *bit* rather than `< 0`: the
+//! result is `true` for negative values, `-0.0` and negatively-signed NaN, and
+//! `false` for every other real value (every unsigned integer included).
+//!
 //! # Examples
 //!
 //! ```rust
