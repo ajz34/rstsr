@@ -261,6 +261,7 @@ macro_rules! impl_sct_real {
                 match s {
                     PyScalar::B(x) => Ok(x.cast_to()),
                     PyScalar::I(x) => Ok(x.cast_to()),
+                    PyScalar::U(x) => Ok(x.cast_to()),
                     PyScalar::F(x) => Ok(x.cast_to()),
                     PyScalar::C(_) => type_err("cannot convert a complex scalar to a real dtype"),
                 }
@@ -287,6 +288,7 @@ macro_rules! impl_sct_complex {
                 match s {
                     PyScalar::B(x) => Ok(x.cast_to()),
                     PyScalar::I(x) => Ok(x.cast_to()),
+                    PyScalar::U(x) => Ok(x.cast_to()),
                     PyScalar::F(x) => Ok(x.cast_to()),
                     PyScalar::C(x) => Ok(x.cast_to()),
                 }
@@ -333,6 +335,27 @@ where
     err_py(r)
 }
 
+/// Spec default-dtype name from Python-native leaves: bool < int < float <
+/// complex. Within the integer kind, a leaf above `i64::MAX` (a `u64` carrier)
+/// selects `uint64` only when no leaf fits `int64` — numpy promotes the mixed
+/// `int64`/`uint64` case to `float64`.
+fn default_leaf_name(scalars: &[PyScalar]) -> &'static str {
+    match scalars.iter().map(PyScalar::kind_rank).max().unwrap_or(1) {
+        0 => "bool",
+        1 => {
+            let has_u64 = scalars.iter().any(|s| matches!(s, PyScalar::U(_)));
+            let has_int64 = scalars.iter().any(|s| matches!(s, PyScalar::I(_)));
+            match (has_u64, has_int64) {
+                (false, _) => "int64",
+                (true, false) => "uint64",
+                (true, true) => "float64",
+            }
+        },
+        2 => "float64",
+        _ => "complex128",
+    }
+}
+
 /// Python-side asarray flattens nested lists; this entry receives the flat
 /// leaves, the shape, and the (optional) target dtype.
 #[pyfunction]
@@ -355,11 +378,7 @@ pub fn asarray_from_flat<'py>(
     }
     let name: &'static str = match dtype {
         Some(d) => d.borrow().name,
-        None => {
-            let rank = scalars.iter().map(|s| s.kind_rank()).max().unwrap_or(1);
-            // spec default-dtype rules from Python native types
-            ["bool", "int64", "float64", "complex128"][rank as usize]
-        },
+        None => default_leaf_name(&scalars),
     };
     let t = dispatch_name!(name, build_t(&scalars, &shape))?;
     Ok(NativeArray { t })
@@ -376,6 +395,7 @@ fn filled_bool(shape: &[usize], filler: &Filler) -> PyResult<AnyTensor> {
             let b = match *s {
                 PyScalar::B(x) => x,
                 PyScalar::I(x) => x != 0,
+                PyScalar::U(x) => x != 0,
                 PyScalar::F(x) => x != 0.0,
                 PyScalar::C(x) => x != num::Complex::new(0.0, 0.0),
             };
@@ -468,8 +488,8 @@ pub fn arange<'py>(
             {
                 return type_err("arange: complex arguments are not supported by the standard");
             }
-            let rank = [Some(s0), s1, s2].iter().flatten().map(|s| s.kind_rank()).max().unwrap_or(1);
-            ["bool", "int64", "float64"][rank as usize]
+            let scalars: Vec<PyScalar> = [Some(s0), s1, s2].into_iter().flatten().collect();
+            default_leaf_name(&scalars)
         },
     };
     let t = dispatch_name_real!(name, arange_t(s0, s1, s2))?;
