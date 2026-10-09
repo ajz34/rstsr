@@ -379,7 +379,7 @@ The reference implementation (as in [`DeviceCpuSerial`] and [`DeviceFaer`]), fol
 
 | status | implementation | Python API | description |
 |-|-|-|-|
-| | | [`clip`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.clip.html) | Clamps each element `x_i` of the input array `x` to the range `[min, max]`. |
+| Y | [`clip`] | [`clip`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.clip.html) | Clamps each element `x_i` of the input array `x` to the range `[min, max]`. |
 
 ## Constants
 

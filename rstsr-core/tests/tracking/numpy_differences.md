@@ -500,3 +500,20 @@ column-major device-order convention of
 [`order_semantics`](https://github.com/RESTGroup/rstsr-core/blob/main/rstsr-core/src/docs/order_semantics.md)
 is the registered transfer this entry tracks).
 
+
+## `clip` takes an `(lo, hi)` group with `None` for an absent bound
+
+- **numpy:** `numpy.clip(a, a_min, a_max)`; an absent bound is `None` in
+  either position (`np.clip(a, 3)`, `np.clip(a, max=4)`).
+- **rstsr:** `rt::clip(&a, (lo, hi))` / `a.clip((lo, hi))` - a single argument
+  group whose `lo`/`hi` are each a scalar, a tensor (broadcast), or the `None`
+  wildcard. With both bounds absent, the result is a copy of `a` (array-API);
+  NumPy's bound-less `clip(a)` raises `ValueError` instead.
+- **tag:** intentional
+- **status:** open
+
+The `None` wildcard borrows the tensor's own element type, so
+`rt::clip(&x_f32, (0.0_f32, None))` stays `float32`, while a differently-typed
+scalar bound still promotes (see *Scalar arguments promote like tensors*). NumPy's
+in-place `out=` / `casting=` variants are not provided (rstsr clip is
+out-of-place only).

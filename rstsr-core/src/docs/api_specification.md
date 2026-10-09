@@ -360,7 +360,7 @@ Custom user reduction (expert-level): [`reduce_all`], [`reduce_axes`], [`reduce_
 
 ### Sorting, searching and counting functions
 
-[`argmin`]/[`argmin_axes`], [`argmax`]/[`argmax_axes`], [`count_nonzero`]/[`count_nonzero_axes`], [`unraveled_argmin`]/[`unraveled_argmin_axes`], [`unraveled_argmax`]/[`unraveled_argmax_axes`], each with `_with_args` forms; and select function [`where`] (boolean condition, NumPy three-argument form)
+[`argmin`]/[`argmin_axes`], [`argmax`]/[`argmax_axes`], [`count_nonzero`]/[`count_nonzero_axes`], [`unraveled_argmin`]/[`unraveled_argmin_axes`], [`unraveled_argmax`]/[`unraveled_argmax_axes`], each with `_with_args` forms; select function [`where`] (boolean condition, NumPy three-argument form); and clip function [`clip`] (`(lo, hi)` bounds, each optional)
 
 Sorting family: [`sort`], [`argsort`] with [`SortArgs`] (`axis` + `descending` + `stable`), plus expert comparator variants [`sort_custom`]/[`argsort_custom`]. Searching: [`searchsorted`] with [`SearchSortedArgs`]; [`nonzero`]. Gathering: [`take_along_axis`]. Discrete differences: [`diff`] (`axis` + `n` + optional `prepend`/`append`).
 

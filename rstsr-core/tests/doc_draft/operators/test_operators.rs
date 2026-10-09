@@ -250,3 +250,33 @@ mod doc_where {
         assert_eq!(format!("{r}"), "[[ 0 1 2]\n [ -3 -4 -5]]");
     }
 }
+
+mod doc_clip {
+    use super::*;
+    static FUNC: &str = "doc_clip";
+
+    #[test]
+    fn test_doc() {
+        crate::specify_test!("test_doc");
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        // both bounds are scalars
+        let x = rt::tensor_from_nested!([-3, -1, 0, 2, 5], &device);
+        println!("{}", rt::clip(&x, (0, 3)));
+        // [ 0 0 0 2 3]
+        assert_eq!(format!("{}", rt::clip(&x, (0, 3))), "[ 0 0 0 2 3]");
+
+        // a tensor bound broadcasts; `None` disables one side
+        let x = rt::tensor_from_nested!([[-3, 2], [4, -5]], &device);
+        let lo = rt::tensor_from_nested!([[-1, 0], [1, -1]], &device);
+        println!("{}", rt::clip(&x, (&lo, 3)));
+        // [[ -1 2]
+        //  [ 3 -1]]
+        assert_eq!(format!("{}", rt::clip(&x, (&lo, 3))), "[[ -1 2]\n [ 3 -1]]");
+        println!("{}", rt::clip(&x, (0, None)));
+        // [[ 0 2]
+        //  [ 4 0]]
+        assert_eq!(format!("{}", rt::clip(&x, (0, None))), "[[ 0 2]\n [ 4 0]]");
+    }
+}
