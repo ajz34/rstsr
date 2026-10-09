@@ -30,8 +30,8 @@ tensor/linalg/matmul.rs,linalg,full,done,3,matmul/matmul_from/matmul_with_output
 tensor/creation.rs,creation,full,done,1,uplifted (anchors+overloads+row/col notices+examples+accordance); eye col-major shape divergence fixed (see numpy_differences_resolved.md)
 tensor/creation_from_tensor.rs,creation,full,done,1,uplifted; concat link typo fixed; API traits documented minimally; meshgrid copy=false view semantics fixed (see numpy_differences_resolved.md)
 tensor/indexing.rs,indexing,full,done,2,slice anchor doc expanded into src/docs/basic_indexing.md (include_str; tuple + .i() forms); diagonal unchanged; twins doc_slice* in doc_draft/indexing
-tensor/adv_indexing.rs,indexing,full,done,2,index_select/take/bool_select full tier; _f and method forms minimal
-tensor/array_indexing.rs,indexing,full,done,8,array_index full tier (overloads table, placement rule, API accordance); array_index_f + methods minimal
+tensor/adv_indexing.rs,indexing,full,done,2,index_select/take/bool_select/take_along_axis/mask_select/mask_fill/mask_assign/index_put/put_along_axis full tier anchors (scalar-returning anchors omit # Returns); _f and method forms minimal
+tensor/array_indexing.rs,indexing,full,done,8,array_index + array_index_assign full tier (overloads tables, placement rule, API accordance, duplicate-index note); the _f twins + methods minimal
 tensor/array_indexer.rs,indexing,na,done,8,ArrayIndexer/ArrayIndexArgs type docs + module header
 tensor/reduction.rs,reduction,full,done,6,module docs carry family table + order notice + examples; allclose anchor full; twins extended (argmax/allclose/count_nonzero)
 tensor/operators/,operators,full,done,5,documented via module docs per policy §9 (macro-generated surface); % -as-matmul warning; op_* module floors; twins extended

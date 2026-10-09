@@ -85,3 +85,82 @@ where
     }
     Ok(())
 }
+
+/// Scatter (inverse of [`take_along_axis_cpu_serial`]): for every position,
+/// write the value from `values` into `a` at `indices` along `axis`, casting
+/// `TA` to `TC`.
+///
+/// `a` and `indices` share their rest shape; `lvalues` is the values layout
+/// broadcast to the indices' shape (a dim-1 rest axis reuses its single slice).
+/// Duplicate targets write the same slot more than once; the visit order decides
+/// the winner — the last write wins.
+#[allow(clippy::too_many_arguments)]
+pub fn put_along_axis_promote_cpu_serial<TC, TA, DA, DI>(
+    a: &mut [TC],
+    la: &Layout<DA>,
+    idx: &[usize],
+    lidx: &Layout<DI>,
+    values: &[TA],
+    lvalues: &Layout<DI>,
+    axis: usize,
+) -> Result<()>
+where
+    TC: Clone,
+    TA: Clone + DTypeCastAPI<TC>,
+    DA: DimAPI,
+    DI: DimAPI,
+{
+    let ndim = la.ndim();
+    rstsr_check_axis!(axis as isize, ndim)?;
+    let axis_stride_a = la.stride()[axis];
+    let base_a = la.offset();
+    let idx_stride = lidx.stride()[axis];
+    let idx_base = lidx.offset();
+    let val_stride = lvalues.stride()[axis];
+    let val_base = lvalues.offset();
+    let axis_size_idx = lidx.shape()[axis];
+
+    // rest axes (ascending order); the walk covers the indices' rest shape
+    let rest_slots: Vec<usize> = (0..ndim).filter(|&i| i != axis).collect();
+    let rest_shape: Vec<usize> = rest_slots.iter().map(|&s| lidx.shape()[s]).collect();
+    let stride_a = la.stride().as_ref();
+    let stride_i = lidx.stride().as_ref();
+    let stride_v = lvalues.stride().as_ref();
+    let total: usize = rest_shape.iter().product();
+
+    for rest_index in 0..total {
+        let mut rem = rest_index;
+        let mut rest_multi: Vec<usize> = vec![0; rest_shape.len()];
+        for i in (0..rest_shape.len()).rev() {
+            rest_multi[i] = rem % rest_shape[i];
+            rem /= rest_shape[i];
+        }
+        let a_off: isize =
+            rest_slots.iter().zip(rest_multi.iter()).map(|(&s, &v)| stride_a[s] * v as isize).sum::<isize>()
+                + base_a as isize;
+        let i_off: isize =
+            rest_slots.iter().zip(rest_multi.iter()).map(|(&s, &v)| stride_i[s] * v as isize).sum::<isize>()
+                + idx_base as isize;
+        // values broadcast to the indices' shape: a dim-1 rest axis reuses its
+        // single slice
+        let v_off: isize = rest_slots
+            .iter()
+            .zip(rest_multi.iter())
+            .map(|(&s, &v)| {
+                let m = if lvalues.shape()[s] == 1 { 0 } else { v };
+                stride_v[s] * m as isize
+            })
+            .sum::<isize>()
+            + val_base as isize;
+        for j in 0..axis_size_idx {
+            let idx_pos = (i_off + idx_stride * j as isize) as usize;
+            // SAFETY: the tensor level validated every index within
+            // `0..la.shape()[axis]`; the destination offset is a
+            // destination-stride dot-product over in-range rest indices.
+            let dst = (a_off + axis_stride_a * idx[idx_pos] as isize) as usize;
+            let src = (v_off + val_stride * j as isize) as usize;
+            a[dst] = values[src].clone().into_cast();
+        }
+    }
+    Ok(())
+}

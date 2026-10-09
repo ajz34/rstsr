@@ -109,32 +109,58 @@ fn resolve_one(value: isize, axis_size: isize, src_axis: usize) -> Result<usize>
     Ok(value as usize)
 }
 
-/// Indexes a tensor by integer arrays (array indexing, *fancy indexing*).
-///
-/// See also [`array_index`].
-#[allow(clippy::type_complexity)]
-pub fn array_index_f<'a, R, T, B, D, I>(
-    tensor: &'a TensorAny<R, T, B, D>,
-    indexer: I,
-) -> Result<TensorCow<'a, T, B, IxD>>
+/// The parsed and resolved form of one array index, shared by the gather
+/// ([`array_index`]) and the scatter ([`array_index_assign`]).
+enum ResolvedArrayIndex<B>
 where
-    R: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw> + DataIntoCowAPI<'a>,
+    B: DeviceRawAPI<isize> + DeviceRawAPI<usize>,
+{
+    /// No array indexer: the index is basic slicing, described by the parsed
+    /// [`Indexer`] list the caller views or writes through.
+    Basic(Vec<Indexer>),
+    /// An array index, resolved and ready for the device op.
+    Array {
+        /// Layout of the indexed tensor (gather source / scatter destination).
+        la: Layout<IxD>,
+        /// Layout of the non-indexed subspace (integer selections folded in).
+        base_layout: Layout<IxD>,
+        /// Position of the broadcast index dimensions in the output shape.
+        consec: usize,
+        /// Gather output shape (the broadcast dimensions inserted at `consec`).
+        out_shape: Vec<usize>,
+        /// One resolved index array per indexer.
+        resolved: Vec<ResolvedBuffer<B>>,
+    },
+}
+
+/// One resolved index array's device storage carrier: `(src_axis, layout,
+/// storage)`.
+type ResolvedBuffer<B> = (usize, Layout<IxD>, Storage<DataOwned<<B as DeviceRawAPI<usize>>::Raw>, usize, B>);
+
+/// Parses, validates and resolves an array index. Shares all the machinery of
+/// the gather and the scatter: indexer lowering, ellipsis and boolean
+/// expansion, the placement rule, the subspace layout, the broadcast shape, and
+/// the resolution of every entry into device storage.
+#[allow(clippy::type_complexity)]
+fn resolve_array_index<RA, T, B, D, I>(
+    tensor: &TensorAny<RA, T, B, D>,
+    indexer: I,
+    order: FlagOrder,
+) -> Result<ResolvedArrayIndex<B>>
+where
+    RA: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
     D: DimAPI,
     T: Clone,
     B: DeviceAPI<T>
         + DeviceAPI<isize>
         + DeviceAPI<bool>
         + DeviceAPI<usize>
-        + DeviceRawAPI<MaybeUninit<T>>
         + DeviceRawAPI<MaybeUninit<usize>>
-        + DeviceCreationAnyAPI<T>
         + DeviceCreationAnyAPI<usize>
-        + DeviceArrayIndexAPI<T>
         + OpNonzeroAPI<bool, IxD>,
     I: TryInto<ArrayIndexArgs<B>, Error: Into<Error>>,
 {
     let device = tensor.device().clone();
-    let order = device.default_order();
     let la = tensor.layout().to_dim::<IxD>()?;
     let ndim = la.ndim();
 
@@ -245,8 +271,7 @@ where
     )?;
     let n_fill = ndim - consumed;
 
-    // without any array indexer, array indexing degenerates to basic slicing,
-    // which is a view
+    // without any array indexer, array indexing degenerates to basic slicing
     if !lowered.iter().any(|e| matches!(e, Lowered::Array { .. } | Lowered::Mask { .. })) {
         let mut basic: Vec<Indexer> = Vec::with_capacity(lowered.len());
         for entry in lowered {
@@ -258,7 +283,7 @@ where
                 Lowered::Noop => {},
             }
         }
-        return Ok(into_slice_f(tensor.view(), AxesIndex::<Indexer>::Vec(basic))?.into_cow());
+        return Ok(ResolvedArrayIndex::Basic(basic));
     }
 
     // expand the ellipsis, and lower each boolean mask into one index array per
@@ -435,46 +460,81 @@ where
     // run (a merely leading run also yields `consec == 0`).
     let consec = if order == ColMajor && consec_status == 2 { base_layout.ndim() } else { consec };
 
-    // output layout: the broadcast dimensions inserted at `consec`
+    // output layout shape: the broadcast dimensions inserted at `consec`
     let mut out_shape: Vec<usize> = Vec::with_capacity(base_layout.ndim() + fancy_ndim);
     out_shape.extend_from_slice(&base_layout.shape()[..consec]);
     out_shape.extend_from_slice(&bulk_shape);
     out_shape.extend_from_slice(&base_layout.shape()[consec..]);
-    let layout_c: Layout<IxD> = out_shape.new_contig(None, order);
-
-    let (_, idx_max) = layout_c.bounds_index()?;
-    let mut storage = device.uninit_impl(idx_max)?;
 
     // Move each index array's resolved entries into device storage: the device
     // reads resolved `usize` entries in its own memory (never a host slice),
     // visited in `order` and addressed through the handed layouts. An empty
     // broadcast leaves every buffer empty and the op returns early.
-    let mut buffers: Vec<(usize, Layout<IxD>, Storage<DataOwned<<B as DeviceRawAPI<usize>>::Raw>, usize, B>)> =
-        Vec::new();
+    let mut resolved: Vec<ResolvedBuffer<B>> = Vec::new();
     for entry in entries {
         let Entry::Array { src_axis, raw, layout } = entry else { continue };
-        let mut resolved: Vec<usize> = Vec::new();
+        let mut values: Vec<usize> = Vec::new();
         if bulk_size != 0 {
-            raw.resolve_into(src_axis, &layout, la.shape()[src_axis], order, &mut resolved)?;
+            raw.resolve_into(src_axis, &layout, la.shape()[src_axis], order, &mut values)?;
         }
         let buffer_layout: Layout<IxD> = layout.shape().clone().new_contig(None, order);
-        buffers.push((src_axis, buffer_layout, device.outof_cpu_vec(resolved)?));
+        resolved.push((src_axis, buffer_layout, device.outof_cpu_vec(values)?));
     }
-    let aux: Vec<ArrayAuxIndexer<'_, B>> = buffers
-        .iter()
-        .map(|(src_axis, layout, buffer)| ArrayAuxIndexer {
-            src_axis: *src_axis,
-            indices: buffer.raw(),
-            layout: layout.clone(),
-        })
-        .collect();
-    device.array_index(storage.raw_mut(), &layout_c, tensor.raw(), &la, &base_layout, &aux, consec, order)?;
-    // SAFETY: `device.array_index` above wrote every element of the fresh
-    // storage exactly once (each output position is filled from one gathered
-    // source element).
-    let storage = unsafe { <B as DeviceCreationAnyAPI<T>>::assume_init_impl(storage)? };
-    let out = Tensor::new_f(storage, layout_c)?;
-    Ok(out.into_cow())
+    Ok(ResolvedArrayIndex::Array { la, base_layout, consec, out_shape, resolved })
+}
+
+/// Indexes a tensor by integer arrays (array indexing, *fancy indexing*).
+///
+/// See also [`array_index`].
+#[allow(clippy::type_complexity)]
+pub fn array_index_f<'a, R, T, B, D, I>(
+    tensor: &'a TensorAny<R, T, B, D>,
+    indexer: I,
+) -> Result<TensorCow<'a, T, B, IxD>>
+where
+    R: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw> + DataIntoCowAPI<'a>,
+    D: DimAPI,
+    T: Clone,
+    B: DeviceAPI<T>
+        + DeviceAPI<isize>
+        + DeviceAPI<bool>
+        + DeviceAPI<usize>
+        + DeviceRawAPI<MaybeUninit<T>>
+        + DeviceRawAPI<MaybeUninit<usize>>
+        + DeviceCreationAnyAPI<T>
+        + DeviceCreationAnyAPI<usize>
+        + DeviceArrayIndexAPI<T>
+        + OpNonzeroAPI<bool, IxD>,
+    I: TryInto<ArrayIndexArgs<B>, Error: Into<Error>>,
+{
+    let device = tensor.device().clone();
+    let order = device.default_order();
+    match resolve_array_index(tensor, indexer, order)? {
+        // no array indexer: the index degenerates to basic slicing, a view
+        ResolvedArrayIndex::Basic(basic) => {
+            Ok(into_slice_f(tensor.view(), AxesIndex::<Indexer>::Vec(basic))?.into_cow())
+        },
+        ResolvedArrayIndex::Array { la, base_layout, consec, out_shape, resolved } => {
+            let layout_c: Layout<IxD> = out_shape.new_contig(None, order);
+            let (_, idx_max) = layout_c.bounds_index()?;
+            let mut storage = device.uninit_impl(idx_max)?;
+            let aux: Vec<ArrayAuxIndexer<'_, B>> = resolved
+                .iter()
+                .map(|(src_axis, layout, buffer)| ArrayAuxIndexer {
+                    src_axis: *src_axis,
+                    indices: buffer.raw(),
+                    layout: layout.clone(),
+                })
+                .collect();
+            device.array_index(storage.raw_mut(), &layout_c, tensor.raw(), &la, &base_layout, &aux, consec, order)?;
+            // SAFETY: `device.array_index` above wrote every element of the fresh
+            // storage exactly once (each output position is filled from one gathered
+            // source element).
+            let storage = unsafe { <B as DeviceCreationAnyAPI<T>>::assume_init_impl(storage)? };
+            let out = Tensor::new_f(storage, layout_c)?;
+            Ok(out.into_cow())
+        },
+    }
 }
 
 /// Helper for reporting index-array shapes in broadcast errors.
@@ -795,6 +855,249 @@ where
     }
 }
 
+/// Assigns a broadcastable value into the elements selected by an array index.
+///
+/// See also [`array_index_assign`].
+pub fn array_index_assign_f<RA, T, B, D, I, U, V>(
+    tensor: &mut TensorAny<RA, T, B, D>,
+    indexer: I,
+    value: V,
+) -> Result<()>
+where
+    RA: DataMutAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
+    D: DimAPI,
+    T: Clone,
+    V: TensorViewAPI<Type = U, Backend = B>,
+    U: Clone + DTypeCastAPI<T>,
+    B: DeviceAPI<T>
+        + DeviceAPI<isize>
+        + DeviceAPI<bool>
+        + DeviceAPI<usize>
+        + DeviceAPI<U>
+        + DeviceRawAPI<MaybeUninit<usize>>
+        + DeviceCreationAnyAPI<usize>
+        + OpAssignAPI<T, IxD, U>
+        + DeviceArrayIndexAssignAPI<T, U>
+        + OpNonzeroAPI<bool, IxD>,
+    I: TryInto<ArrayIndexArgs<B>, Error: Into<Error>>,
+{
+    let device = tensor.device().clone();
+    let order = device.default_order();
+    rstsr_assert!(!tensor.layout().is_broadcasted(), InvalidLayout, "cannot assign to broadcasted tensor")?;
+    match resolve_array_index(&*tensor, indexer, order)? {
+        // no array indexer: assign through the basic-slicing view
+        ResolvedArrayIndex::Basic(basic) => {
+            let mut view = slice_mut_f(tensor, AxesIndex::<Indexer>::Vec(basic))?;
+            assign_f(&mut view, value.view())
+        },
+        ResolvedArrayIndex::Array { la, base_layout, consec, out_shape, resolved } => {
+            let value = value.view();
+            rstsr_assert!(device.same_device(value.device()), DeviceMismatch)?;
+            // broadcast the value against the gather output shape (the shape
+            // carrier is only metadata; nothing is allocated)
+            let lvalue0 = value.layout().to_dim::<IxD>()?;
+            let out_layout: Layout<IxD> = out_shape.new_contig(None, order);
+            let (_, lvalue) = broadcast_layout_to_first(&out_layout, &lvalue0, order)?;
+            let aux: Vec<ArrayAuxIndexer<'_, B>> = resolved
+                .iter()
+                .map(|(src_axis, layout, buffer)| ArrayAuxIndexer {
+                    src_axis: *src_axis,
+                    indices: buffer.raw(),
+                    layout: layout.clone(),
+                })
+                .collect();
+            device.array_index_assign(tensor.raw_mut(), &la, &base_layout, &aux, value.raw(), &lvalue, consec, order)
+        },
+    }
+}
+
+/// Assigns a broadcastable value into the elements selected by an array index.
+///
+/// This is the assignment form of [`array_index`]: the index selects the same
+/// elements (`tensor.array_index(indexer)`), `value` is broadcast to that
+/// result's shape and cast to `tensor`'s element type, and the selected
+/// elements are overwritten in place. A boolean mask in the index selects the
+/// positions it keeps (an array-valued `x[mask] = value`); a basic indexer
+/// makes it an ordinary slice assignment.
+///
+/// <div class="warning">
+///
+/// **Row/Column Major Notice**
+///
+/// This function behaves differently on default orders ([`RowMajor`] and [`ColMajor`]) of device.
+///
+/// </div>
+///
+/// The index arrays and the placement of the broadcast index dimensions follow
+/// [`array_index`] (see its Row/Column Major Notice). When an element is
+/// selected by more than one index entry (duplicate entries), the value written
+/// last wins — the entries are visited in the device default order.
+///
+/// # Overloads Table
+///
+/// ## Signature `array_index_assign(tensor, indexer, value)`
+///
+/// - `array_index_assign(tensor: &mut TensorAny<..>, indexer: impl Into<ArrayIndexer<B>>, value:
+///   impl TensorViewAPI) -> ()` — a single per-axis indexer, applied to the first axis.
+/// - `array_index_assign(tensor: &mut TensorAny<..>, indexer: (F1, .., F6), value: impl
+///   TensorViewAPI) -> ()` — a tuple of up to six per-axis indexers (the preferred form).
+/// - `array_index_assign(tensor: &mut TensorAny<..>, indexer: Vec<ArrayIndexer<B>>, value: impl
+///   TensorViewAPI) -> ()` — an explicit list of indexers.
+/// - `array_index_assign(tensor: &mut TensorAny<..>, indexer: AxesIndex<ArrayIndexer<B>>, value:
+///   impl TensorViewAPI) -> ()` — the `Val` / `Vec` forms; [`AxesIndex::None`] is rejected.
+///
+/// The per-axis indexer overloads are those of [`array_index`].
+///
+/// # Parameters
+///
+/// - `tensor`: [`&mut TensorAny<R, T, B, D>`][TensorAny]: the destination; must not be a
+///   broadcasted view.
+/// - `indexer`: Into [`ArrayIndexArgs<B>`]: the indexers, as in [`array_index`].
+/// - `value`: [`impl TensorViewAPI<Type = U, Backend = B>`][TensorViewAPI]: the source; any tensor
+///   (view or owned), broadcast to the shape of `tensor.array_index(indexer)` and cast from `U` to
+///   `T`.
+///
+/// # Examples
+///
+/// A host list indexes the first axis; the value is the two matching rows:
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let mut a = rt::arange((12, &device)).into_shape([3, 4]);
+/// let rows = rt::tensor_from_nested!([[100, 101, 102, 103], [-1, -2, -3, -4]], &device);
+/// a.array_index_assign([2, 0], &rows);
+/// println!("{a}");
+/// // [[ -1 -2 -3 -4]
+/// //  [ 4 5 6 7]
+/// //  [ 100 101 102 103]]
+/// # assert_eq!(format!("{a}"), "[[ -1 -2 -3 -4]\n [ 4 5 6 7]\n [ 100 101 102 103]]");
+/// ```
+///
+/// A boolean mask selects the rows it keeps (the value is cast to the
+/// destination dtype):
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let mut a: Tensor<f64, _> = rt::zeros(([3, 2], &device));
+/// let mask = rt::asarray((vec![true, false, true], &device));
+/// a.array_index_assign(&mask, rt::full(([2, 2], 1.5f64, &device)));
+/// println!("{a}");
+/// // [[ 1.5 1.5]
+/// //  [ 0 0]
+/// //  [ 1.5 1.5]]
+/// # assert_eq!(format!("{a}"), "[[ 1.5 1.5]\n [ 0 0]\n [ 1.5 1.5]]");
+/// ```
+///
+/// # Notes of API accordance
+///
+/// - Array-API: `x[k1, .., kN] = value` ([`indexing`](https://data-apis.org/array-api/2024.12/API_specification/indexing.html)):
+///   the standard's integer-array form.
+/// - NumPy: `x[k1, .., kN] = value` ([`numpy.ndarray.__setitem__`](https://numpy.org/doc/stable/reference/arrays.indexing.html#advanced-indexing)):
+///   RSTSR implements NumPy's vectorized-indexing assignment, including boolean masks, but not
+///   grouped ("parenthesized") index tuples.
+/// - RSTSR: `rt::array_index_assign(&mut x, indexers, value)` or method
+///   `x.array_index_assign(indexers, value)`.
+///
+/// # Panics
+///
+/// - Panics if the index is invalid (as [`array_index`]), if `value` cannot be broadcast to the
+///   selected shape, if the devices differ, or if the destination is a broadcasted (read-only)
+///   view.
+///
+/// For a fallible version, use [`array_index_assign_f`].
+///
+/// # See also
+///
+/// ## Related functions in RSTSR
+///
+/// - [`array_index`]: the gather this assigns into.
+/// - [`assign`]: whole-tensor assignment with broadcasting.
+/// - [`mask_fill`]: write a scalar into every element a mask selects.
+///
+/// ## Variants of this function
+///
+/// - [`array_index_assign_f`]: fallible version.
+/// - Associated methods on [`TensorAny`]: [`TensorAny::array_index_assign`] /
+///   [`TensorAny::array_index_assign_f`].
+#[allow(clippy::type_complexity)]
+pub fn array_index_assign<RA, T, B, D, I, U, V>(tensor: &mut TensorAny<RA, T, B, D>, indexer: I, value: V)
+where
+    RA: DataMutAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
+    D: DimAPI,
+    T: Clone,
+    V: TensorViewAPI<Type = U, Backend = B>,
+    U: Clone + DTypeCastAPI<T>,
+    B: DeviceAPI<T>
+        + DeviceAPI<isize>
+        + DeviceAPI<bool>
+        + DeviceAPI<usize>
+        + DeviceAPI<U>
+        + DeviceRawAPI<MaybeUninit<usize>>
+        + DeviceCreationAnyAPI<usize>
+        + OpAssignAPI<T, IxD, U>
+        + DeviceArrayIndexAssignAPI<T, U>
+        + OpNonzeroAPI<bool, IxD>,
+    I: TryInto<ArrayIndexArgs<B>, Error: Into<Error>>,
+{
+    array_index_assign_f(tensor, indexer, value).rstsr_unwrap()
+}
+
+impl<RA, T, B, D> TensorAny<RA, T, B, D>
+where
+    RA: DataMutAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
+    D: DimAPI,
+    T: Clone,
+    B: DeviceRawAPI<T>,
+{
+    /// Assigns a broadcastable value into the elements selected by an array index.
+    ///
+    /// See also [`array_index_assign`].
+    pub fn array_index_assign_f<I, U, V>(&mut self, indexer: I, value: V) -> Result<()>
+    where
+        V: TensorViewAPI<Type = U, Backend = B>,
+        U: Clone + DTypeCastAPI<T>,
+        I: TryInto<ArrayIndexArgs<B>, Error: Into<Error>>,
+        B: DeviceAPI<T>
+            + DeviceAPI<isize>
+            + DeviceAPI<bool>
+            + DeviceAPI<usize>
+            + DeviceAPI<U>
+            + DeviceRawAPI<MaybeUninit<usize>>
+            + DeviceCreationAnyAPI<usize>
+            + OpAssignAPI<T, IxD, U>
+            + DeviceArrayIndexAssignAPI<T, U>
+            + OpNonzeroAPI<bool, IxD>,
+    {
+        array_index_assign_f(self, indexer, value)
+    }
+
+    /// Assigns a broadcastable value into the elements selected by an array index.
+    ///
+    /// See also [`array_index_assign`].
+    pub fn array_index_assign<I, U, V>(&mut self, indexer: I, value: V)
+    where
+        V: TensorViewAPI<Type = U, Backend = B>,
+        U: Clone + DTypeCastAPI<T>,
+        I: TryInto<ArrayIndexArgs<B>, Error: Into<Error>>,
+        B: DeviceAPI<T>
+            + DeviceAPI<isize>
+            + DeviceAPI<bool>
+            + DeviceAPI<usize>
+            + DeviceAPI<U>
+            + DeviceRawAPI<MaybeUninit<usize>>
+            + DeviceCreationAnyAPI<usize>
+            + OpAssignAPI<T, IxD, U>
+            + DeviceArrayIndexAssignAPI<T, U>
+            + OpNonzeroAPI<bool, IxD>,
+    {
+        array_index_assign(self, indexer, value)
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -947,5 +1250,82 @@ mod test {
         let expected: Vec<f64> = i0.iter().zip(i1.iter()).map(|(&x, &y)| (x * k as isize + y) as f64).collect();
         assert_eq!(v_r, expected);
         assert_eq!(v_r, v_s);
+    }
+
+    #[test]
+    fn test_array_index_assign_workable() {
+        let mut device = DeviceCpu::default();
+        device.set_default_order(RowMajor);
+
+        // one host list on axis 0: whole rows
+        let mut a = arange((12, &device)).into_shape([3, 4]);
+        let rows = tensor_from_nested!([[100, 101, 102, 103], [-1, -2, -3, -4]], &device);
+        a.array_index_assign([2, 0], &rows);
+        assert_eq!(a.into_shape([-1]).to_vec(), vec![-1, -2, -3, -4, 4, 5, 6, 7, 100, 101, 102, 103]);
+
+        // two index arrays zipped into a one-dimensional selection
+        let mut b = arange((12, &device)).into_shape([3, 4]);
+        b.array_index_assign(([0, 2], [1, 3]), tensor_from_nested!([10, 20], &device));
+        assert_eq!(b.into_shape([-1]).to_vec(), vec![0, 10, 2, 3, 4, 5, 6, 7, 8, 9, 10, 20]);
+
+        // no array indexer (integer select): basic assignment into the row
+        let mut c: Tensor<i32, _> = zeros(([2, 3], &device));
+        c.array_index_assign(1, tensor_from_nested!([7, 8, 9], &device));
+        assert_eq!(c.into_shape([-1]).to_vec(), vec![0, 0, 0, 7, 8, 9]);
+
+        // boolean mask selects rows
+        let mut d: Tensor<f64, _> = zeros(([3, 2], &device));
+        let mask = asarray((vec![true, false, true], &device));
+        d.array_index_assign(&mask, full(([2, 2], 1.5f64, &device)));
+        assert_eq!(d.into_shape([-1]).to_vec(), vec![1.5, 1.5, 0.0, 0.0, 1.5, 1.5]);
+
+        // duplicate targets: the last written value wins
+        let mut e: Tensor<f64, _> = zeros(([4], &device));
+        e.array_index_assign([3, 3, 3], tensor_from_nested!([1.0, 2.0, 3.0], &device));
+        assert_eq!(e.to_vec(), vec![0., 0., 0., 3.]);
+    }
+
+    #[test]
+    fn test_array_index_assign_cast_broadcast_and_errors() {
+        let mut device = DeviceCpu::default();
+        device.set_default_order(RowMajor);
+
+        // i32 value into an f64 destination (cast), broadcast (2, 1) -> (2, 3)
+        let mut a: Tensor<f64, _> = zeros(([3, 3], &device));
+        let v = tensor_from_nested!([[1i32], [2i32]], &device);
+        a.array_index_assign(([0, 2], ..), &v);
+        let expected: Vec<f64> = vec![1., 1., 1., 0., 0., 0., 2., 2., 2.];
+        assert_eq!(a.into_shape([-1]).to_vec(), expected);
+
+        // value cannot broadcast to the selection shape (2, 3) vs (3, 3)
+        let mut z: Tensor<f64, _> = zeros(([3, 3], &device));
+        assert!(z.array_index_assign_f([0, 1, 2], tensor_from_nested!([[1, 2, 3], [4, 5, 6]], &device)).is_err());
+        // index out of range
+        assert!(z.array_index_assign_f([9], tensor_from_nested!([1, 2], &device)).is_err());
+    }
+
+    #[test]
+    fn test_array_index_assign_matches_serial() {
+        // DeviceCpu is the rayon device under default features; its setter must
+        // delegate to the same serial kernel
+        let mut d_rayon = DeviceCpu::default();
+        d_rayon.set_default_order(RowMajor);
+        let mut d_serial = DeviceCpuSerial::default();
+        d_serial.set_default_order(RowMajor);
+
+        let base: Vec<f64> = (0..120).map(|k| k as f64).collect();
+        let idx: Vec<isize> = (0..30).map(|k| ((k * 7) % 10) as isize).collect();
+        let val: Vec<f64> = (0..30).map(|k| -((k + 1) as f64)).collect();
+
+        let mut a_r = asarray((base.clone(), &d_rayon)).into_shape([10, 12]);
+        let mut a_s = asarray((base, &d_serial)).into_shape([10, 12]);
+        let i_r = asarray((idx.clone(), &d_rayon));
+        let i_s = asarray((idx, &d_serial));
+        let v_r = asarray((val.clone(), &d_rayon)).into_shape([30, 1]);
+        let v_s = asarray((val, &d_serial)).into_shape([30, 1]);
+
+        a_r.array_index_assign((&i_r, ..), &v_r);
+        a_s.array_index_assign((&i_s, ..), &v_s);
+        assert_eq!(a_r.into_shape([-1]).to_vec(), a_s.into_shape([-1]).to_vec());
     }
 }

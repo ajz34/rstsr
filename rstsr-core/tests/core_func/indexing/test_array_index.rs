@@ -103,7 +103,8 @@ mod numpy_array_index {
         let err = a.array_index_f(([0, 1], [0, 1, 2])).unwrap_err();
         assert!(is_index_error(&err), "expected an IndexError, got {err}");
         // `assert_raises(IndexError, a.__setitem__, ([0, 1], [0, 1, 2]), 0)` is
-        // N/A: advanced-key assignment is not implemented yet (registered).
+        // covered by `test_array_index_assign::numpy_array_index_assign::
+        // test_broaderrors_indexing_setitem`.
     }
 
     #[test]

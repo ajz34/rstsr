@@ -49,6 +49,56 @@ where
     ) -> Result<()>;
 }
 
+/// Scatter along one axis with an index TENSOR (see [`put_along_axis`]).
+///
+/// The inverse of [`DeviceTakeAlongAxisAPI::take_along_axis`]: at every
+/// position, the value read from `values` is written into `a` at `idx` along
+/// `axis`. `idx` has the same rank as `a`, and the `values` layout is broadcast
+/// to the indices' shape. Duplicate index targets write the same destination
+/// more than once; the visit order decides the winner (last write wins), so
+/// this op is not parallelized. The value dtype `TA` is cast to `TC`.
+pub trait DevicePutAlongAxisAPI<TC, DA, DI, TA = TC>
+where
+    DA: DimAPI,
+    DI: DimAPI,
+    Self: DeviceAPI<TC> + DeviceAPI<usize> + DeviceAPI<TA>,
+{
+    #[allow(clippy::too_many_arguments)]
+    fn put_along_axis(
+        &self,
+        a: &mut <Self as DeviceRawAPI<TC>>::Raw,
+        la: &Layout<DA>,
+        idx: &<Self as DeviceRawAPI<usize>>::Raw,
+        lidx: &Layout<DI>,
+        values: &<Self as DeviceRawAPI<TA>>::Raw,
+        lvalues: &Layout<DI>,
+        axis: usize,
+    ) -> Result<()>;
+}
+
+/// Scatter along one axis by a host index list (see [`index_put`]).
+///
+/// The inverse of [`DeviceIndexSelectAPI::index_select`]: the value read from
+/// `value` at the selection shape (the input shape with `axis` of length
+/// `indices.len()`) is written into `a` along `axis` at `indices`. Duplicate
+/// indices write the same destination more than once (last write wins), so this
+/// op is not parallelized. The value dtype `TA` is cast to `TC`.
+pub trait DeviceIndexPutAPI<TC, TA = TC>
+where
+    Self: DeviceAPI<TC> + DeviceAPI<TA>,
+{
+    #[allow(clippy::too_many_arguments)]
+    fn index_put(
+        &self,
+        a: &mut <Self as DeviceRawAPI<TC>>::Raw,
+        la: &Layout<IxD>,
+        axis: usize,
+        indices: &[usize],
+        value: &<Self as DeviceRawAPI<TA>>::Raw,
+        lvalue: &Layout<IxD>,
+    ) -> Result<()>;
+}
+
 /// Whole-tensor boolean-mask gather / scatter (see [`mask_select`] /
 /// [`mask_fill`]).
 ///
@@ -135,6 +185,38 @@ where
         la: &Layout<IxD>,
         base_layout: &Layout<IxD>,
         indexers: &[ArrayAuxIndexer<'_, Self>],
+        consec: usize,
+        order: FlagOrder,
+    ) -> Result<()>;
+}
+
+/// Array-indexing assignment (scatter): write a broadcastable value into the
+/// positions the index arrays select.
+///
+/// See [`array_index_assign`]. This is the inverse of
+/// [`DeviceArrayIndexAPI::array_index`]: the destination `a` is addressed
+/// through `la` / `base_layout` / `indexers` exactly as the gather addresses
+/// its source, while the written values come from `value` read through
+/// `lvalue`, a layout already broadcast to the gather output shape (its
+/// `shape()[consec..consec + fancy_ndim]` is the broadcast block, as `lc` is
+/// for the gather). The value dtype `TA` is cast to the destination dtype `TC`.
+///
+/// Duplicate index targets write the same destination position more than once;
+/// the visit order — the device default order — decides the winner (the last
+/// write wins), so this op is not parallelized.
+pub trait DeviceArrayIndexAssignAPI<TC, TA = TC>
+where
+    Self: DeviceAPI<TC> + DeviceAPI<TA> + DeviceRawAPI<usize>,
+{
+    #[allow(clippy::too_many_arguments)]
+    fn array_index_assign(
+        &self,
+        a: &mut <Self as DeviceRawAPI<TC>>::Raw,
+        la: &Layout<IxD>,
+        base_layout: &Layout<IxD>,
+        indexers: &[ArrayAuxIndexer<'_, Self>],
+        value: &<Self as DeviceRawAPI<TA>>::Raw,
+        lvalue: &Layout<IxD>,
         consec: usize,
         order: FlagOrder,
     ) -> Result<()>;

@@ -43,3 +43,23 @@ where
         mask_fill_cpu_rayon(a, &la.to_dim::<IxD>()?, mask, &lm.to_dim::<IxD>()?, value, self.default_order(), pool)
     }
 }
+
+impl<TC, TA> DeviceIndexPutAPI<TC, TA> for DeviceRayonAutoImpl
+where
+    TC: Clone,
+    TA: Clone + DTypeCastAPI<TC>,
+{
+    fn index_put(
+        &self,
+        a: &mut Vec<TC>,
+        la: &Layout<IxD>,
+        axis: usize,
+        indices: &[usize],
+        value: &Vec<TA>,
+        lvalue: &Layout<IxD>,
+    ) -> Result<()> {
+        // the scatter is serial: duplicate indices make disjoint writes
+        // impossible, so the serial kernel is called directly
+        index_put_promote_cpu_serial(a, la, axis, indices, value, lvalue)
+    }
+}

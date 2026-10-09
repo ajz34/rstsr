@@ -445,16 +445,25 @@ class Array:
             for k in key
         )
         if builtins.any(isinstance(k, Array) for k in key):
-            if not _is_single_bool_mask(key):
-                _unimplemented(
-                    "item assignment with an array or a mask mixed into the key "
-                    "(rstsr gap G-039); only a lone boolean mask (x[mask] = value) is supported"
-                )
-            mask = key[0]._h
+            if _is_single_bool_mask(key):
+                # A lone boolean mask rides mask_fill for a scalar value or a
+                # size-1 array value. Any larger array value rides array-index
+                # assignment, which lowers a mask only when it has at least one
+                # dimension -- a 0-d mask is rejected there (not lowerable).
+                if isinstance(value, Array) and value.size > 1:
+                    _pkg.setitem_array(self._h, (key[0]._h,), value._h)
+                elif isinstance(value, Array):
+                    _pkg.setitem_mask(self._h, key[0]._h, value._h)
+                else:
+                    _pkg.setitem_mask_scalar(self._h, key[0]._h, value)
+                return
+            # integer-array keys (masks mixed with basic indexers included) ride
+            # rust-side array-indexing assignment (`rt::array_index_assign`)
+            key = tuple(k._h if isinstance(k, Array) else k for k in key)
             if isinstance(value, Array):
-                _pkg.setitem_mask(self._h, mask, value._h)
+                _pkg.setitem_array(self._h, key, value._h)
             else:
-                _pkg.setitem_mask_scalar(self._h, mask, value)
+                _pkg.setitem_array_scalar(self._h, key, value)
             return
         if isinstance(value, Array):
             _pkg.setitem_basic(self._h, key, value._h)
