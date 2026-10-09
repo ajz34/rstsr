@@ -2,8 +2,9 @@
 //! [`slice_mut`](slice_mut()), operator `[]` for scalar access) and diagonal
 //! extraction ([`diagonal`]).
 //!
-//! For advanced indexing (selecting by boolean masks or integer indices), see
-//! [`adv_indexing`](crate::tensor::adv_indexing).
+//! Advanced indexing has its own entry points: array indexing (fancy indexing)
+//! by integer arrays in [`array_index`], and selection by boolean masks or
+//! one-axis index lists in [`adv_indexing`](crate::tensor::adv_indexing).
 
 use core::ops::{Index, IndexMut};
 

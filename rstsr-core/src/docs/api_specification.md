@@ -116,6 +116,7 @@ Device is designed to be able extended by other crates. The above devices [`Devi
 |--|--|--|
 | assoc/fn | [`bool_select`] | Returns a new tensor, which indexes the input tensor along dimension `axis` using the boolean entries in `mask`. |
 | assoc/fn | [`index_select`] | Returns a new tensor, which indexes the input tensor along dimension `axis` using the entries in `indices`. |
+| assoc/fn | [`array_index`] | Array indexing (fancy indexing): indexes the tensor by integer arrays on one or more axes, mixed with basic indexers; returns a view when no index array is involved. |
 | assoc/fn | [`take`] | Take elements from an array along an axis. |
 
 ## RSTSR Specific Identifiers

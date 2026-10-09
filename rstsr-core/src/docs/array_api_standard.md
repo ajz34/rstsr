@@ -181,6 +181,7 @@ The reference implementation (as in [`DeviceCpuSerial`] and [`DeviceFaer`]), fol
 |-|-|-|-|
 | Y | [`bool_select`] | — | Returns elements of an array along one axis at the positions where a boolean mask is `True` (RSTSR extension). |
 | Y | [`index_select`] | — | Returns elements of an array along one axis at the given integer indices (RSTSR extension). |
+| Y | [`array_index`] | [`__getitem__`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.array.__getitem__.html) | Returns the elements selected by integer index arrays (`x[int_array, ..]`), optionally mixed with basic indexers. |
 | Y | [`mask_fill`] | [`__setitem__`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.array.__setitem__.html) | Writes a scalar into the elements where a boolean mask is `True` (`x[mask] = value`). |
 | Y | [`mask_select`] | [`__getitem__`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.array.__getitem__.html) | Returns the elements where a boolean mask is `True` (`x[mask]`). |
 | P | [`take`] | [`take`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.take.html) | Returns elements of an array along an axis. |
@@ -191,7 +192,7 @@ The reference implementation (as in [`DeviceCpuSerial`] and [`DeviceFaer`]), fol
 
 **Notes**
 - Boolean-mask indexing requires the mask to have no more axes than the indexed array, each matching the indexed array's corresponding leading axis **or be `0`** (NumPy parity); the result is `(count,) + x.shape[mask.ndim() ..]`, where `count` is the number of `True` entries. The element and block order follow the device default order — deliberately not the row-major rule the Python Array API prescribes for boolean index arrays, so that a column-major device stays column-major (see the [`mask_select`] Row/Column Major Notice).
-- Integer-array (fancy) indexing (`x[int_array]`) is not implemented (gap G-039).
+- Integer-array (fancy) indexing (`x[int_array, ..]`) is provided by [`array_index`]: the index arrays broadcast together (aligning from the last axis) and the broadcast dimensions follow NumPy's placement rule (in place for a contiguous run of advanced indexers, at the front otherwise). The array API's integer-array form — every indexer an integer or an integer array — is the special case where no basic indexer is present. Boolean index arrays (masks) mixed into a tuple are supported — a mask consumes one axis per mask axis; grouped ("parenthesized") index tuples and zero-dimensional booleans are not.
 - [`bool_select`] and [`index_select`] select along a single axis (PyTorch-style); `nonzero` gives the coordinates of every non-zero element (see Searching Functions).
 
 ## Inspection

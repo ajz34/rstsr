@@ -3,6 +3,8 @@
 //! external-type conversions.
 
 pub mod adv_indexing;
+pub mod array_indexer;
+pub mod array_indexing;
 pub mod asarray;
 pub mod assignment;
 pub mod creation;
@@ -33,6 +35,8 @@ pub mod exports {
     use super::*;
 
     pub use adv_indexing::*;
+    pub use array_indexer::*;
+    pub use array_indexing::*;
     pub use asarray::*;
     pub use assignment::*;
     pub use creation::*;

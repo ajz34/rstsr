@@ -1,4 +1,5 @@
 pub mod adv_indexing;
+pub mod array_indexing;
 pub mod assignment;
 pub mod creation;
 pub mod nonzero;

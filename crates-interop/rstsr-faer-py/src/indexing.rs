@@ -2,10 +2,10 @@
 //!
 //! Basic keys (int/slice/newaxis/ellipsis) ride rstsr's layout slicing
 //! (`i_f`/`i_mut_f`) and its assign/fill; whole-tensor boolean-mask keys ride
-//! `rt::mask_select` / `rt::mask_fill` (rust-side, G-038). Integer-array
-//! (fancy) indexing stays a registered rust-side gap (G-039) and is declined
-//! here per the wrapper-only rule. Results are fresh owned tensors — the
-//! handle model has no shared storage (register G-036).
+//! `rt::mask_select` / `rt::mask_fill` (rust-side, G-038); keys containing an
+//! integer array or a boolean mask ride `rt::array_index` (rust-side array
+//! indexing, G-039), and may freely mix basic indexers with them. Results are
+//! fresh owned tensors — the handle model has no shared storage (register G-036).
 
 use core::mem::MaybeUninit;
 use num::Complex;
@@ -17,7 +17,9 @@ use rstsr::prelude::rt;
 use rstsr::prelude::*;
 
 use rstsr_common::layout::exports::{Indexer, SliceI};
-use rstsr_core::operators::adv_indexing::{DeviceIndexSelectAPI, DeviceMaskIndexAPI, DeviceTakeAlongAxisAPI};
+use rstsr_core::operators::adv_indexing::{
+    DeviceArrayIndexAPI, DeviceIndexSelectAPI, DeviceMaskIndexAPI, DeviceTakeAlongAxisAPI,
+};
 use rstsr_core::operators::assignment::OpAssignAPI;
 use rstsr_core::operators::searching::OpNonzeroAPI;
 use rstsr_core::storage::exports::{DeviceCreationAnyAPI, DeviceRawAPI};
@@ -32,16 +34,38 @@ enum KeyItem {
     Slice(Option<isize>, Option<isize>, Option<isize>),
     NewAxis,
     Ellipsis,
+    /// An integer index array (same device as the indexed tensor).
+    Array(FTensor<isize>),
+    /// A boolean mask (same device as the indexed tensor), consuming one axis
+    /// per mask axis.
+    Mask(FTensor<bool>),
 }
 
 fn sl(start: Option<isize>, stop: Option<isize>, step: Option<isize>) -> Indexer {
     Indexer::Slice(SliceI::new(start, stop, step))
 }
 
-/// Duck-typed key parse: int / slice / None / Ellipsis. Whole-tensor boolean
-/// masks are routed to [`getitem_mask`] / [`setitem_mask`] by the Python
-/// layer, so an array key reaching here is integer-array (fancy) indexing,
-/// declined as a registered rust-side gap (G-039).
+/// Convert an integer index array (any integer dtype) into the `isize` index
+/// dtype of rstsr's array indexing. Boolean arrays are routed to
+/// [`KeyItem::Mask`] by `parse_key` (and a lone one to [`getitem_mask`] by the
+/// Python layer), so only integer dtypes reach here.
+fn index_array_to_isize(x: &NativeArray) -> PyResult<FTensor<isize>> {
+    match &x.t {
+        AnyTensor::I8(t) => Ok(t.mapv(|v| v as isize)),
+        AnyTensor::I16(t) => Ok(t.mapv(|v| v as isize)),
+        AnyTensor::I32(t) => Ok(t.mapv(|v| v as isize)),
+        AnyTensor::I64(t) => Ok(t.mapv(|v| v as isize)),
+        AnyTensor::U8(t) => Ok(t.mapv(|v| v as isize)),
+        AnyTensor::U16(t) => Ok(t.mapv(|v| v as isize)),
+        AnyTensor::U32(t) => Ok(t.mapv(|v| v as isize)),
+        AnyTensor::U64(t) => Ok(t.mapv(|v| v as isize)),
+        _ => type_err("integer-array (fancy) indexing requires an integer index array"),
+    }
+}
+
+/// Duck-typed key parse: int / slice / None / Ellipsis / integer array /
+/// boolean mask. A lone whole-tensor boolean mask is routed to
+/// [`getitem_mask`] / [`setitem_mask`] by the Python layer.
 fn parse_key<'py>(key: &Bound<'py, PyTuple>) -> PyResult<Vec<KeyItem>> {
     let mut items = Vec::new();
     for item in key.iter() {
@@ -58,8 +82,11 @@ fn parse_key<'py>(key: &Bound<'py, PyTuple>) -> PyResult<Vec<KeyItem>> {
             items.push(KeyItem::NewAxis);
         } else if item.is_instance_of::<PyEllipsis>() {
             items.push(KeyItem::Ellipsis);
-        } else if item.extract::<PyRef<'py, NativeArray>>().is_ok() {
-            return Err(PyTypeError::new_err("integer-array (fancy) indexing is not provided by rstsr (gap G-039)"));
+        } else if let Ok(handle) = item.extract::<PyRef<'py, NativeArray>>() {
+            match &handle.t {
+                AnyTensor::Bool(t) => items.push(KeyItem::Mask(t.clone())),
+                _ => items.push(KeyItem::Array(index_array_to_isize(&handle)?)),
+            }
         } else {
             return Err(PyTypeError::new_err(format!("invalid index element of type {}", item.get_type().name()?)));
         }
@@ -67,36 +94,69 @@ fn parse_key<'py>(key: &Bound<'py, PyTuple>) -> PyResult<Vec<KeyItem>> {
     Ok(items)
 }
 
-fn to_indexers(items: &[KeyItem]) -> Vec<Indexer> {
+fn to_indexers(items: &[KeyItem]) -> PyResult<Vec<Indexer>> {
     items
         .iter()
         .map(|it| match it {
-            KeyItem::Select(i) => Indexer::Select(*i),
-            KeyItem::Slice(a, b, c) => sl(*a, *b, *c),
-            KeyItem::NewAxis => Indexer::Insert,
-            KeyItem::Ellipsis => Indexer::Ellipsis,
+            KeyItem::Select(i) => Ok(Indexer::Select(*i)),
+            KeyItem::Slice(a, b, c) => Ok(sl(*a, *b, *c)),
+            KeyItem::NewAxis => Ok(Indexer::Insert),
+            KeyItem::Ellipsis => Ok(Indexer::Ellipsis),
+            // integer-array keys are served by `op_getitem`; item assignment
+            // with an index array is not implemented (G-039)
+            KeyItem::Array(_) => type_err(
+                "integer-array (fancy) item assignment is not implemented; only boolean-mask \
+                 assignment (x[mask] = value) is supported",
+            ),
+            KeyItem::Mask(_) => type_err(
+                "boolean-mask item assignment is only supported when the mask is the whole key \
+                 (x[mask] = value)",
+            ),
         })
-        .collect()
+        .collect::<PyResult<Vec<Indexer>>>()
 }
 
 /* #endregion */
 
 /* #region basic */
 
-fn op_getitem_basic<T>(t: &FTensor<T>, idx: &[Indexer]) -> rt::Result<FTensor<T>>
+/// Every `__getitem__` key rides `rt::array_index`: with integer index arrays
+/// or boolean masks that is array indexing, and without them it degenerates to
+/// basic slicing (a view). Riding one path also means a bad key raises the same
+/// error kind in both spellings (NumPy raises `IndexError` either way).
+fn op_getitem<T>(t: &FTensor<T>, items: Vec<KeyItem>) -> rt::Result<FTensor<T>>
 where
-    T: Clone + Send + Sync,
-    DeviceFaer: DeviceAPI<T, Raw = Vec<T>> + DeviceCreationAnyAPI<T>,
+    T: Clone + Send + Sync + 'static,
+    DeviceFaer: DeviceAPI<T, Raw = Vec<T>>
+        + DeviceAPI<isize>
+        + DeviceAPI<bool>
+        + DeviceAPI<usize>
+        + DeviceRawAPI<MaybeUninit<T>>
+        + DeviceRawAPI<MaybeUninit<usize>>
+        + DeviceCreationAnyAPI<T>
+        + DeviceCreationAnyAPI<usize>
+        + DeviceArrayIndexAPI<T>
+        + OpNonzeroAPI<bool, IxD>,
 {
-    let view = t.i_f(idx)?;
-    Ok(view.into_owned())
+    let indexers = items
+        .into_iter()
+        .map(|it| match it {
+            KeyItem::Select(i) => ArrayIndexer::Basic(Indexer::Select(i)),
+            KeyItem::Slice(a, b, c) => ArrayIndexer::Basic(sl(a, b, c)),
+            KeyItem::NewAxis => ArrayIndexer::Basic(Indexer::Insert),
+            KeyItem::Ellipsis => ArrayIndexer::Basic(Indexer::Ellipsis),
+            // moved, not cloned: `parse_key` owns the handle's tensor
+            KeyItem::Array(idx) => ArrayIndexer::ArrayIndex(idx),
+            KeyItem::Mask(m) => ArrayIndexer::ArrayBool(m),
+        })
+        .collect::<Vec<_>>();
+    Ok(rt::array_index_f(t, ArrayIndexArgs::new(indexers))?.into_owned())
 }
 
 #[pyfunction]
 pub fn getitem_basic(x: &NativeArray, key: &Bound<'_, PyTuple>) -> PyResult<NativeArray> {
     let items = parse_key(key)?;
-    let idx = to_indexers(&items);
-    Ok(NativeArray { t: dispatch_t!(x.t, op_getitem_basic(&idx))? })
+    Ok(NativeArray { t: dispatch_t!(x.t, op_getitem(items))? })
 }
 
 /* #endregion */
@@ -117,7 +177,7 @@ impl NativeArray {
     /// Basic-key assignment; `value` is an array of the same dtype.
     pub fn setitem_basic_arr(&mut self, key: &Bound<'_, PyTuple>, value: &NativeArray) -> PyResult<()> {
         let items = parse_key(key)?;
-        let idx = to_indexers(&items);
+        let idx = to_indexers(&items)?;
         macro_rules! arms {
             ($($dv:ident);* $(;)?) => {
                 match (&mut self.t, &value.t) {
@@ -135,7 +195,7 @@ impl NativeArray {
     /// Basic-key assignment with a Python scalar value.
     pub fn setitem_basic_scalar(&mut self, key: &Bound<'_, PyTuple>, value: PyScalar) -> PyResult<()> {
         let items = parse_key(key)?;
-        let idx = to_indexers(&items);
+        let idx = to_indexers(&items)?;
         match &mut self.t {
             AnyTensor::Bool(ref mut a) => {
                 let v = <bool as ScalarCastTarget>::from_scalar(value)?;

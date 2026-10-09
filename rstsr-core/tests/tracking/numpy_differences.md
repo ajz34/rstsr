@@ -412,3 +412,72 @@ matches `np.unique` (and the pre-2.3 aliases); the naive (general-bound
 (substituting the sorted path for complex is a registered follow-up). Signed
 zeros merge in both paths, keeping the first-seen encoding (also NumPy's
 behavior: `np.unique([-0., 1., 0.])` → `[-0., 1.]`).
+
+## Array indexing: no grouped index tuples
+
+- **numpy:** `x[1:3, ([0, 1, 2], [0, 2, 1])]` groups index arrays into one advanced indexer.
+- **rstsr:** entry_row_cpu::core_func::indexing::test_array_index (numpy_array_index + custom_array_index)
+- **tag:** intentional
+- **status:** open
+
+`rt::array_index` implements NumPy's *vectorized indexing* for ungrouped keys
+(`x[1:3, [0, 1, 2], [0, 2, 1]]`) including the placement rule for the broadcast dimensions
+and boolean masks: a mask is lowered to its `nonzero` coordinates, so it consumes one axis
+per mask axis (they must match the indexed axes exactly — a zero-size mask axis is allowed,
+NumPy-style) and contributes one `(count,)` dimension. Grouped ("parenthesized") index
+tuples are still not supported and raise `UnImplemented`. In the Python layer a lone boolean
+array still routes to whole-tensor mask indexing (`rt::mask_select`, i.e. `x[mask]`); a
+boolean mask mixed into a Python key rides the same `rt::array_index` path (the faer-py shim
+exposes it since 2026-10-09). Advanced key assignment (`x[idx] = value`) is likewise not
+implemented. The index
+argument is a dedicated argument type ([`ArrayIndexArgs`]) rather than
+`AxesIndex<ArrayIndexer<B>>`, because the latter's conversions cannot be implemented outside
+`rstsr-common` (the orphan rule); the `AxesIndex` form is still accepted through `TryFrom`.
+
+## Array indexing: no zero-dimensional boolean indexers
+
+- **numpy:** a zero-dimensional boolean adds a `{0, 1}`-sized block without consuming an axis.
+- **rstsr:** entry_row_cpu::core_func::indexing::test_array_index::custom_array_index
+- **tag:** intentional
+- **status:** wontfix
+
+A zero-dimensional boolean is declined in `rt::array_index` (`UnImplemented`): it would add a
+`{0, 1}`-sized block without consuming an axis, which the index-array lowering cannot express.
+This is a permanent decision rather than a follow-up; a lone boolean array in the Python layer
+is unaffected (it routes to `rt::mask_select`).
+
+## Gathering results follow the device order when flattened
+
+- **numpy:** a gathered result is C-ordered, so its flattened sequence (`tolist()`, `ravel()`,
+  iteration) is the row-major one — for `x[mask]` (`np.nonzero` order) and for
+  `x[int_array, ..]` alike.
+- **rstsr:** `entry_row_cpu::core_func::indexing::test_array_index::device_order` —
+  `test_array_index_order_arrangement` (the displaced-run placement flip, the
+  arrangement of a multi-dimensional result — identical for 1-D results — with
+  the row-major/column-major flattenings checked against NumPy's `ravel()` /
+  `ravel(order='F')`), `test_array_index_order_invariance` (the shapes and
+  values of together runs) and `test_boolean_mask_orders` (the same for boolean
+  masks, plus the count-axis `nonzero` sequence of a rank-2 mask), plus
+  [`mask_select`]'s Row/Column Major Notice for the mask side
+- **tag:** col-major-transfer
+- **status:** open
+
+`rt::array_index` follows NumPy exactly under the row-major default order (the placement rule and
+the trailing-aligned broadcast of the index arrays included). Under a `ColMajor` device the
+placement rule is measured in the device's access order: a run of advanced indexers that other
+indexers *displace* is placed at the back of the result instead of the front (the broadcast block
+keeps its contiguity role — the most-strided axis), so the *shape* differs from NumPy's there,
+while a run that stays together keeps its shape and only the arrangement differs (the output is
+allocated with `new_contig(order)` like every other op, so its flattened visit order is
+column-major where NumPy's is row-major). A boolean mask in a key is lowered to its `nonzero`
+coordinates, so a mask of rank two or more also carries the device's `nonzero` sequence on its
+count dimension: under `ColMajor` it gathers the same positions in a different order, a value
+difference and not merely an arrangement one. `rt::mask_select` goes one step further: its selection
+*sequence* is the mask visit order, which follows the device default order by design (its
+Row/Column Major Notice), so there the element order itself — not merely the memory arrangement —
+is device-dependent, and a 1-D result carries the device sequence. All of these follow NumPy
+exactly under the row-major default order, which is the order the library is held to (the
+column-major device-order convention of
+[`order_semantics`](https://github.com/RESTGroup/rstsr-core/blob/main/rstsr-core/src/docs/order_semantics.md)
+is the registered transfer this entry tracks).
+

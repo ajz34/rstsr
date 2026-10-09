@@ -43,8 +43,29 @@ not pin an order themselves:
 Layout-only manipulations ([`transpose`], slicing, [`flip`], ...) are not
 affected at all. Element-wise computations are unaffected in their results;
 only the memory arrangement of newly allocated results follows the default
-order. For every other function, consult its own docstring notice rather than
-assuming.
+order. The same holds for the gathering operations whose selection is described
+by coordinates rather than by a visit sequence — [`index_select`],
+[`take_along_axis`] and, for a run of integer index arrays that stays together,
+[`array_index`]: their shape and values are order-independent, and only the
+arrangement of a newly allocated result (and anything that flattens it:
+`to_vec()`, `iter()`) follows the device default order. [`array_index`] is
+*shape*-dependent on the order when the advanced indexers are apart: its
+placement rule is measured in the device's access order, so a displaced run of
+index arrays goes to the front under [`RowMajor`] and to the **back** under
+[`ColMajor`] (see its Row/Column Major Notice). Either way it reads its index
+arrays — and visits the broadcast dimensions they describe — in the device
+order, and that traversal is not observable in the result. A boolean mask in
+[`array_index`] takes the same placement rule, but its count dimension *is* the
+[`nonzero`] visit sequence: a mask of rank two or more therefore gathers the
+same positions in a different order under [`ColMajor`] — a difference in values,
+not only in arrangement (the same class as [`mask_select`]'s sequence below).
+[`mask_select`] is
+the exception among the gathers:
+its selection *sequence* is the mask visit order, which follows the device
+default order by design — not the row-major rule the Python Array API
+prescribes for boolean index arrays — so on a column-major device even a 1-D
+result carries the column-major sequence (see its Row/Column Major Notice). For
+every other function, consult its own docstring notice rather than assuming.
 
 The rest of this page demonstrates the three cases worth understanding in
 depth: creation, broadcasting, and reshape.
