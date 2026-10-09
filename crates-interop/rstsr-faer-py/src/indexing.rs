@@ -122,10 +122,12 @@ fn op_getitem<T>(t: &FTensor<T>, items: Vec<KeyItem>) -> rt::Result<FTensor<T>>
 where
     T: Clone + Send + Sync + 'static,
     DeviceFaer: DeviceAPI<T, Raw = Vec<T>>
-        + DeviceAPI<isize, Raw = Vec<isize>>
-        + DeviceAPI<bool, Raw = Vec<bool>>
+        + DeviceAPI<isize>
+        + DeviceAPI<bool>
+        + DeviceAPI<usize>
         + DeviceRawAPI<MaybeUninit<T>>
         + DeviceCreationAnyAPI<T>
+        + DeviceCreationAnyAPI<usize>
         + DeviceArrayIndexAPI<T>,
 {
     let indexers = items

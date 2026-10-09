@@ -90,13 +90,22 @@ where
 /// [`DeviceArrayIndexAPI::array_index`]).
 ///
 /// The tensor level resolves and validates everything, so a device only ever
-/// sees non-negative in-bounds `usize` entries.
-pub struct ArrayAuxIndexer<'a> {
+/// sees non-negative in-bounds `usize` entries, and those entries live in
+/// **device storage**. `(indices, layout)` represents the resolved index array,
+/// but the representation is deliberately not canonical: an index array is not
+/// required to be row-major (or contiguous, or in any particular order), so a
+/// device reads the entries through `layout` — arbitrary strides and offset
+/// included — instead of assuming a host slice or a C-contiguous buffer. Any
+/// layout that represents the same index array yields the same result.
+pub struct ArrayAuxIndexer<'a, B>
+where
+    B: DeviceRawAPI<usize>,
+{
     /// Source axis consumed by this index array.
     pub src_axis: usize,
-    /// Resolved index values, in C (row-major) order over `layout`.
-    pub indices: &'a [usize],
-    /// Contiguous layout of the index array's own shape.
+    /// Resolved index entries, in device storage.
+    pub indices: &'a <B as DeviceRawAPI<usize>>::Raw,
+    /// Layout of the index array's own shape.
     pub layout: Layout<IxD>,
 }
 
@@ -109,9 +118,14 @@ pub struct ArrayAuxIndexer<'a> {
 /// already carries the integer selections).
 pub trait DeviceArrayIndexAPI<T>
 where
-    Self: DeviceAPI<T> + DeviceRawAPI<MaybeUninit<T>>,
+    Self: DeviceAPI<T> + DeviceRawAPI<usize> + DeviceRawAPI<MaybeUninit<T>>,
 {
     /// Gather `a` into `c` by integer arrays on selected axes.
+    ///
+    /// `order` is the device default order: the broadcast index dimensions are
+    /// visited in that order. The gathered values do not depend on it (the
+    /// output arrangement is carried by `lc`); the traversal, and with it the
+    /// locality of the writes, follows the device.
     #[allow(clippy::too_many_arguments)]
     fn array_index(
         &self,
@@ -120,7 +134,8 @@ where
         a: &<Self as DeviceRawAPI<T>>::Raw,
         la: &Layout<IxD>,
         base_layout: &Layout<IxD>,
-        indexers: &[ArrayAuxIndexer<'_>],
+        indexers: &[ArrayAuxIndexer<'_, Self>],
         consec: usize,
+        order: FlagOrder,
     ) -> Result<()>;
 }

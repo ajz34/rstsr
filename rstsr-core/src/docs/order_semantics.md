@@ -48,7 +48,9 @@ order. The same holds for the gathering operations — [`index_select`],
 and values, including `array_index`'s placement rule and the trailing-aligned
 broadcast of its index arrays) are order-independent, while the flattened visit
 order of a newly allocated result (`to_vec()`, `iter()`) follows the device
-default order, as it does for every other allocation. For every other function, consult its own docstring notice rather than
+default order, as it does for every other allocation. [`array_index`] also
+reads its index arrays — and visits the broadcast dimensions they describe — in
+the device order; that traversal is not observable in the result. For every other function, consult its own docstring notice rather than
 assuming.
 
 The rest of this page demonstrates the three cases worth understanding in

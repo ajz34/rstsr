@@ -11,8 +11,11 @@ use crate::prelude_dev::*;
 /// Gather `a` into `c` by integer arrays on selected axes.
 ///
 /// `indexers` carries, per array indexer, its source axis, its resolved
-/// (non-negative, in-bounds) values in C order, and the layout of its own
-/// shape.
+/// (non-negative, in-bounds) entries, and the layout of its own shape (the
+/// entries are addressed through that layout, so any strides/offset work). The
+/// broadcast index dimensions are visited in `order`, the device default order;
+/// the two per-bulk tables are paired per visit, so the visit order does not
+/// affect which value lands where.
 #[allow(clippy::too_many_arguments)]
 pub fn array_index_cpu_serial<T>(
     c: &mut [MaybeUninit<T>],
@@ -22,6 +25,7 @@ pub fn array_index_cpu_serial<T>(
     base_layout: &Layout<IxD>,
     indexers: &[(usize, &[usize], Layout<IxD>)],
     consec: usize,
+    order: FlagOrder,
 ) -> Result<()>
 where
     T: Clone,
@@ -51,10 +55,22 @@ where
     let mut out_bulk = vec![0_isize; n_bulk];
     let mut bulk_multi = vec![0_usize; fancy_ndim];
     for (bulk_flat, (src, out)) in src_bulk.iter_mut().zip(out_bulk.iter_mut()).enumerate() {
+        // unravel the flat bulk position in the device default order:
+        // row-major varies the last axis fastest, column-major the first
         let mut rem = bulk_flat;
-        for d in (0..fancy_ndim).rev() {
-            bulk_multi[d] = rem % bulk_shape[d];
-            rem /= bulk_shape[d];
+        match order {
+            RowMajor => {
+                for d in (0..fancy_ndim).rev() {
+                    bulk_multi[d] = rem % bulk_shape[d];
+                    rem /= bulk_shape[d];
+                }
+            },
+            ColMajor => {
+                for d in 0..fancy_ndim {
+                    bulk_multi[d] = rem % bulk_shape[d];
+                    rem /= bulk_shape[d];
+                }
+            },
         }
         for (d, &m) in bulk_multi.iter().enumerate() {
             *out += lc_stride[consec + d] * m as isize;

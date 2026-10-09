@@ -17,16 +17,77 @@ fn bool_index_declined<X>() -> Result<X> {
 }
 
 /// One parsed index entry, describing what one group of the index does.
-enum Entry {
+enum Entry<B>
+where
+    B: DeviceRawAPI<isize>,
+{
     /// A slice on `axis`.
     Slice { axis: usize, slice: SliceI },
     /// An integer selection on `axis`, dropping it.
     Select { axis: usize, index: usize },
     /// A new axis (size-1 dimension).
     Insert,
-    /// An integer array indexing `src_axis`; `values` are the raw entries and
-    /// `indices` the resolved ones (filled once the broadcast shape is known).
-    Array { src_axis: usize, values: Vec<isize>, indices: Vec<usize>, layout: Layout<IxD> },
+    /// An integer array indexing `src_axis`, with the raw (unresolved) entries
+    /// and the layout of its own shape.
+    Array { src_axis: usize, raw: RawIndex<B>, layout: Layout<IxD> },
+}
+
+/// Raw (unresolved) entries of one index array, kept in the carrier they
+/// arrived in until the broadcast shape is known.
+enum RawIndex<B>
+where
+    B: DeviceRawAPI<isize>,
+{
+    /// Host-carried entries ([`ArrayIndexer::OneDimIndex`]).
+    Host(Vec<isize>),
+    /// Entries of an index tensor, still in device storage.
+    Device(Tensor<isize, B, IxD>),
+}
+
+impl<B> RawIndex<B>
+where
+    B: DeviceAPI<isize>,
+{
+    /// Resolve negative entries and check the bounds of every entry, appending
+    /// the resolved values to `resolved` in the order `layout` is traversed.
+    ///
+    /// Entries of an index tensor are read element by element through the
+    /// device storage (never through a host slice of the raw buffer), visited
+    /// in `order` — the device default order, the same order the caller stores
+    /// the resolved values in.
+    fn resolve_into(
+        &self,
+        src_axis: usize,
+        layout: &Layout<IxD>,
+        axis_size: usize,
+        order: FlagOrder,
+        resolved: &mut Vec<usize>,
+    ) -> Result<()> {
+        let axis_size = axis_size as isize;
+        match self {
+            Self::Host(values) => {
+                resolved.reserve(values.len());
+                for &value in values.iter() {
+                    resolved.push(resolve_one(value, axis_size, src_axis)?);
+                }
+            },
+            Self::Device(index) => {
+                resolved.reserve(index.size());
+                for (_, offset) in IndexedIterLayout::<IxD>::new(layout, order)? {
+                    let value = index.storage().get_index(offset);
+                    resolved.push(resolve_one(value, axis_size, src_axis)?);
+                }
+            },
+        }
+        Ok(())
+    }
+}
+
+/// Resolve one raw index entry (negatives count from the back) and check it.
+fn resolve_one(value: isize, axis_size: isize, src_axis: usize) -> Result<usize> {
+    let value = if value < 0 { value + axis_size } else { value };
+    rstsr_pattern!(value, 0..axis_size, IndexError, "Array index out of range along axis {}.", src_axis)?;
+    Ok(value as usize)
 }
 
 /// Indexes a tensor by integer arrays (array indexing, *fancy indexing*).
@@ -42,24 +103,30 @@ where
     D: DimAPI,
     T: Clone,
     B: DeviceAPI<T>
-        + DeviceAPI<isize, Raw = Vec<isize>>
-        + DeviceAPI<bool, Raw = Vec<bool>>
+        + DeviceAPI<isize>
+        + DeviceAPI<bool>
+        + DeviceAPI<usize>
         + DeviceRawAPI<MaybeUninit<T>>
         + DeviceCreationAnyAPI<T>
+        + DeviceCreationAnyAPI<usize>
         + DeviceArrayIndexAPI<T>,
     I: TryInto<ArrayIndexArgs<B>, Error: Into<Error>>,
 {
     let device = tensor.device().clone();
+    let order = device.default_order();
     let la = tensor.layout().to_dim::<IxD>()?;
     let ndim = la.ndim();
 
     let indexers = indexer.try_into().map_err(Into::into)?.indexers;
 
     // lower host carriers; a zero-dimensional integer tensor is a scalar index
-    enum Lowered {
+    enum Lowered<B>
+    where
+        B: DeviceRawAPI<isize>,
+    {
         Basic(Indexer),
         Array {
-            values: Vec<isize>,
+            raw: RawIndex<B>,
             layout: Layout<IxD>,
         },
         Bool,
@@ -68,13 +135,13 @@ where
         Noop,
     }
 
-    let mut lowered: Vec<Lowered> = Vec::with_capacity(indexers.len());
+    let mut lowered: Vec<Lowered<B>> = Vec::with_capacity(indexers.len());
     for indexer in indexers {
         match indexer {
             ArrayIndexer::Basic(indexer) => lowered.push(Lowered::Basic(indexer)),
             ArrayIndexer::OneDimIndex(values) => {
                 let layout = vec![values.len()].new_c_contig(None);
-                lowered.push(Lowered::Array { values, layout });
+                lowered.push(Lowered::Array { raw: RawIndex::Host(values), layout });
             },
             ArrayIndexer::OneDimBool(_) | ArrayIndexer::ArrayBool(_) => lowered.push(Lowered::Bool),
             ArrayIndexer::ArrayIndex(index) => {
@@ -85,20 +152,14 @@ where
                 )?;
                 if index.ndim() == 0 {
                     // a zero-dimensional integer array is an integer index
-                    let offset = index.layout().index_uncheck(&[]) as usize;
-                    lowered.push(Lowered::Basic(Indexer::Select(index.raw()[offset])));
+                    let value = index.storage().get_index(index.layout().offset());
+                    lowered.push(Lowered::Basic(Indexer::Select(value)));
                     continue;
                 }
+                // the index array keeps its own (possibly strided) layout until
+                // its entries are resolved below
                 let layout = index.layout().to_dim::<IxD>()?;
-                let mut values = Vec::with_capacity(index.size());
-                // read in C order; `IterLayoutRowMajor` yields bare offsets (no
-                // per-element multi-index clone, and C order is what the
-                // resolved layout below describes)
-                for offset in IterLayoutRowMajor::<IxD>::new(&layout)? {
-                    values.push(index.raw()[offset]);
-                }
-                let layout = layout.shape().clone().new_c_contig(None);
-                lowered.push(Lowered::Array { values, layout });
+                lowered.push(Lowered::Array { raw: RawIndex::Device(index), layout });
             },
         }
     }
@@ -145,7 +206,7 @@ where
         return Ok(into_slice_f(tensor.view(), AxesIndex::<Indexer>::Vec(basic))?.into_cow());
     }
 
-    let mut expanded: Vec<Lowered> = Vec::with_capacity(lowered.len() + n_fill);
+    let mut expanded: Vec<Lowered<B>> = Vec::with_capacity(lowered.len() + n_fill);
     for entry in lowered {
         match entry {
             Lowered::Basic(Indexer::Ellipsis) => {
@@ -169,7 +230,7 @@ where
     // walk the index: resolve entries, compute the placement of the broadcast
     // index dimensions (NumPy's rule: in place when the advanced indexers are
     // consecutive, at the front otherwise)
-    let mut entries: Vec<Entry> = Vec::with_capacity(expanded.len());
+    let mut entries: Vec<Entry<B>> = Vec::with_capacity(expanded.len());
     let mut curr_axis = 0_usize;
     let mut result_dim = 0_usize;
     let mut consec = 0_usize;
@@ -215,9 +276,9 @@ where
             Lowered::Basic(_) => unreachable!(),
             Lowered::Bool => unreachable!(),
             Lowered::Noop => {},
-            Lowered::Array { values, layout } => {
+            Lowered::Array { raw, layout } => {
                 fancy_ndim = fancy_ndim.max(layout.ndim());
-                entries.push(Entry::Array { src_axis: curr_axis, values, indices: Vec::new(), layout });
+                entries.push(Entry::Array { src_axis: curr_axis, raw, layout });
                 curr_axis += 1;
             },
         }
@@ -274,51 +335,48 @@ where
     }
 
     // Resolve (and bounds-check) the index entries only when the broadcast is
-    // non-empty: an empty selection never touches the index arrays, so NumPy
-    // does not raise for values that are out of range but never gathered.
+    // non-empty: an empty broadcast never touches the index arrays, so NumPy
+    // does not raise for values that are out of range but never gathered. An
+    // empty *subspace* (a zero-sized non-indexed dimension) is still validated.
     let bulk_size: usize = bulk_shape.iter().product();
-    for entry in &mut entries {
-        if let Entry::Array { src_axis, values, indices, .. } = entry {
-            let axis_size = la.shape()[*src_axis] as isize;
-            if bulk_size != 0 {
-                indices.reserve(values.len());
-                for &value in values.iter() {
-                    let value = if value < 0 { value + axis_size } else { value };
-                    rstsr_pattern!(
-                        value,
-                        0..axis_size,
-                        IndexError,
-                        "Array index out of range along axis {}.",
-                        src_axis
-                    )?;
-                    indices.push(value as usize);
-                }
-            }
-            // the raw entries are no longer needed
-            values.clear();
-            values.shrink_to_fit();
-        }
-    }
 
     // output layout: the broadcast dimensions inserted at `consec`
     let mut out_shape: Vec<usize> = Vec::with_capacity(base_layout.ndim() + fancy_ndim);
     out_shape.extend_from_slice(&base_layout.shape()[..consec]);
     out_shape.extend_from_slice(&bulk_shape);
     out_shape.extend_from_slice(&base_layout.shape()[consec..]);
-    let layout_c: Layout<IxD> = out_shape.new_contig(None, device.default_order());
+    let layout_c: Layout<IxD> = out_shape.new_contig(None, order);
 
     let (_, idx_max) = layout_c.bounds_index()?;
     let mut storage = device.uninit_impl(idx_max)?;
-    let aux: Vec<ArrayAuxIndexer<'_>> = entries
+
+    // Move the resolved entries of every index array into device storage: the
+    // device receives resolved `usize` entries in its own memory, never a host
+    // slice. Entries are visited (and stored) in `order`, so each buffer is
+    // contiguous in that order; the layouts handed to the device need not be
+    // row-major and a device addresses the buffers through them. With an empty
+    // broadcast the buffers stay empty (and the op never reads them: a
+    // zero-sized bulk makes it return early).
+    let mut buffers: Vec<(usize, Layout<IxD>, Storage<DataOwned<<B as DeviceRawAPI<usize>>::Raw>, usize, B>)> =
+        Vec::new();
+    for entry in entries {
+        let Entry::Array { src_axis, raw, layout } = entry else { continue };
+        let mut resolved: Vec<usize> = Vec::new();
+        if bulk_size != 0 {
+            raw.resolve_into(src_axis, &layout, la.shape()[src_axis], order, &mut resolved)?;
+        }
+        let buffer_layout: Layout<IxD> = layout.shape().clone().new_contig(None, order);
+        buffers.push((src_axis, buffer_layout, device.outof_cpu_vec(resolved)?));
+    }
+    let aux: Vec<ArrayAuxIndexer<'_, B>> = buffers
         .iter()
-        .filter_map(|entry| match entry {
-            Entry::Array { src_axis, indices, layout, .. } => {
-                Some(ArrayAuxIndexer { src_axis: *src_axis, indices: indices.as_slice(), layout: layout.clone() })
-            },
-            _ => None,
+        .map(|(src_axis, layout, buffer)| ArrayAuxIndexer {
+            src_axis: *src_axis,
+            indices: buffer.raw(),
+            layout: layout.clone(),
         })
         .collect();
-    device.array_index(storage.raw_mut(), &layout_c, tensor.raw(), &la, &base_layout, &aux, consec)?;
+    device.array_index(storage.raw_mut(), &layout_c, tensor.raw(), &la, &base_layout, &aux, consec, order)?;
     // SAFETY: `device.array_index` above wrote every element of the fresh
     // storage exactly once (each output position is filled from one gathered
     // source element).
@@ -521,10 +579,12 @@ where
     D: DimAPI,
     T: Clone,
     B: DeviceAPI<T>
-        + DeviceAPI<isize, Raw = Vec<isize>>
-        + DeviceAPI<bool, Raw = Vec<bool>>
+        + DeviceAPI<isize>
+        + DeviceAPI<bool>
+        + DeviceAPI<usize>
         + DeviceRawAPI<MaybeUninit<T>>
         + DeviceCreationAnyAPI<T>
+        + DeviceCreationAnyAPI<usize>
         + DeviceArrayIndexAPI<T>,
     I: TryInto<ArrayIndexArgs<B>, Error: Into<Error>>,
 {
@@ -537,10 +597,12 @@ where
     D: DimAPI,
     T: Clone,
     B: DeviceAPI<T>
-        + DeviceAPI<isize, Raw = Vec<isize>>
-        + DeviceAPI<bool, Raw = Vec<bool>>
+        + DeviceAPI<isize>
+        + DeviceAPI<bool>
+        + DeviceAPI<usize>
         + DeviceRawAPI<MaybeUninit<T>>
         + DeviceCreationAnyAPI<T>
+        + DeviceCreationAnyAPI<usize>
         + DeviceArrayIndexAPI<T>,
 {
     /// Indexes a tensor by integer arrays (array indexing, *fancy indexing*).
@@ -670,5 +732,92 @@ mod test {
         assert!(a.array_index_f((1, 2, 3)).is_err());
         // index arrays that cannot broadcast
         assert!(a.array_index_f(([0, 1], [0, 1, 2])).is_err());
+    }
+
+    /// Row-major logical order of a 2-D result, read through the public API so
+    /// that the comparison does not depend on the memory arrangement.
+    fn grid(x: &TensorCow<'_, i32, DeviceCpu, IxD>, n: usize, m: usize) -> Vec<i32> {
+        let mut out = Vec::with_capacity(n * m);
+        for i in 0..n {
+            for j in 0..m {
+                out.push(x.i((i, j)).to_scalar());
+            }
+        }
+        out
+    }
+
+    /// Array indexing is device-default-order aware: the gathered values (and
+    /// the placement rule, and the trailing-aligned broadcast of the index
+    /// arrays) are order-independent, while the arrangement of the result and
+    /// the reading order of the index arrays follow the device.
+    #[test]
+    fn test_array_index_order_equivalence() {
+        // a[i, j, k] = 12*i + 4*j + k, built by broadcasting so that both
+        // devices hold the *same* logical tensor whatever their order
+        fn build(device: &DeviceCpu) -> Tensor<i32, DeviceCpu, IxD> {
+            let i = arange((2, device)).into_shape([2, 1, 1]);
+            let j = arange((3, device)).into_shape([1, 3, 1]);
+            let k = arange((4, device)).into_shape([1, 1, 4]);
+            i * 12 + j * 4 + k
+        }
+
+        let mut dev_row = DeviceCpu::default();
+        dev_row.set_default_order(RowMajor);
+        let mut dev_col = DeviceCpu::default();
+        dev_col.set_default_order(ColMajor);
+        let (a_row, a_col) = (build(&dev_row), build(&dev_col));
+
+        // 1-D result: a leading integer (advanced for the placement) plus two
+        // consecutive index arrays
+        let b_row = a_row.array_index((1, [0, 1, 2], [2, 0, 1]));
+        let b_col = a_col.array_index((1, [0, 1, 2], [2, 0, 1]));
+        assert_eq!(b_row.shape(), &vec![3]);
+        assert_eq!(b_col.shape(), &vec![3]);
+        assert_eq!(b_row.into_shape([-1]).to_vec(), vec![14, 16, 21]);
+        assert_eq!(b_col.into_shape([-1]).to_vec(), vec![14, 16, 21]);
+
+        // 2-D result, broadcast dimensions at the front (separated advanced
+        // indexers); the values are order-independent, the arrangement is not
+        let c_row = a_row.array_index(([1, 0], .., 1));
+        let c_col = a_col.array_index(([1, 0], .., 1));
+        assert_eq!(c_row.shape(), &vec![2, 3]);
+        assert_eq!(c_col.shape(), &vec![2, 3]);
+        assert_eq!(grid(&c_row, 2, 3), vec![13, 17, 21, 1, 5, 9]);
+        assert_eq!(grid(&c_col, 2, 3), vec![13, 17, 21, 1, 5, 9]);
+        // row-major device: C-contiguous; column-major device: F-contiguous
+        assert_eq!(c_row.stride(), &vec![3, 1]);
+        assert_eq!(c_col.stride(), &vec![1, 2]);
+
+        // trailing-aligned broadcast of index arrays of different ranks: the
+        // rank-1 array lines up with the *last* broadcast dimension (and its
+        // 2x1 partner with both), whatever the device order
+        for (device, a) in [(&dev_row, &a_row), (&dev_col, &a_col)] {
+            let idx = asarray((vec![2_isize, 0], device)).into_shape([2, 1]);
+            let e = a.array_index((1, &idx, [3, 0, 1, 2]));
+            assert_eq!(e.shape(), &vec![2, 4]);
+            assert_eq!(grid(&e, 2, 4), vec![23, 20, 21, 22, 15, 12, 13, 14]);
+        }
+
+        // a multi-dimensional index array is read in the device order: the flat
+        // entries describe different logical index arrays under the two orders
+        // (row-major reads `[2*p + q]`, column-major `[p + 2*q]`)
+        let flat_idx = vec![0_isize, 1, 2, 0];
+        let flat_jdx = vec![3_isize, 0, 1, 2];
+        // x[i, j] = 4*i + j on both devices
+        let x_row = arange((3, &dev_row)).into_shape([3, 1]) * 4 + arange((4, &dev_row)).into_shape([1, 4]);
+        let x_col = arange((3, &dev_col)).into_shape([3, 1]) * 4 + arange((4, &dev_col)).into_shape([1, 4]);
+        let d_row = x_row.array_index((
+            asarray((flat_idx.clone(), &dev_row)).into_shape([2, 2]),
+            asarray((flat_jdx.clone(), &dev_row)).into_shape([2, 2]),
+        ));
+        let d_col = x_col.array_index((
+            asarray((flat_idx, &dev_col)).into_shape([2, 2]),
+            asarray((flat_jdx, &dev_col)).into_shape([2, 2]),
+        ));
+        assert_eq!(d_row.shape(), &vec![2, 2]);
+        assert_eq!(d_col.shape(), &vec![2, 2]);
+        assert_eq!(grid(&d_row, 2, 2), vec![3, 4, 9, 2]);
+        assert_eq!(grid(&d_col, 2, 2), vec![3, 9, 4, 2]);
+        assert_eq!(d_col.stride(), &vec![1, 2]);
     }
 }

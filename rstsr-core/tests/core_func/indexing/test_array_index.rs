@@ -415,6 +415,15 @@ mod custom_array_index {
         // a transposed (non-monotonic-stride) source: tr[2] == base[:, :, 2].transpose()
         let tr = rt::permute_dims(&base, [2, 1, 0]);
         assert_eq!(tr.array_index((2, .., ..)).into_shape([-1]).to_vec(), vec![2, 14, 6, 18, 10, 22]);
+
+        // the same index array in two memory representations (row-major and
+        // column-major) gathers the same elements: a device reads the entries
+        // through their layout, never assuming a row-major buffer
+        let idx_2d = rt::asarray((vec![0_isize, 3, 1, 2], &device)).into_shape([2, 2]);
+        let idx_2d_f =
+            rt::change_contig(rt::asarray((vec![0_isize, 3, 1, 2], &device)).into_shape([2, 2]), ColMajor).into_owned();
+        assert_ne!(idx_2d.stride(), idx_2d_f.stride());
+        assert_equal(base.array_index((.., .., &idx_2d)), base.array_index((.., .., &idx_2d_f)), None);
     }
 
     /// The empty index `()` is the identity (and still a view); `None` is the
