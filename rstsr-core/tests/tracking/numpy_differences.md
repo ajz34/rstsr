@@ -437,8 +437,10 @@ rule); the `AxesIndex` form is still accepted through `TryFrom`.
   iteration) is the row-major one — for `x[mask]` (`np.nonzero` order) and for
   `x[int_array, ..]` alike.
 - **rstsr:** `rstsr-core/src/tensor/array_indexing.rs` in-src
-  `tensor::array_indexing::test::test_array_index_colmajor_iteration` (runs in
-  both the row-major and the col-major CI unit-test jobs) for the array-indexing
+  `tensor::array_indexing::test::test_array_index_order_arrangement` (the
+  arrangement of a multi-dimensional result — identical for 1-D results — with
+  the row-major/column-major flattenings checked against NumPy's `ravel()` /
+  `ravel(order='F')`; runs in both CI unit-test jobs) for the array-indexing
   side, and [`mask_select`]'s Row/Column Major Notice for the mask side
 - **tag:** col-major-transfer
 - **status:** open

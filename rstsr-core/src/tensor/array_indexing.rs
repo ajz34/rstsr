@@ -758,67 +758,181 @@ mod test {
         out
     }
 
-    /// A column-major device iterates a gathered result in column-major order:
-    /// the fancy (broadcast) dimensions carry their column-major strides — a
-    /// leading fancy dimension is the fastest varying one — and the flattened
-    /// visit sequence (`to_vec()`, `into_shape([-1])`, `iter()`) is the F-order
-    /// reading of the result, where NumPy (and a row-major device) reads it in
-    /// C order. Since a flattening is a bijection onto the logical tensor, the
-    /// two sequences pin the values as well: both devices hold the same logical
-    /// tensor, merely ordered differently.
+    /// `a[i, j, k] = 12*i + 4*j + k` on `device`, built by broadcasting so that
+    /// every device holds the *same* logical tensor whatever its order.
+    fn build_input_2x3x4(device: &DeviceCpu) -> Tensor<i32, DeviceCpu, IxD> {
+        let i = arange((2, device)).into_shape([2, 1, 1]);
+        let j = arange((3, device)).into_shape([1, 3, 1]);
+        let k = arange((4, device)).into_shape([1, 1, 4]);
+        i * 12 + j * 4 + k
+    }
+
+    /// `a[i, j, k, l] = 16*i + 8*j + 4*k + l` on `device` (broadcast build).
+    fn build_input_3x2x2x4(device: &DeviceCpu) -> Tensor<i32, DeviceCpu, IxD> {
+        let i = arange((3, device)).into_shape([3, 1, 1, 1]);
+        let j = arange((2, device)).into_shape([1, 2, 1, 1]);
+        let k = arange((2, device)).into_shape([1, 1, 2, 1]);
+        let l = arange((4, device)).into_shape([1, 1, 1, 4]);
+        i * 16 + j * 8 + k * 4 + l
+    }
+
+    /// The order-invariant half of the story: *for the same logical inputs, the
+    /// two device orders gather the same logical result* — the same shape and
+    /// the same value at every position, whatever the arrangement. What the
+    /// device order changes is only the arrangement, and the sibling
+    /// [`test_array_index_order_arrangement`] pins that (and when).
     ///
-    /// The kernel's own visit order is a locality choice and does not show up
-    /// here: every output position is written from exactly one source position,
-    /// whatever the traversal — the arrangement is what carries the device
-    /// order into the result.
-    ///
-    /// This test answers *"what does the device order change, and does it match
-    /// NumPy read in that same order?"*, comparing each device against NumPy's
-    /// `ravel()` / `ravel(order='F')` rather than against the other device. Its
-    /// sibling [`test_array_index_order_equivalence`] answers *"do the two
-    /// orders gather the same thing?"* (values, shape, and the reading order of
-    /// multi-dimensional index arrays).
+    /// The comparisons here are deliberately arrangement-blind: element reads
+    /// (`grid`) for 2-D results and the flattened sequence for 1-D ones (a
+    /// single axis has a single order), so that equal values under unequal
+    /// arrangements cannot pass by accident.
     #[test]
-    fn test_array_index_colmajor_iteration() {
-        // a[i, j, k, l] = 16*i + 8*j + 4*k + l, built by broadcasting so both
-        // devices hold the same logical tensor
-        fn build(device: &DeviceCpu) -> Tensor<i32, DeviceCpu, IxD> {
-            let i = arange((3, device)).into_shape([3, 1, 1, 1]);
-            let j = arange((2, device)).into_shape([1, 2, 1, 1]);
-            let k = arange((2, device)).into_shape([1, 1, 2, 1]);
-            let l = arange((4, device)).into_shape([1, 1, 1, 4]);
-            i * 16 + j * 8 + k * 4 + l
-        }
+    fn test_array_index_order_invariance() {
         let mut dev_row = DeviceCpu::default();
         dev_row.set_default_order(RowMajor);
         let mut dev_col = DeviceCpu::default();
         dev_col.set_default_order(ColMajor);
-        let shape = [2_usize, 2, 4];
-        // the gathered tensors borrow their source, so bind the owners first
-        let a_row = build(&dev_row);
-        let a_col = build(&dev_col);
+        let a_row = build_input_2x3x4(&dev_row);
+        let a_col = build_input_2x3x4(&dev_col);
 
-        // the broadcast dimension in the middle: a slice, then two consecutive
-        // index arrays (inserted in place, at position 1), then a slice
+        // every axis consumed by an integer and 1-D index arrays: a 1-D result
+        // NumPy: `a[1, [0, 1, 2], [2, 0, 1]]`
+        let b_row = a_row.array_index((1, [0, 1, 2], [2, 0, 1]));
+        let b_col = a_col.array_index((1, [0, 1, 2], [2, 0, 1]));
+        assert_eq!(b_row.shape(), &vec![3]);
+        assert_eq!(b_col.shape(), &vec![3]);
+        assert_eq!(b_row.into_shape([-1]).to_vec(), vec![14, 16, 21]);
+        assert_eq!(b_col.into_shape([-1]).to_vec(), vec![14, 16, 21]);
+
+        // a slice keeps a base dimension, so the two orders arrange the result
+        // differently; the value at every position still agrees
+        // NumPy: `a[[1, 0], :, 1]`
+        let c_row = a_row.array_index(([1, 0], .., 1));
+        let c_col = a_col.array_index(([1, 0], .., 1));
+        assert_eq!(c_row.shape(), &vec![2, 3]);
+        assert_eq!(c_col.shape(), &vec![2, 3]);
+        assert_eq!(grid(&c_row, 2, 3), vec![13, 17, 21, 1, 5, 9]);
+        assert_eq!(grid(&c_col, 2, 3), vec![13, 17, 21, 1, 5, 9]);
+
+        // index arrays of different ranks broadcast trailing-aligned: the rank-1
+        // array lines up with the *last* broadcast dimension (its 2x1 partner
+        // with both), whatever the device order
+        // NumPy: `a[1, [[2], [0]], [3, 0, 1, 2]]`
+        for (device, a) in [(&dev_row, &a_row), (&dev_col, &a_col)] {
+            let idx = asarray((vec![2_isize, 0], device)).into_shape([2, 1]);
+            let e = a.array_index((1, &idx, [3, 0, 1, 2]));
+            assert_eq!(e.shape(), &vec![2, 4]);
+            assert_eq!(grid(&e, 2, 4), vec![23, 20, 21, 22, 15, 12, 13, 14]);
+        }
+
+        // the *same logical* multi-dimensional index arrays on both devices: a
+        // flat host listing is read in the device order, so the column-major
+        // device is handed the F-order listing of the same array (the row-major
+        // one the C-order listing) — and the two gathers agree
+        let x_row = arange((3, &dev_row)).into_shape([3, 1]) * 4 + arange((4, &dev_row)).into_shape([1, 4]);
+        let x_col = arange((3, &dev_col)).into_shape([3, 1]) * 4 + arange((4, &dev_col)).into_shape([1, 4]);
+        let d_row = x_row.array_index((
+            asarray((vec![0_isize, 1, 2, 0], &dev_row)).into_shape([2, 2]),
+            asarray((vec![3_isize, 0, 1, 2], &dev_row)).into_shape([2, 2]),
+        ));
+        let d_col = x_col.array_index((
+            asarray((vec![0_isize, 2, 1, 0], &dev_col)).into_shape([2, 2]),
+            asarray((vec![3_isize, 1, 0, 2], &dev_col)).into_shape([2, 2]),
+        ));
+        assert_eq!(d_row.shape(), &vec![2, 2]);
+        assert_eq!(d_col.shape(), &vec![2, 2]);
+        // NumPy: `x[[[0, 1], [2, 0]], [[3, 0], [1, 2]]]`
+        assert_eq!(grid(&d_row, 2, 2), vec![3, 4, 9, 2]);
+        assert_eq!(grid(&d_col, 2, 2), vec![3, 4, 9, 2]);
+
+        // what the order decides here is the *construction*, not the gather: the
+        // same flat listing on the column-major device is the transposed pair of
+        // index arrays (`reshape(flat, [2, 2], order='F')`), and the gather
+        // faithfully returns other elements
+        // NumPy: `x[[[0, 2], [1, 0]], [[3, 1], [0, 2]]]`
+        let e_col = x_col.array_index((
+            asarray((vec![0_isize, 1, 2, 0], &dev_col)).into_shape([2, 2]),
+            asarray((vec![3_isize, 0, 1, 2], &dev_col)).into_shape([2, 2]),
+        ));
+        assert_eq!(grid(&e_col, 2, 2), vec![3, 9, 4, 2]);
+    }
+
+    /// The other half of the story: what the device order *does* change is the
+    /// arrangement of the result — and only when the result has two or more
+    /// dimensions.
+    ///
+    /// - A 1-D result is *identical* under both orders (a single axis has a single order), so a
+    ///   gather that consumes every axis with integers and 1-D index arrays gives the same tensor
+    ///   on either device.
+    /// - A result with two or more dimensions carries the device order: it is C-contiguous on a
+    ///   row-major device and F-contiguous on a column-major one, so its flattened visit sequence
+    ///   (`to_vec()`, `into_shape([-1])`, `iter()`) is NumPy's `ravel()` / `ravel(order='F')` of
+    ///   the same logical result.
+    ///
+    /// An n-dimensional (n > 1) index array always broadcasts to an
+    /// n-dimensional bulk, hence always forces a multi-dimensional result and
+    /// always lands here — but it is *not* the criterion: a 1-D index array only
+    /// has to meet a slice (or another 1-D array across a slice) to make one.
+    ///
+    /// The kernel's own visit order is a locality choice and does not show up
+    /// here: every output position is written from exactly one source position,
+    /// whatever the traversal — the arrangement is what carries the device order
+    /// into the result.
+    #[test]
+    fn test_array_index_order_arrangement() {
+        let mut dev_row = DeviceCpu::default();
+        dev_row.set_default_order(RowMajor);
+        let mut dev_col = DeviceCpu::default();
+        dev_col.set_default_order(ColMajor);
+        let a_row = build_input_2x3x4(&dev_row);
+        let a_col = build_input_2x3x4(&dev_col);
+
+        // a 1-D result: identical under both orders, down to the strides
+        let b_row = a_row.array_index((1, [0, 1, 2], [2, 0, 1]));
+        let b_col = a_col.array_index((1, [0, 1, 2], [2, 0, 1]));
+        assert_eq!(b_row.stride(), b_col.stride());
+        assert_eq!(b_row.into_shape([-1]).to_vec(), vec![14, 16, 21]);
+        assert_eq!(b_col.into_shape([-1]).to_vec(), vec![14, 16, 21]);
+
+        // a 1-D index array plus slices already makes a multi-dimensional
+        // result, so the two devices arrange it differently (same values — see
+        // the sibling test)
+        // NumPy: `a[:, :, [0, 1]]`
+        let c_seq = vec![0, 1, 4, 5, 8, 9, 12, 13, 16, 17, 20, 21];
+        let c_row = a_row.array_index((.., .., [0, 1]));
+        let c_col = a_col.array_index((.., .., [0, 1]));
+        assert_eq!(c_row.shape(), &vec![2, 3, 2]);
+        assert_eq!(c_col.shape(), &vec![2, 3, 2]);
+        assert_eq!(c_row.stride(), &vec![6, 2, 1]);
+        assert_eq!(c_col.stride(), &vec![1, 2, 6]);
+        assert_eq!(c_row.into_shape([-1]).to_vec(), c_seq);
+        assert_eq!(c_col.into_shape([-1]).to_vec(), f_order(&c_seq, &[2, 3, 2]));
+
+        // multi-dimensional index arrays with the broadcast dimension in the
+        // middle of the result: a slice, then two consecutive index arrays
+        // (inserted in place, at position 1), then a slice
+        let a4_row = build_input_3x2x2x4(&dev_row);
+        let a4_col = build_input_3x2x2x4(&dev_col);
+        let shape = [2_usize, 2, 4];
         let mid = || (0..2, [0, 1], [1, 0], ..);
-        let mid_row = a_row.array_index(mid());
-        let mid_col = a_col.array_index(mid());
-        // NumPy: `a[0:2, [0, 1], [1, 0], :] .ravel()` / `.ravel(order='F')`
+        let mid_row = a4_row.array_index(mid());
+        let mid_col = a4_col.array_index(mid());
+        // NumPy: `a[0:2, [0, 1], [1, 0], :]`
         let c_seq = vec![4, 5, 6, 7, 8, 9, 10, 11, 20, 21, 22, 23, 24, 25, 26, 27];
         assert_eq!(mid_row.shape(), &vec![2, 2, 4]);
         assert_eq!(mid_col.shape(), &vec![2, 2, 4]);
         assert_eq!(mid_row.stride(), &vec![8, 4, 1]);
-        assert_eq!(mid_row.into_shape([-1]).to_vec(), c_seq);
-        // the fancy dimension sits at position 1: column-major gives it stride 2
+        // the fancy dimension (position 1) carries stride 2 under column-major
         assert_eq!(mid_col.stride(), &vec![1, 2, 4]);
+        assert_eq!(mid_row.into_shape([-1]).to_vec(), c_seq);
         assert_eq!(mid_col.into_shape([-1]).to_vec(), f_order(&c_seq, &shape));
 
-        // a leading broadcast dimension (separated advanced indexers): under
-        // column-major the fancy dimension is the fastest varying one
+        // ... and with the broadcast dimension leading, where the fancy axis is
+        // the fastest varying one under column-major
         let lead = || ([0, 1], .., [1, 0], ..);
-        let lead_row = a_row.array_index(lead());
-        let lead_col = a_col.array_index(lead());
-        // NumPy: `a[[0, 1], :, [1, 0], :] .ravel()` / `.ravel(order='F')`
+        let lead_row = a4_row.array_index(lead());
+        let lead_col = a4_col.array_index(lead());
+        // NumPy: `a[[0, 1], :, [1, 0], :]`
         let c_seq = vec![4, 5, 6, 7, 12, 13, 14, 15, 16, 17, 18, 19, 24, 25, 26, 27];
         assert_eq!(lead_row.shape(), &vec![2, 2, 4]);
         assert_eq!(lead_col.shape(), &vec![2, 2, 4]);
@@ -839,91 +953,5 @@ mod test {
             }
         }
         out
-    }
-
-    /// Array indexing is device-default-order aware: the gathered values (and
-    /// the placement rule, and the trailing-aligned broadcast of the index
-    /// arrays) are order-independent, while the arrangement of the result and
-    /// the reading order of the index arrays follow the device.
-    ///
-    /// This test answers *"do the two device orders gather the same thing?"* —
-    /// it compares the two devices against each other, logically (element
-    /// reads, insensitive to the arrangement), and covers what only this test
-    /// covers: index arrays of different ranks broadcasting trailing-aligned,
-    /// and multi-dimensional index arrays, whose same flat entries are
-    /// *different* logical index arrays under the two orders. Its sibling
-    /// [`test_array_index_colmajor_iteration`] answers the complementary
-    /// question, *"what does the device order change?"*, by comparing each
-    /// device against NumPy's flattening in the corresponding order (the
-    /// strides of the fancy dimensions and the result's visit sequence).
-    #[test]
-    fn test_array_index_order_equivalence() {
-        // a[i, j, k] = 12*i + 4*j + k, built by broadcasting so that both
-        // devices hold the *same* logical tensor whatever their order
-        fn build(device: &DeviceCpu) -> Tensor<i32, DeviceCpu, IxD> {
-            let i = arange((2, device)).into_shape([2, 1, 1]);
-            let j = arange((3, device)).into_shape([1, 3, 1]);
-            let k = arange((4, device)).into_shape([1, 1, 4]);
-            i * 12 + j * 4 + k
-        }
-
-        let mut dev_row = DeviceCpu::default();
-        dev_row.set_default_order(RowMajor);
-        let mut dev_col = DeviceCpu::default();
-        dev_col.set_default_order(ColMajor);
-        let (a_row, a_col) = (build(&dev_row), build(&dev_col));
-
-        // 1-D result: a leading integer (advanced for the placement) plus two
-        // consecutive index arrays
-        let b_row = a_row.array_index((1, [0, 1, 2], [2, 0, 1]));
-        let b_col = a_col.array_index((1, [0, 1, 2], [2, 0, 1]));
-        assert_eq!(b_row.shape(), &vec![3]);
-        assert_eq!(b_col.shape(), &vec![3]);
-        assert_eq!(b_row.into_shape([-1]).to_vec(), vec![14, 16, 21]);
-        assert_eq!(b_col.into_shape([-1]).to_vec(), vec![14, 16, 21]);
-
-        // 2-D result, broadcast dimensions at the front (separated advanced
-        // indexers); the values are order-independent, the arrangement is not
-        let c_row = a_row.array_index(([1, 0], .., 1));
-        let c_col = a_col.array_index(([1, 0], .., 1));
-        assert_eq!(c_row.shape(), &vec![2, 3]);
-        assert_eq!(c_col.shape(), &vec![2, 3]);
-        assert_eq!(grid(&c_row, 2, 3), vec![13, 17, 21, 1, 5, 9]);
-        assert_eq!(grid(&c_col, 2, 3), vec![13, 17, 21, 1, 5, 9]);
-        // row-major device: C-contiguous; column-major device: F-contiguous
-        assert_eq!(c_row.stride(), &vec![3, 1]);
-        assert_eq!(c_col.stride(), &vec![1, 2]);
-
-        // trailing-aligned broadcast of index arrays of different ranks: the
-        // rank-1 array lines up with the *last* broadcast dimension (and its
-        // 2x1 partner with both), whatever the device order
-        for (device, a) in [(&dev_row, &a_row), (&dev_col, &a_col)] {
-            let idx = asarray((vec![2_isize, 0], device)).into_shape([2, 1]);
-            let e = a.array_index((1, &idx, [3, 0, 1, 2]));
-            assert_eq!(e.shape(), &vec![2, 4]);
-            assert_eq!(grid(&e, 2, 4), vec![23, 20, 21, 22, 15, 12, 13, 14]);
-        }
-
-        // a multi-dimensional index array is read in the device order: the flat
-        // entries describe different logical index arrays under the two orders
-        // (row-major reads `[2*p + q]`, column-major `[p + 2*q]`)
-        let flat_idx = vec![0_isize, 1, 2, 0];
-        let flat_jdx = vec![3_isize, 0, 1, 2];
-        // x[i, j] = 4*i + j on both devices
-        let x_row = arange((3, &dev_row)).into_shape([3, 1]) * 4 + arange((4, &dev_row)).into_shape([1, 4]);
-        let x_col = arange((3, &dev_col)).into_shape([3, 1]) * 4 + arange((4, &dev_col)).into_shape([1, 4]);
-        let d_row = x_row.array_index((
-            asarray((flat_idx.clone(), &dev_row)).into_shape([2, 2]),
-            asarray((flat_jdx.clone(), &dev_row)).into_shape([2, 2]),
-        ));
-        let d_col = x_col.array_index((
-            asarray((flat_idx, &dev_col)).into_shape([2, 2]),
-            asarray((flat_jdx, &dev_col)).into_shape([2, 2]),
-        ));
-        assert_eq!(d_row.shape(), &vec![2, 2]);
-        assert_eq!(d_col.shape(), &vec![2, 2]);
-        assert_eq!(grid(&d_row, 2, 2), vec![3, 4, 9, 2]);
-        assert_eq!(grid(&d_col, 2, 2), vec![3, 9, 4, 2]);
-        assert_eq!(d_col.stride(), &vec![1, 2]);
     }
 }
