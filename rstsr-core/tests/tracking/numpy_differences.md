@@ -428,11 +428,28 @@ NumPy-style) and contributes one `(count,)` dimension. Grouped ("parenthesized")
 tuples are still not supported and raise `UnImplemented`. In the Python layer a lone boolean
 array still routes to whole-tensor mask indexing (`rt::mask_select`, i.e. `x[mask]`); a
 boolean mask mixed into a Python key rides the same `rt::array_index` path (the faer-py shim
-exposes it since 2026-10-09). Advanced key assignment (`x[idx] = value`) is likewise not
-implemented. The index
+exposes it since 2026-10-09). Advanced key assignment (`x[idx] = value`) is implemented by
+[`rt::array_index_assign`]; the duplicate-index and column-major divergences of its write order
+are registered separately (see "Array-indexing assignment: write order"). The index
 argument is a dedicated argument type ([`ArrayIndexArgs`]) rather than
 `AxesIndex<ArrayIndexer<B>>`, because the latter's conversions cannot be implemented outside
 `rstsr-common` (the orphan rule); the `AxesIndex` form is still accepted through `TryFrom`.
+
+## Array-indexing assignment: write order
+
+- **numpy:** when an index selects the same element more than once
+  (`a[[3, 3, 3]] = [1, 2, 3]`), the value written last wins, in C (row-major) order.
+- **rstsr:** entry_row_cpu::core_func::indexing::test_array_index_assign
+- **tag:** col-major-transfer
+- **status:** open
+
+`rt::array_index_assign` overwrites the selected elements in place. When an element is selected by
+more than one index entry, the value written last wins, and the entries are visited in the device
+default order — exactly NumPy's C-order last-write-wins under `RowMajor`, but a **different winner**
+under `ColMajor` (the visit order is the device's, registered under `col-major-transfer`). The
+scatter is deliberately serial: a rayon scatter would race on duplicate destinations (undefined
+behavior for concurrent non-atomic stores), so the device trait contract is serial and the rayon
+device delegates to the serial kernel.
 
 ## Array indexing: no zero-dimensional boolean indexers
 

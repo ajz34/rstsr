@@ -139,3 +139,35 @@ where
         order: FlagOrder,
     ) -> Result<()>;
 }
+
+/// Array-indexing assignment (scatter): write a broadcastable value into the
+/// positions the index arrays select.
+///
+/// See [`array_index_assign`]. This is the inverse of
+/// [`DeviceArrayIndexAPI::array_index`]: the destination `a` is addressed
+/// through `la` / `base_layout` / `indexers` exactly as the gather addresses
+/// its source, while the written values come from `value` read through
+/// `lvalue`, a layout already broadcast to the gather output shape (its
+/// `shape()[consec..consec + fancy_ndim]` is the broadcast block, as `lc` is
+/// for the gather). The value dtype `TA` is cast to the destination dtype `TC`.
+///
+/// Duplicate index targets write the same destination position more than once;
+/// the visit order — the device default order — decides the winner (the last
+/// write wins), so this op is not parallelized.
+pub trait DeviceArrayIndexAssignAPI<TC, TA = TC>
+where
+    Self: DeviceAPI<TC> + DeviceAPI<TA> + DeviceRawAPI<usize>,
+{
+    #[allow(clippy::too_many_arguments)]
+    fn array_index_assign(
+        &self,
+        a: &mut <Self as DeviceRawAPI<TC>>::Raw,
+        la: &Layout<IxD>,
+        base_layout: &Layout<IxD>,
+        indexers: &[ArrayAuxIndexer<'_, Self>],
+        value: &<Self as DeviceRawAPI<TA>>::Raw,
+        lvalue: &Layout<IxD>,
+        consec: usize,
+        order: FlagOrder,
+    ) -> Result<()>;
+}
