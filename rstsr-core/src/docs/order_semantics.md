@@ -45,7 +45,7 @@ affected at all. Element-wise computations are unaffected in their results;
 only the memory arrangement of newly allocated results follows the default
 order. The same holds for the gathering operations whose selection is described
 by coordinates rather than by a visit sequence — [`index_select`],
-[`take_along_axis`] and, for a run of advanced indexers that stays together,
+[`take_along_axis`] and, for a run of integer index arrays that stays together,
 [`array_index`]: their shape and values are order-independent, and only the
 arrangement of a newly allocated result (and anything that flattens it:
 `to_vec()`, `iter()`) follows the device default order. [`array_index`] is

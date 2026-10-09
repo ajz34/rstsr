@@ -402,11 +402,19 @@ where
                 if dim != 1 {
                     let broadcast = bulk_shape[fancy_ndim - ndim_idx + d];
                     if broadcast != 1 && broadcast != dim {
+                        // NumPy reports every index array's shape, not only the clashing pair
+                        let shapes = entries
+                            .iter()
+                            .filter_map(|entry| match entry {
+                                Entry::Array { layout, .. } => Some(DebugShape(layout.shape()).to_string()),
+                                _ => None,
+                            })
+                            .collect::<Vec<_>>()
+                            .join(" ");
                         rstsr_raise!(
                             IndexError,
-                            "shape mismatch: indexing arrays could not be broadcast together with shapes {} and {}.",
-                            DebugShape(&bulk_shape),
-                            DebugShape(&layout.shape()[..])
+                            "shape mismatch: indexing arrays could not be broadcast together with shapes {}.",
+                            shapes
                         )?;
                     }
                     bulk_shape[fancy_ndim - ndim_idx + d] = dim;
@@ -421,13 +429,10 @@ where
     // empty *subspace* (a zero-sized non-indexed dimension) is still validated.
     let bulk_size: usize = bulk_shape.iter().product();
 
-    // NumPy's placement rule, measured in the device's access order: a run of
-    // advanced indexers that other indexers displace goes to the front on a
-    // row-major device and to the *back* on a column-major one, where the block
-    // keeps its contiguity role (the most-strided axis of the result). A run
-    // that stays together keeps its subscript position in both orders.
-    // `consec_status == 2` marks the displaced run: a run that merely leads the
-    // index also yields `consec == 0`, but it is in place.
+    // NumPy's placement measured in the device's access order: a displaced run
+    // goes to the front under `RowMajor` and to the back under `ColMajor`; a
+    // together run keeps its position. `consec_status == 2` marks the displaced
+    // run (a merely leading run also yields `consec == 0`).
     let consec = if order == ColMajor && consec_status == 2 { base_layout.ndim() } else { consec };
 
     // output layout: the broadcast dimensions inserted at `consec`
@@ -440,13 +445,10 @@ where
     let (_, idx_max) = layout_c.bounds_index()?;
     let mut storage = device.uninit_impl(idx_max)?;
 
-    // Move the resolved entries of every index array into device storage: the
-    // device receives resolved `usize` entries in its own memory, never a host
-    // slice. Entries are visited (and stored) in `order`, so each buffer is
-    // contiguous in that order; the layouts handed to the device need not be
-    // row-major and a device addresses the buffers through them. With an empty
-    // broadcast the buffers stay empty (and the op never reads them: a
-    // zero-sized bulk makes it return early).
+    // Move each index array's resolved entries into device storage: the device
+    // reads resolved `usize` entries in its own memory (never a host slice),
+    // visited in `order` and addressed through the handed layouts. An empty
+    // broadcast leaves every buffer empty and the op returns early.
     let mut buffers: Vec<(usize, Layout<IxD>, Storage<DataOwned<<B as DeviceRawAPI<usize>>::Raw>, usize, B>)> =
         Vec::new();
     for entry in entries {
@@ -552,7 +554,8 @@ impl Display for DebugShape<'_> {
 ///   indexer (as in basic slicing), not an alias of the empty index `()` — and `Some(n)` is
 ///   rejected; [`Ellipsis`]: the ellipsis;
 /// - host list (`Vec` / `&Vec` / `&[T]` / `[T; N]` / `&[T; N]`): a one-dimensional index array;
-/// - integer tensor or tensor view of any rank: an index array;
+/// - integer tensor or tensor view of rank at least one: an index array (a zero-dimensional integer
+///   tensor is an integer index, i.e. a `Select`, like a plain integer);
 /// - boolean host list (`Vec<bool>` / `&Vec<bool>` / `&[bool]` / `[bool; N]` / `&[bool; N]`) or
 ///   boolean tensor/view: a mask, consuming as many axes as its rank (its own axes must match those
 ///   axes exactly) and contributing one dimension of its `true` count.
@@ -696,10 +699,11 @@ impl Display for DebugShape<'_> {
 ///   the standard defines the *reduced* integer-array form (every indexer an integer or an integer
 ///   array, broadcast together, zipped). RSTSR accepts that form as a special case; mixing slices
 ///   with index arrays is left implementation-defined by the standard.
-/// - NumPy: `x[k1, .., kN]` (`numpy.ndarray.__getitem__`): RSTSR implements NumPy's vectorized
-///   indexing, including the placement rule for the broadcast dimensions and boolean masks (a mask
-///   is its `nonzero` coordinates, contributing a `(count,)` dimension), but not grouped
-///   ("parenthesized") index tuples, and not a zero-dimensional boolean.
+/// - NumPy: `x[k1, .., kN]` ([`numpy.ndarray.__getitem__`](https://numpy.org/doc/stable/reference/arrays.indexing.html#advanced-indexing)):
+///   RSTSR implements NumPy's vectorized indexing, including the placement rule for the broadcast
+///   dimensions and boolean masks (a mask is its `nonzero` coordinates, contributing a `(count,)`
+///   dimension), but not grouped ("parenthesized") index tuples, and not a zero-dimensional
+///   boolean.
 /// - RSTSR: `rt::array_index(&tensor, indexers)`.
 ///
 /// # Panics

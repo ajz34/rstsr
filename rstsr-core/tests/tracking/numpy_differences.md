@@ -413,10 +413,9 @@ matches `np.unique` (and the pre-2.3 aliases); the naive (general-bound
 zeros merge in both paths, keeping the first-seen encoding (also NumPy's
 behavior: `np.unique([-0., 1., 0.])` → `[-0., 1.]`).
 
-## Array indexing: no grouped index tuples, no zero-dimensional booleans
+## Array indexing: no grouped index tuples
 
-- **numpy:** `x[1:3, ([0, 1, 2], [0, 2, 1])]` groups index arrays into one advanced indexer;
-  a zero-dimensional boolean adds a `{0, 1}`-sized block without consuming an axis.
+- **numpy:** `x[1:3, ([0, 1, 2], [0, 2, 1])]` groups index arrays into one advanced indexer.
 - **rstsr:** entry_row_cpu::core_func::indexing::test_array_index (numpy_array_index + custom_array_index)
 - **tag:** intentional
 - **status:** open
@@ -426,15 +425,25 @@ behavior: `np.unique([-0., 1., 0.])` → `[-0., 1.]`).
 and boolean masks: a mask is lowered to its `nonzero` coordinates, so it consumes one axis
 per mask axis (they must match the indexed axes exactly — a zero-size mask axis is allowed,
 NumPy-style) and contributes one `(count,)` dimension. Grouped ("parenthesized") index
-tuples are still not supported, and neither is a zero-dimensional boolean (it would add a
-`{0, 1}`-sized block without consuming an axis, which the index-array lowering cannot
-express); both raise `UnImplemented`. In the Python layer a lone boolean array still routes
-to whole-tensor mask indexing (`rt::mask_select`, i.e. `x[mask]`), and a boolean array mixed
-into a Python key outside that route is not exposed yet (the faer-py shim raises).
-Advanced key assignment (`x[idx] = value`) is likewise not implemented. The index argument
-is a dedicated argument type ([`ArrayIndexArgs`]) rather than `AxesIndex<ArrayIndexer<B>>`,
-because the latter's conversions cannot be implemented outside `rstsr-common` (the orphan
-rule); the `AxesIndex` form is still accepted through `TryFrom`.
+tuples are still not supported and raise `UnImplemented`. In the Python layer a lone boolean
+array still routes to whole-tensor mask indexing (`rt::mask_select`, i.e. `x[mask]`), and a
+boolean array mixed into a Python key outside that route is not exposed yet (the faer-py shim
+raises). Advanced key assignment (`x[idx] = value`) is likewise not implemented. The index
+argument is a dedicated argument type ([`ArrayIndexArgs`]) rather than
+`AxesIndex<ArrayIndexer<B>>`, because the latter's conversions cannot be implemented outside
+`rstsr-common` (the orphan rule); the `AxesIndex` form is still accepted through `TryFrom`.
+
+## Array indexing: no zero-dimensional boolean indexers
+
+- **numpy:** a zero-dimensional boolean adds a `{0, 1}`-sized block without consuming an axis.
+- **rstsr:** entry_row_cpu::core_func::indexing::test_array_index::custom_array_index
+- **tag:** intentional
+- **status:** wontfix
+
+A zero-dimensional boolean is declined in `rt::array_index` (`UnImplemented`): it would add a
+`{0, 1}`-sized block without consuming an axis, which the index-array lowering cannot express.
+This is a permanent decision rather than a follow-up; a lone boolean array in the Python layer
+is unaffected (it routes to `rt::mask_select`).
 
 ## Gathering results follow the device order when flattened
 

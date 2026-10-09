@@ -379,6 +379,9 @@ mod custom_array_index {
         // out of range / too many indexers
         let err = a.array_index_f([3]).unwrap_err();
         assert!(is_index_error(&err), "expected an IndexError, got {err}");
+        // the most negative index stays an IndexError, not an arithmetic overflow
+        let err = a.array_index_f([isize::MIN]).unwrap_err();
+        assert!(is_index_error(&err), "expected an IndexError, got {err}");
         // too many indexers is also an IndexError (the Python exception kind)
         let err = a.array_index_f((1, 2, 3)).unwrap_err();
         assert!(is_index_error(&err), "expected an IndexError, got {err}");
