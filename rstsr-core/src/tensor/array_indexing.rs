@@ -814,6 +814,16 @@ mod test {
         assert_eq!(grid(&c_row, 2, 3), vec![13, 17, 21, 1, 5, 9]);
         assert_eq!(grid(&c_col, 2, 3), vec![13, 17, 21, 1, 5, 9]);
 
+        // two 1-D index arrays separated by a slice: the broadcast dimension
+        // moves to the front, and the values still do not depend on the order
+        // NumPy: `a[[0, 1], :, [2, 0]]`
+        let sep_row = a_row.array_index(([0, 1], .., [2, 0]));
+        let sep_col = a_col.array_index(([0, 1], .., [2, 0]));
+        assert_eq!(sep_row.shape(), &vec![2, 3]);
+        assert_eq!(sep_col.shape(), &vec![2, 3]);
+        assert_eq!(grid(&sep_row, 2, 3), vec![2, 6, 10, 12, 16, 20]);
+        assert_eq!(grid(&sep_col, 2, 3), vec![2, 6, 10, 12, 16, 20]);
+
         // index arrays of different ranks broadcast trailing-aligned: the rank-1
         // array lines up with the *last* broadcast dimension (its 2x1 partner
         // with both), whatever the device order
@@ -907,6 +917,19 @@ mod test {
         assert_eq!(c_col.stride(), &vec![1, 2, 6]);
         assert_eq!(c_row.into_shape([-1]).to_vec(), c_seq);
         assert_eq!(c_col.into_shape([-1]).to_vec(), f_order(&c_seq, &[2, 3, 2]));
+
+        // ... and with two 1-D index arrays separated by a slice — no
+        // multi-dimensional index array anywhere — which is the same story
+        // NumPy: `a[[0, 1], :, [2, 0]]`
+        let c_seq = vec![2, 6, 10, 12, 16, 20];
+        let sep_row = a_row.array_index(([0, 1], .., [2, 0]));
+        let sep_col = a_col.array_index(([0, 1], .., [2, 0]));
+        assert_eq!(sep_row.shape(), &vec![2, 3]);
+        assert_eq!(sep_col.shape(), &vec![2, 3]);
+        assert_eq!(sep_row.stride(), &vec![3, 1]);
+        assert_eq!(sep_col.stride(), &vec![1, 2]);
+        assert_eq!(sep_row.into_shape([-1]).to_vec(), c_seq);
+        assert_eq!(sep_col.into_shape([-1]).to_vec(), f_order(&c_seq, &[2, 3]));
 
         // multi-dimensional index arrays with the broadcast dimension in the
         // middle of the result: a slice, then two consecutive index arrays
