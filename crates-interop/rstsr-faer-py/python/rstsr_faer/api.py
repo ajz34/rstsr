@@ -446,10 +446,10 @@ class Array:
         )
         if builtins.any(isinstance(k, Array) for k in key):
             if _is_single_bool_mask(key):
-                # A lone boolean mask rides mask_fill (scalar / size-1 value,
-                # including a 0-d mask, which array indexing does not lower);
-                # a genuinely broadcast array value rides array-indexing
-                # assignment.
+                # A lone boolean mask rides mask_fill for a scalar value or a
+                # size-1 array value. Any larger array value rides array-index
+                # assignment, which lowers a mask only when it has at least one
+                # dimension -- a 0-d mask is rejected there (not lowerable).
                 if isinstance(value, Array) and value.size > 1:
                     _pkg.setitem_array(self._h, (key[0]._h,), value._h)
                 elif isinstance(value, Array):

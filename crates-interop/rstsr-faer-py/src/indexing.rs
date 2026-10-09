@@ -103,18 +103,29 @@ fn to_indexers(items: &[KeyItem]) -> PyResult<Vec<Indexer>> {
             KeyItem::Slice(a, b, c) => Ok(sl(*a, *b, *c)),
             KeyItem::NewAxis => Ok(Indexer::Insert),
             KeyItem::Ellipsis => Ok(Indexer::Ellipsis),
-            // integer-array keys are served by `op_getitem`; item assignment
-            // with an index array is not implemented (G-039)
-            KeyItem::Array(_) => type_err(
-                "integer-array (fancy) item assignment is not implemented; only boolean-mask \
-                 assignment (x[mask] = value) is supported",
-            ),
-            KeyItem::Mask(_) => type_err(
-                "boolean-mask item assignment is only supported when the mask is the whole key \
-                 (x[mask] = value)",
-            ),
+            // array/mask keys are routed to the array-indexing paths by the
+            // Python layer (never reached here)
+            KeyItem::Array(_) | KeyItem::Mask(_) => type_err("array keys do not belong to the basic-indexing path"),
         })
         .collect::<PyResult<Vec<Indexer>>>()
+}
+
+/// Map a parsed key to rust-side array indexers: basic indexers freely mixed
+/// with integer arrays / masks. Shared by `op_getitem` (read) and
+/// [`array_index_args`] (write).
+fn key_to_array_indexers(items: Vec<KeyItem>) -> Vec<ArrayIndexer<DeviceFaer>> {
+    items
+        .into_iter()
+        .map(|it| match it {
+            KeyItem::Select(i) => ArrayIndexer::Basic(Indexer::Select(i)),
+            KeyItem::Slice(a, b, c) => ArrayIndexer::Basic(sl(a, b, c)),
+            KeyItem::NewAxis => ArrayIndexer::Basic(Indexer::Insert),
+            KeyItem::Ellipsis => ArrayIndexer::Basic(Indexer::Ellipsis),
+            // moved, not cloned: `parse_key` owns the handle's tensor
+            KeyItem::Array(idx) => ArrayIndexer::ArrayIndex(idx),
+            KeyItem::Mask(m) => ArrayIndexer::ArrayBool(m),
+        })
+        .collect()
 }
 
 /* #endregion */
@@ -139,18 +150,7 @@ where
         + DeviceArrayIndexAPI<T>
         + OpNonzeroAPI<bool, IxD>,
 {
-    let indexers = items
-        .into_iter()
-        .map(|it| match it {
-            KeyItem::Select(i) => ArrayIndexer::Basic(Indexer::Select(i)),
-            KeyItem::Slice(a, b, c) => ArrayIndexer::Basic(sl(a, b, c)),
-            KeyItem::NewAxis => ArrayIndexer::Basic(Indexer::Insert),
-            KeyItem::Ellipsis => ArrayIndexer::Basic(Indexer::Ellipsis),
-            // moved, not cloned: `parse_key` owns the handle's tensor
-            KeyItem::Array(idx) => ArrayIndexer::ArrayIndex(idx),
-            KeyItem::Mask(m) => ArrayIndexer::ArrayBool(m),
-        })
-        .collect::<Vec<_>>();
+    let indexers = key_to_array_indexers(items);
     Ok(rt::array_index_f(t, ArrayIndexArgs::new(indexers))?.into_owned())
 }
 
@@ -287,20 +287,9 @@ pub fn setitem_scalar(x: &mut NativeArray, key: &Bound<'_, PyTuple>, value: &Bou
 /* #region array-key setitem (G-039) */
 
 /// Build rust-side array-indexing arguments from the parsed key (basic indexers
-/// mixed with integer arrays / masks, as in `op_getitem`).
+/// mixed with integer arrays / masks).
 fn array_index_args(items: Vec<KeyItem>) -> ArrayIndexArgs<DeviceFaer> {
-    let indexers = items
-        .into_iter()
-        .map(|it| match it {
-            KeyItem::Select(i) => ArrayIndexer::Basic(Indexer::Select(i)),
-            KeyItem::Slice(a, b, c) => ArrayIndexer::Basic(sl(a, b, c)),
-            KeyItem::NewAxis => ArrayIndexer::Basic(Indexer::Insert),
-            KeyItem::Ellipsis => ArrayIndexer::Basic(Indexer::Ellipsis),
-            KeyItem::Array(idx) => ArrayIndexer::ArrayIndex(idx),
-            KeyItem::Mask(m) => ArrayIndexer::ArrayBool(m),
-        })
-        .collect();
-    ArrayIndexArgs::new(indexers)
+    ArrayIndexArgs::new(key_to_array_indexers(items))
 }
 
 fn op_setitem_array<T>(t: &mut FTensor<T>, items: Vec<KeyItem>, value: &FTensor<T>) -> rt::Result<()>
