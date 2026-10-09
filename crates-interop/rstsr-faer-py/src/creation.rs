@@ -506,12 +506,11 @@ where
 
 fn cast_ts<S, U>(t: &FTensor<S>) -> PyResult<FTensor<U>>
 where
-    S: Copy + NumCastShim<U>,
+    S: Copy + NumCastShim<U> + Send + Sync,
+    U: Clone + Send + Sync,
     DeviceFaer: DeviceAPI<U, Raw = Vec<U>>,
 {
-    let shape = AsRef::<[usize]>::as_ref(t.shape()).to_vec();
-    let data: Vec<U> = t.view().iter().map(|&v| v.cast_to()).collect();
-    err_py(rt::asarray_f((data, dim_from(&shape), device_faer())))
+    err_py(t.view().mapv_f(|v| v.cast_to()))
 }
 
 /// astype: element-wise cast via DTypeCastAPI (rstsr 0.9.0 has no tensor-level
