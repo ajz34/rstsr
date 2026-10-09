@@ -1012,6 +1012,27 @@ mod test {
         assert_eq!(mid_row.into_shape([-1]).to_vec(), c_seq);
         assert_eq!(mid_col.into_shape([-1]).to_vec(), f_order(&c_seq, &shape));
 
+        // the same story on the 5-D input with base axes on both sides of a
+        // together run: the position is kept in both orders, so NumPy's shape
+        // `(3, 2, 6, 7)` is the same and only the arrangement differs
+        // NumPy: `a[:, [0, 1], [2, 0], :, :]`
+        let a5_row = build_input_3x4x5x6x7(&dev_row);
+        let a5_col = build_input_3x4x5x6x7(&dev_col);
+        let tight = || (.., [0, 1], [2, 0], .., ..);
+        let tight_row = a5_row.array_index(tight());
+        let tight_col = a5_col.array_index(tight());
+        assert_eq!(tight_row.shape(), &vec![3, 2, 6, 7]);
+        assert_eq!(tight_col.shape(), &vec![3, 2, 6, 7]);
+        assert_eq!(tight_row.stride(), &vec![84, 42, 7, 1]);
+        assert_eq!(tight_col.stride(), &vec![1, 3, 6, 36]);
+        // the same logical result either way (NumPy: 84, 947, 1931)
+        for (i, p, l, m) in [(0, 0, 0, 0), (1, 0, 3, 2), (2, 1, 5, 6)] {
+            assert_eq!(tight_row.i((i, p, l, m)).to_scalar(), tight_col.i((i, p, l, m)).to_scalar());
+        }
+        assert_eq!(tight_row.i((0, 0, 0, 0)).to_scalar(), 84);
+        assert_eq!(tight_row.i((1, 0, 3, 2)).to_scalar(), 947);
+        assert_eq!(tight_row.i((2, 1, 5, 6)).to_scalar(), 1931);
+
         // ... and with the advanced indexers apart (displaced): the column-major
         // device moves the block to the back, the row-major result with the
         // block re-inserted there (`col[j, l, p] = row[p, j, l]`)
