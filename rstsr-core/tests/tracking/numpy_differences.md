@@ -436,16 +436,22 @@ rule); the `AxesIndex` form is still accepted through `TryFrom`.
 - **numpy:** a gathered result is C-ordered, so its flattened sequence (`tolist()`, `ravel()`,
   iteration) is the row-major one — for `x[mask]` (`np.nonzero` order) and for
   `x[int_array, ..]` alike.
-- **rstsr:** entry_row_cpu::core_func::indexing::test_array_index (values/shape only;
-  the order caveat is asserted in `doc_draft` and `mask_select`'s docstring)
+- **rstsr:** `rstsr-core/src/tensor/array_indexing.rs` in-src
+  `tensor::array_indexing::test::test_array_index_colmajor_iteration` (runs in
+  both the row-major and the col-major CI unit-test jobs) for the array-indexing
+  side, and [`mask_select`]'s Row/Column Major Notice for the mask side
 - **tag:** col-major-transfer
 - **status:** open
 
-`rt::array_index` computes order-independent results (the placement rule and the
-trailing-aligned broadcast of the index arrays do not consult the device order), but it allocates
-its output with `new_contig(order)` like every other op, so on a `ColMajor` device the flattened
-visit order of the result is column-major where NumPy's is row-major. The same applies to
-`rt::mask_select` (documented on its own Row/Column Major Notice). Shape and element values never
-differ; only the memory arrangement (and anything that flattens it) does. See
-[`order_semantics`](https://github.com/RESTGroup/rstsr-core/blob/main/rstsr-core/src/docs/order_semantics.md).
+`rt::array_index` computes order-independent shape and values (the placement rule and the
+trailing-aligned broadcast of the index arrays do not consult the device order); it allocates its
+output with `new_contig(order)` like every other op, so on a `ColMajor` device only the flattened
+visit order of the result (and anything that flattens it) is column-major where NumPy's is
+row-major. `rt::mask_select` goes one step further: its selection *sequence* is the mask visit
+order, which follows the device default order by design (its Row/Column Major Notice), so there the
+element order itself — not merely the memory arrangement — is device-dependent, and a 1-D result
+carries the device sequence. Both follow NumPy exactly under the row-major default order, which is
+the order the library is held to (the column-major device-order convention of
+[`order_semantics`](https://github.com/RESTGroup/rstsr-core/blob/main/rstsr-core/src/docs/order_semantics.md)
+is the registered transfer this entry tracks).
 

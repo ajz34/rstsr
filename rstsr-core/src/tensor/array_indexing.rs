@@ -734,6 +734,94 @@ mod test {
         assert!(a.array_index_f(([0, 1], [0, 1, 2])).is_err());
     }
 
+    /// Column-major reading of a row-major flat sequence of the given shape.
+    fn f_order(c_seq: &[i32], shape: &[usize]) -> Vec<i32> {
+        let mut out = Vec::with_capacity(c_seq.len());
+        let mut multi = vec![0_usize; shape.len()];
+        for _ in 0..c_seq.len() {
+            let mut off = 0_usize;
+            let mut stride = 1_usize;
+            for d in (0..shape.len()).rev() {
+                off += multi[d] * stride;
+                stride *= shape[d];
+            }
+            out.push(c_seq[off]);
+            // first axis fastest (column-major reading)
+            for d in 0..shape.len() {
+                multi[d] += 1;
+                if multi[d] < shape[d] {
+                    break;
+                }
+                multi[d] = 0;
+            }
+        }
+        out
+    }
+
+    /// A column-major device iterates a gathered result in column-major order:
+    /// the fancy (broadcast) dimensions carry their column-major strides — a
+    /// leading fancy dimension is the fastest varying one — and the flattened
+    /// visit sequence (`to_vec()`, `into_shape([-1])`, `iter()`) is the F-order
+    /// reading of the result, where NumPy (and a row-major device) reads it in
+    /// C order. Since a flattening is a bijection onto the logical tensor, the
+    /// two sequences pin the values as well: both devices hold the same logical
+    /// tensor, merely ordered differently.
+    ///
+    /// The kernel's own visit order is a locality choice and does not show up
+    /// here: every output position is written from exactly one source position,
+    /// whatever the traversal — the arrangement is what carries the device
+    /// order into the result.
+    #[test]
+    fn test_array_index_colmajor_iteration() {
+        // a[i, j, k, l] = 16*i + 8*j + 4*k + l, built by broadcasting so both
+        // devices hold the same logical tensor
+        fn build(device: &DeviceCpu) -> Tensor<i32, DeviceCpu, IxD> {
+            let i = arange((3, device)).into_shape([3, 1, 1, 1]);
+            let j = arange((2, device)).into_shape([1, 2, 1, 1]);
+            let k = arange((2, device)).into_shape([1, 1, 2, 1]);
+            let l = arange((4, device)).into_shape([1, 1, 1, 4]);
+            i * 16 + j * 8 + k * 4 + l
+        }
+        let mut dev_row = DeviceCpu::default();
+        dev_row.set_default_order(RowMajor);
+        let mut dev_col = DeviceCpu::default();
+        dev_col.set_default_order(ColMajor);
+        let shape = [2_usize, 2, 4];
+        // the gathered tensors borrow their source, so bind the owners first
+        let a_row = build(&dev_row);
+        let a_col = build(&dev_col);
+
+        // the broadcast dimension in the middle: a slice, then two consecutive
+        // index arrays (inserted in place, at position 1), then a slice
+        let mid = || (0..2, [0, 1], [1, 0], ..);
+        let mid_row = a_row.array_index(mid());
+        let mid_col = a_col.array_index(mid());
+        // NumPy: `a[0:2, [0, 1], [1, 0], :] .ravel()` / `.ravel(order='F')`
+        let c_seq = vec![4, 5, 6, 7, 8, 9, 10, 11, 20, 21, 22, 23, 24, 25, 26, 27];
+        assert_eq!(mid_row.shape(), &vec![2, 2, 4]);
+        assert_eq!(mid_col.shape(), &vec![2, 2, 4]);
+        assert_eq!(mid_row.stride(), &vec![8, 4, 1]);
+        assert_eq!(mid_row.into_shape([-1]).to_vec(), c_seq);
+        // the fancy dimension sits at position 1: column-major gives it stride 2
+        assert_eq!(mid_col.stride(), &vec![1, 2, 4]);
+        assert_eq!(mid_col.into_shape([-1]).to_vec(), f_order(&c_seq, &shape));
+
+        // a leading broadcast dimension (separated advanced indexers): under
+        // column-major the fancy dimension is the fastest varying one
+        let lead = || ([0, 1], .., [1, 0], ..);
+        let lead_row = a_row.array_index(lead());
+        let lead_col = a_col.array_index(lead());
+        // NumPy: `a[[0, 1], :, [1, 0], :] .ravel()` / `.ravel(order='F')`
+        let c_seq = vec![4, 5, 6, 7, 12, 13, 14, 15, 16, 17, 18, 19, 24, 25, 26, 27];
+        assert_eq!(lead_row.shape(), &vec![2, 2, 4]);
+        assert_eq!(lead_col.shape(), &vec![2, 2, 4]);
+        assert_eq!(lead_row.stride(), &vec![8, 4, 1]);
+        assert_eq!(lead_row.into_shape([-1]).to_vec(), c_seq);
+        assert_eq!(lead_col.stride(), &vec![1, 2, 4]);
+        assert_eq!(lead_col.stride()[0], 1, "a leading fancy dimension iterates first under column-major");
+        assert_eq!(lead_col.into_shape([-1]).to_vec(), f_order(&c_seq, &shape));
+    }
+
     /// Row-major logical order of a 2-D result, read through the public API so
     /// that the comparison does not depend on the memory arrangement.
     fn grid(x: &TensorCow<'_, i32, DeviceCpu, IxD>, n: usize, m: usize) -> Vec<i32> {

@@ -43,15 +43,20 @@ not pin an order themselves:
 Layout-only manipulations ([`transpose`], slicing, [`flip`], ...) are not
 affected at all. Element-wise computations are unaffected in their results;
 only the memory arrangement of newly allocated results follows the default
-order. The same holds for the gathering operations — [`index_select`],
-[`take_along_axis`], [`mask_select`] and [`array_index`]: their results (shape
-and values, including `array_index`'s placement rule and the trailing-aligned
-broadcast of its index arrays) are order-independent, while the flattened visit
-order of a newly allocated result (`to_vec()`, `iter()`) follows the device
-default order, as it does for every other allocation. [`array_index`] also
-reads its index arrays — and visits the broadcast dimensions they describe — in
-the device order; that traversal is not observable in the result. For every other function, consult its own docstring notice rather than
-assuming.
+order. The same holds for the gathering operations whose selection is described
+by coordinates rather than by a visit sequence — [`index_select`],
+[`take_along_axis`] and [`array_index`] (including `array_index`'s placement
+rule and the trailing-aligned broadcast of its index arrays): their shape and
+values are order-independent, and only the arrangement of a newly allocated
+result (and anything that flattens it: `to_vec()`, `iter()`) follows the device
+default order. [`array_index`] also reads its index arrays — and visits the
+broadcast dimensions they describe — in the device order; that traversal is not
+observable in the result. [`mask_select`] is the exception among the gathers:
+its selection *sequence* is the mask visit order, which follows the device
+default order by design — not the row-major rule the Python Array API
+prescribes for boolean index arrays — so on a column-major device even a 1-D
+result carries the column-major sequence (see its Row/Column Major Notice). For
+every other function, consult its own docstring notice rather than assuming.
 
 The rest of this page demonstrates the three cases worth understanding in
 depth: creation, broadcasting, and reshape.
