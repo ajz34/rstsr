@@ -14,6 +14,7 @@ mod indexing;
 mod info;
 mod manipulation;
 mod ops;
+mod promotion;
 mod searching;
 mod set;
 mod sorting;
@@ -285,6 +286,7 @@ fn rstsr_faer(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(finfo, m)?)?;
     m.add_function(wrap_pyfunction!(iinfo, m)?)?;
     m.add_function(wrap_pyfunction!(dtype_kind, m)?)?;
+    m.add_function(wrap_pyfunction!(promotion::dtype_promote, m)?)?;
     m.add_function(wrap_pyfunction!(default_dtype_for, m)?)?;
 
     Ok(())
