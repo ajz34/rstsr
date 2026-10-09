@@ -800,6 +800,17 @@ mod test {
         i * 16 + j * 8 + k * 4 + l
     }
 
+    /// `arange(2520).reshape(3, 4, 5, 6, 7)` on `device`, i.e.
+    /// `a[i, j, k, l, m] = ((i*4 + j)*5 + k)*6 + l)*7 + m` (broadcast build).
+    fn build_input_3x4x5x6x7(device: &DeviceCpu) -> Tensor<i32, DeviceCpu, IxD> {
+        let i = arange((3, device)).into_shape([3, 1, 1, 1, 1]);
+        let j = arange((4, device)).into_shape([1, 4, 1, 1, 1]);
+        let k = arange((5, device)).into_shape([1, 1, 5, 1, 1]);
+        let l = arange((6, device)).into_shape([1, 1, 1, 6, 1]);
+        let m = arange((7, device)).into_shape([1, 1, 1, 1, 7]);
+        (((i * 4 + j) * 5 + k) * 6 + l) * 7 + m
+    }
+
     /// The order-invariant half of the story: for a run of advanced indexers
     /// that stays *together*, and for a 1-D result, the two device orders gather
     /// the same logical result — the same shape and the same value at every
@@ -1018,6 +1029,35 @@ mod test {
         assert_eq!(lead_col.into_shape([-1]).to_vec(), vec![
             4, 12, 5, 13, 6, 14, 7, 15, 16, 24, 17, 25, 18, 26, 19, 27
         ]);
+    }
+
+    /// The displaced-run placement on a deep base (three base axes): the block
+    /// goes to the front under row-major and behind all base axes under
+    /// column-major, the base axes keeping their order —
+    /// `arange(2520).reshape(3, 4, 5, 6, 7)`, NumPy `a[:, [0, 1], :, [2, 0], :]`.
+    #[test]
+    fn test_array_index_order_displaced_deep_base() {
+        let mut dev_row = DeviceCpu::default();
+        dev_row.set_default_order(RowMajor);
+        let mut dev_col = DeviceCpu::default();
+        dev_col.set_default_order(ColMajor);
+        let a_row = build_input_3x4x5x6x7(&dev_row);
+        let a_col = build_input_3x4x5x6x7(&dev_col);
+
+        let deep = || (.., [0, 1], .., [2, 0], ..);
+        let deep_row = a_row.array_index(deep());
+        let deep_col = a_col.array_index(deep());
+        assert_eq!(deep_row.shape(), &vec![2, 3, 5, 7]);
+        assert_eq!(deep_col.shape(), &vec![3, 5, 7, 2]);
+        assert_eq!(deep_row.stride(), &vec![105, 35, 7, 1]);
+        assert_eq!(deep_col.stride(), &vec![1, 3, 15, 105]);
+        // the block moved behind the base axes: `col[i, k, m, p] == row[p, i, k, m]`
+        // (NumPy: `a[0, 0, 0, 0]` = 14, `a[1, 2, 4, 6]` = 2064)
+        for (p, i, k, m) in [(0, 0, 0, 0), (1, 2, 4, 6), (0, 1, 2, 3), (1, 0, 3, 5)] {
+            assert_eq!(deep_col.i((i, k, m, p)).to_scalar(), deep_row.i((p, i, k, m)).to_scalar());
+        }
+        assert_eq!(deep_row.i((0, 0, 0, 0)).to_scalar(), 14);
+        assert_eq!(deep_row.i((1, 2, 4, 6)).to_scalar(), 2064);
     }
 
     /// Row-major logical order of a 2-D result, read through the public API so
