@@ -993,3 +993,64 @@ pub fn where_(cond: &NativeArray, x: &NativeArray, y: &NativeArray) -> PyResult<
         _ => type_err("where: condition must have a boolean data type"),
     }
 }
+
+// ------------------------------------------------------------------ clip -----
+
+/// Same-dtype clip wrapper. The Python shim casts both bounds to `x.dtype`
+/// (the array API's clip keeps `x`'s dtype; bounds do not promote), so the
+/// native op sees three same-dtype operands; an absent bound is `None`.
+fn op_clip<T>(x: &FTensor<T>, lo: Option<&FTensor<T>>, hi: Option<&FTensor<T>>) -> rt::Result<FTensor<T>>
+where
+    for<'x> &'x FTensor<T>: TensorClipAPI<TensorView<'x, T>, TensorView<'x, T>, Output = FTensor<T>>,
+    for<'x> &'x FTensor<T>: TensorClipAPI<TensorView<'x, T>, Option<T>, Output = FTensor<T>>,
+    for<'x> &'x FTensor<T>: TensorClipAPI<Option<T>, TensorView<'x, T>, Output = FTensor<T>>,
+    for<'x> &'x FTensor<T>: TensorClipAPI<Option<T>, Option<T>, Output = FTensor<T>>,
+{
+    match (lo, hi) {
+        (Some(l), Some(h)) => rt::clip_f(x, (l.view(), h.view())),
+        (Some(l), None) => rt::clip_f(x, (l.view(), Option::<T>::None)),
+        (None, Some(h)) => rt::clip_f(x, (Option::<T>::None, h.view())),
+        (None, None) => rt::clip_f(x, (Option::<T>::None, Option::<T>::None)),
+    }
+}
+
+macro_rules! clip_arm {
+    ($v:expr, $variant:ident, $ty:ty, $ctor:path, $min:expr, $max:expr) => {{
+        let lo = match $min {
+            None => None,
+            Some(na) => match &na.t {
+                AnyTensor::$variant(t) => Some(t),
+                _ => return type_err("clip: min dtype must match the input dtype"),
+            },
+        };
+        let hi = match $max {
+            None => None,
+            Some(na) => match &na.t {
+                AnyTensor::$variant(t) => Some(t),
+                _ => return type_err("clip: max dtype must match the input dtype"),
+            },
+        };
+        lift(op_clip::<$ty>($v, lo, hi), $ctor)
+    }};
+}
+
+/// Element-wise clip; bounds are the same dtype as `x` (the Python shim casts
+/// them), and `min`/`max` are `None` when the caller omitted that bound. With
+/// both absent the result is a copy of `x` (array-API semantics).
+#[pyfunction]
+pub fn clip(x: &NativeArray, min: Option<&NativeArray>, max: Option<&NativeArray>) -> PyResult<NativeArray> {
+    let t: AnyTensor = match &x.t {
+        AnyTensor::I8(v) => clip_arm!(v, I8, i8, AnyTensor::I8, min, max)?,
+        AnyTensor::I16(v) => clip_arm!(v, I16, i16, AnyTensor::I16, min, max)?,
+        AnyTensor::I32(v) => clip_arm!(v, I32, i32, AnyTensor::I32, min, max)?,
+        AnyTensor::I64(v) => clip_arm!(v, I64, i64, AnyTensor::I64, min, max)?,
+        AnyTensor::U8(v) => clip_arm!(v, U8, u8, AnyTensor::U8, min, max)?,
+        AnyTensor::U16(v) => clip_arm!(v, U16, u16, AnyTensor::U16, min, max)?,
+        AnyTensor::U32(v) => clip_arm!(v, U32, u32, AnyTensor::U32, min, max)?,
+        AnyTensor::U64(v) => clip_arm!(v, U64, u64, AnyTensor::U64, min, max)?,
+        AnyTensor::F32(v) => clip_arm!(v, F32, f32, AnyTensor::F32, min, max)?,
+        AnyTensor::F64(v) => clip_arm!(v, F64, f64, AnyTensor::F64, min, max)?,
+        _ => return type_err("clip: only real dtypes are supported"),
+    };
+    Ok(NativeArray { t })
+}

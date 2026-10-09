@@ -55,6 +55,7 @@ from .rstsr_faer import (
     prod as _prod,
     max as _max,
     min as _min,
+    clip as _clip,
     mean as _mean,
     var as _var,
     std as _std,
@@ -1448,6 +1449,35 @@ def where(condition, x1, x2, /):
     return _wrap(_where(condition._h, a, b))
 
 
+def _clip_bound(value, ref, /):
+    """Bound marshalling for ``clip``.
+
+    The array-API ``clip`` keeps the input dtype (the bounds do not promote), so
+    an Array bound is cast to ``x``'s dtype and a Python scalar is routed through
+    ``_scalar_operand`` — the same weak-scalar rule (and cross-kind guard) as the
+    other elementwise functions.
+    """
+    dtype = ref.dtype()
+    if isinstance(value, Array):
+        return value.astype(dtype, copy=False)._h
+    return _scalar_operand(value, dtype)._h
+
+
+def clip(x, /, min=None, max=None):
+    """Clamp each element of ``x`` to the range ``[min, max]``.
+
+    Either bound may be ``None`` (no bound on that side); with both absent the
+    result is a copy of ``x`` (per the spec). A bound may be an Array
+    (broadcast against ``x``) or a Python scalar. Per the spec, ``min`` and
+    ``max`` do not participate in dtype promotion: both are cast to ``x``'s
+    dtype, so the result keeps ``x``'s dtype.
+    """
+    h = _handle(x)
+    lo = None if min is None else _clip_bound(min, h)
+    hi = None if max is None else _clip_bound(max, h)
+    return _wrap(_clip(h, lo, hi))
+
+
 def take(x, /, indices, *, axis=None):
     h = _handle(x)
     if not isinstance(indices, Array):
@@ -1884,7 +1914,7 @@ __all__ = [
     "acos", "acosh", "asin", "asinh", "atan", "atan2", "atanh", "ceil",
     "conj", "copysign", "cos", "cosh", "exp", "expm1", "floor", "floor_divide",
     "hypot", "imag", "log", "log1p", "log2", "log10", "logaddexp", "maximum",
-    "minimum", "nextafter", "pow", "real", "reciprocal", "remainder", "round",
+    "minimum", "clip", "nextafter", "pow", "real", "reciprocal", "remainder", "round",
     "sign", "signbit", "sin", "sinh", "sqrt", "square", "tan", "tanh", "trunc",
     "bitwise_and", "bitwise_left_shift", "bitwise_invert", "bitwise_or",
     "bitwise_right_shift", "bitwise_xor", "logical_and", "logical_not",

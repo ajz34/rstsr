@@ -201,7 +201,7 @@ _core/tests/test_indexing.py,TestIndexing,test_broaderrors_indexing,v2.5.2,trans
 _core/tests/test_indexing.py,TestIndexing,test_nontuple_ndindex,v2.5.2,partial,core_func/indexing/test_array_index.rs::numpy_array_index::test_nontuple_ndindex,bfdd921b2ee3,"a bare list indexes the first axis, a tuple zips index arrays; a[[slice(None)]] is type-level N/A"
 _core/tests/test_indexing.py,TestMultiIndexingAutomated,test_1d,v2.5.2,partial,core_func/indexing/test_array_index.rs::custom_array_index::test_numpy_generated_diff,1153e69aa749,"the Python reimplementation of the C advanced-indexing algorithm; covered by the NumPy-generated case set (generator + fixture), not by a literal translation"
 
-# --- core_func/operators (elementwise select) ---
+# --- core_func/operators (elementwise select, clip) ---
 _core/tests/test_multiarray.py,TestWhere,test_basic,v2.5.2,transferred,core_func/operators/test_where.rs::numpy_where::test_basic,06bbd4df6245,"dtype loop bool/i16/i32/i64/f64/complex128 (longdouble/clongdouble N-A); scalar-cond as 0-d bool tensors; 0-d broadcast; strided ::2/1::2/::3/1::3/::-2/::-3/1::-3"
 _core/tests/test_multiarray.py,TestWhere,test_ndim,v2.5.2,transferred,core_func/operators/test_where.rs::numpy_where::test_ndim,c5515b762895,"cond[:,None] 3-way broadcast + transposed-operand part with plain 1-D cond"
 _core/tests/test_multiarray.py,TestWhere,test_dtype_mix,v2.5.2,partial,core_func/operators/test_where.rs::numpy_where::test_dtype_mix,9c81c416e0f5,"u32 0-d + f64, f32 + i64 -> f64; non-bool-mask parts translated via ne(mask, 0) (rstsr cond is strict bool)"
@@ -213,6 +213,10 @@ _core/tests/test_multiarray.py,TestWhere,test_string,v2.5.2,not-applicable,,aff8
 _core/tests/test_multiarray.py,TestWhere,test_empty_result,v2.5.2,not-applicable,,f588ac980d30,1-arg where(cond) == nonzero; out of scope (3-arg only)
 _core/tests/test_multiarray.py,TestWhere,test_largedim,v2.5.2,not-applicable,,8be7298435d0,1-arg where(cond)/nonzero; out of scope
 _core/tests/test_multiarray.py,TestWhere,test_kwargs,v2.5.2,not-applicable,,c84ef55a6d2f,kwargs rejection N-A in Rust (positional-only by construction)
+_core/tests/test_multiarray.py,TestClip,test_basic,v2.5.2,transferred,core_func/operators/test_clip.rs::numpy_clip::test_basic,79c671b9b26e,"float/[-12.8,100.2] and [0,0], int/[-120,100] and [0,0], uint/[10,100] and [0,0]; scalar and 0-d tensor bound forms; inplace/out= and byteorder parts N-A (out-of-place only)"
+_core/tests/test_multiarray.py,TestClip,test_int_out_of_range,v2.5.2,partial,core_func/operators/test_clip.rs::numpy_clip::test_int_out_of_range,de473e759ec8,"u8 tensors with -1/300, -1/50, 100/1000 bounds; rstsr promotes instead of the inplace casting='unsafe' path (out-of-place only)"
+_core/tests/test_multiarray.py,TestClip,test_max_or_min,v2.5.2,transferred,core_func/operators/test_clip.rs::numpy_clip::test_max_or_min,a4b9600f4dbd,"min-only / max-only / both, via (3,None), (None,4), (3,4)"
+_core/tests/test_multiarray.py,TestClip,test_nan,v2.5.2,transferred,core_func/operators/test_clip.rs::numpy_clip::test_nan,4a10ea843d24,"NaN input propagates through the clamp"
 _core/tests/test_multiarray.py,TestRepeat,test_basic,v2.5.2,transferred,core_func/manipulation/test_repeat.rs::numpy_repeat::test_basic,63d8882a07bf,per-element counts
 _core/tests/test_multiarray.py,TestRepeat,test_broadcast1,v2.5.2,transferred,core_func/manipulation/test_repeat.rs::numpy_repeat::test_broadcast1,f9c4f7aa6ca9,scalar count
 _core/tests/test_multiarray.py,TestRepeat,test_axis_spec,v2.5.2,transferred,core_func/manipulation/test_repeat.rs::numpy_repeat::test_axis_spec,7a7dabe5b1ba,axis 0 / axis 1 lists
