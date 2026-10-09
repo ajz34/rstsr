@@ -210,14 +210,17 @@ class _NamespaceInfo:
         self.api_version = api_version
 
     def devices(self, /):
-        return [_DEVICE]
+        return (_DEVICE,)
+
+    def default_device(self, /):
+        return _DEVICE
 
     def default_dtypes(self, /, *, device=None):
         _check_device(device)
         return {
-            "real": float64,
+            "real floating": float64,
             "integral": int64,
-            "complex": complex128,
+            "complex floating": complex128,
             # 2025.12 key: every index output is lifted to int64 (idx_lift)
             "indexing": int64,
         }
@@ -226,12 +229,19 @@ class _NamespaceInfo:
         _check_device(device)
         groups = {
             "bool": {"bool": bool},
-            "integral": {
+            "signed integer": {
                 "int8": int8, "int16": int16, "int32": int32, "int64": int64,
+            },
+            "unsigned integer": {
                 "uint8": uint8, "uint16": uint16, "uint32": uint32, "uint64": uint64,
             },
             "real floating": {"float32": float32, "float64": float64},
             "complex floating": {"complex64": complex64, "complex128": complex128},
+        }
+        # composite kinds: 'integral' and 'numeric' are unions of the atomic ones
+        groups["integral"] = {**groups["signed integer"], **groups["unsigned integer"]}
+        groups["numeric"] = {
+            **groups["integral"], **groups["real floating"], **groups["complex floating"],
         }
         if kind is None:
             kinds = tuple(groups)
@@ -242,7 +252,7 @@ class _NamespaceInfo:
         for k in kinds:
             if k not in groups:
                 raise ValueError(f"unrecognized kind {k!r}")
-        return {k: dict(groups[k]) for k in kinds}
+        return {name: dt for k in kinds for name, dt in groups[k].items()}
 
     def capabilities(self, /):
         return {
@@ -482,7 +492,8 @@ class Array:
             raise ValueError("stream is not supported on cpu devices")
         return self
 
-    def astype(self, dtype, /, *, copy=True):
+    def astype(self, dtype, /, *, copy=True, device=None):
+        _check_device(device)
         return _wrap(_astype(self._h, dtype, copy))
 
     # ---- python scalar conversion --------------------------------------
@@ -757,22 +768,22 @@ def _flatten(obj, /):
     return flat, tuple(shape)
 
 
-def zeros(shape, /, *, dtype=None, device=None):
+def zeros(shape, *, dtype=None, device=None):
     _check_device(device)
     return _wrap(_zeros(_norm_shape(shape), _dtype_or_default(dtype, "real"), _DEVICE))
 
 
-def ones(shape, /, *, dtype=None, device=None):
+def ones(shape, *, dtype=None, device=None):
     _check_device(device)
     return _wrap(_ones(_norm_shape(shape), _dtype_or_default(dtype, "real"), _DEVICE))
 
 
-def empty(shape, /, *, dtype=None, device=None):
+def empty(shape, *, dtype=None, device=None):
     _check_device(device)
     return _wrap(_empty(_norm_shape(shape), _dtype_or_default(dtype, "real"), _DEVICE))
 
 
-def full(shape, fill_value, /, *, dtype=None, device=None):
+def full(shape, fill_value, *, dtype=None, device=None):
     _check_device(device)
     if dtype is None:
         dtype = _infer_default(fill_value)
@@ -957,15 +968,33 @@ def any(x, /, *, axis=None, keepdims=False):
 
 
 def isnan(x, /):
-    return _wrap(_isnan(_handle(x)))
+    h = _handle(x)
+    kind = _kind(h.dtype())
+    if kind in ("real floating", "complex floating"):
+        return _wrap(_isnan(h))
+    if kind in ("integral", "bool"):
+        return zeros(h.shape(), dtype=bool)  # int/bool are never NaN
+    raise TypeError(f"isnan: only numeric dtypes are allowed, got {kind}")
 
 
 def isfinite(x, /):
-    return _wrap(_isfinite(_handle(x)))
+    h = _handle(x)
+    kind = _kind(h.dtype())
+    if kind in ("real floating", "complex floating"):
+        return _wrap(_isfinite(h))
+    if kind in ("integral", "bool"):
+        return ones(h.shape(), dtype=bool)  # int/bool are always finite
+    raise TypeError(f"isfinite: only numeric dtypes are allowed, got {kind}")
 
 
 def isinf(x, /):
-    return _wrap(_isinf(_handle(x)))
+    h = _handle(x)
+    kind = _kind(h.dtype())
+    if kind in ("real floating", "complex floating"):
+        return _wrap(_isinf(h))
+    if kind in ("integral", "bool"):
+        return zeros(h.shape(), dtype=bool)  # int/bool are never inf
+    raise TypeError(f"isinf: only numeric dtypes are allowed, got {kind}")
 
 
 
@@ -1724,13 +1753,19 @@ def unique_all(x, /):
 # --------------------------------------------------------------- data types ---
 
 
-def astype(x, /, dtype, *, copy=True):
+def astype(x, /, dtype, *, copy=True, device=None):
+    _check_device(device)
     return _wrap(_astype(_handle(x), dtype, copy))
 
 
 def finfo(type, /):
     if isinstance(type, Array):
         type = type.dtype
+    # finfo accepts complex dtypes per the spec; report the real component's info
+    if type is complex64:
+        type = float32
+    elif type is complex128:
+        type = float64
     return _finfo(type)
 
 

@@ -1331,11 +1331,13 @@ pub(crate) fn proj_name<T: DtypeName>(_: &FTensor<T>) -> &'static str {
     T::NAME
 }
 
-/// A Python scalar leaf, normalized to one of four canonical carriers.
+/// A Python scalar leaf, normalized to canonical carriers. `I`/`U` are the
+/// signed/unsigned integer carriers (the latter for values above `i64::MAX`).
 #[derive(Clone, Copy, Debug)]
 pub enum PyScalar {
     B(bool),
     I(i64),
+    U(u64),
     F(f64),
     C(Complex<f64>),
 }
@@ -1345,7 +1347,7 @@ impl PyScalar {
     pub fn kind_rank(&self) -> u8 {
         match self {
             PyScalar::B(_) => 0,
-            PyScalar::I(_) => 1,
+            PyScalar::I(_) | PyScalar::U(_) => 1,
             PyScalar::F(_) => 2,
             PyScalar::C(_) => 3,
         }
@@ -1356,6 +1358,7 @@ impl PyScalar {
         let v = match self {
             PyScalar::B(x) => x.into_py_any(py)?,
             PyScalar::I(x) => x.into_py_any(py)?,
+            PyScalar::U(x) => x.into_py_any(py)?,
             PyScalar::F(x) => x.into_py_any(py)?,
             PyScalar::C(x) => PyComplex::from_doubles(py, x.re, x.im).into_any().unbind(),
         };
@@ -1370,6 +1373,8 @@ pub fn parse_leaf(el: &Bound<'_, PyAny>) -> PyResult<PyScalar> {
         Ok(PyScalar::C(Complex::new(c.real(), c.imag())))
     } else if let Ok(i) = el.extract::<i64>() {
         Ok(PyScalar::I(i))
+    } else if let Ok(u) = el.extract::<u64>() {
+        Ok(PyScalar::U(u))
     } else if let Ok(f) = el.extract::<f64>() {
         Ok(PyScalar::F(f))
     } else {
@@ -1395,12 +1400,7 @@ impl_pyscalar_from!(i64, I);
 impl_pyscalar_from!(u8, I);
 impl_pyscalar_from!(u16, I);
 impl_pyscalar_from!(u32, I);
-// u64 does not fit i64; wrap (spec edge: values > i64::MAX from u64 arrays).
-impl From<u64> for PyScalar {
-    fn from(v: u64) -> PyScalar {
-        PyScalar::I(v as i64)
-    }
-}
+impl_pyscalar_from!(u64, U);
 impl_pyscalar_from!(f32, F);
 impl_pyscalar_from!(f64, F);
 
