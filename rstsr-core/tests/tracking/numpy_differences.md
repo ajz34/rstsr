@@ -431,3 +431,21 @@ dedicated argument type ([`ArrayIndexArgs`]) rather than `AxesIndex<ArrayIndexer
 because the latter's conversions cannot be implemented outside `rstsr-common` (the orphan
 rule); the `AxesIndex` form is still accepted through `TryFrom`.
 
+## Gathering results follow the device order when flattened
+
+- **numpy:** a gathered result is C-ordered, so its flattened sequence (`tolist()`, `ravel()`,
+  iteration) is the row-major one — for `x[mask]` (`np.nonzero` order) and for
+  `x[int_array, ..]` alike.
+- **rstsr:** entry_row_cpu::core_func::indexing::test_array_index (values/shape only;
+  the order caveat is asserted in `doc_draft` and `mask_select`'s docstring)
+- **tag:** col-major-transfer
+- **status:** open
+
+`rt::array_index` computes order-independent results (the placement rule and the
+trailing-aligned broadcast of the index arrays do not consult the device order), but it allocates
+its output with `new_contig(order)` like every other op, so on a `ColMajor` device the flattened
+visit order of the result is column-major where NumPy's is row-major. The same applies to
+`rt::mask_select` (documented on its own Row/Column Major Notice). Shape and element values never
+differ; only the memory arrangement (and anything that flattens it) does. See
+[`order_semantics`](https://github.com/RESTGroup/rstsr-core/blob/main/rstsr-core/src/docs/order_semantics.md).
+

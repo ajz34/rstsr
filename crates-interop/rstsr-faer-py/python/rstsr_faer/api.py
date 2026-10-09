@@ -437,6 +437,13 @@ class Array:
 
     def __setitem__(self, key, value, /):
         key = key if isinstance(key, tuple) else (key,)
+        # a 0-d integer array is a scalar index, as in __getitem__
+        key = tuple(
+            _py_int(k)
+            if isinstance(k, Array) and k.ndim == 0 and _kind(k.dtype) == "integral"
+            else k
+            for k in key
+        )
         if builtins.any(isinstance(k, Array) for k in key):
             if not _is_single_bool_mask(key):
                 _unimplemented("integer-array (fancy) item assignment (rstsr gap G-039)")

@@ -155,8 +155,8 @@ where
                 stop = (len_prev + stop).max(0);
             }
 
-            if start > len_prev || start > stop {
-                // zero size slice caused by inproper start and stop
+            if start > len_prev {
+                // start is out of bound: the slice is empty
                 start = 0;
                 stop = 0;
             } else if stop > len_prev {
@@ -164,8 +164,17 @@ where
                 stop = len_prev;
             }
 
+            // emptiness is only known after both bounds are clamped; reset the
+            // start then, so that the offset stays reachable even for a negative
+            // stride (a garbage offset on a zero-size dimension escapes the
+            // layout bounds check)
+            let len = if start < stop { (stop - start + step - 1) / step } else { 0 };
+            if len == 0 {
+                start = 0;
+            }
+
             let offset = (self.offset() as isize + stride[axis] * start) as usize;
-            shape[axis] = ((stop - start + step - 1) / step).max(0) as usize;
+            shape[axis] = len as usize;
             stride[axis] *= step;
             return Self::new(shape, stride, offset);
         } else {

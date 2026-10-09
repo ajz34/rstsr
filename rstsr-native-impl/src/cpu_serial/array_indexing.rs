@@ -84,7 +84,9 @@ where
             rem /= base_shape[d];
         }
         let src_base = base_layout.index_uncheck(&base_multi);
-        let mut out_base = 0_isize;
+        // `lc.offset()` is part of the output layout: it must reach the write
+        // offset as well (the sibling ops never assume a zero-offset layout)
+        let mut out_base = lc.offset() as isize;
         for (d, &m) in base_multi.iter().enumerate() {
             let stride = if d < consec { lc_stride[d] } else { lc_stride[d + fancy_ndim] };
             out_base += stride * m as isize;

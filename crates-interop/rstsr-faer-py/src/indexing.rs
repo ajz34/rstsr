@@ -100,8 +100,8 @@ fn to_indexers(items: &[KeyItem]) -> PyResult<Vec<Indexer>> {
             KeyItem::Slice(a, b, c) => Ok(sl(*a, *b, *c)),
             KeyItem::NewAxis => Ok(Indexer::Insert),
             KeyItem::Ellipsis => Ok(Indexer::Ellipsis),
-            // integer-array keys are served by `op_getitem_array`; item
-            // assignment with an index array is not implemented (G-039)
+            // integer-array keys are served by `op_getitem`; item assignment
+            // with an index array is not implemented (G-039)
             KeyItem::Array(_) => type_err(
                 "integer-array (fancy) item assignment is not implemented; only boolean-mask \
                  assignment (x[mask] = value) is supported",
@@ -114,18 +114,11 @@ fn to_indexers(items: &[KeyItem]) -> PyResult<Vec<Indexer>> {
 
 /* #region basic */
 
-fn op_getitem_basic<T>(t: &FTensor<T>, idx: &[Indexer]) -> rt::Result<FTensor<T>>
-where
-    T: Clone + Send + Sync,
-    DeviceFaer: DeviceAPI<T, Raw = Vec<T>> + DeviceCreationAnyAPI<T>,
-{
-    let view = t.i_f(idx)?;
-    Ok(view.into_owned())
-}
-
-/// Array indexing (fancy indexing): basic indexers may be mixed with integer
-/// index arrays; see `rt::array_index`.
-fn op_getitem_array<T>(t: &FTensor<T>, items: &[KeyItem]) -> rt::Result<FTensor<T>>
+/// Every `__getitem__` key rides `rt::array_index`: with integer index arrays
+/// that is array indexing, and without them it degenerates to basic slicing (a
+/// view). Riding one path also means a bad key raises the same error kind in
+/// both spellings (NumPy raises `IndexError` either way).
+fn op_getitem<T>(t: &FTensor<T>, items: Vec<KeyItem>) -> rt::Result<FTensor<T>>
 where
     T: Clone + Send + Sync + 'static,
     DeviceFaer: DeviceAPI<T, Raw = Vec<T>>
@@ -136,13 +129,14 @@ where
         + DeviceArrayIndexAPI<T>,
 {
     let indexers = items
-        .iter()
+        .into_iter()
         .map(|it| match it {
-            KeyItem::Select(i) => ArrayIndexer::Basic(Indexer::Select(*i)),
-            KeyItem::Slice(a, b, c) => ArrayIndexer::Basic(sl(*a, *b, *c)),
+            KeyItem::Select(i) => ArrayIndexer::Basic(Indexer::Select(i)),
+            KeyItem::Slice(a, b, c) => ArrayIndexer::Basic(sl(a, b, c)),
             KeyItem::NewAxis => ArrayIndexer::Basic(Indexer::Insert),
             KeyItem::Ellipsis => ArrayIndexer::Basic(Indexer::Ellipsis),
-            KeyItem::Array(idx) => ArrayIndexer::ArrayIndex(idx.clone()),
+            // moved, not cloned: `parse_key` owns the handle's tensor
+            KeyItem::Array(idx) => ArrayIndexer::ArrayIndex(idx),
         })
         .collect::<Vec<_>>();
     Ok(rt::array_index_f(t, ArrayIndexArgs::new(indexers))?.into_owned())
@@ -151,11 +145,7 @@ where
 #[pyfunction]
 pub fn getitem_basic(x: &NativeArray, key: &Bound<'_, PyTuple>) -> PyResult<NativeArray> {
     let items = parse_key(key)?;
-    if items.iter().any(|it| matches!(it, KeyItem::Array(_))) {
-        return Ok(NativeArray { t: dispatch_t!(x.t, op_getitem_array(&items))? });
-    }
-    let idx = to_indexers(&items)?;
-    Ok(NativeArray { t: dispatch_t!(x.t, op_getitem_basic(&idx))? })
+    Ok(NativeArray { t: dispatch_t!(x.t, op_getitem(items))? })
 }
 
 /* #endregion */

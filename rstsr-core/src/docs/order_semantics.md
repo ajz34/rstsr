@@ -43,7 +43,12 @@ not pin an order themselves:
 Layout-only manipulations ([`transpose`], slicing, [`flip`], ...) are not
 affected at all. Element-wise computations are unaffected in their results;
 only the memory arrangement of newly allocated results follows the default
-order. For every other function, consult its own docstring notice rather than
+order. The same holds for the gathering operations — [`index_select`],
+[`take_along_axis`], [`mask_select`] and [`array_index`]: their results (shape
+and values, including `array_index`'s placement rule and the trailing-aligned
+broadcast of its index arrays) are order-independent, while the flattened visit
+order of a newly allocated result (`to_vec()`, `iter()`) follows the device
+default order, as it does for every other allocation. For every other function, consult its own docstring notice rather than
 assuming.
 
 The rest of this page demonstrates the three cases worth understanding in

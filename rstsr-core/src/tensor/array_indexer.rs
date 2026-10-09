@@ -45,16 +45,6 @@ where
     OneDimBool(Vec<bool>),
 }
 
-impl<B> ArrayIndexer<B>
-where
-    B: DeviceRawAPI<isize> + DeviceRawAPI<bool>,
-{
-    /// Returns `true` if this indexer is a basic indexer.
-    pub fn is_basic(&self) -> bool {
-        matches!(self, Self::Basic(_))
-    }
-}
-
 /// Arguments of array indexing: the per-axis indexers.
 ///
 /// One entry per indexed axis, exactly like NumPy's `x[i, j, k]`; axes not
@@ -146,21 +136,34 @@ where
     }
 }
 
-impl<B> From<Option<usize>> for ArrayIndexer<B>
+/// `None` is the new-axis indexer (as in basic slicing); `Some(n)` is rejected
+/// as an error rather than panicking, so the fallible entry points stay
+/// fallible.
+impl<B> TryFrom<Option<usize>> for ArrayIndexer<B>
 where
     B: DeviceRawAPI<isize> + DeviceRawAPI<bool>,
 {
-    fn from(value: Option<usize>) -> Self {
-        Self::Basic(value.into())
+    type Error = Error;
+
+    fn try_from(value: Option<usize>) -> Result<Self> {
+        match value {
+            None => Ok(Self::Basic(Indexer::Insert)),
+            Some(_) => rstsr_raise!(
+                InvalidValue,
+                "Only `None` is accepted as a new axis in array indexing; use an integer to select an index."
+            ),
+        }
     }
 }
 
-impl<B> From<Option<usize>> for ArrayIndexArgs<B>
+impl<B> TryFrom<Option<usize>> for ArrayIndexArgs<B>
 where
     B: DeviceRawAPI<isize> + DeviceRawAPI<bool>,
 {
-    fn from(value: Option<usize>) -> Self {
-        Self::new(vec![value.into()])
+    type Error = Error;
+
+    fn try_from(value: Option<usize>) -> Result<Self> {
+        Ok(Self::new(vec![value.try_into()?]))
     }
 }
 
@@ -292,60 +295,31 @@ macro_rules! impl_from_one_dim_to_array_indexer {
 
 impl_from_one_dim_to_array_indexer!(isize, usize, u32, i32, u64, i64);
 
-impl<B> From<Vec<bool>> for ArrayIndexer<B>
-where
-    B: DeviceRawAPI<isize> + DeviceRawAPI<bool>,
-{
-    fn from(value: Vec<bool>) -> Self {
-        Self::OneDimBool(value)
-    }
+macro_rules! impl_from_bool_list_to_array_indexer {
+    ($($t:ty),*) => {
+        $(
+            impl<B> From<$t> for ArrayIndexer<B>
+            where
+                B: DeviceRawAPI<isize> + DeviceRawAPI<bool>,
+            {
+                fn from(value: $t) -> Self {
+                    Self::OneDimBool(value.to_vec())
+                }
+            }
+
+            impl<B> From<$t> for ArrayIndexArgs<B>
+            where
+                B: DeviceRawAPI<isize> + DeviceRawAPI<bool>,
+            {
+                fn from(value: $t) -> Self {
+                    Self::new(vec![value.into()])
+                }
+            }
+        )*
+    };
 }
 
-impl<B> From<Vec<bool>> for ArrayIndexArgs<B>
-where
-    B: DeviceRawAPI<isize> + DeviceRawAPI<bool>,
-{
-    fn from(value: Vec<bool>) -> Self {
-        Self::new(vec![value.into()])
-    }
-}
-
-impl<B> From<&Vec<bool>> for ArrayIndexer<B>
-where
-    B: DeviceRawAPI<isize> + DeviceRawAPI<bool>,
-{
-    fn from(value: &Vec<bool>) -> Self {
-        Self::OneDimBool(value.clone())
-    }
-}
-
-impl<B> From<&Vec<bool>> for ArrayIndexArgs<B>
-where
-    B: DeviceRawAPI<isize> + DeviceRawAPI<bool>,
-{
-    fn from(value: &Vec<bool>) -> Self {
-        Self::new(vec![value.into()])
-    }
-}
-
-impl<B> From<&[bool]> for ArrayIndexer<B>
-where
-    B: DeviceRawAPI<isize> + DeviceRawAPI<bool>,
-{
-    fn from(value: &[bool]) -> Self {
-        Self::OneDimBool(value.to_vec())
-    }
-}
-
-impl<B> From<&[bool]> for ArrayIndexArgs<B>
-where
-    B: DeviceRawAPI<isize> + DeviceRawAPI<bool>,
-{
-    fn from(value: &[bool]) -> Self {
-        Self::new(vec![value.into()])
-    }
-}
-
+impl_from_bool_list_to_array_indexer!(Vec<bool>, &Vec<bool>, &[bool]);
 impl<B, const N: usize> From<[bool; N]> for ArrayIndexer<B>
 where
     B: DeviceRawAPI<isize> + DeviceRawAPI<bool>,
@@ -542,15 +516,17 @@ where
 /// two indexers, while `[a, b]` is a single index array indexing one axis.
 macro_rules! impl_from_tuple_to_array_index_args {
     ($($f:ident),+) => {
-        impl<B, $($f,)+> From<($($f,)+)> for ArrayIndexArgs<B>
+        impl<B, $($f,)+> TryFrom<($($f,)+)> for ArrayIndexArgs<B>
         where
             B: DeviceRawAPI<isize> + DeviceRawAPI<bool>,
-            $($f: Into<ArrayIndexer<B>>,)+
+            $($f: TryInto<ArrayIndexer<B>, Error: Into<Error>>,)+
         {
-            fn from(value: ($($f,)+)) -> Self {
+            type Error = Error;
+
+            fn try_from(value: ($($f,)+)) -> Result<Self> {
                 #[allow(non_snake_case)]
                 let ($($f,)+) = value;
-                Self::new(vec![$($f.into(),)+])
+                Ok(Self::new(vec![$($f.try_into().map_err(Into::into)?,)+]))
             }
         }
     };

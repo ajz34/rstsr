@@ -1,7 +1,8 @@
-//! Advanced indexing related tensor manipulations.
+//! Advanced indexing related tensor manipulations: one-axis gathers (by an
+//! integer list or an index tensor) and whole-tensor boolean-mask selection.
 //!
-//! Currently, full support of advanced indexing is not available. However, it
-//! is still possible to index one axis by list.
+//! Array indexing (*fancy indexing*, integer index arrays possibly mixed with
+//! basic indexers) lives in [`array_index`](crate::tensor::array_indexing::array_index).
 
 use crate::prelude_dev::*;
 

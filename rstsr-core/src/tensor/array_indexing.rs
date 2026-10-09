@@ -7,6 +7,15 @@
 
 use crate::prelude_dev::*;
 
+/// The single rejection for boolean index arrays (raised from both the
+/// array-indexing path and the basic-slicing delegation).
+fn bool_index_declined<X>() -> Result<X> {
+    rstsr_raise!(
+        UnImplemented,
+        "boolean-array indexing is not supported by array_index; use mask_select or bool_select instead."
+    )
+}
+
 /// One parsed index entry, describing what one group of the index does.
 enum Entry {
     /// A slice on `axis`.
@@ -15,8 +24,9 @@ enum Entry {
     Select { axis: usize, index: usize },
     /// A new axis (size-1 dimension).
     Insert,
-    /// An integer array indexing `src_axis`.
-    Array { src_axis: usize, indices: Vec<usize>, layout: Layout<IxD> },
+    /// An integer array indexing `src_axis`; `values` are the raw entries and
+    /// `indices` the resolved ones (filled once the broadcast shape is known).
+    Array { src_axis: usize, values: Vec<isize>, indices: Vec<usize>, layout: Layout<IxD> },
 }
 
 /// Indexes a tensor by integer arrays (array indexing, *fancy indexing*).
@@ -81,7 +91,10 @@ where
                 }
                 let layout = index.layout().to_dim::<IxD>()?;
                 let mut values = Vec::with_capacity(index.size());
-                for (_, offset) in IndexedIterLayout::<IxD>::new(&layout, RowMajor)? {
+                // read in C order; `IterLayoutRowMajor` yields bare offsets (no
+                // per-element multi-index clone, and C order is what the
+                // resolved layout below describes)
+                for offset in IterLayoutRowMajor::<IxD>::new(&layout)? {
                     values.push(index.raw()[offset]);
                 }
                 let layout = layout.shape().clone().new_c_contig(None);
@@ -100,7 +113,7 @@ where
             _ => consumed += 1,
         }
     }
-    rstsr_assert!(n_ellipsis <= 1, InvalidValue, "Only one ellipsis indexer is allowed in array indexing.")?;
+    rstsr_assert!(n_ellipsis <= 1, IndexError, "Only one ellipsis indexer is allowed in array indexing.")?;
     rstsr_assert!(
         consumed <= ndim,
         IndexError,
@@ -110,6 +123,12 @@ where
     )?;
     let n_fill = ndim - consumed;
 
+    // boolean index arrays are only supported as a lone whole-tensor mask
+    // (`mask_select`), which the Python layer routes separately
+    if lowered.iter().any(|e| matches!(e, Lowered::Bool)) {
+        return bool_index_declined();
+    }
+
     // without any array indexer, array indexing degenerates to basic slicing,
     // which is a view
     if !lowered.iter().any(|e| matches!(e, Lowered::Array { .. })) {
@@ -117,24 +136,13 @@ where
         for entry in lowered {
             match entry {
                 Lowered::Basic(indexer) => basic.push(indexer),
-                Lowered::Bool => rstsr_raise!(
-                    UnImplemented,
-                    "boolean-array indexing is not supported by array_index; use mask_select or bool_select instead."
-                )?,
                 Lowered::Array { .. } => unreachable!(),
+                // `Lowered::Bool` was rejected above
+                Lowered::Bool => unreachable!(),
                 Lowered::Noop => {},
             }
         }
         return Ok(into_slice_f(tensor.view(), AxesIndex::<Indexer>::Vec(basic))?.into_cow());
-    }
-
-    // if any boolean indexer is present, refuse (only a sole boolean array is
-    // supported elsewhere, through `mask_select`)
-    if lowered.iter().any(|e| matches!(e, Lowered::Bool)) {
-        rstsr_raise!(
-            UnImplemented,
-            "boolean-array indexing is not supported by array_index; use mask_select or bool_select instead."
-        )?;
     }
 
     let mut expanded: Vec<Lowered> = Vec::with_capacity(lowered.len() + n_fill);
@@ -208,21 +216,8 @@ where
             Lowered::Bool => unreachable!(),
             Lowered::Noop => {},
             Lowered::Array { values, layout } => {
-                let axis_size = la.shape()[curr_axis] as isize;
-                let mut indices = Vec::with_capacity(values.len());
-                for value in values {
-                    let value = if value < 0 { value + axis_size } else { value };
-                    rstsr_pattern!(
-                        value,
-                        0..axis_size,
-                        IndexError,
-                        "Array index out of range along axis {}.",
-                        curr_axis
-                    )?;
-                    indices.push(value as usize);
-                }
                 fancy_ndim = fancy_ndim.max(layout.ndim());
-                entries.push(Entry::Array { src_axis: curr_axis, indices, layout });
+                entries.push(Entry::Array { src_axis: curr_axis, values, indices: Vec::new(), layout });
                 curr_axis += 1;
             },
         }
@@ -278,6 +273,33 @@ where
         }
     }
 
+    // Resolve (and bounds-check) the index entries only when the broadcast is
+    // non-empty: an empty selection never touches the index arrays, so NumPy
+    // does not raise for values that are out of range but never gathered.
+    let bulk_size: usize = bulk_shape.iter().product();
+    for entry in &mut entries {
+        if let Entry::Array { src_axis, values, indices, .. } = entry {
+            let axis_size = la.shape()[*src_axis] as isize;
+            if bulk_size != 0 {
+                indices.reserve(values.len());
+                for &value in values.iter() {
+                    let value = if value < 0 { value + axis_size } else { value };
+                    rstsr_pattern!(
+                        value,
+                        0..axis_size,
+                        IndexError,
+                        "Array index out of range along axis {}.",
+                        src_axis
+                    )?;
+                    indices.push(value as usize);
+                }
+            }
+            // the raw entries are no longer needed
+            values.clear();
+            values.shrink_to_fit();
+        }
+    }
+
     // output layout: the broadcast dimensions inserted at `consec`
     let mut out_shape: Vec<usize> = Vec::with_capacity(base_layout.ndim() + fancy_ndim);
     out_shape.extend_from_slice(&base_layout.shape()[..consec]);
@@ -290,7 +312,7 @@ where
     let aux: Vec<ArrayAuxIndexer<'_>> = entries
         .iter()
         .filter_map(|entry| match entry {
-            Entry::Array { src_axis, indices, layout } => {
+            Entry::Array { src_axis, indices, layout, .. } => {
                 Some(ArrayAuxIndexer { src_axis: *src_axis, indices: indices.as_slice(), layout: layout.clone() })
             },
             _ => None,
@@ -359,7 +381,9 @@ impl Display for DebugShape<'_> {
 ///
 /// - integer (`isize` / `usize` / `i32` / `i64` / `u32` / `u64`): one axis dropped (`Select`);
 /// - range (`1..4`) or [`slice!`] result: one axis narrowed (`Slice`);
-/// - `None` / [`NewAxis`]: one new size-1 axis (`Insert`); [`Ellipsis`]: the ellipsis;
+/// - `None` / [`NewAxis`]: one new size-1 axis (`Insert`) — note that `None` is the *new-axis*
+///   indexer (as in basic slicing), not an alias of the empty index `()` — and `Some(n)` is
+///   rejected; [`Ellipsis`]: the ellipsis;
 /// - host list (`Vec` / `&Vec` / `&[T]` / `[T; N]` / `&[T; N]`): a one-dimensional index array;
 /// - integer tensor or tensor view of any rank: an index array.
 ///

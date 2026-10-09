@@ -7,8 +7,9 @@ use super::CATEGORY;
 use crate::TESTCFG;
 
 // Basic indexing via `Tensor::i(...)` (NumPy basic indexing: integer + slice +
-// newaxis/ellipsis). Advanced (fancy/boolean) indexing is not implemented in rstsr
-// except 1-D integer-index gather, which is exercised in `custom_indexing`.
+// newaxis/ellipsis). Advanced indexing has its own entry points: array indexing
+// (`rt::array_index`, `test_array_index.rs`), boolean masks (`rt::mask_select` /
+// `rt::bool_select`) and one-axis gathers (`rt::index_select` / `rt::take`).
 
 #[cfg(test)]
 mod numpy_indexing {
@@ -91,6 +92,48 @@ mod custom_indexing {
         let v = rt::arange((3, &device));
         assert_eq!(v.i(None).shape(), &[1, 3]);
         assert_eq!(v.i((.., None)).shape(), &[3, 1]);
+    }
+
+    /// Regression (2026-10-08, surfaced by the array-indexing differential
+    /// harness): negative-step and empty slices must follow Python's slicing
+    /// rules — an empty result must not keep a `start` that drives the offset
+    /// out of the buffer when the axis stride is negative.
+    #[test]
+    fn test_negative_step_and_empty_slices() {
+        crate::specify_test!("test_negative_step_and_empty_slices");
+
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        // a = np.arange(5)
+        let a = rt::arange((5, &device));
+        // a[::-1] == [4, 3, 2, 1, 0]
+        assert_equal(a.i(slice!(None, None, -1)), rt::tensor_from_nested!([4, 3, 2, 1, 0], &device), None);
+        // a[4:-1:-1] == [] and a[-6::-1] == []: an explicit negative bound
+        // counts from the back (it is not the "reverse to the start" default)
+        assert_eq!(a.i(slice!(4, -1, -1)).shape(), &[0]);
+        assert_eq!(a.i(slice!(-6, None, -1)).shape(), &[0]);
+        // a[-4::-1] == [1, 0]
+        assert_equal(a.i(slice!(-4, None, -1)), rt::tensor_from_nested!([1, 0], &device), None);
+        // a[2:2] == []
+        assert_eq!(a.i(slice!(2, 2)).shape(), &[0]);
+
+        // empty slices on a negative-stride axis keep a valid offset (a stale
+        // `start` used to underflow it); `2:5` on a size-2 axis is empty too —
+        // emptiness is only known after the stop is clamped
+        let m = rt::arange((6, &device)).into_shape([2, 3]);
+        let rev = m.i((slice!(None, None, -1), ..));
+        assert_eq!(rev.i((slice!(2, 2), ..)).shape(), &[0, 3]);
+        assert_eq!(rev.i((slice!(2, 5), ..)).shape(), &[0, 3]);
+        assert_eq!(rev.i((slice!(3, 5), ..)).shape(), &[0, 3]);
+        // the offset of an empty view stays inside the buffer (it used to
+        // underflow to a huge `usize` on the negative-stride axis)
+        assert_eq!(rev.i((slice!(2, 5), ..)).offset(), 3);
+        let idx = rt::asarray((vec![0_isize, 1], &device));
+        assert_eq!(rev.array_index_f((slice!(2, 2), &idx)).unwrap().shape(), &[0, 2]);
+        assert_eq!(rev.array_index_f((slice!(2, 5), &idx)).unwrap().shape(), &[0, 2]);
+        // m[::-1][1:2] == [m[0]]
+        assert_equal(rev.i((slice!(1, 2), ..)), rt::tensor_from_nested!([[0, 1, 2]], &device), None);
     }
 
     #[test]
