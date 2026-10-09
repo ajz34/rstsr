@@ -2,7 +2,7 @@
 //! integer list or an index tensor) and whole-tensor boolean-mask selection.
 //!
 //! Array indexing (*fancy indexing*, integer index arrays possibly mixed with
-//! basic indexers) lives in [`array_index`](crate::tensor::array_indexing::array_index).
+//! basic indexers) lives in [`array_index`].
 
 use crate::prelude_dev::*;
 

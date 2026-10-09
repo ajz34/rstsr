@@ -3,9 +3,8 @@
 //! extraction ([`diagonal`]).
 //!
 //! Advanced indexing has its own entry points: array indexing (fancy indexing)
-//! by integer arrays in [`array_index`](crate::tensor::array_indexing::array_index),
-//! and selection by boolean masks or one-axis index lists in
-//! [`adv_indexing`](crate::tensor::adv_indexing).
+//! by integer arrays in [`array_index`], and selection by boolean masks or
+//! one-axis index lists in [`adv_indexing`](crate::tensor::adv_indexing).
 
 use core::ops::{Index, IndexMut};
 
