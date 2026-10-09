@@ -449,7 +449,9 @@ default order — exactly NumPy's C-order last-write-wins under `RowMajor`, but 
 under `ColMajor` (the visit order is the device's, registered under `col-major-transfer`). The
 scatter is deliberately serial: a rayon scatter would race on duplicate destinations (undefined
 behavior for concurrent non-atomic stores), so the device trait contract is serial and the rayon
-device delegates to the serial kernel.
+device delegates to the serial kernel. The derived setters (`put_along_axis`, `index_put`,
+array-valued `mask_assign`) follow the same rule: their gathers (`take_along_axis`, `index_select`,
+`mask_select`) are parallel, but the scatters are serial with the same last-write-wins order.
 
 ## Array indexing: no zero-dimensional boolean indexers
 

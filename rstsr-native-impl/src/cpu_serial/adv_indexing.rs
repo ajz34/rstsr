@@ -73,3 +73,29 @@ where
         })
     }
 }
+
+/// Scatter (inverse of [`index_select_cpu_serial`]): write `value` (at the
+/// selection shape — the input shape with `axis` of length `indices.len()`)
+/// into `a` along `axis` at `indices`, casting `TA` to `TC`.
+///
+/// Each selected slice is written by the element-wise promoted assign; duplicate
+/// indices write the same slice more than once (last write wins).
+pub fn index_put_promote_cpu_serial<TC, TA>(
+    a: &mut [TC],
+    la: &Layout<IxD>,
+    axis: usize,
+    indices: &[usize],
+    value: &[TA],
+    lvalue: &Layout<IxD>,
+) -> Result<()>
+where
+    TC: Clone,
+    TA: Clone + DTypeCastAPI<TC>,
+{
+    for (k, &sel) in indices.iter().enumerate() {
+        let la_selected = la.dim_select(axis as isize, sel as isize)?;
+        let lv_selected = lvalue.dim_select(axis as isize, k as isize)?;
+        assign_promote_cpu_serial(a, &la_selected, value, &lv_selected)?;
+    }
+    Ok(())
+}

@@ -2,6 +2,7 @@
 pub mod test_array_index;
 pub mod test_array_index_assign;
 pub mod test_indexing;
+pub mod test_put_along_axis;
 pub mod test_take_along_axis;
 
 pub static CATEGORY: &str = "indexing";

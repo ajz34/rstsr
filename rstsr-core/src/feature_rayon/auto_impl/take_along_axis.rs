@@ -25,3 +25,26 @@ where
         take_along_axis_cpu_rayon(c, &out_strides, a, la, idx, lidx, axis, pool)
     }
 }
+
+impl<TC, TA, DA, DI> DevicePutAlongAxisAPI<TC, DA, DI, TA> for DeviceRayonAutoImpl
+where
+    TC: Clone,
+    TA: Clone + DTypeCastAPI<TC>,
+    DA: DimAPI,
+    DI: DimAPI,
+{
+    fn put_along_axis(
+        &self,
+        a: &mut Vec<TC>,
+        la: &Layout<DA>,
+        idx: &Vec<usize>,
+        lidx: &Layout<DI>,
+        values: &Vec<TA>,
+        lvalues: &Layout<DI>,
+        axis: usize,
+    ) -> Result<()> {
+        // the scatter is serial: duplicate index targets make disjoint writes
+        // impossible, so the serial kernel is called directly
+        put_along_axis_promote_cpu_serial(a, la, idx, lidx, values, lvalues, axis)
+    }
+}

@@ -927,6 +927,479 @@ where
 
 /* #endregion */
 
+/* #region put_along_axis / index_put / mask_assign (scatter) */
+
+/// Writes values along one axis at the positions an index tensor gives.
+///
+/// See also [`put_along_axis`].
+pub fn put_along_axis_f<RA, T, B, DA, DI, U, V>(
+    tensor: &mut TensorAny<RA, T, B, DA>,
+    indices: impl TensorViewAPI<Type = isize, Backend = B, Dim = DI>,
+    values: V,
+    axis: impl TryInto<AxisIndex<isize>, Error: Into<Error>>,
+) -> Result<()>
+where
+    RA: DataMutAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
+    DA: DimAPI,
+    DI: DimAPI,
+    T: Clone,
+    V: TensorViewAPI<Type = U, Backend = B>,
+    U: Clone + DTypeCastAPI<T>,
+    B: DeviceAPI<T>
+        + DeviceAPI<usize, Raw = Vec<usize>>
+        + DeviceAPI<isize, Raw = Vec<isize>>
+        + DeviceAPI<U>
+        + DevicePutAlongAxisAPI<T, DA, DI, U>,
+{
+    let indices = indices.view();
+    let axis: AxisIndex<isize> = axis.try_into().map_err(Into::into)?;
+    let device = tensor.device().clone();
+    rstsr_assert!(
+        device.same_device(indices.device()),
+        DeviceMismatch,
+        "put_along_axis requires tensor and indices on the same device."
+    )?;
+    let axis = axis.into_normalized(tensor.ndim())?;
+    rstsr_assert!(!tensor.layout().is_broadcasted(), InvalidLayout, "cannot assign to broadcasted tensor")?;
+    let la = tensor.layout().clone();
+    let lidx = indices.layout();
+    rstsr_assert_eq!(
+        lidx.ndim(),
+        la.ndim(),
+        InvalidLayout,
+        "put_along_axis requires indices with the same ndim as the tensor."
+    )?;
+    for i in 0..la.ndim() {
+        if i != axis {
+            rstsr_assert_eq!(
+                la.shape()[i],
+                lidx.shape()[i],
+                InvalidLayout,
+                "put_along_axis requires indices to match the tensor shape outside the indexed axis."
+            )?;
+        }
+    }
+    // resolve the index entries (logical row-major order; strided/broadcast
+    // index tensors are read through their layout, negatives count from the back)
+    let axis_size = la.shape()[axis];
+    let mut resolved: Vec<usize> = Vec::with_capacity(indices.size());
+    let iter: IndexedIterLayout<IxD> = IndexedIterLayout::new(&lidx.to_dim()?, RowMajor)?;
+    for (_, off) in iter {
+        let v = indices.raw()[off];
+        let v = if v < 0 { v + axis_size as isize } else { v };
+        rstsr_pattern!(v, 0..axis_size as isize, IndexError, "put_along_axis index out of range along axis {}.", axis)?;
+        resolved.push(v as usize);
+    }
+    let lidx_resolved: Layout<DI> = lidx.shape().as_ref().to_vec().new_c_contig(None).to_dim()?;
+    // broadcast the values to the indices' shape
+    let value = values.view();
+    rstsr_assert!(device.same_device(value.device()), DeviceMismatch)?;
+    let lidx_ixd = lidx.to_dim::<IxD>()?;
+    let lvalue0 = value.layout().to_dim::<IxD>()?;
+    let (_, lvalues) = broadcast_layout_to_first(&lidx_ixd, &lvalue0, device.default_order())?;
+    let lvalues = lvalues.to_dim::<DI>()?;
+    device.put_along_axis(tensor.raw_mut(), &la, &resolved, &lidx_resolved, value.raw(), &lvalues, axis)
+}
+
+/// Writes values along one axis at the positions an index tensor gives: at every
+/// position outside `axis`, `x[i_0, ..., indices[i_0, ..., j, ..., i_n], ..., i_n]
+/// = values[i_0, ..., j, ..., i_n]`. The inverse of [`take_along_axis`].
+///
+/// This function behaves identically under [`RowMajor`] and [`ColMajor`] device
+/// default orders.
+///
+/// # Parameters
+///
+/// - `tensor`: [`&mut TensorAny<R, T, B, DA>`](TensorAny): the destination tensor.
+/// - `indices`: integer indices along `axis`; same rank as `tensor` and the same shape outside
+///   `axis`. Negative entries count from the back.
+/// - `values`: the values to write, broadcast to the shape of `indices` and cast to `T`.
+/// - `axis`: TryInto [`AxisIndex<isize>`]: the axis to write along.
+///
+/// # Notes of API accordance
+///
+/// - NumPy: `numpy.put_along_axis(arr, indices, values, axis)`
+/// - RSTSR: `rt::put_along_axis(&mut x, indices, values, axis)`
+///
+/// # Panics
+///
+/// - Panics if `axis` is out of range, the shapes mismatch outside `axis`, an index is out of
+///   range, the values cannot broadcast to the indices' shape, the devices differ, or the
+///   destination is a broadcasted view.
+///
+/// For a fallible version, use [`put_along_axis_f`].
+///
+/// # See also
+///
+/// ## Related functions in RSTSR
+///
+/// - [`take_along_axis`]: the gather this inverts.
+///
+/// ## Variants of this function
+///
+/// - [`put_along_axis_f`]: fallible version.
+/// - Associated methods on [`TensorAny`]: [`TensorAny::put_along_axis`] /
+///   [`TensorAny::put_along_axis_f`].
+#[allow(clippy::type_complexity)]
+pub fn put_along_axis<RA, T, B, DA, DI, U, V>(
+    tensor: &mut TensorAny<RA, T, B, DA>,
+    indices: impl TensorViewAPI<Type = isize, Backend = B, Dim = DI>,
+    values: V,
+    axis: impl TryInto<AxisIndex<isize>, Error: Into<Error>>,
+) where
+    RA: DataMutAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
+    DA: DimAPI,
+    DI: DimAPI,
+    T: Clone,
+    V: TensorViewAPI<Type = U, Backend = B>,
+    U: Clone + DTypeCastAPI<T>,
+    B: DeviceAPI<T>
+        + DeviceAPI<usize, Raw = Vec<usize>>
+        + DeviceAPI<isize, Raw = Vec<isize>>
+        + DeviceAPI<U>
+        + DevicePutAlongAxisAPI<T, DA, DI, U>,
+{
+    put_along_axis_f(tensor, indices, values, axis).rstsr_unwrap()
+}
+
+/// Writes a broadcastable value along one axis at a host index list.
+///
+/// See also [`index_put`].
+pub fn index_put_f<RA, T, B, D, I, U, V>(
+    tensor: &mut TensorAny<RA, T, B, D>,
+    axis: isize,
+    indices: I,
+    value: V,
+) -> Result<()>
+where
+    RA: DataMutAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
+    D: DimAPI,
+    T: Clone,
+    V: TensorViewAPI<Type = U, Backend = B>,
+    U: Clone + DTypeCastAPI<T>,
+    I: TryInto<AxesIndex<isize>, Error: Into<Error>>,
+    B: DeviceAPI<T> + DeviceAPI<U> + DeviceIndexPutAPI<T, U>,
+{
+    let device = tensor.device().clone();
+    let order = device.default_order();
+    let ndim = tensor.ndim();
+    let axis = rstsr_check_axis!(axis, ndim)?;
+    rstsr_assert!(!tensor.layout().is_broadcasted(), InvalidLayout, "cannot assign to broadcasted tensor")?;
+    let nshape = tensor.layout().shape()[axis];
+    let indices = indices.try_into().map_err(Into::into)?;
+    let indices = indices
+        .as_ref()
+        .iter()
+        .map(|&i| -> Result<usize> {
+            let i = if i < 0 { nshape as isize + i } else { i };
+            rstsr_pattern!(
+                i,
+                0..nshape as isize,
+                IndexError,
+                "Invalid index that exceeds shape length at axis {}.",
+                axis
+            )?;
+            Ok(i as usize)
+        })
+        .collect::<Result<Vec<usize>>>()?;
+    // the selection shape is the input shape with `axis` of length `indices.len()`
+    let mut sel_shape = tensor.layout().shape().as_ref().to_vec();
+    sel_shape[axis] = indices.len();
+    let value = value.view();
+    rstsr_assert!(device.same_device(value.device()), DeviceMismatch)?;
+    let sel_layout: Layout<IxD> = sel_shape.new_contig(None, order);
+    let lvalue0 = value.layout().to_dim::<IxD>()?;
+    let (_, lvalue) = broadcast_layout_to_first(&sel_layout, &lvalue0, order)?;
+    let la = tensor.layout().to_dim::<IxD>()?;
+    device.index_put(tensor.raw_mut(), &la, axis, &indices, value.raw(), &lvalue)
+}
+
+/// Writes a broadcastable value along one axis at a host index list. The
+/// inverse of [`index_select`].
+///
+/// This function behaves identically under [`RowMajor`] and [`ColMajor`] device
+/// default orders.
+///
+/// # Parameters
+///
+/// - `tensor`: [`&mut TensorAny<R, T, B, D>`](TensorAny): the destination tensor.
+/// - `axis`: the axis to write along (negative counts from the back).
+/// - `indices`: the indices to write at, anything that converts into
+///   [`AxesIndex<isize>`][AxesIndex].
+/// - `value`: the values to write, broadcast to the selection shape and cast to `T`.
+///
+/// # Notes of API accordance
+///
+/// - RSTSR: `rt::index_put(&mut x, axis, indices, value)` (the inverse of [`index_select`]).
+///
+/// # Panics
+///
+/// - Panics if `axis` is out of range, an index is out of range, the value cannot broadcast to the
+///   selection shape, the devices differ, or the destination is a broadcasted view.
+///
+/// For a fallible version, use [`index_put_f`].
+///
+/// # See also
+///
+/// ## Related functions in RSTSR
+///
+/// - [`index_select`]: the gather this inverts.
+///
+/// ## Variants of this function
+///
+/// - [`index_put_f`]: fallible version.
+/// - Associated methods on [`TensorAny`]: [`TensorAny::index_put`] / [`TensorAny::index_put_f`].
+#[allow(clippy::type_complexity)]
+pub fn index_put<RA, T, B, D, I, U, V>(tensor: &mut TensorAny<RA, T, B, D>, axis: isize, indices: I, value: V)
+where
+    RA: DataMutAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
+    D: DimAPI,
+    T: Clone,
+    V: TensorViewAPI<Type = U, Backend = B>,
+    U: Clone + DTypeCastAPI<T>,
+    I: TryInto<AxesIndex<isize>, Error: Into<Error>>,
+    B: DeviceAPI<T> + DeviceAPI<U> + DeviceIndexPutAPI<T, U>,
+{
+    index_put_f(tensor, axis, indices, value).rstsr_unwrap()
+}
+
+/// Write a broadcastable value into every element of `tensor` where `mask` is
+/// true (array-valued `x[mask] = value`).
+///
+/// See also [`mask_assign`].
+pub fn mask_assign_f<RA, T, B, DA, DM, U, V>(
+    tensor: &mut TensorAny<RA, T, B, DA>,
+    mask: impl TensorViewAPI<Type = bool, Backend = B, Dim = DM>,
+    value: V,
+) -> Result<()>
+where
+    RA: DataMutAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
+    DA: DimAPI,
+    DM: DimAPI,
+    T: Clone,
+    V: TensorViewAPI<Type = U, Backend = B>,
+    U: Clone + DTypeCastAPI<T>,
+    B: DeviceAPI<T>
+        + DeviceAPI<bool>
+        + DeviceAPI<isize>
+        + DeviceAPI<usize>
+        + DeviceAPI<U>
+        + DeviceRawAPI<MaybeUninit<usize>>
+        + DeviceCreationAnyAPI<usize>
+        + DeviceCreationAnyAPI<bool>
+        + DeviceRawAPI<MaybeUninit<bool>>
+        + OpAssignAPI<bool, IxD>
+        + OpAssignAPI<T, IxD, U>
+        + DeviceArrayIndexAssignAPI<T, U>
+        + OpNonzeroAPI<bool, IxD>,
+    <B as DeviceRawAPI<bool>>::Raw: Clone,
+{
+    let mask = mask.view();
+    let device = tensor.device().clone();
+    rstsr_assert!(device.same_device(mask.device()), DeviceMismatch)?;
+    let mask_owned: Tensor<bool, B, IxD> = mask.into_dim::<IxD>().into_owned();
+    array_index_assign_f(tensor, mask_owned, value)
+}
+
+/// Write a broadcastable value into every element of `tensor` where `mask` is
+/// true (array-valued `x[mask] = value`). The mask has `dm <= x.ndim` axes
+/// matching `x`'s leading axes.
+///
+/// `x[mask] = value` with a *scalar* value is [`mask_fill`]; this is the
+/// array-valued form, which routes through [`array_index_assign`] (the mask's
+/// `nonzero` coordinates become index arrays).
+///
+/// # Notes of API accordance
+///
+/// - Array-API: `x[mask] = value`
+/// - NumPy: `x[mask] = value`
+/// - RSTSR: `rt::mask_assign(&mut x, mask, value)`
+///
+/// # Panics
+///
+/// - Panics if the mask has more axes than `x`, an axis whose size is neither `x`'s nor zero, the
+///   value cannot broadcast to the selected shape, the devices differ, or the destination is a
+///   broadcasted view.
+///
+/// For a fallible version, use [`mask_assign_f`].
+///
+/// # See also
+///
+/// ## Related functions in RSTSR
+///
+/// - [`mask_fill`]: the scalar form.
+/// - [`array_index_assign`]: the general setter this delegates to.
+///
+/// ## Variants of this function
+///
+/// - [`mask_assign_f`]: fallible version.
+/// - Associated methods on [`TensorAny`]: [`TensorAny::mask_assign`] /
+///   [`TensorAny::mask_assign_f`].
+#[allow(clippy::type_complexity)]
+pub fn mask_assign<RA, T, B, DA, DM, U, V>(
+    tensor: &mut TensorAny<RA, T, B, DA>,
+    mask: impl TensorViewAPI<Type = bool, Backend = B, Dim = DM>,
+    value: V,
+) where
+    RA: DataMutAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
+    DA: DimAPI,
+    DM: DimAPI,
+    T: Clone,
+    V: TensorViewAPI<Type = U, Backend = B>,
+    U: Clone + DTypeCastAPI<T>,
+    B: DeviceAPI<T>
+        + DeviceAPI<bool>
+        + DeviceAPI<isize>
+        + DeviceAPI<usize>
+        + DeviceAPI<U>
+        + DeviceRawAPI<MaybeUninit<usize>>
+        + DeviceCreationAnyAPI<usize>
+        + DeviceCreationAnyAPI<bool>
+        + DeviceRawAPI<MaybeUninit<bool>>
+        + OpAssignAPI<bool, IxD>
+        + OpAssignAPI<T, IxD, U>
+        + DeviceArrayIndexAssignAPI<T, U>
+        + OpNonzeroAPI<bool, IxD>,
+    <B as DeviceRawAPI<bool>>::Raw: Clone,
+{
+    mask_assign_f(tensor, mask, value).rstsr_unwrap()
+}
+
+impl<RA, T, B, DA> TensorAny<RA, T, B, DA>
+where
+    RA: DataMutAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
+    DA: DimAPI,
+    T: Clone,
+    B: DeviceRawAPI<T>,
+{
+    /// Writes values along one axis at the positions an index tensor gives.
+    ///
+    /// See also [`put_along_axis`].
+    pub fn put_along_axis_f<DI, U, V>(
+        &mut self,
+        indices: impl TensorViewAPI<Type = isize, Backend = B, Dim = DI>,
+        values: V,
+        axis: impl TryInto<AxisIndex<isize>, Error: Into<Error>>,
+    ) -> Result<()>
+    where
+        DI: DimAPI,
+        V: TensorViewAPI<Type = U, Backend = B>,
+        U: Clone + DTypeCastAPI<T>,
+        B: DeviceAPI<T>
+            + DeviceAPI<usize, Raw = Vec<usize>>
+            + DeviceAPI<isize, Raw = Vec<isize>>
+            + DeviceAPI<U>
+            + DevicePutAlongAxisAPI<T, DA, DI, U>,
+    {
+        put_along_axis_f(self, indices, values, axis)
+    }
+
+    /// Writes values along one axis at the positions an index tensor gives.
+    ///
+    /// See also [`put_along_axis`].
+    pub fn put_along_axis<DI, U, V>(
+        &mut self,
+        indices: impl TensorViewAPI<Type = isize, Backend = B, Dim = DI>,
+        values: V,
+        axis: impl TryInto<AxisIndex<isize>, Error: Into<Error>>,
+    ) where
+        DI: DimAPI,
+        V: TensorViewAPI<Type = U, Backend = B>,
+        U: Clone + DTypeCastAPI<T>,
+        B: DeviceAPI<T>
+            + DeviceAPI<usize, Raw = Vec<usize>>
+            + DeviceAPI<isize, Raw = Vec<isize>>
+            + DeviceAPI<U>
+            + DevicePutAlongAxisAPI<T, DA, DI, U>,
+    {
+        put_along_axis(self, indices, values, axis)
+    }
+
+    /// Writes a broadcastable value along one axis at a host index list.
+    ///
+    /// See also [`index_put`].
+    pub fn index_put_f<I, U, V>(&mut self, axis: isize, indices: I, value: V) -> Result<()>
+    where
+        I: TryInto<AxesIndex<isize>, Error: Into<Error>>,
+        V: TensorViewAPI<Type = U, Backend = B>,
+        U: Clone + DTypeCastAPI<T>,
+        B: DeviceAPI<T> + DeviceAPI<U> + DeviceIndexPutAPI<T, U>,
+    {
+        index_put_f(self, axis, indices, value)
+    }
+
+    /// Writes a broadcastable value along one axis at a host index list.
+    ///
+    /// See also [`index_put`].
+    pub fn index_put<I, U, V>(&mut self, axis: isize, indices: I, value: V)
+    where
+        I: TryInto<AxesIndex<isize>, Error: Into<Error>>,
+        V: TensorViewAPI<Type = U, Backend = B>,
+        U: Clone + DTypeCastAPI<T>,
+        B: DeviceAPI<T> + DeviceAPI<U> + DeviceIndexPutAPI<T, U>,
+    {
+        index_put(self, axis, indices, value)
+    }
+
+    /// Writes a broadcastable value into every element where `mask` is true.
+    ///
+    /// See also [`mask_assign`].
+    pub fn mask_assign_f<DM, U, V>(
+        &mut self,
+        mask: impl TensorViewAPI<Type = bool, Backend = B, Dim = DM>,
+        value: V,
+    ) -> Result<()>
+    where
+        DM: DimAPI,
+        V: TensorViewAPI<Type = U, Backend = B>,
+        U: Clone + DTypeCastAPI<T>,
+        B: DeviceAPI<T>
+            + DeviceAPI<bool>
+            + DeviceAPI<isize>
+            + DeviceAPI<usize>
+            + DeviceAPI<U>
+            + DeviceRawAPI<MaybeUninit<usize>>
+            + DeviceCreationAnyAPI<usize>
+            + DeviceCreationAnyAPI<bool>
+            + DeviceRawAPI<MaybeUninit<bool>>
+            + OpAssignAPI<bool, IxD>
+            + OpAssignAPI<T, IxD, U>
+            + DeviceArrayIndexAssignAPI<T, U>
+            + OpNonzeroAPI<bool, IxD>,
+        <B as DeviceRawAPI<bool>>::Raw: Clone,
+    {
+        mask_assign_f(self, mask, value)
+    }
+
+    /// Writes a broadcastable value into every element where `mask` is true.
+    ///
+    /// See also [`mask_assign`].
+    pub fn mask_assign<DM, U, V>(&mut self, mask: impl TensorViewAPI<Type = bool, Backend = B, Dim = DM>, value: V)
+    where
+        DM: DimAPI,
+        V: TensorViewAPI<Type = U, Backend = B>,
+        U: Clone + DTypeCastAPI<T>,
+        B: DeviceAPI<T>
+            + DeviceAPI<bool>
+            + DeviceAPI<isize>
+            + DeviceAPI<usize>
+            + DeviceAPI<U>
+            + DeviceRawAPI<MaybeUninit<usize>>
+            + DeviceCreationAnyAPI<usize>
+            + DeviceCreationAnyAPI<bool>
+            + DeviceRawAPI<MaybeUninit<bool>>
+            + OpAssignAPI<bool, IxD>
+            + OpAssignAPI<T, IxD, U>
+            + DeviceArrayIndexAssignAPI<T, U>
+            + OpNonzeroAPI<bool, IxD>,
+        <B as DeviceRawAPI<bool>>::Raw: Clone,
+    {
+        mask_assign(self, mask, value)
+    }
+}
+
+/* #endregion */
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -1097,5 +1570,63 @@ mod test {
         let v_r = a_r.take_along_axis(&i_r, 0).into_shape([-1]).to_vec();
         let v_s = a_s.take_along_axis(&i_s, 0).into_shape([-1]).to_vec();
         assert_eq!(v_r, v_s);
+    }
+
+    #[test]
+    fn test_put_along_axis_workable() {
+        let mut device = DeviceCpu::default();
+        device.set_default_order(RowMajor);
+
+        // overwrite along axis 1 at per-row columns
+        let mut a: Tensor<i32, _> = zeros(([2, 3], &device));
+        let idx = tensor_from_nested!([[2isize, 0], [1, 1]], &device);
+        let vals = tensor_from_nested!([[10, 20], [30, 40]], &device);
+        a.put_along_axis(&idx, &vals, -1);
+        // a[0,2]=10, a[0,0]=20, a[1,1]=30 then 40 (last wins)
+        assert_eq!(a.into_shape([-1]).to_vec(), vec![20, 0, 10, 0, 40, 0]);
+
+        // values broadcast to the indices' shape (2, 1) -> (2, 2)
+        let mut b: Tensor<i32, _> = zeros(([2, 3], &device));
+        b.put_along_axis(&idx, tensor_from_nested!([[5], [6]], &device), 1);
+        assert_eq!(b.into_shape([-1]).to_vec(), vec![5, 0, 5, 0, 6, 0]);
+
+        // along the leading axis
+        let mut c: Tensor<i32, _> = zeros(([3, 2], &device));
+        let idx0 = tensor_from_nested!([[1isize, 2], [0, 1]], &device);
+        c.put_along_axis(&idx0, tensor_from_nested!([[10, 11], [12, 13]], &device), 0);
+        // c[1,0]=10, c[0,0]=12, c[2,1]=11, c[1,1]=13
+        assert_eq!(c.into_shape([-1]).to_vec(), vec![12, 0, 10, 13, 0, 11]);
+    }
+
+    #[test]
+    fn test_index_put_workable() {
+        let mut device = DeviceCpu::default();
+        device.set_default_order(RowMajor);
+
+        // overwrite rows 0 and 1 along axis 0
+        let mut a = arange((6, &device)).into_shape([3, 2]);
+        a.index_put(0, [0, 1], tensor_from_nested!([[10, 11], [12, 13]], &device));
+        assert_eq!(a.into_shape([-1]).to_vec(), vec![10, 11, 12, 13, 4, 5]);
+
+        // duplicate indices: the last write wins
+        let mut b = arange((6, &device)).into_shape([3, 2]);
+        b.index_put(0, [2, 2], tensor_from_nested!([[1, 2], [3, 4]], &device));
+        assert_eq!(b.into_shape([-1]).to_vec(), vec![0, 1, 2, 3, 3, 4]);
+
+        // broadcast value (a column) into the selection
+        let mut c: Tensor<f64, _> = zeros(([3, 2], &device));
+        c.index_put(1, [0, 1], full(([3, 1], 5.0f64, &device)));
+        assert_eq!(c.into_shape([-1]).to_vec(), vec![5., 5., 5., 5., 5., 5.]);
+    }
+
+    #[test]
+    fn test_mask_assign_workable() {
+        let mut device = DeviceCpu::default();
+        device.set_default_order(RowMajor);
+
+        let mut a: Tensor<f64, _> = zeros(([3, 2], &device));
+        let mask = asarray((vec![true, false, true], &device));
+        a.mask_assign(&mask, full(([2, 2], 1.5f64, &device)));
+        assert_eq!(a.into_shape([-1]).to_vec(), vec![1.5, 1.5, 0.0, 0.0, 1.5, 1.5]);
     }
 }
