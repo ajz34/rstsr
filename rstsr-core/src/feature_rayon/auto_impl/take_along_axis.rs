@@ -1,7 +1,5 @@
 //! take_along_axis device impls for [`DeviceRayonAutoImpl`] (generic rayon
-//! device; also [`DeviceFaer`]'s impl through the `rayon_auto_impl`
-//! symlink). Delegates to the serial kernel (per-line gathers are memory
-//! bound; a parallel rest-split can follow with the perf pass).
+//! device; also `DeviceFaer`'s impl through the `rayon_auto_impl` symlink).
 
 use crate::prelude_dev::*;
 
@@ -21,8 +19,9 @@ where
         lidx: &Layout<DI>,
         axis: usize,
     ) -> Result<()> {
+        let pool = self.get_current_pool();
         let stride_ref: &[isize] = layout_c.stride().as_ref();
         let out_strides: Vec<usize> = stride_ref.iter().map(|&s| s.unsigned_abs()).collect();
-        take_along_axis_cpu_serial(c, &out_strides, a, la, idx, lidx, axis)
+        take_along_axis_cpu_rayon(c, &out_strides, a, la, idx, lidx, axis, pool)
     }
 }

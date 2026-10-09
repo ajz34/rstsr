@@ -1028,4 +1028,74 @@ mod test {
             assert_eq!(c.into_shape([-1]).to_vec(), vec![9, 0, 9, 0, 0, 0, 0, 9, 0, 0, 9, 0]);
         }
     }
+
+    // `DeviceCpu` is the rayon device under the default features; the sizes
+    // below cross its parallel switch, so these compare the parallel mask /
+    // take_along_axis kernels with the serial ones.
+    #[test]
+    #[cfg(feature = "rayon")]
+    fn test_mask_indexing_parallel_matches_serial() {
+        let mut d_rayon = DeviceCpu::default();
+        d_rayon.set_default_order(RowMajor);
+        let mut d_serial = DeviceCpuSerial::default();
+        d_serial.set_default_order(RowMajor);
+
+        // a prefix mask over the leading axis of a 2-D array: the selected
+        // trailing blocks are large enough to cross the switch
+        let (rows, cols) = (200_usize, 256_usize);
+        let host: Vec<f64> = (0..rows * cols).map(|x| x as f64).collect();
+        let sel: Vec<bool> = (0..rows).map(|i| i % 3 != 0).collect();
+        let a_r = asarray((host.clone(), &d_rayon)).into_shape((rows, cols));
+        let m_r = asarray((sel.clone(), &d_rayon));
+        let a_s = asarray((host, &d_serial)).into_shape((rows, cols));
+        let m_s = asarray((sel.clone(), &d_serial));
+
+        let v_r = mask_select(&a_r, &m_r).into_shape([-1]).to_vec();
+        let v_s = mask_select(&a_s, &m_s).into_shape([-1]).to_vec();
+        // the expected blocks are the rows not divisible by 3, in visit order
+        let expected: Vec<f64> =
+            (0..rows).filter(|i| i % 3 != 0).flat_map(|i| (0..cols).map(move |j| (i * cols + j) as f64)).collect();
+        assert_eq!(v_r, expected);
+        assert_eq!(v_r, v_s);
+
+        // scatter a scalar into the same selection
+        let mut c_r = a_r.clone();
+        let mut c_s = a_s.clone();
+        c_r.mask_fill(&m_r, -1.0);
+        c_s.mask_fill(&m_s, -1.0);
+        let v_r = c_r.into_shape([-1]).to_vec();
+        let v_s = c_s.into_shape([-1]).to_vec();
+        let expected: Vec<f64> = (0..rows * cols).map(|x| if (x / cols) % 3 != 0 { -1.0 } else { x as f64 }).collect();
+        assert_eq!(v_r, expected);
+        assert_eq!(v_r, v_s);
+    }
+
+    #[test]
+    #[cfg(feature = "rayon")]
+    fn test_take_along_axis_parallel_matches_serial() {
+        let mut d_rayon = DeviceCpu::default();
+        d_rayon.set_default_order(RowMajor);
+        let mut d_serial = DeviceCpuSerial::default();
+        d_serial.set_default_order(RowMajor);
+
+        let (rows, cols) = (300_usize, 300_usize);
+        let host: Vec<f64> = (0..rows * cols).map(|x| x as f64).collect();
+        let idx: Vec<isize> = (0..rows * cols).map(|x| ((x * 7) % cols) as isize).collect();
+        let a_r = asarray((host.clone(), &d_rayon)).into_shape((rows, cols));
+        let i_r = asarray((idx.clone(), &d_rayon)).into_shape((rows, cols));
+        let a_s = asarray((host, &d_serial)).into_shape((rows, cols));
+        let i_s = asarray((idx.clone(), &d_serial)).into_shape((rows, cols));
+
+        let v_r = a_r.take_along_axis(&i_r, 1).into_shape([-1]).to_vec();
+        let v_s = a_s.take_along_axis(&i_s, 1).into_shape([-1]).to_vec();
+        // `a[r, c] = r * cols + c` with `c` the taken column
+        let expected: Vec<f64> = (0..rows * cols).map(|x| ((x / cols) * cols + (x * 7) % cols) as f64).collect();
+        assert_eq!(v_r, expected);
+        assert_eq!(v_r, v_s);
+
+        // take along the leading axis as well (a different rest/axis split)
+        let v_r = a_r.take_along_axis(&i_r, 0).into_shape([-1]).to_vec();
+        let v_s = a_s.take_along_axis(&i_s, 0).into_shape([-1]).to_vec();
+        assert_eq!(v_r, v_s);
+    }
 }

@@ -26,8 +26,6 @@ where
     DA: DimAPI,
     DM: DimAPI,
 {
-    /// Serial gather / scatter (the mask prefix-sum needed for a parallel fill
-    /// can follow with the perf pass, as for `nonzero`).
     fn mask_select(
         &self,
         c: &mut Vec<MaybeUninit<TA>>,
@@ -36,10 +34,12 @@ where
         mask: &Vec<bool>,
         lm: &Layout<DM>,
     ) -> Result<()> {
-        mask_select_cpu_serial(c, a, &la.to_dim::<IxD>()?, mask, &lm.to_dim::<IxD>()?, self.default_order())
+        let pool = self.get_current_pool();
+        mask_select_cpu_rayon(c, a, &la.to_dim::<IxD>()?, mask, &lm.to_dim::<IxD>()?, self.default_order(), pool)
     }
 
     fn mask_fill(&self, a: &mut Vec<TA>, la: &Layout<DA>, mask: &Vec<bool>, lm: &Layout<DM>, value: TA) -> Result<()> {
-        mask_fill_cpu_serial(a, &la.to_dim::<IxD>()?, mask, &lm.to_dim::<IxD>()?, value, self.default_order())
+        let pool = self.get_current_pool();
+        mask_fill_cpu_rayon(a, &la.to_dim::<IxD>()?, mask, &lm.to_dim::<IxD>()?, value, self.default_order(), pool)
     }
 }

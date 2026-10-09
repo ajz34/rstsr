@@ -902,4 +902,50 @@ mod test {
         // index arrays that cannot broadcast
         assert!(a.array_index_f(([0, 1], [0, 1, 2])).is_err());
     }
+
+    // `DeviceCpu` is the rayon device under the default features; the sizes
+    // below cross its parallel switch, so this compares the parallel gather
+    // with the serial one.
+    #[test]
+    #[cfg(feature = "rayon")]
+    fn test_array_index_parallel_matches_serial() {
+        let mut d_rayon = DeviceCpu::default();
+        d_rayon.set_default_order(RowMajor);
+        let mut d_serial = DeviceCpuSerial::default();
+        d_serial.set_default_order(RowMajor);
+
+        // one index array on the only axis
+        let n = 20_000_usize;
+        let host: Vec<f64> = (0..n).map(|k| k as f64).collect();
+        let idx: Vec<isize> = (0..n).map(|k| ((k * 7919) % n) as isize).collect();
+        let a_r = asarray((host.clone(), &d_rayon));
+        let i_r = asarray((idx.clone(), &d_rayon));
+        let a_s = asarray((host, &d_serial));
+        let i_s = asarray((idx.clone(), &d_serial));
+
+        let v_r = a_r.array_index((&i_r,)).into_shape([-1]).to_vec();
+        let v_s = a_s.array_index((&i_s,)).into_shape([-1]).to_vec();
+        // `a[k] == k`, so the gather reproduces the index array
+        assert_eq!(v_r, idx.iter().map(|&x| x as f64).collect::<Vec<_>>());
+        assert_eq!(v_r, v_s);
+
+        // two index arrays broadcast to a 2-D block
+        let (m, k) = (200_usize, 200_usize);
+        let host2: Vec<f64> = (0..m * k).map(|x| x as f64).collect();
+        let i0: Vec<isize> = (0..m * k).map(|x| (x % m) as isize).collect();
+        let i1: Vec<isize> = (0..m * k).map(|x| (x / m) as isize).collect();
+        let a_r = asarray((host2.clone(), &d_rayon)).into_shape((m, k));
+        let j0_r = asarray((i0.clone(), &d_rayon)).into_shape([m, k]);
+        let j1_r = asarray((i1.clone(), &d_rayon)).into_shape([m, k]);
+        let a_s = asarray((host2, &d_serial)).into_shape((m, k));
+        let j0_s = asarray((i0.clone(), &d_serial)).into_shape([m, k]);
+        let j1_s = asarray((i1.clone(), &d_serial)).into_shape([m, k]);
+
+        let v_r = a_r.array_index((&j0_r, &j1_r)).into_shape([-1]).to_vec();
+        let v_s = a_s.array_index((&j0_s, &j1_s)).into_shape([-1]).to_vec();
+        // `a[i0, i1] = i0 * k + i1` (row-major flattened offset)
+        let expected: Vec<f64> = i0.iter().zip(i1.iter()).map(|(&x, &y)| (x * k as isize + y) as f64).collect();
+        assert_eq!(v_r, expected);
+        assert_eq!(v_r, v_s);
+    }
 }
