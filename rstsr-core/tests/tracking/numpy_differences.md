@@ -426,9 +426,10 @@ and boolean masks: a mask is lowered to its `nonzero` coordinates, so it consume
 per mask axis (they must match the indexed axes exactly — a zero-size mask axis is allowed,
 NumPy-style) and contributes one `(count,)` dimension. Grouped ("parenthesized") index
 tuples are still not supported and raise `UnImplemented`. In the Python layer a lone boolean
-array still routes to whole-tensor mask indexing (`rt::mask_select`, i.e. `x[mask]`), and a
-boolean array mixed into a Python key outside that route is not exposed yet (the faer-py shim
-raises). Advanced key assignment (`x[idx] = value`) is likewise not implemented. The index
+array still routes to whole-tensor mask indexing (`rt::mask_select`, i.e. `x[mask]`); a
+boolean mask mixed into a Python key rides the same `rt::array_index` path (the faer-py shim
+exposes it since 2026-10-09). Advanced key assignment (`x[idx] = value`) is likewise not
+implemented. The index
 argument is a dedicated argument type ([`ArrayIndexArgs`]) rather than
 `AxesIndex<ArrayIndexer<B>>`, because the latter's conversions cannot be implemented outside
 `rstsr-common` (the orphan rule); the `AxesIndex` form is still accepted through `TryFrom`.

@@ -3,9 +3,9 @@
 //! Basic keys (int/slice/newaxis/ellipsis) ride rstsr's layout slicing
 //! (`i_f`/`i_mut_f`) and its assign/fill; whole-tensor boolean-mask keys ride
 //! `rt::mask_select` / `rt::mask_fill` (rust-side, G-038); keys containing an
-//! integer array ride `rt::array_index` (rust-side array indexing, G-039), and
-//! may freely mix basic indexers with index arrays. Results are fresh owned
-//! tensors — the handle model has no shared storage (register G-036).
+//! integer array or a boolean mask ride `rt::array_index` (rust-side array
+//! indexing, G-039), and may freely mix basic indexers with them. Results are
+//! fresh owned tensors — the handle model has no shared storage (register G-036).
 
 use core::mem::MaybeUninit;
 use num::Complex;
@@ -36,6 +36,9 @@ enum KeyItem {
     Ellipsis,
     /// An integer index array (same device as the indexed tensor).
     Array(FTensor<isize>),
+    /// A boolean mask (same device as the indexed tensor), consuming one axis
+    /// per mask axis.
+    Mask(FTensor<bool>),
 }
 
 fn sl(start: Option<isize>, stop: Option<isize>, step: Option<isize>) -> Indexer {
@@ -43,9 +46,9 @@ fn sl(start: Option<isize>, stop: Option<isize>, step: Option<isize>) -> Indexer
 }
 
 /// Convert an integer index array (any integer dtype) into the `isize` index
-/// dtype of rstsr's array indexing. Boolean arrays are only supported as a
-/// lone whole-tensor mask, which the Python layer routes to
-/// [`getitem_mask`]; every other array dtype is not an index.
+/// dtype of rstsr's array indexing. Boolean arrays are routed to
+/// [`KeyItem::Mask`] by `parse_key` (and a lone one to [`getitem_mask`] by the
+/// Python layer), so only integer dtypes reach here.
 fn index_array_to_isize(x: &NativeArray) -> PyResult<FTensor<isize>> {
     match &x.t {
         AnyTensor::I8(t) => Ok(t.mapv(|v| v as isize)),
@@ -56,17 +59,13 @@ fn index_array_to_isize(x: &NativeArray) -> PyResult<FTensor<isize>> {
         AnyTensor::U16(t) => Ok(t.mapv(|v| v as isize)),
         AnyTensor::U32(t) => Ok(t.mapv(|v| v as isize)),
         AnyTensor::U64(t) => Ok(t.mapv(|v| v as isize)),
-        AnyTensor::Bool(_) => type_err(
-            "boolean-array indexing cannot be mixed with other indexers; use a lone boolean mask \
-             (x[mask]) or rt::mask_select / rt::bool_select",
-        ),
         _ => type_err("integer-array (fancy) indexing requires an integer index array"),
     }
 }
 
-/// Duck-typed key parse: int / slice / None / Ellipsis / integer array.
-/// Whole-tensor boolean masks are routed to [`getitem_mask`] /
-/// [`setitem_mask`] by the Python layer.
+/// Duck-typed key parse: int / slice / None / Ellipsis / integer array /
+/// boolean mask. A lone whole-tensor boolean mask is routed to
+/// [`getitem_mask`] / [`setitem_mask`] by the Python layer.
 fn parse_key<'py>(key: &Bound<'py, PyTuple>) -> PyResult<Vec<KeyItem>> {
     let mut items = Vec::new();
     for item in key.iter() {
@@ -84,7 +83,10 @@ fn parse_key<'py>(key: &Bound<'py, PyTuple>) -> PyResult<Vec<KeyItem>> {
         } else if item.is_instance_of::<PyEllipsis>() {
             items.push(KeyItem::Ellipsis);
         } else if let Ok(handle) = item.extract::<PyRef<'py, NativeArray>>() {
-            items.push(KeyItem::Array(index_array_to_isize(&handle)?));
+            match &handle.t {
+                AnyTensor::Bool(t) => items.push(KeyItem::Mask(t.clone())),
+                _ => items.push(KeyItem::Array(index_array_to_isize(&handle)?)),
+            }
         } else {
             return Err(PyTypeError::new_err(format!("invalid index element of type {}", item.get_type().name()?)));
         }
@@ -106,6 +108,10 @@ fn to_indexers(items: &[KeyItem]) -> PyResult<Vec<Indexer>> {
                 "integer-array (fancy) item assignment is not implemented; only boolean-mask \
                  assignment (x[mask] = value) is supported",
             ),
+            KeyItem::Mask(_) => type_err(
+                "boolean-mask item assignment is only supported when the mask is the whole key \
+                 (x[mask] = value)",
+            ),
         })
         .collect::<PyResult<Vec<Indexer>>>()
 }
@@ -115,9 +121,9 @@ fn to_indexers(items: &[KeyItem]) -> PyResult<Vec<Indexer>> {
 /* #region basic */
 
 /// Every `__getitem__` key rides `rt::array_index`: with integer index arrays
-/// that is array indexing, and without them it degenerates to basic slicing (a
-/// view). Riding one path also means a bad key raises the same error kind in
-/// both spellings (NumPy raises `IndexError` either way).
+/// or boolean masks that is array indexing, and without them it degenerates to
+/// basic slicing (a view). Riding one path also means a bad key raises the same
+/// error kind in both spellings (NumPy raises `IndexError` either way).
 fn op_getitem<T>(t: &FTensor<T>, items: Vec<KeyItem>) -> rt::Result<FTensor<T>>
 where
     T: Clone + Send + Sync + 'static,
@@ -141,6 +147,7 @@ where
             KeyItem::Ellipsis => ArrayIndexer::Basic(Indexer::Ellipsis),
             // moved, not cloned: `parse_key` owns the handle's tensor
             KeyItem::Array(idx) => ArrayIndexer::ArrayIndex(idx),
+            KeyItem::Mask(m) => ArrayIndexer::ArrayBool(m),
         })
         .collect::<Vec<_>>();
     Ok(rt::array_index_f(t, ArrayIndexArgs::new(indexers))?.into_owned())

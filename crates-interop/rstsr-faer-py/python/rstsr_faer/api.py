@@ -446,7 +446,10 @@ class Array:
         )
         if builtins.any(isinstance(k, Array) for k in key):
             if not _is_single_bool_mask(key):
-                _unimplemented("integer-array (fancy) item assignment (rstsr gap G-039)")
+                _unimplemented(
+                    "item assignment with an array or a mask mixed into the key "
+                    "(rstsr gap G-039); only a lone boolean mask (x[mask] = value) is supported"
+                )
             mask = key[0]._h
             if isinstance(value, Array):
                 _pkg.setitem_mask(self._h, mask, value._h)
