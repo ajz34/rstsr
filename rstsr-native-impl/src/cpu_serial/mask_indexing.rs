@@ -13,7 +13,7 @@ use crate::prelude_dev::*;
 /// The block shape/stride are those of `la.shape()[dm..]` / `la.stride()[dm..]`;
 /// offsets are relative to the block base. Empty block (a zero-size axis)
 /// yields no offsets.
-fn trailing_offsets(la: &Layout<IxD>, dm: usize, order: FlagOrder) -> Vec<isize> {
+pub(crate) fn trailing_offsets(la: &Layout<IxD>, dm: usize, order: FlagOrder) -> Vec<isize> {
     let shape: &[usize] = &la.shape()[dm..];
     let stride: &[isize] = &la.stride()[dm..];
     let n = shape.len();
