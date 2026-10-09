@@ -771,6 +771,13 @@ mod test {
     /// here: every output position is written from exactly one source position,
     /// whatever the traversal — the arrangement is what carries the device
     /// order into the result.
+    ///
+    /// This test answers *"what does the device order change, and does it match
+    /// NumPy read in that same order?"*, comparing each device against NumPy's
+    /// `ravel()` / `ravel(order='F')` rather than against the other device. Its
+    /// sibling [`test_array_index_order_equivalence`] answers *"do the two
+    /// orders gather the same thing?"* (values, shape, and the reading order of
+    /// multi-dimensional index arrays).
     #[test]
     fn test_array_index_colmajor_iteration() {
         // a[i, j, k, l] = 16*i + 8*j + 4*k + l, built by broadcasting so both
@@ -838,6 +845,17 @@ mod test {
     /// the placement rule, and the trailing-aligned broadcast of the index
     /// arrays) are order-independent, while the arrangement of the result and
     /// the reading order of the index arrays follow the device.
+    ///
+    /// This test answers *"do the two device orders gather the same thing?"* —
+    /// it compares the two devices against each other, logically (element
+    /// reads, insensitive to the arrangement), and covers what only this test
+    /// covers: index arrays of different ranks broadcasting trailing-aligned,
+    /// and multi-dimensional index arrays, whose same flat entries are
+    /// *different* logical index arrays under the two orders. Its sibling
+    /// [`test_array_index_colmajor_iteration`] answers the complementary
+    /// question, *"what does the device order change?"*, by comparing each
+    /// device against NumPy's flattening in the corresponding order (the
+    /// strides of the fancy dimensions and the result's visit sequence).
     #[test]
     fn test_array_index_order_equivalence() {
         // a[i, j, k] = 12*i + 4*j + k, built by broadcasting so that both
