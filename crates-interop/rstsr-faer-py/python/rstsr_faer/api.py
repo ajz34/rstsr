@@ -4,6 +4,14 @@ Thin Python layer over the pyo3 module ``rstsr_faer.rstsr_faer``: signature
 shims, protocol objects, and marshalling only.  No numeric algorithms live
 here — everything numeric happens in Rust (rstsr, faer device).
 
+One corner where the standard asks for more than Rust does is *dtype
+promotion queries* (``result_type``, ``can_cast``, ``isdtype``). In Rust,
+promotion is a compile-time relation carried by a trait bound
+(``DTypePromoteAPI``), so there is nothing to call at runtime; a Python
+namespace has only dtype tokens, so the standard mandates explicit functions.
+They resolve through ``rstsr_faer.rstsr_faer.dtype_promote``, which
+re-projects that same trait lattice onto name pairs — see ``src/promotion.rs``.
+
 Consciously outside the standard's surface (validation instrument, not a
 product): names absent from this module are rstsr gaps, recorded in the gap
 register rather than papered over with Python fallbacks.
@@ -1775,6 +1783,86 @@ def iinfo(type, /):
     return _iinfo(type)
 
 
+# ------------------------------------------------------ dtype promotion -----
+# The standard mandates runtime promotion queries that Rust answers with a
+# trait bound (see the module docstring and src/promotion.rs).
+
+_DTYPE_BY_NAME = {
+    "bool": bool,
+    "int8": int8, "int16": int16, "int32": int32, "int64": int64,
+    "uint8": uint8, "uint16": uint16, "uint32": uint32, "uint64": uint64,
+    "float32": float32, "float64": float64,
+    "complex64": complex64, "complex128": complex128,
+}
+_ALL_DTYPE_NAMES = tuple(_DTYPE_BY_NAME)
+
+# isdtype kind membership (the seven kind names of the standard)
+_KIND_MEMBERS = {
+    "bool": ("bool",),
+    "signed integer": ("int8", "int16", "int32", "int64"),
+    "unsigned integer": ("uint8", "uint16", "uint32", "uint64"),
+    "integral": ("int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64"),
+    "real floating": ("float32", "float64"),
+    "complex floating": ("complex64", "complex128"),
+    "numeric": (
+        "int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64",
+        "float32", "float64", "complex64", "complex128",
+    ),
+}
+
+
+def _dtype_name(x, /):
+    """Dtype name of an array/dtype argument; None for a Python scalar."""
+    if isinstance(x, Array):
+        return x.dtype.name
+    if isinstance(x, Dtype):
+        return x.name
+    if isinstance(x, (_py_bool, _py_int, _py_float, _py_complex)):
+        return None
+    raise TypeError(f"expected an array, a dtype, or a Python scalar, got {type(x).__name__}")
+
+
+def isdtype(dtype, kind):
+    if not isinstance(dtype, Dtype):
+        raise TypeError(f"isdtype: dtype must be a dtype object, got {type(dtype).__name__}")
+    kinds = kind if isinstance(kind, tuple) else (kind,)
+    for k in kinds:
+        if isinstance(k, Dtype):
+            if dtype is k:
+                return True
+        elif isinstance(k, str):
+            members = _KIND_MEMBERS.get(k)
+            if members is None:
+                raise ValueError(f"isdtype: unrecognized kind {k!r}")
+            if dtype.name in members:
+                return True
+        else:
+            raise TypeError(f"isdtype: kind entries must be str or dtype, got {type(k).__name__}")
+    return False
+
+
+def can_cast(from_, to, /):
+    f = _dtype_name(from_)
+    if f is None:
+        raise TypeError("can_cast: from_ must be an array or a dtype")
+    t = _dtype_name(to)
+    if t is None:
+        raise TypeError("can_cast: to must be a dtype")
+    # per the standard, `to` is reachable when some dtype promotes `from_` to it
+    return builtins.any(_pkg.dtype_promote(f, o) == t for o in _ALL_DTYPE_NAMES)
+
+
+def result_type(*arrays_and_dtypes):
+    # Python scalars are weak: they never promote the array/dtype arguments.
+    names = [n for n in map(_dtype_name, arrays_and_dtypes) if n is not None]
+    if not names:
+        raise ValueError("result_type: at least one array or dtype is required")
+    res = names[0]
+    for n in names[1:]:
+        res = _pkg.dtype_promote(res, n)
+    return _DTYPE_BY_NAME[res]
+
+
 # -------------------------------------------------------------------- export --
 
 __all__ = [
@@ -1822,7 +1910,7 @@ __all__ = [
     # set functions
     "isin", "unique_values", "unique_counts", "unique_inverse", "unique_all",
     # data types
-    "astype", "finfo", "iinfo",
+    "astype", "finfo", "iinfo", "can_cast", "isdtype", "result_type",
     # constants / sentinels
     "newaxis",
 ]
