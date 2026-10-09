@@ -45,13 +45,17 @@ affected at all. Element-wise computations are unaffected in their results;
 only the memory arrangement of newly allocated results follows the default
 order. The same holds for the gathering operations whose selection is described
 by coordinates rather than by a visit sequence — [`index_select`],
-[`take_along_axis`] and [`array_index`] (including `array_index`'s placement
-rule and the trailing-aligned broadcast of its index arrays): their shape and
-values are order-independent, and only the arrangement of a newly allocated
-result (and anything that flattens it: `to_vec()`, `iter()`) follows the device
-default order. [`array_index`] also reads its index arrays — and visits the
-broadcast dimensions they describe — in the device order; that traversal is not
-observable in the result. [`mask_select`] is the exception among the gathers:
+[`take_along_axis`] and, for a run of advanced indexers that stays together,
+[`array_index`]: their shape and values are order-independent, and only the
+arrangement of a newly allocated result (and anything that flattens it:
+`to_vec()`, `iter()`) follows the device default order. [`array_index`] is
+*shape*-dependent on the order when the advanced indexers are apart: its
+placement rule is measured in the device's access order, so a displaced run of
+index arrays goes to the front under [`RowMajor`] and to the **back** under
+[`ColMajor`] (see its Row/Column Major Notice). Either way it reads its index
+arrays — and visits the broadcast dimensions they describe — in the device
+order, and that traversal is not observable in the result. [`mask_select`] is
+the exception among the gathers:
 its selection *sequence* is the mask visit order, which follows the device
 default order by design — not the row-major rule the Python Array API
 prescribes for boolean index arrays — so on a column-major device even a 1-D

@@ -438,22 +438,28 @@ rule); the `AxesIndex` form is still accepted through `TryFrom`.
   `x[int_array, ..]` alike.
 - **rstsr:** `rstsr-core/src/tensor/array_indexing.rs` in-src
   `tensor::array_indexing::test::test_array_index_order_arrangement` (the
-  arrangement of a multi-dimensional result — identical for 1-D results — with
-  the row-major/column-major flattenings checked against NumPy's `ravel()` /
-  `ravel(order='F')`; runs in both CI unit-test jobs) for the array-indexing
-  side, and [`mask_select`]'s Row/Column Major Notice for the mask side
+  displaced-run placement flip, the arrangement of a multi-dimensional result —
+  identical for 1-D results — with the row-major/column-major flattenings
+  checked against NumPy's `ravel()` / `ravel(order='F')`; runs in both CI
+  unit-test jobs) and `test_array_index_order_invariance` (the shapes and values
+  of together runs), plus [`mask_select`]'s Row/Column Major Notice for the mask
+  side
 - **tag:** col-major-transfer
 - **status:** open
 
-`rt::array_index` computes order-independent shape and values (the placement rule and the
-trailing-aligned broadcast of the index arrays do not consult the device order); it allocates its
-output with `new_contig(order)` like every other op, so on a `ColMajor` device only the flattened
-visit order of the result (and anything that flattens it) is column-major where NumPy's is
-row-major. `rt::mask_select` goes one step further: its selection *sequence* is the mask visit
-order, which follows the device default order by design (its Row/Column Major Notice), so there the
-element order itself — not merely the memory arrangement — is device-dependent, and a 1-D result
-carries the device sequence. Both follow NumPy exactly under the row-major default order, which is
-the order the library is held to (the column-major device-order convention of
+`rt::array_index` follows NumPy exactly under the row-major default order (the placement rule and
+the trailing-aligned broadcast of the index arrays included). Under a `ColMajor` device the
+placement rule is measured in the device's access order: a run of advanced indexers that other
+indexers *displace* is placed at the back of the result instead of the front (the broadcast block
+keeps its contiguity role — the most-strided axis), so the *shape* differs from NumPy's there,
+while a run that stays together keeps its shape and only the arrangement differs (the output is
+allocated with `new_contig(order)` like every other op, so its flattened visit order is
+column-major where NumPy's is row-major). `rt::mask_select` goes one step further: its selection
+*sequence* is the mask visit order, which follows the device default order by design (its
+Row/Column Major Notice), so there the element order itself — not merely the memory arrangement —
+is device-dependent, and a 1-D result carries the device sequence. All of these follow NumPy
+exactly under the row-major default order, which is the order the library is held to (the
+column-major device-order convention of
 [`order_semantics`](https://github.com/RESTGroup/rstsr-core/blob/main/rstsr-core/src/docs/order_semantics.md)
 is the registered transfer this entry tracks).
 
