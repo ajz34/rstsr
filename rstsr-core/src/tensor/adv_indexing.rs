@@ -748,6 +748,18 @@ where
 /// device; RSTSR keeps its device-order convention for flattened visit
 /// orders, as in [`crate::tensor::nonzero::nonzero`].
 ///
+/// # Parameters
+///
+/// - `tensor`: [`impl TensorViewAPI<Type = T, Backend = B>`][TensorViewAPI]: the source tensor.
+/// - `mask`: [`impl TensorViewAPI<Type = bool, Backend = B>`][TensorViewAPI]: the mask; at most
+///   `x.ndim()` axes, each matching the corresponding leading axis of `x` (a zero-size axis selects
+///   nothing).
+///
+/// # Returns
+///
+/// - [`Tensor<T, B, IxD>`][`Tensor`]: the selected elements, owning its data, shaped `(count,) +
+///   x.shape[mask.ndim() ..]`, where `count` is the number of true entries.
+///
 /// # Examples
 ///
 /// ```rust
@@ -833,6 +845,30 @@ where
 ///
 /// See [`mask_select`] for the mask-shape contract. Only a scalar `value` is
 /// supported.
+///
+/// # Parameters
+///
+/// - `tensor`: [`&mut TensorAny<R, T, B, DA>`][TensorAny]: the destination; must not be a
+///   broadcasted view.
+/// - `mask`: [`impl TensorViewAPI<Type = bool, Backend = B>`][TensorViewAPI]: the mask; at most
+///   `x.ndim()` axes matching `x`'s leading axes (see [`mask_select`]).
+/// - `value`: `T`: the scalar written into every selected element.
+///
+/// # Examples
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let mut a = rt::arange((6, &device)).into_shape([3, 2]);
+/// let mask = rt::tensor_from_nested!([true, false, true], &device);
+/// rt::mask_fill(&mut a, &mask, 0);
+/// println!("{a}");
+/// // [[ 0 0]
+/// //  [ 2 3]
+/// //  [ 0 0]]
+/// # assert_eq!(a.reshape([-1]).to_vec(), vec![0, 0, 2, 3, 0, 0]);
+/// ```
 ///
 /// # Notes of API accordance
 ///
@@ -1016,6 +1052,22 @@ where
 /// - `values`: the values to write, broadcast to the shape of `indices` and cast to `T`.
 /// - `axis`: TryInto [`AxisIndex<isize>`]: the axis to write along.
 ///
+/// # Examples
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let mut a: Tensor<i32, _> = rt::zeros(([2, 3], &device));
+/// let idx = rt::tensor_from_nested!([[2, 0], [1, 1]], &device);
+/// let vals = rt::tensor_from_nested!([[30, 10], [50, 50]], &device);
+/// rt::put_along_axis(&mut a, &idx, &vals, -1);
+/// println!("{a}");
+/// // [[ 10 0 30]
+/// //  [ 0 50 0]]
+/// # assert_eq!(a.reshape([-1]).to_vec(), vec![10, 0, 30, 0, 50, 0]);
+/// ```
+///
 /// # Notes of API accordance
 ///
 /// - NumPy: `numpy.put_along_axis(arr, indices, values, axis)`
@@ -1128,6 +1180,22 @@ where
 ///   [`AxesIndex<isize>`][AxesIndex].
 /// - `value`: the values to write, broadcast to the selection shape and cast to `T`.
 ///
+/// # Examples
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let mut a: Tensor<i32, _> = rt::zeros(([3, 2], &device));
+/// let vals = rt::tensor_from_nested!([[1, 2], [3, 4]], &device);
+/// rt::index_put(&mut a, 0, [0, 2], &vals);
+/// println!("{a}");
+/// // [[ 1 2]
+/// //  [ 0 0]
+/// //  [ 3 4]]
+/// # assert_eq!(a.reshape([-1]).to_vec(), vec![1, 2, 0, 0, 3, 4]);
+/// ```
+///
 /// # Notes of API accordance
 ///
 /// - RSTSR: `rt::index_put(&mut x, axis, indices, value)` (the inverse of [`index_select`]).
@@ -1207,7 +1275,35 @@ where
 ///
 /// `x[mask] = value` with a *scalar* value is [`mask_fill`]; this is the
 /// array-valued form, which routes through [`array_index_assign`] (the mask's
-/// `nonzero` coordinates become index arrays).
+/// `nonzero` coordinates become index arrays). The mask is materialized into an
+/// owned tensor, as [`array_index`] does for boolean masks, so a borrowed mask
+/// is copied once.
+///
+/// # Parameters
+///
+/// - `tensor`: [`&mut TensorAny<R, T, B, DA>`][TensorAny]: the destination; must not be a
+///   broadcasted view.
+/// - `mask`: [`impl TensorViewAPI<Type = bool, Backend = B>`][TensorViewAPI]: the mask; `dm <=
+///   x.ndim` axes matching `x`'s leading axes (see [`mask_select`]).
+/// - `value`: [`impl TensorViewAPI<Type = U, Backend = B>`][TensorViewAPI]: the values to write,
+///   broadcast to the selected shape and cast from `U` to `T`.
+///
+/// # Examples
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let mut a: Tensor<i32, _> = rt::zeros(([3, 2], &device));
+/// let mask = rt::asarray((vec![true, false, true], &device));
+/// let vals = rt::tensor_from_nested!([[1, 2], [3, 4]], &device);
+/// rt::mask_assign(&mut a, &mask, &vals);
+/// println!("{a}");
+/// // [[ 1 2]
+/// //  [ 0 0]
+/// //  [ 3 4]]
+/// # assert_eq!(a.reshape([-1]).to_vec(), vec![1, 2, 0, 0, 3, 4]);
+/// ```
 ///
 /// # Notes of API accordance
 ///
