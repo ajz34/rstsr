@@ -3,9 +3,10 @@
 //! Basic keys (int/slice/newaxis/ellipsis) ride rstsr's layout slicing
 //! (`i_f`/`i_mut_f`) and its assign/fill; whole-tensor boolean-mask keys ride
 //! `rt::mask_select` / `rt::mask_fill` (rust-side, G-038); keys containing an
-//! integer array or a boolean mask ride `rt::array_index` (rust-side array
-//! indexing, G-039), and may freely mix basic indexers with them. Results are
-//! fresh owned tensors — the handle model has no shared storage (register G-036).
+//! integer array or a boolean mask ride `rt::array_index` (read, G-039) or
+//! `rt::array_index_assign` (write), and may freely mix basic indexers with
+//! them. Results are fresh owned tensors — the handle model has no shared
+//! storage (register G-036).
 
 use core::mem::MaybeUninit;
 use num::Complex;
@@ -18,7 +19,7 @@ use rstsr::prelude::*;
 
 use rstsr_common::layout::exports::{Indexer, SliceI};
 use rstsr_core::operators::adv_indexing::{
-    DeviceArrayIndexAPI, DeviceIndexSelectAPI, DeviceMaskIndexAPI, DeviceTakeAlongAxisAPI,
+    DeviceArrayIndexAPI, DeviceArrayIndexAssignAPI, DeviceIndexSelectAPI, DeviceMaskIndexAPI, DeviceTakeAlongAxisAPI,
 };
 use rstsr_core::operators::assignment::OpAssignAPI;
 use rstsr_core::operators::searching::OpNonzeroAPI;
@@ -279,6 +280,82 @@ pub fn setitem_basic(x: &mut NativeArray, key: &Bound<'_, PyTuple>, value: &Nati
 pub fn setitem_scalar(x: &mut NativeArray, key: &Bound<'_, PyTuple>, value: &Bound<'_, PyAny>) -> PyResult<()> {
     let s = parse_leaf(value)?;
     x.setitem_basic_scalar(key, s)
+}
+
+/* #endregion */
+
+/* #region array-key setitem (G-039) */
+
+/// Build rust-side array-indexing arguments from the parsed key (basic indexers
+/// mixed with integer arrays / masks, as in `op_getitem`).
+fn array_index_args(items: Vec<KeyItem>) -> ArrayIndexArgs<DeviceFaer> {
+    let indexers = items
+        .into_iter()
+        .map(|it| match it {
+            KeyItem::Select(i) => ArrayIndexer::Basic(Indexer::Select(i)),
+            KeyItem::Slice(a, b, c) => ArrayIndexer::Basic(sl(a, b, c)),
+            KeyItem::NewAxis => ArrayIndexer::Basic(Indexer::Insert),
+            KeyItem::Ellipsis => ArrayIndexer::Basic(Indexer::Ellipsis),
+            KeyItem::Array(idx) => ArrayIndexer::ArrayIndex(idx),
+            KeyItem::Mask(m) => ArrayIndexer::ArrayBool(m),
+        })
+        .collect();
+    ArrayIndexArgs::new(indexers)
+}
+
+fn op_setitem_array<T>(t: &mut FTensor<T>, items: Vec<KeyItem>, value: &FTensor<T>) -> rt::Result<()>
+where
+    T: Clone + Send + Sync + 'static,
+    DeviceFaer: DeviceAPI<T, Raw = Vec<T>>
+        + DeviceAPI<isize>
+        + DeviceAPI<bool>
+        + DeviceAPI<usize>
+        + DeviceRawAPI<MaybeUninit<usize>>
+        + DeviceCreationAnyAPI<usize>
+        + OpAssignAPI<T, IxD, T>
+        + DeviceArrayIndexAssignAPI<T, T>
+        + OpNonzeroAPI<bool, IxD>,
+{
+    rt::array_index_assign_f(t, array_index_args(items), value.view())
+}
+
+/// `x[key] = value` where the key contains an integer array or a mask (basic
+/// indexers may be mixed in); `value` is an array, broadcast to the selection
+/// and cast to the destination dtype.
+#[pyfunction]
+pub fn setitem_array(x: &mut NativeArray, key: &Bound<'_, PyTuple>, value: &NativeArray) -> PyResult<()> {
+    let items = parse_key(key)?;
+    macro_rules! arms {
+        ($($dv:ident);* $(;)?) => {
+            match (&mut x.t, &value.t) {
+                $((AnyTensor::$dv(ref mut a), AnyTensor::$dv(b)) =>
+                    err_py(op_setitem_array(a, items, b)),)*
+                _ => type_err(
+                    "cross-dtype item assignment is not provided (gap); use matching dtypes",
+                ),
+            }
+        };
+    }
+    arms!(Bool; I8; I16; I32; I64; U8; U16; U32; U64; F32; F64; C32; C64)
+}
+
+/// As [`setitem_array`], with a Python scalar value (written via a 0-d tensor).
+#[pyfunction]
+pub fn setitem_array_scalar(x: &mut NativeArray, key: &Bound<'_, PyTuple>, value: &Bound<'_, PyAny>) -> PyResult<()> {
+    let items = parse_key(key)?;
+    let s = parse_leaf(value)?;
+    macro_rules! arms {
+        ($($dv:ident : $ty:ty);* $(;)?) => {
+            match &mut x.t {
+                $(AnyTensor::$dv(ref mut a) => {
+                    let v = <$ty as ScalarCastTarget>::from_scalar(s)?;
+                    let sv = rt::from_scalar(v, a.device());
+                    err_py(op_setitem_array(a, items, &sv))
+                }),*
+            }
+        };
+    }
+    arms!(Bool: bool; I8: i8; I16: i16; I32: i32; I64: i64; U8: u8; U16: u16; U32: u32; U64: u64; F32: f32; F64: f64; C32: Complex<f32>; C64: Complex<f64>)
 }
 
 /* #endregion */
