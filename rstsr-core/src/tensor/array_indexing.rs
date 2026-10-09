@@ -1,4 +1,4 @@
-//! Array indexing (fancy indexing) by integer arrays.
+//! Array indexing (fancy indexing) by integer arrays and boolean masks.
 //!
 //! Contrary to basic slicing ([`slice`](crate::tensor::indexing::slice())),
 //! which only moves the layout, array indexing gathers elements and therefore
@@ -7,19 +7,20 @@
 
 use crate::prelude_dev::*;
 
-/// The single rejection for boolean index arrays (raised from both the
-/// array-indexing path and the basic-slicing delegation).
-fn bool_index_declined<X>() -> Result<X> {
+/// The rejection for the one boolean indexer that array indexing does not
+/// lower: a zero-dimensional boolean. NumPy lets it add a `{0, 1}`-sized block
+/// without consuming an axis, which the index-array lowering cannot express.
+fn bool_scalar_declined<X>() -> Result<X> {
     rstsr_raise!(
         UnImplemented,
-        "boolean-array indexing is not supported by array_index; use mask_select or bool_select instead."
+        "a zero-dimensional boolean index is not supported by array_index; use a 1-D mask, mask_select or bool_select instead."
     )
 }
 
 /// One parsed index entry, describing what one group of the index does.
 enum Entry<B>
 where
-    B: DeviceRawAPI<isize>,
+    B: DeviceRawAPI<isize> + DeviceRawAPI<usize>,
 {
     /// A slice on `axis`.
     Slice { axis: usize, slice: SliceI },
@@ -36,17 +37,21 @@ where
 /// arrived in until the broadcast shape is known.
 enum RawIndex<B>
 where
-    B: DeviceRawAPI<isize>,
+    B: DeviceRawAPI<isize> + DeviceRawAPI<usize>,
 {
     /// Host-carried entries ([`ArrayIndexer::OneDimIndex`]).
     Host(Vec<isize>),
     /// Entries of an index tensor, still in device storage.
     Device(Tensor<isize, B, IxD>),
+    /// Entries already resolved and kept in device storage: the coordinates a
+    /// boolean mask selects along one axis (`nonzero`), non-negative and in
+    /// bounds by construction.
+    Coords(Tensor<usize, B, IxD>),
 }
 
 impl<B> RawIndex<B>
 where
-    B: DeviceAPI<isize>,
+    B: DeviceAPI<isize> + DeviceAPI<usize>,
 {
     /// Resolve negative entries and check the bounds of every entry, appending
     /// the resolved values to `resolved` in the order `layout` is traversed.
@@ -63,19 +68,33 @@ where
         order: FlagOrder,
         resolved: &mut Vec<usize>,
     ) -> Result<()> {
-        let axis_size = axis_size as isize;
+        let axis_size_isize = axis_size as isize;
         match self {
             Self::Host(values) => {
                 resolved.reserve(values.len());
                 for &value in values.iter() {
-                    resolved.push(resolve_one(value, axis_size, src_axis)?);
+                    resolved.push(resolve_one(value, axis_size_isize, src_axis)?);
                 }
             },
             Self::Device(index) => {
                 resolved.reserve(index.size());
                 for (_, offset) in IndexedIterLayout::<IxD>::new(layout, order)? {
                     let value = index.storage().get_index(offset);
-                    resolved.push(resolve_one(value, axis_size, src_axis)?);
+                    resolved.push(resolve_one(value, axis_size_isize, src_axis)?);
+                }
+            },
+            Self::Coords(index) => {
+                resolved.reserve(index.size());
+                for (_, offset) in IndexedIterLayout::<IxD>::new(layout, order)? {
+                    let value = index.storage().get_index(offset);
+                    rstsr_pattern!(
+                        value,
+                        0..axis_size,
+                        IndexError,
+                        "Array index out of range along axis {}.",
+                        src_axis
+                    )?;
+                    resolved.push(value);
                 }
             },
         }
@@ -107,9 +126,11 @@ where
         + DeviceAPI<bool>
         + DeviceAPI<usize>
         + DeviceRawAPI<MaybeUninit<T>>
+        + DeviceRawAPI<MaybeUninit<usize>>
         + DeviceCreationAnyAPI<T>
         + DeviceCreationAnyAPI<usize>
-        + DeviceArrayIndexAPI<T>,
+        + DeviceArrayIndexAPI<T>
+        + OpNonzeroAPI<bool, IxD>,
     I: TryInto<ArrayIndexArgs<B>, Error: Into<Error>>,
 {
     let device = tensor.device().clone();
@@ -122,14 +143,23 @@ where
     // lower host carriers; a zero-dimensional integer tensor is a scalar index
     enum Lowered<B>
     where
-        B: DeviceRawAPI<isize>,
+        B: DeviceRawAPI<isize> + DeviceRawAPI<usize>,
     {
         Basic(Indexer),
         Array {
             raw: RawIndex<B>,
             layout: Layout<IxD>,
         },
-        Bool,
+        /// A boolean mask indexer: one 1-D index array per mask axis (its
+        /// `nonzero` coordinates, each consuming one source axis), plus the
+        /// mask's own axis sizes (`mask_shape`) for NumPy's exact-match check.
+        /// It expands into as many `Array` entries once the ellipsis fill has
+        /// decided the source axes.
+        Mask {
+            coords: Vec<RawIndex<B>>,
+            mask_shape: Vec<usize>,
+            layout: Layout<IxD>,
+        },
         /// A zero-width ellipsis: it selects nothing, but still separates the
         /// advanced indexers around it (NumPy's placement rule).
         Noop,
@@ -143,7 +173,36 @@ where
                 let layout = vec![values.len()].new_c_contig(None);
                 lowered.push(Lowered::Array { raw: RawIndex::Host(values), layout });
             },
-            ArrayIndexer::OneDimBool(_) | ArrayIndexer::ArrayBool(_) => lowered.push(Lowered::Bool),
+            ArrayIndexer::OneDimBool(values) => {
+                let coords: Vec<isize> =
+                    values.iter().enumerate().filter_map(|(i, &b)| b.then_some(i as isize)).collect();
+                let layout = vec![coords.len()].new_c_contig(None);
+                lowered.push(Lowered::Mask {
+                    coords: vec![RawIndex::Host(coords)],
+                    mask_shape: vec![values.len()],
+                    layout,
+                });
+            },
+            ArrayIndexer::ArrayBool(mask) => {
+                rstsr_assert!(
+                    device.same_device(mask.device()),
+                    DeviceMismatch,
+                    "array_index requires the index arrays on the same device as the tensor."
+                )?;
+                if mask.ndim() == 0 {
+                    return bool_scalar_declined();
+                }
+                // the mask's coordinates (`nonzero`): one 1-D index array per
+                // mask axis, visited in the device default order; `nonzero_f`
+                // builds them with one shared layout
+                let coords = crate::tensor::nonzero::nonzero_f(&mask)?;
+                let layout = coords[0].layout().to_dim::<IxD>()?;
+                lowered.push(Lowered::Mask {
+                    coords: coords.into_iter().map(RawIndex::Coords).collect(),
+                    mask_shape: mask.layout().shape().clone(),
+                    layout,
+                });
+            },
             ArrayIndexer::ArrayIndex(index) => {
                 rstsr_assert!(
                     device.same_device(index.device()),
@@ -171,6 +230,8 @@ where
         match entry {
             Lowered::Basic(Indexer::Insert) => {},
             Lowered::Basic(Indexer::Ellipsis) => n_ellipsis += 1,
+            // a mask consumes one axis per mask axis
+            Lowered::Mask { coords, .. } => consumed += coords.len(),
             _ => consumed += 1,
         }
     }
@@ -184,29 +245,27 @@ where
     )?;
     let n_fill = ndim - consumed;
 
-    // boolean index arrays are only supported as a lone whole-tensor mask
-    // (`mask_select`), which the Python layer routes separately
-    if lowered.iter().any(|e| matches!(e, Lowered::Bool)) {
-        return bool_index_declined();
-    }
-
     // without any array indexer, array indexing degenerates to basic slicing,
     // which is a view
-    if !lowered.iter().any(|e| matches!(e, Lowered::Array { .. })) {
+    if !lowered.iter().any(|e| matches!(e, Lowered::Array { .. } | Lowered::Mask { .. })) {
         let mut basic: Vec<Indexer> = Vec::with_capacity(lowered.len());
         for entry in lowered {
             match entry {
                 Lowered::Basic(indexer) => basic.push(indexer),
                 Lowered::Array { .. } => unreachable!(),
-                // `Lowered::Bool` was rejected above
-                Lowered::Bool => unreachable!(),
+                // `Lowered::Mask` was rejected by the predicate above
+                Lowered::Mask { .. } => unreachable!(),
                 Lowered::Noop => {},
             }
         }
         return Ok(into_slice_f(tensor.view(), AxesIndex::<Indexer>::Vec(basic))?.into_cow());
     }
 
+    // expand the ellipsis, and lower each boolean mask into one index array per
+    // source axis it consumes; NumPy requires a mask axis to match the indexed
+    // axis exactly (no broadcasting), which the ellipsis fill makes checkable
     let mut expanded: Vec<Lowered<B>> = Vec::with_capacity(lowered.len() + n_fill);
+    let mut curr_axis = 0_usize;
     for entry in lowered {
         match entry {
             Lowered::Basic(Indexer::Ellipsis) => {
@@ -215,10 +274,31 @@ where
                 } else {
                     for _ in 0..n_fill {
                         expanded.push(Lowered::Basic(Indexer::Slice(SliceI::new(None, None, None))));
+                        curr_axis += 1;
                     }
                 }
             },
-            other => expanded.push(other),
+            Lowered::Mask { coords, mask_shape, layout } => {
+                for (j, coord) in coords.into_iter().enumerate() {
+                    let axis_size = la.shape()[curr_axis + j];
+                    rstsr_assert!(
+                        mask_shape[j] == axis_size || mask_shape[j] == 0,
+                        IndexError,
+                        "boolean index did not match indexed array along axis {}; size of axis is {} but size of corresponding boolean axis is {}.",
+                        curr_axis + j,
+                        axis_size,
+                        mask_shape[j]
+                    )?;
+                    expanded.push(Lowered::Array { raw: coord, layout: layout.clone() });
+                }
+                curr_axis += mask_shape.len();
+            },
+            other => {
+                if !matches!(other, Lowered::Basic(Indexer::Insert) | Lowered::Noop) {
+                    curr_axis += 1;
+                }
+                expanded.push(other);
+            },
         }
     }
     if n_ellipsis == 0 {
@@ -274,7 +354,8 @@ where
             },
             // `Indexer` is `non_exhaustive`: every variant is handled above
             Lowered::Basic(_) => unreachable!(),
-            Lowered::Bool => unreachable!(),
+            // masks were expanded into `Array` entries above
+            Lowered::Mask { .. } => unreachable!(),
             Lowered::Noop => {},
             Lowered::Array { raw, layout } => {
                 fancy_ndim = fancy_ndim.max(layout.ndim());
@@ -413,11 +494,12 @@ impl Display for DebugShape<'_> {
 /// Indexes a tensor by integer arrays (array indexing, *fancy indexing*).
 ///
 /// Array indexing gathers the elements selected by index arrays, in the sense
-/// of NumPy's *vectorized indexing*: each index array consumes one axis, the
-/// index arrays broadcast against each other (aligning from the last axis),
-/// and the gathered elements are the coordinates they describe together.
-/// Contrary to basic slicing it is a copying operation; basic indexers may be
-/// mixed freely with the index arrays in the same index ([`ArrayIndexer`]).
+/// of NumPy's *vectorized indexing*: each index array consumes one axis (a
+/// boolean mask consumes as many axes as its own rank), the index arrays
+/// broadcast against each other (aligning from the last axis), and the gathered
+/// elements are the coordinates they describe together. Contrary to basic
+/// slicing it is a copying operation; basic indexers may be mixed freely with
+/// the index arrays in the same index ([`ArrayIndexer`]).
 ///
 /// - With no index array at all, the index degenerates to basic slicing and the result is a
 ///   **view**.
@@ -443,7 +525,10 @@ impl Display for DebugShape<'_> {
 /// both orders. The result's *shape* therefore differs between the two orders
 /// exactly when the advanced indexers are apart; either way the new tensor is
 /// allocated in the device default order, and a one-dimensional result is
-/// identical in both.
+/// identical in both. A boolean mask contributes its `nonzero` visit sequence
+/// as the count dimension, so a mask of rank two or more also permutes that
+/// dimension's values under [`ColMajor`] — not only the memory arrangement. See
+/// [`order_semantics`](crate::order_semantics) for the device-order conventions.
 ///
 /// # Overloads Table
 ///
@@ -467,7 +552,10 @@ impl Display for DebugShape<'_> {
 ///   indexer (as in basic slicing), not an alias of the empty index `()` — and `Some(n)` is
 ///   rejected; [`Ellipsis`]: the ellipsis;
 /// - host list (`Vec` / `&Vec` / `&[T]` / `[T; N]` / `&[T; N]`): a one-dimensional index array;
-/// - integer tensor or tensor view of any rank: an index array.
+/// - integer tensor or tensor view of any rank: an index array;
+/// - boolean host list (`Vec<bool>` / `&Vec<bool>` / `&[bool]` / `[bool; N]` / `&[bool; N]`) or
+///   boolean tensor/view: a mask, consuming as many axes as its rank (its own axes must match those
+///   axes exactly) and contributing one dimension of its `true` count.
 ///
 /// # Parameters
 ///
@@ -533,6 +621,26 @@ impl Display for DebugShape<'_> {
 /// # assert_eq!(format!("{result}"), "[[ 9 14 16]\n [ 18 23 25]]");
 /// ```
 ///
+/// ## Boolean masks
+///
+/// A boolean mask in the index is its `nonzero` coordinates: it consumes as many
+/// axes as its own rank (they must match those axes exactly) and contributes one
+/// dimension holding the selected positions, taking part in the placement rule
+/// like an integer index array.
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let x = rt::arange((12, &device)).into_shape([3, 4]);
+/// let mask = rt::asarray((vec![true, false, true], &device));
+/// let result = rt::array_index(&x, &mask);
+/// println!("{result}");
+/// // [[ 0 1 2 3]
+/// //  [ 8 9 10 11]]
+/// # assert_eq!(format!("{result}"), "[[ 0 1 2 3]\n [ 8 9 10 11]]");
+/// ```
+///
 /// ## Placement of the broadcast dimensions
 ///
 /// When the advanced indexers are separated by a basic indexer, the broadcast
@@ -554,6 +662,34 @@ impl Display for DebugShape<'_> {
 /// # assert_eq!(rt::array_index(&x, ([1, 0], .., 1)).shape(), &[2, 3]);
 /// ```
 ///
+/// ## Difference between [`RowMajor`] and [`ColMajor`]
+///
+/// A run of advanced indexers that other indexers *displace* is placed at the
+/// front of the result on a row-major device and at the **back** on a
+/// column-major one (the broadcast block keeps its contiguity role: the
+/// most-strided axis). A run that stays together keeps its position in both
+/// orders.
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// # let mut device_col = DeviceCpu::default();
+/// # device_col.set_default_order(ColMajor);
+/// # let build = |d: &DeviceCpu| {
+/// #     let i = rt::arange((2, d)).into_shape([2, 1, 1]);
+/// #     let j = rt::arange((3, d)).into_shape([1, 3, 1]);
+/// #     let k = rt::arange((4, d)).into_shape([1, 1, 4]);
+/// #     i * 12 + j * 4 + k
+/// # };
+/// # let x_row = build(&device);
+/// # let x_col = build(&device_col);
+/// println!("{:?}", rt::array_index(&x_row, ([1, 0], .., 1)).shape());
+/// // [2, 3]
+/// println!("{:?}", rt::array_index(&x_col, ([1, 0], .., 1)).shape());
+/// // [3, 2]
+/// ```
+///
 /// # Notes of API accordance
 ///
 /// - Array-API: `x[k1, .., kN]` ([`indexing`](https://data-apis.org/array-api/2024.12/API_specification/indexing.html)):
@@ -561,9 +697,9 @@ impl Display for DebugShape<'_> {
 ///   array, broadcast together, zipped). RSTSR accepts that form as a special case; mixing slices
 ///   with index arrays is left implementation-defined by the standard.
 /// - NumPy: `x[k1, .., kN]` (`numpy.ndarray.__getitem__`): RSTSR implements NumPy's vectorized
-///   indexing, including the placement rule for the broadcast dimensions, but not grouped
-///   ("parenthesized") index tuples, and not boolean index arrays (use [`mask_select`] /
-///   [`bool_select`], or a lone boolean mask through `x[mask]`).
+///   indexing, including the placement rule for the broadcast dimensions and boolean masks (a mask
+///   is its `nonzero` coordinates, contributing a `(count,)` dimension), but not grouped
+///   ("parenthesized") index tuples, and not a zero-dimensional boolean.
 /// - RSTSR: `rt::array_index(&tensor, indexers)`.
 ///
 /// # Panics
@@ -571,7 +707,8 @@ impl Display for DebugShape<'_> {
 /// - Panics if an axis index is out of range, if an index array entry (after resolving negative
 ///   values) is out of range on its axis, if the index arrays cannot be broadcast together, if the
 ///   index consumes more axes than the tensor has, if the index tensors live on a different device,
-///   or if a boolean index array is used.
+///   if a boolean mask's axes do not match the indexed axes, or if a zero-dimensional boolean is
+///   used.
 ///
 /// For a fallible version, use [`array_index_f`].
 ///
@@ -607,9 +744,11 @@ where
         + DeviceAPI<bool>
         + DeviceAPI<usize>
         + DeviceRawAPI<MaybeUninit<T>>
+        + DeviceRawAPI<MaybeUninit<usize>>
         + DeviceCreationAnyAPI<T>
         + DeviceCreationAnyAPI<usize>
-        + DeviceArrayIndexAPI<T>,
+        + DeviceArrayIndexAPI<T>
+        + OpNonzeroAPI<bool, IxD>,
     I: TryInto<ArrayIndexArgs<B>, Error: Into<Error>>,
 {
     array_index_f(tensor, indexer).rstsr_unwrap()
@@ -625,9 +764,11 @@ where
         + DeviceAPI<bool>
         + DeviceAPI<usize>
         + DeviceRawAPI<MaybeUninit<T>>
+        + DeviceRawAPI<MaybeUninit<usize>>
         + DeviceCreationAnyAPI<T>
         + DeviceCreationAnyAPI<usize>
-        + DeviceArrayIndexAPI<T>,
+        + DeviceArrayIndexAPI<T>
+        + OpNonzeroAPI<bool, IxD>,
 {
     /// Indexes a tensor by integer arrays (array indexing, *fancy indexing*).
     ///

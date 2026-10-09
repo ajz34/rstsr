@@ -57,5 +57,37 @@ mod doc_array_index {
         assert_eq!(rt::array_index(&x, ([1, 0], .., 1)).shape(), &[2, 3]);
         assert_eq!(rt::array_index(&x, (.., [1, 0], 1)).into_shape([-1]).to_vec(), vec![5, 1, 17, 13]);
         assert_eq!(rt::array_index(&x, ([1, 0], .., 1)).into_shape([-1]).to_vec(), vec![13, 17, 21, 1, 5, 9]);
+
+        // a boolean mask in the index: it consumes the axes its rank covers and
+        // contributes one dimension holding the selected positions
+        let y = rt::arange((12, &device)).into_shape([3, 4]);
+        let mask = rt::asarray((vec![true, false, true], &device));
+        let result = rt::array_index(&y, &mask);
+        println!("{result}");
+        // [[ 0 1 2 3]
+        //  [ 8 9 10 11]]
+        assert_eq!(format!("{result}"), "[[ 0 1 2 3]\n [ 8 9 10 11]]");
+        assert_eq!(result.into_shape([-1]).to_vec(), vec![0, 1, 2, 3, 8, 9, 10, 11]);
+
+        // RowMajor vs ColMajor: a run of advanced indexers displaced by a basic
+        // indexer is placed at the front under RowMajor and at the back under
+        // ColMajor (the input is broadcast-built, so both devices hold the same
+        // logical tensor)
+        let mut device_col = TESTCFG.device.clone();
+        device_col.set_default_order(ColMajor);
+        let build = |d: &DeviceType| {
+            let i = rt::arange((2, d)).into_shape([2, 1, 1]);
+            let j = rt::arange((3, d)).into_shape([1, 3, 1]);
+            let k = rt::arange((4, d)).into_shape([1, 1, 4]);
+            i * 12 + j * 4 + k
+        };
+        let x_row = build(&device);
+        let x_col = build(&device_col);
+        println!("{:?}", rt::array_index(&x_row, ([1, 0], .., 1)).shape());
+        // [2, 3]
+        println!("{:?}", rt::array_index(&x_col, ([1, 0], .., 1)).shape());
+        // [3, 2]
+        assert_eq!(rt::array_index(&x_row, ([1, 0], .., 1)).shape(), &[2, 3]);
+        assert_eq!(rt::array_index(&x_col, ([1, 0], .., 1)).shape(), &[3, 2]);
     }
 }

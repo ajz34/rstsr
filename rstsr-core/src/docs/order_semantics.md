@@ -54,7 +54,12 @@ placement rule is measured in the device's access order, so a displaced run of
 index arrays goes to the front under [`RowMajor`] and to the **back** under
 [`ColMajor`] (see its Row/Column Major Notice). Either way it reads its index
 arrays — and visits the broadcast dimensions they describe — in the device
-order, and that traversal is not observable in the result. [`mask_select`] is
+order, and that traversal is not observable in the result. A boolean mask in
+[`array_index`] takes the same placement rule, but its count dimension *is* the
+[`nonzero`] visit sequence: a mask of rank two or more therefore gathers the
+same positions in a different order under [`ColMajor`] — a difference in values,
+not only in arrangement (the same class as [`mask_select`]'s sequence below).
+[`mask_select`] is
 the exception among the gathers:
 its selection *sequence* is the mask visit order, which follows the device
 default order by design — not the row-major rule the Python Array API

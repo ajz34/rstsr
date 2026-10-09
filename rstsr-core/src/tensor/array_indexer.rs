@@ -32,10 +32,11 @@ where
     Basic(Indexer),
     /// Integer-array indexer: the tensor indexes one axis by its entries.
     ArrayIndex(Tensor<isize, B, IxD>),
-    /// Boolean-array indexer: the tensor indexes axes by its true entries.
+    /// Boolean-array indexer: a mask, consuming as many axes as its rank (they
+    /// must match those axes exactly) and contributing one dimension of its
+    /// `true` count.
     ///
-    /// Not implemented yet; use [`mask_select`]
-    /// or [`bool_select`].
+    /// A zero-dimensional boolean is rejected.
     ArrayBool(Tensor<bool, B, IxD>),
     /// One-dimensional host integer list, lowered to
     /// [`ArrayIndexer::ArrayIndex`].
@@ -457,6 +458,38 @@ where
     <B as DeviceRawAPI<isize>>::Raw: Clone,
 {
     fn from(value: &TensorAny<R, isize, B, IxD>) -> Self {
+        Self::new(vec![value.into()])
+    }
+}
+
+impl<R, B> From<TensorAny<R, bool, B, IxD>> for ArrayIndexArgs<B>
+where
+    R: DataCloneAPI<Data = <B as DeviceRawAPI<bool>>::Raw>,
+    R::Data: Clone,
+    B: DeviceAPI<bool>
+        + DeviceRawAPI<isize>
+        + DeviceRawAPI<MaybeUninit<bool>>
+        + DeviceCreationAnyAPI<bool>
+        + OpAssignAPI<bool, IxD>,
+    <B as DeviceRawAPI<bool>>::Raw: Clone,
+{
+    fn from(value: TensorAny<R, bool, B, IxD>) -> Self {
+        Self::new(vec![value.into()])
+    }
+}
+
+impl<R, B> From<&TensorAny<R, bool, B, IxD>> for ArrayIndexArgs<B>
+where
+    R: DataCloneAPI<Data = <B as DeviceRawAPI<bool>>::Raw>,
+    R::Data: Clone,
+    B: DeviceAPI<bool>
+        + DeviceRawAPI<isize>
+        + DeviceRawAPI<MaybeUninit<bool>>
+        + DeviceCreationAnyAPI<bool>
+        + OpAssignAPI<bool, IxD>,
+    <B as DeviceRawAPI<bool>>::Raw: Clone,
+{
+    fn from(value: &TensorAny<R, bool, B, IxD>) -> Self {
         Self::new(vec![value.into()])
     }
 }

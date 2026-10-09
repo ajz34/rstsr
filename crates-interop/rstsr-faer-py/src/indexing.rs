@@ -126,9 +126,11 @@ where
         + DeviceAPI<bool>
         + DeviceAPI<usize>
         + DeviceRawAPI<MaybeUninit<T>>
+        + DeviceRawAPI<MaybeUninit<usize>>
         + DeviceCreationAnyAPI<T>
         + DeviceCreationAnyAPI<usize>
-        + DeviceArrayIndexAPI<T>,
+        + DeviceArrayIndexAPI<T>
+        + OpNonzeroAPI<bool, IxD>,
 {
     let indexers = items
         .into_iter()

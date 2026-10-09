@@ -450,6 +450,110 @@ mod custom_array_index {
         assert_eq!(a.array_index(2).shape(), &vec![4]);
     }
 
+    /// Boolean index arrays in a tuple: a mask is exactly its `nonzero`
+    /// coordinates — it consumes `ndim(mask)` axes and contributes one
+    /// `(count,)` block, so the placement rule and the mutual broadcast apply
+    /// to it as to an integer index array of the same coordinates. A
+    /// zero-dimensional boolean is declined.
+    ///
+    /// NumPy 2.5.1 cross-checked.
+    #[test]
+    fn test_boolean_index_arrays() {
+        crate::specify_test!("test_boolean_index_arrays");
+
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        // `a[1:3, [True, False, False, True, False]]` -> (2, 2, 5)
+        // `a[1:3, [True, False, False, True, False],
+        //       [False, True, False, True, False]]` -> [[26, 43], [51, 68]]
+        let a = rt::arange((75, &device)).into_shape([3, 5, 5]);
+        let m1 = rt::asarray((vec![true, false, false, true, false], &device));
+        let m2 = rt::asarray((vec![false, true, false, true, false], &device));
+
+        let b = a.array_index((1..3, &m1));
+        assert_eq!(b.shape(), &vec![2, 2, 5]);
+        assert_eq!(b.into_shape([-1]).to_vec(), vec![
+            25, 26, 27, 28, 29, 40, 41, 42, 43, 44, 50, 51, 52, 53, 54, 65, 66, 67, 68, 69
+        ]);
+        // the same as the integer nonzero coordinates
+        assert_equal(a.array_index((1..3, [0, 3])), a.array_index((1..3, &m1)), None);
+
+        let c = a.array_index((1..3, &m1, &m2));
+        assert_eq!(c.shape(), &vec![2, 2]);
+        assert_eq!(c.into_shape([-1]).to_vec(), vec![26, 43, 51, 68]);
+        assert_equal(a.array_index((1..3, [0, 3], [1, 3])), a.array_index((1..3, &m1, &m2)), None);
+
+        // `a[[True, False, True], :, 0]` -> (2, 5): a mask and a plain integer
+        // across a slice are apart, so the block moves to the front
+        let m0 = rt::asarray((vec![true, false, true], &device));
+        let d = a.array_index((&m0, .., 0));
+        assert_eq!(d.shape(), &vec![2, 5]);
+        assert_eq!(d.into_shape([-1]).to_vec(), vec![0, 5, 10, 15, 20, 50, 55, 60, 65, 70]);
+
+        // an n-dimensional mask consumes `ndim(mask)` axes and contributes one
+        // (count,) block: `b3[mask2d]` -> (2, 4), the mask's two true entries
+        let b3 = rt::arange((100, &device)).into_shape([5, 5, 4]);
+        let mut mask_data = vec![false; 25];
+        mask_data[3] = true; // (0, 3)
+        mask_data[17] = true; // (3, 2)
+        let mask2d = rt::asarray((mask_data, &device)).into_shape([5, 5]);
+        let e = b3.array_index((&mask2d,));
+        assert_eq!(e.shape(), &vec![2, 4]);
+        assert_eq!(e.into_shape([-1]).to_vec(), vec![12, 13, 14, 15, 68, 69, 70, 71]);
+        // the mask is its `nonzero` coordinates (host-listed here)
+        let nz = rt::nonzero(&mask2d);
+        let i0: Vec<isize> = nz[0].to_vec().into_iter().map(|v| v as isize).collect();
+        let i1: Vec<isize> = nz[1].to_vec().into_iter().map(|v| v as isize).collect();
+        assert_equal(b3.array_index((&i0, &i1)), b3.array_index((&mask2d,)), None);
+        // ... and slices around it keep the mask in place: `c4[:, mask2d]`
+        // -> (3, 2, 4)
+        let c4 = rt::arange((300, &device)).into_shape([3, 5, 5, 4]);
+        assert_eq!(c4.array_index((.., &mask2d)).shape(), &vec![3, 2, 4]);
+
+        // a mask after an ellipsis, and one displaced from a plain integer:
+        // the placement rule is unchanged
+        // NumPy: `x[..., m]` -> (2, 3, 2); `x[0, ..., m]` -> (2, 3)
+        let x = rt::arange((24, &device)).into_shape([2, 3, 4]);
+        let mx = rt::asarray((vec![true, false, true, false], &device));
+        let f = x.array_index((.., .., &mx));
+        assert_eq!(f.shape(), &vec![2, 3, 2]);
+        assert_eq!(f.into_shape([-1]).to_vec(), vec![0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22]);
+        let g = x.array_index((0, .., &mx));
+        assert_eq!(g.shape(), &vec![2, 3]);
+        assert_eq!(g.into_shape([-1]).to_vec(), vec![0, 4, 8, 2, 6, 10]);
+
+        // `a[:, [True, False, False, True, False], 0]` -> (3, 2): the mask and
+        // the plain integer are consecutive, so the block stays in place
+        let h = a.array_index((.., &m1, 0));
+        assert_eq!(h.shape(), &vec![3, 2]);
+        assert_eq!(h.into_shape([-1]).to_vec(), vec![0, 15, 25, 40, 50, 65]);
+
+        // the mask's count joins the mutual broadcast as a (count,) array: a
+        // single true broadcasts against (2, 2) index arrays
+        // NumPy: `x[[True, False], [[1, 2], [0, 1]], [[3, 0], [2, 1]]]` -> (2, 2)
+        let m0x = rt::asarray((vec![true, false], &device));
+        let i1 = rt::asarray((vec![1_isize, 2, 0, 1], &device)).into_shape([2, 2]);
+        let i2 = rt::asarray((vec![3_isize, 0, 2, 1], &device)).into_shape([2, 2]);
+        let j = x.array_index((&m0x, &i1, &i2));
+        assert_eq!(j.shape(), &vec![2, 2]);
+        assert_eq!(j.into_shape([-1]).to_vec(), vec![7, 8, 2, 5]);
+        assert_equal(x.array_index(([0], &i1, &i2)), x.array_index((&m0x, &i1, &i2)), None);
+
+        // the mask axes must match the indexed axes exactly (no broadcasting)
+        let short = rt::asarray((vec![true, false, false, true], &device));
+        assert!(is_index_error(&a.array_index_f((1..3, &short)).unwrap_err()));
+        // a zero-size mask axis is allowed and selects nothing (NumPy)
+        let none = rt::asarray((Vec::<bool>::new(), &device));
+        assert_eq!(a.array_index((1..3, &none)).shape(), &vec![2, 0, 5]);
+
+        // a zero-dimensional boolean would add a {0,1}-sized block without
+        // consuming an axis; declined here
+        let scalar_owner = rt::asarray((vec![true], &device));
+        let scalar = scalar_owner.i(0);
+        assert!(a.array_index_f((1..3, &scalar)).is_err());
+    }
+
     /// Differential check against NumPy.
     ///
     /// Every row of [`NUMPY_CASES`] is a case solved by NumPy (v2.5.2) with the
@@ -547,6 +651,22 @@ mod device_order {
         let l = rt::arange((6, device)).into_shape([1, 1, 1, 6, 1]);
         let m = rt::arange((7, device)).into_shape([1, 1, 1, 1, 7]);
         (((i * 4 + j) * 5 + k) * 6 + l) * 7 + m
+    }
+
+    /// `a[i, j, k] = 25*i + 5*j + k` on `device` (broadcast build).
+    fn build_input_3x5x5(device: &DeviceType) -> Tensor<i32, DeviceType, IxD> {
+        let i = rt::arange((3, device)).into_shape([3, 1, 1]);
+        let j = rt::arange((5, device)).into_shape([1, 5, 1]);
+        let k = rt::arange((5, device)).into_shape([1, 1, 5]);
+        i * 25 + j * 5 + k
+    }
+
+    /// `a[i, j, k] = 20*i + 4*j + k` on `device` (broadcast build).
+    fn build_input_5x5x4(device: &DeviceType) -> Tensor<i32, DeviceType, IxD> {
+        let i = rt::arange((5, device)).into_shape([5, 1, 1]);
+        let j = rt::arange((5, device)).into_shape([1, 5, 1]);
+        let k = rt::arange((4, device)).into_shape([1, 1, 4]);
+        i * 20 + j * 4 + k
     }
 
     /// Row-major logical order of a 2-D result, read through the public API so
@@ -835,5 +955,88 @@ mod device_order {
         }
         assert_eq!(deep_row.i((0, 0, 0, 0)).to_scalar(), 14);
         assert_eq!(deep_row.i((1, 2, 4, 6)).to_scalar(), 2064);
+    }
+
+    /// Boolean masks follow the placement rule as integer index arrays do. A
+    /// one-dimensional mask carries a single-order sequence, so the two devices
+    /// select the same positions and only the arrangement differs; a mask with
+    /// `ndim >= 2` carries the device's `nonzero` visit order on its count axis,
+    /// so under `ColMajor` the count axis is permuted — the registered sequence
+    /// divergence, the same class as `mask_select`'s.
+    #[test]
+    fn test_boolean_mask_orders() {
+        crate::specify_test!("test_boolean_mask_orders");
+
+        let mut dev_row = TESTCFG.device.clone();
+        dev_row.set_default_order(RowMajor);
+        let mut dev_col = TESTCFG.device.clone();
+        dev_col.set_default_order(ColMajor);
+        let a_row = build_input_3x5x5(&dev_row);
+        let a_col = build_input_3x5x5(&dev_col);
+
+        // 1-D masks: both devices select the same positions; the result keeps
+        // its shape and only the arrangement matters (C- vs F-contiguous)
+        let m1_row = rt::asarray((vec![true, false, false, true, false], &dev_row));
+        let m1_col = rt::asarray((vec![true, false, false, true, false], &dev_col));
+        let m2_row = rt::asarray((vec![false, true, false, true, false], &dev_row));
+        let m2_col = rt::asarray((vec![false, true, false, true, false], &dev_col));
+
+        let b_row = a_row.array_index((1..3, &m1_row));
+        let b_col = a_col.array_index((1..3, &m1_col));
+        assert_eq!(b_row.shape(), &vec![2, 2, 5]);
+        assert_eq!(b_col.shape(), &vec![2, 2, 5]);
+        assert_eq!(b_row.stride(), &vec![10, 5, 1]);
+        assert_eq!(b_col.stride(), &vec![1, 2, 4]);
+        let seq = b_row.into_shape([-1]).to_vec();
+        assert_eq!(b_col.into_shape([-1]).to_vec(), f_order(&seq, &[2, 2, 5]));
+
+        let c_row = a_row.array_index((1..3, &m1_row, &m2_row));
+        let c_col = a_col.array_index((1..3, &m1_col, &m2_col));
+        assert_eq!(c_row.shape(), &vec![2, 2]);
+        assert_eq!(c_col.shape(), &vec![2, 2]);
+        let seq = c_row.into_shape([-1]).to_vec();
+        assert_eq!(seq, vec![26, 43, 51, 68]);
+        assert_eq!(c_col.into_shape([-1]).to_vec(), f_order(&seq, &[2, 2]));
+
+        // a mask and a plain integer across a slice are displaced: row-major
+        // puts the block at the front, column-major at the back (the transpose,
+        // the same buffer)
+        let m0_row = rt::asarray((vec![true, false, true], &dev_row));
+        let m0_col = rt::asarray((vec![true, false, true], &dev_col));
+        let d_row = a_row.array_index((&m0_row, .., 0));
+        let d_col = a_col.array_index((&m0_col, .., 0));
+        assert_eq!(d_row.shape(), &vec![2, 5]);
+        assert_eq!(d_col.shape(), &vec![5, 2]);
+        let seq = vec![0, 5, 10, 15, 20, 50, 55, 60, 65, 70];
+        assert_eq!(d_row.into_shape([-1]).to_vec(), seq);
+        assert_eq!(d_col.into_shape([-1]).to_vec(), seq);
+
+        // an n-dimensional mask: the count axis follows the device's `nonzero`
+        // visit order, so the column-major result is NOT the row-major one
+        // re-arranged — the values at a multi-index differ
+        // built from a logical grid, so both devices hold the same mask
+        // whatever their layout (the flat-listing construction trap)
+        let build_mask = |device: &DeviceType| {
+            let grid = rt::arange((5, device)).into_shape([5, 1]) * 5 + rt::arange((5, device)).into_shape([1, 5]);
+            grid.map(|v| *v == 3 || *v == 17) // trues at (0, 3) and (3, 2)
+        };
+        let mask_row = build_mask(&dev_row);
+        let mask_col = build_mask(&dev_col);
+        let b3_row = build_input_5x5x4(&dev_row);
+        let b3_col = build_input_5x5x4(&dev_col);
+        let r_row = b3_row.array_index((&mask_row,));
+        let r_col = b3_col.array_index((&mask_col,));
+        assert_eq!(r_row.shape(), &vec![2, 4]);
+        assert_eq!(r_col.shape(), &vec![2, 4]);
+        // row-major visits the mask row-major: (0, 3) first
+        assert_eq!(r_row.i((0, 0)).to_scalar(), 12);
+        // column-major visits it column-major: (3, 2) first
+        assert_eq!(r_col.i((0, 0)).to_scalar(), 68);
+        // the whole count axis is the mask's `nonzero` sequence: row-major
+        // reads the trues (0, 3), (3, 2); column-major reads them (3, 2), (0, 3)
+        assert_eq!(r_row.i((0, 0)).to_scalar(), b3_row.i((0, 3, 0)).to_scalar());
+        assert_eq!(r_row.i((1, 0)).to_scalar(), b3_row.i((3, 2, 0)).to_scalar());
+        assert_eq!(r_col.i((0, 0)).to_scalar(), b3_col.i((3, 2, 0)).to_scalar());
+        assert_eq!(r_col.i((1, 0)).to_scalar(), b3_col.i((0, 3, 0)).to_scalar());
     }
 }
