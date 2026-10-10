@@ -12,6 +12,7 @@ pub mod creation_from_tensor;
 pub mod device_conversion;
 pub mod diff;
 pub mod ext_conversion;
+pub mod ext_linalg;
 pub mod indexing;
 pub mod iterator_axes;
 pub mod iterator_elem;
@@ -44,6 +45,7 @@ pub mod exports {
     pub use device_conversion::*;
     pub use diff::*;
     pub use ext_conversion::*;
+    pub use ext_linalg::exports::*;
     pub use indexing::*;
     pub use iterator_axes::*;
     pub use iterator_elem::*;

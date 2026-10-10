@@ -6,6 +6,7 @@ pub mod assignment;
 pub mod conversion;
 pub mod creation;
 pub mod device;
+pub mod ext_linalg;
 pub mod linalg;
 pub mod nonzero;
 pub mod operators;

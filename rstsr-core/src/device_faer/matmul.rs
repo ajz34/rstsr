@@ -11,7 +11,7 @@ use core::sync::atomic::{AtomicPtr, Ordering};
 use num::{Complex, Zero};
 
 // code from ndarray
-fn same_type<A: 'static, B: 'static>() -> bool {
+pub(crate) fn same_type<A: 'static, B: 'static>() -> bool {
     TypeId::of::<A>() == TypeId::of::<B>()
 }
 
