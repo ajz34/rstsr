@@ -149,6 +149,19 @@ from .rstsr_faer import (
     unique_inverse as _unique_inverse,
     unique_all as _unique_all,
     take_along_axis as _take_along_axis,
+    linalg_cholesky as _linalg_cholesky,
+    linalg_det as _linalg_det,
+    linalg_diagonal as _linalg_diagonal,
+    linalg_eigh as _linalg_eigh,
+    linalg_eigvalsh as _linalg_eigvalsh,
+    linalg_inv as _linalg_inv,
+    linalg_matmul as _linalg_matmul,
+    linalg_matrix_transpose as _linalg_matrix_transpose,
+    linalg_pinv as _linalg_pinv,
+    linalg_solve as _linalg_solve,
+    linalg_svd as _linalg_svd,
+    linalg_svdvals as _linalg_svdvals,
+    linalg_vecdot as _linalg_vecdot,
 )
 
 __array_api_version__ = "2025.12"
@@ -610,6 +623,10 @@ class Array:
 
     def __rtruediv__(self, other, /):
         return self._binary(other, divide, reflected=True)
+
+    # matrix product (PEP 465); same semantics as the top-level matmul
+    def __matmul__(self, other, /):
+        return matmul(self, other)
 
     # comparison
     def __eq__(self, other, /):
@@ -1813,6 +1830,94 @@ def iinfo(type, /):
     return _iinfo(type)
 
 
+# ------------------------------------------------------------------- linalg --
+# array-API `linalg` extension, over rstsr's existing entries only. Members the
+# standard defines but rstsr/faer does not provide (qr, slogdet, eig, eigvals,
+# matrix_norm, matrix_power, matrix_rank, tensordot, outer, cross, trace, and
+# the general-`ord` norms) are absent here — rust-side gaps, recorded in the
+# gap register, never stubbed. None of these wrappers batch: rstsr's faer
+# factorizations are 2-D only, so a stacked input is passed through and
+# declined rust-side.
+
+_EighResult = collections.namedtuple("EighResult", ["eigenvalues", "eigenvectors"])
+_SVDResult = collections.namedtuple("SVDResult", ["U", "S", "Vh"])
+
+
+def matmul(x1, x2, /):
+    return _wrap(_linalg_matmul(_handle(x1), _handle(x2)))
+
+
+def matrix_transpose(x, /):
+    return _wrap(_linalg_matrix_transpose(_handle(x)))
+
+
+def vecdot(x1, x2, /, *, axis=-1):
+    return _wrap(_linalg_vecdot(_handle(x1), _handle(x2), axis))
+
+
+def cholesky(x, /, *, upper=False):
+    return _wrap(_linalg_cholesky(_handle(x), upper))
+
+
+def det(x, /):
+    return _wrap(_linalg_det(_handle(x)))
+
+
+def diagonal(x, /, *, offset=0):
+    return _wrap(_linalg_diagonal(_handle(x), offset))
+
+
+def eigh(x, /):
+    w, v = _linalg_eigh(_handle(x))
+    return _EighResult(_wrap(w), _wrap(v))
+
+
+def eigvalsh(x, /):
+    return _wrap(_linalg_eigvalsh(_handle(x)))
+
+
+def inv(x, /):
+    return _wrap(_linalg_inv(_handle(x)))
+
+
+def pinv(x, /, *, rtol=None):
+    return _wrap(_linalg_pinv(_handle(x), rtol))
+
+
+def solve(x1, x2, /):
+    return _wrap(_linalg_solve(_handle(x1), _handle(x2)))
+
+
+def svd(x, /, *, full_matrices=True):
+    u, s, vh = _linalg_svd(_handle(x), _py_bool(full_matrices))
+    return _SVDResult(_wrap(u), _wrap(s), _wrap(vh))
+
+
+def svdvals(x, /):
+    return _wrap(_linalg_svdvals(_handle(x)))
+
+
+class _LinalgNamespace:
+    """The array-API ``linalg`` extension namespace (API version 2025.12)."""
+
+    cholesky = staticmethod(cholesky)
+    det = staticmethod(det)
+    diagonal = staticmethod(diagonal)
+    eigh = staticmethod(eigh)
+    eigvalsh = staticmethod(eigvalsh)
+    inv = staticmethod(inv)
+    matmul = staticmethod(matmul)
+    matrix_transpose = staticmethod(matrix_transpose)
+    pinv = staticmethod(pinv)
+    solve = staticmethod(solve)
+    svd = staticmethod(svd)
+    svdvals = staticmethod(svdvals)
+    vecdot = staticmethod(vecdot)
+
+
+linalg = _LinalgNamespace()
+
+
 # ------------------------------------------------------ dtype promotion -----
 # The standard mandates runtime promotion queries that Rust answers with a
 # trait bound (see the module docstring and src/promotion.rs).
@@ -1932,6 +2037,8 @@ __all__ = [
     "reshape", "permute_dims", "broadcast_arrays", "broadcast_shapes",
     "concat", "stack", "unstack", "expand_dims", "squeeze", "flip", "moveaxis",
     "repeat", "roll", "tile", "diff",
+    # linear algebra
+    "matmul", "matrix_transpose", "vecdot", "linalg",
     # sorting
     "sort", "argsort",
     # searching / indexing
