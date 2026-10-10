@@ -1,4 +1,5 @@
 use crate::prelude_dev::*;
+use core::mem::transmute;
 
 /* #region outer by function */
 
@@ -77,8 +78,8 @@ use crate::prelude_dev::*;
 ///
 /// ## Variants of this function
 ///
-/// - [`outer_f`]: fallible version.
-/// - Associated methods on [`TensorAny`]: [`TensorAny::outer`] / [`TensorAny::outer_f`].
+/// - [`outer`] / [`outer_f`]: Returning a new tensor.
+/// - [`outer_from`] / [`outer_from_f`]: Writing the result into an existing tensor.
 pub fn outer<TA, TB, DA, DB, B>(
     a: impl TensorViewAPI<Type = TA, Backend = B, Dim = DA>,
     b: impl TensorViewAPI<Type = TB, Backend = B, Dim = DB>,
@@ -155,6 +156,65 @@ where
     unsafe { Tensor::new_f(B::assume_init_impl(storage_c)?, layout_c) }
 }
 
+/// Outer product of two one-dimensional arrays, written into an existing two-dimensional tensor.
+///
+/// The output `c` must already have shape `(a.size, b.size)` and is fully overwritten: this
+/// function computes `c[i, j] = a[i] * b[j]` without accumulating onto `c`'s previous contents.
+///
+/// See also [`outer`].
+pub fn outer_from<TA, TB, TC, DA, DB, B>(
+    c: impl TensorViewMutAPI<Type = TC, Backend = B, Dim = Ix2>,
+    a: impl TensorViewAPI<Type = TA, Backend = B, Dim = DA>,
+    b: impl TensorViewAPI<Type = TB, Backend = B, Dim = DB>,
+) where
+    TA: Mul<TB, Output = TC>,
+    DA: DimAPI,
+    DB: DimAPI,
+    B: DeviceOuterAPI<TA, TB, TC> + DeviceAPI<TA> + DeviceAPI<TB> + DeviceAPI<TC>,
+{
+    outer_from_f(c, a, b).rstsr_unwrap()
+}
+
+/// Outer product of two one-dimensional arrays, written into an existing two-dimensional tensor.
+///
+/// See also [`outer`].
+pub fn outer_from_f<TA, TB, TC, DA, DB, B>(
+    mut c: impl TensorViewMutAPI<Type = TC, Backend = B, Dim = Ix2>,
+    a: impl TensorViewAPI<Type = TA, Backend = B, Dim = DA>,
+    b: impl TensorViewAPI<Type = TB, Backend = B, Dim = DB>,
+) -> Result<()>
+where
+    TA: Mul<TB, Output = TC>,
+    DA: DimAPI,
+    DB: DimAPI,
+    B: DeviceOuterAPI<TA, TB, TC> + DeviceAPI<TA> + DeviceAPI<TB> + DeviceAPI<TC>,
+{
+    let (a, b, mut c) = (a.view(), b.view(), c.view_mut());
+    // writing through a broadcast layout would alias elements
+    rstsr_assert!(!c.layout().is_broadcasted(), InvalidLayout, "cannot write into broadcasted tensor")?;
+
+    // check devices
+    let device = c.device().clone();
+    rstsr_assert!(device.same_device(a.device()), DeviceMismatch)?;
+    rstsr_assert!(device.same_device(b.device()), DeviceMismatch)?;
+
+    // the array-API contract: both operands are one-dimensional
+    rstsr_assert!(a.ndim() == 1 && b.ndim() == 1, InvalidValue, "outer expects one-dimensional operands")?;
+    let la = a.layout().to_dim::<Ix1>()?;
+    let lb = b.layout().to_dim::<Ix1>()?;
+    let (n, m) = (la.shape()[0], lb.shape()[0]);
+    rstsr_assert_eq!(c.shape(), &[n, m], InvalidLayout, "the outer-product output should have shape (a.len, b.len)")?;
+
+    let c_layout = c.layout().clone();
+    // SAFETY: `<B as DeviceRawAPI<TC>>::Raw` and `<B as DeviceRawAPI<MaybeUninit<TC>>>::Raw`
+    // are the same buffer type (a container of `TC`-sized slots); `c` is an initialized,
+    // writable output buffer, which the device op fully overwrites.
+    let c_raw_mut = unsafe {
+        transmute::<&mut <B as DeviceRawAPI<TC>>::Raw, &mut <B as DeviceRawAPI<MaybeUninit<TC>>>::Raw>(c.raw_mut())
+    };
+    device.outer(c_raw_mut, &c_layout, a.raw(), &la, b.raw(), &lb)
+}
+
 /* #endregion */
 
 /* #region outer tensor trait */
@@ -201,6 +261,49 @@ where
             + DeviceCreationAnyAPI<<T as Mul<TB>>::Output>,
     {
         op_refa_refb_outer(self.view(), b).rstsr_unwrap()
+    }
+}
+
+/* #endregion */
+
+/* #region outer_from tensor trait */
+
+impl<R, T, B> TensorAny<R, T, B, Ix2>
+where
+    R: DataMutAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
+    B: DeviceAPI<T>,
+{
+    /// Outer product of two one-dimensional tensors, writing into this tensor.
+    ///
+    /// See also [`outer`].
+    pub fn outer_from<TA, TB, DA, DB>(
+        &mut self,
+        a: impl TensorViewAPI<Type = TA, Backend = B, Dim = DA>,
+        b: impl TensorViewAPI<Type = TB, Backend = B, Dim = DB>,
+    ) where
+        TA: Mul<TB, Output = T>,
+        DA: DimAPI,
+        DB: DimAPI,
+        B: DeviceOuterAPI<TA, TB, T> + DeviceAPI<TA> + DeviceAPI<TB>,
+    {
+        outer_from_f(self, a, b).rstsr_unwrap()
+    }
+
+    /// Outer product of two one-dimensional tensors, writing into this tensor.
+    ///
+    /// See also [`outer`].
+    pub fn outer_from_f<TA, TB, DA, DB>(
+        &mut self,
+        a: impl TensorViewAPI<Type = TA, Backend = B, Dim = DA>,
+        b: impl TensorViewAPI<Type = TB, Backend = B, Dim = DB>,
+    ) -> Result<()>
+    where
+        TA: Mul<TB, Output = T>,
+        DA: DimAPI,
+        DB: DimAPI,
+        B: DeviceOuterAPI<TA, TB, T> + DeviceAPI<TA> + DeviceAPI<TB>,
+    {
+        outer_from_f(self, a, b)
     }
 }
 
@@ -263,6 +366,42 @@ mod test {
         let b2 = rt::tensor_from_nested!([[1.0f64, 2.]], &device);
         assert!(rt::outer_f(&a, &b2).is_err());
         assert!(rt::outer_f(&b2, &a).is_err());
+    }
+
+    #[test]
+    fn test_outer_from_overwrites_output() {
+        let mut device = DeviceCpuSerial::default();
+        device.set_default_order(RowMajor);
+        let a = rt::tensor_from_nested!([1.0f64, 2., 3.], &device);
+        let b = rt::tensor_from_nested!([4.0f64, 5.], &device);
+        // a pre-filled output is fully overwritten (outer has no accumulate form)
+        let expected = rt::tensor_from_nested!([[4.0f64, 5.], [8., 10.], [12., 15.]], &device);
+
+        let mut c: Tensor<f64, _, Ix2> = rt::ones(([3, 2], &device)).into_dim();
+        rt::outer_from(&mut c, &a, &b);
+        assert_eq!(format!("{c}"), format!("{expected}"));
+
+        // the associated method is equivalent
+        let mut c2: Tensor<f64, _, Ix2> = rt::zeros(([3, 2], &device)).into_dim();
+        c2.outer_from(&a, &b);
+        assert_eq!(format!("{c2}"), format!("{expected}"));
+    }
+
+    #[test]
+    fn test_outer_from_rejects_bad_output() {
+        let device = DeviceCpuSerial::default();
+        let a = rt::tensor_from_nested!([1.0f64, 2., 3.], &device);
+        let b = rt::tensor_from_nested!([4.0f64, 5.], &device);
+
+        // wrong output shape
+        let mut c: Tensor<f64, _, Ix2> = rt::zeros(([2, 3], &device)).into_dim();
+        assert!(rt::outer_from_f(&mut c, &a, &b).is_err());
+
+        // a broadcast (stride-0) output aliases elements; writing through it is rejected
+        let ai = rt::arange((3, &device));
+        let bi = rt::arange((2, &device));
+        let mut c = Tensor::new(rt::arange((2, &device)).into_raw_parts().0, Layout::new([3, 2], [0, 1], 0).unwrap());
+        assert!(rt::outer_from_f(c.view_mut(), &ai, &bi).is_err());
     }
 
     #[cfg(all(feature = "faer", feature = "rayon"))]
