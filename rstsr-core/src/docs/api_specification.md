@@ -333,8 +333,10 @@ Trait function calls like associated methods, so we also do not recommend usage 
 |--|--|--|
 | assoc/fn | [`vecdot`], [`ext_vecdot`] | Computes the (vector) dot product of two arrays. |
 | assoc/fn | [`tensordot`], [`ext_tensordot`] | Contracts two arrays over specified axes. |
+| assoc/fn | [`outer`], [`ext_outer`] | Computes the outer product of two one-dimensional arrays. |
+| assoc/fn | [`trace`] | Sums along the diagonal of a tensor. |
 
-**The `ext_` forms ([`ext_vecdot`], [`ext_tensordot`]) exist only for array-API compliance**, not as the idiomatic rstsr surface: they accept mixed-dtype operands and compute in their promoted common data type (the same rule as NumPy), unlike the same-dtype [`vecdot`] / [`tensordot`], which require matching operand dtypes. Prefer the same-dtype entries whenever the operands already share a dtype.
+**The `ext_` forms ([`ext_vecdot`], [`ext_tensordot`], [`ext_outer`]) exist only for array-API compliance**, not as the idiomatic rstsr surface: they accept mixed-dtype operands and compute in their promoted common data type (the same rule as NumPy), unlike the same-dtype [`vecdot`] / [`tensordot`] / [`outer`], which require matching operand dtypes. Prefer the same-dtype entries whenever the operands already share a dtype.
 
 <div class="warning">
 

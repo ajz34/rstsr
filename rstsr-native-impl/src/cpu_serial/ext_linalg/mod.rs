@@ -6,5 +6,6 @@
 //! corresponding `linalg`/`matmul_naive` modules.
 
 pub mod matmul;
+pub mod outer;
 pub mod tensordot;
 pub mod vecdot;

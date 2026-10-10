@@ -9,10 +9,10 @@
 //! concrete dtype arm, so no generic trait bound is stated here and no faer
 //! type is named.
 //!
-//! Names rstsr/faer does not provide (`qr`, `slogdet`, `eig`, `matrix_norm`,
-//! `matrix_power`, `matrix_rank`, `tensordot`, `outer`, `cross`, `trace`, the
-//! general-`ord` norms) are absent from the namespace, never stubbed — they
-//! are rust-side gaps.
+//! Names rstsr/faer does not provide (`qr`, `eig`, `eigvals`, `matrix_norm`,
+//! `matrix_power`, `matrix_rank`, `cross`, the general-`ord` norms) are absent
+//! from the namespace, never stubbed — they are rust-side gaps. `trace` is now
+//! available rust-side (`rt::trace`) but not yet bound here.
 
 use core::mem::MaybeUninit;
 use core::ops::{Add, Mul};
@@ -23,7 +23,9 @@ use pyo3::prelude::*;
 use pyo3::types::{PySequence, PySequenceMethods};
 use rstsr::prelude::rt;
 use rstsr::prelude::*;
-use rstsr_core::operators::exports::{DeviceExtMatMulAPI, DeviceExtTensordotAPI, DeviceExtVecdotAPI};
+use rstsr_core::operators::exports::{
+    DeviceExtMatMulAPI, DeviceExtOuterAPI, DeviceExtTensordotAPI, DeviceExtVecdotAPI,
+};
 use rstsr_core::storage::exports::{DeviceCreationAnyAPI, DeviceRawAPI};
 use rstsr_dtype_traits::{DTypePromoteAPI, ExtNum};
 
@@ -303,6 +305,31 @@ pub fn linalg_tensordot(
 ) -> PyResult<NativeArray> {
     let axes = parse_tensordot_axes(axes)?;
     let t = dispatch_bin_promote_arith!(x1.t, x2.t, "tensordot", op_ext_tensordot, &axes)?;
+    Ok(NativeArray { t })
+}
+
+/// Mixed-dtype outer-product wrapper: the pair promotes to its common dtype
+/// ([`DTypePromoteAPI`]), which is also the result dtype.
+fn op_ext_outer<T, U>(a: &FTensor<T>, b: &FTensor<U>) -> rt::Result<FTensor<<T as DTypePromoteAPI<U>>::Res>>
+where
+    T: DTypePromoteAPI<U> + Clone + Send + Sync,
+    U: Clone + Send + Sync,
+    <T as DTypePromoteAPI<U>>::Res: Clone + Send + Sync,
+    <T as DTypePromoteAPI<U>>::Res: Mul<<T as DTypePromoteAPI<U>>::Res, Output = <T as DTypePromoteAPI<U>>::Res>,
+    DeviceFaer: DeviceExtOuterAPI<T, U, <T as DTypePromoteAPI<U>>::Res>
+        + DeviceAPI<<T as DTypePromoteAPI<U>>::Res>
+        + DeviceCreationAnyAPI<<T as DTypePromoteAPI<U>>::Res>
+        + DeviceRawAPI<MaybeUninit<<T as DTypePromoteAPI<U>>::Res>>,
+{
+    // the core entry is rank-2 (`Ix2`); the shim's handles are dynamic (`IxD`)
+    rt::ext_outer_f(a, b).map(|t| t.into_dim::<IxD>())
+}
+
+/// Outer product of two one-dimensional arrays, promoting mixed-dtype operands
+/// to their common dtype.
+#[pyfunction]
+pub fn linalg_outer(x1: &NativeArray, x2: &NativeArray) -> PyResult<NativeArray> {
+    let t = dispatch_bin_promote_arith!(x1.t, x2.t, "outer", op_ext_outer)?;
     Ok(NativeArray { t })
 }
 

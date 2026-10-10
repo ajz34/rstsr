@@ -368,6 +368,9 @@ where
         let axis2 = axis2.unwrap_or(1);
         let axis1 = rstsr_check_axis!(axis1, self.ndim())?;
         let axis2 = rstsr_check_axis!(axis2, self.ndim())?;
+        // two distinct axes are required: a repeated axis would drop only one
+        // axis while still appending a diagonal, giving an out-of-bounds layout
+        rstsr_assert!(axis1 != axis2, InvalidValue, "axis1 and axis2 cannot be the same")?;
 
         // shape and strides of last two dimensions
         let d1 = self.shape()[axis1] as isize;
@@ -1014,6 +1017,14 @@ mod test {
         let layout = [3, 1].c();
         let diag = layout.diagonal(Some(2), Some(0), Some(1)).unwrap();
         assert_eq!(diag, Layout::new([0], [2], 0).unwrap());
+        // a repeated axis is rejected (NumPy raises ValueError; before the
+        // guard it produced a layout past the end of the buffer)
+        let layout = [2, 2].c();
+        assert!(layout.diagonal(None, Some(0), Some(0)).is_err());
+        assert!(layout.diagonal(None, Some(-1), Some(-1)).is_err());
+        // but two *distinct* axes of equal length are fine (NumPy allows them)
+        assert!(layout.diagonal(None, Some(0), Some(1)).is_ok());
+        assert!(layout.diagonal(None, Some(1), Some(0)).is_ok());
     }
 
     #[test]
