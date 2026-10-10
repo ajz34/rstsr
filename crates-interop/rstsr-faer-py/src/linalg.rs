@@ -18,8 +18,7 @@ use pyo3::prelude::*;
 use rstsr::prelude::rt;
 use rstsr::prelude::*;
 
-use crate::any_tensor::{any_of, device_faer, err_py, type_err, AnyTensor, FTensor, IntoAnyTensor, NativeArray};
-use crate::creation::dim_from;
+use crate::any_tensor::{any_of, err_py, type_err, AnyTensor, FTensor, IntoAnyTensor, NativeArray};
 
 /// `rt::Result<FTensor<R>>` -> erased handle, by the result's own dtype, so a
 /// real-valued eigenvalue/singular-value output lands in the right variant.
@@ -112,13 +111,10 @@ pub fn linalg_cholesky(x: &NativeArray, upper: bool) -> PyResult<NativeArray> {
     Ok(NativeArray { t })
 }
 
-/// Determinant as a 0-d array.
+/// Determinant, a 0-d array for a 2-D input and a stack result for a stacked one.
 #[pyfunction]
 pub fn linalg_det(x: &NativeArray) -> PyResult<NativeArray> {
-    let t = unary_fc!(x, |a| {
-        let d = err_py(rt::linalg::det_f(a))?;
-        any_res(rt::asarray_f((vec![d], dim_from(&[]), device_faer())))
-    })?;
+    let t = unary_fc!(x, |a| any_res(rt::linalg::det_f(a)))?;
     Ok(NativeArray { t })
 }
 
