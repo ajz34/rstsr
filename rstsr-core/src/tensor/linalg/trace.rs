@@ -375,8 +375,10 @@ mod test {
         // distinct, equal-length axes -> allowed (numpy.trace(a22, axis1=1, axis2=0) == 3)
         assert_eq!(rt::trace(&a22, (0, 1, 0)).to_scalar(), 3);
 
-        // a 3-d input: `-1` and `2` normalize to the same axis and are rejected
-        let a222 = rt::arange((8, &device)).into_shape([2, 2, 2]);
+        // a 3-d input: `-1` and `2` normalize to the same axis and are rejected.
+        // it is built from literals (not `arange().into_shape`) so its logical
+        // content is the same under either device default order
+        let a222 = rt::tensor_from_nested!([[[0, 1], [2, 3]], [[4, 5], [6, 7]]], &device);
         assert!(rt::trace_f(&a222, (0, -1, 2)).is_err());
         // ... while these agree with numpy.trace(a222, axis1=..., axis2=...)
         let n_default = rt::tensor_from_nested!([6, 8], &device); // (0, 1)
