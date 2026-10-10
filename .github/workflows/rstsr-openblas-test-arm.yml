@@ -29,12 +29,11 @@ jobs:
     - name: validate manifest (driver_validation_f64)
       run: |
         conda init; source $HOME/.bashrc; conda activate
-        cd crates-device/rstsr-openblas/tests/driver_impl
-        python driver_validation_f64.py
+        python rstsr-blas-traits/src/blas_tests_impl/driver_impl/driver_validation_f64.py
     - name: validate manifest (func_validation_f64)
       run: |
         conda init; source $HOME/.bashrc; conda activate
-        cd crates-device/rstsr-openblas/tests/linalg_func
-        python func_validation_f64.py
+        python rstsr-blas-traits/src/blas_tests_impl/linalg_func/func_validation_f64.py
     - name: test
-      run: RSTSR_DEV=1 cargo test -p rstsr-openblas --release --features="openmp linalg"
+      # --test-threads=1: parallel test threads oversubscribe the CPU, since each test calls multi-threaded BLAS
+      run: RSTSR_DEV=1 cargo test -p rstsr-openblas --release --features="openmp linalg" -- --test-threads=1
