@@ -8,6 +8,7 @@ pub mod mask_indexing;
 pub mod matmul_naive;
 pub mod op_tri;
 pub mod op_with_func;
+pub mod outer;
 pub mod reduction;
 pub mod searching;
 pub mod sorting;

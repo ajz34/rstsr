@@ -10,6 +10,7 @@ pub mod op_ternary_arithmetic;
 pub mod op_ternary_common;
 pub mod op_tri;
 pub mod op_with_func;
+pub mod outer;
 pub mod reduction;
 pub mod searching;
 pub mod set;

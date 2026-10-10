@@ -80,3 +80,25 @@ mod doc_ext_tensordot {
         assert_eq!(format!("{c}"), "[[ 19 22]\n [ 43 50]]");
     }
 }
+
+#[cfg(test)]
+mod doc_ext_outer {
+    use super::*;
+    static FUNC: &str = "doc_ext_outer";
+
+    #[test]
+    fn test_doc() {
+        crate::specify_test!("test_doc");
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        let a = rt::tensor_from_nested!([1u8, 2, 3], &device);
+        let b = rt::tensor_from_nested!([4u16, 5], &device);
+        let c = rt::ext_outer(&a, &b);
+        println!("{c}");
+        // [[ 4 5]
+        //  [ 8 10]
+        //  [ 12 15]]
+        assert_eq!(format!("{c}"), "[[ 4 5]\n [ 8 10]\n [ 12 15]]");
+    }
+}

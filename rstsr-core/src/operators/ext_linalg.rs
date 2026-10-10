@@ -72,6 +72,31 @@ where
     ) -> Result<()>;
 }
 
+/// Outer product with Array-API dtype promotion.
+///
+/// The operands may have different dtypes: each pair is promoted to its common
+/// dtype ([`DTypePromoteAPI`]) inside the kernel. This is the device op behind
+/// [`ext_outer`]; the same-dtype [`DeviceOuterAPI`] is left unchanged.
+pub trait DeviceExtOuterAPI<TA, TB, TC>
+where
+    Self: DeviceAPI<TA> + DeviceAPI<TB> + DeviceAPI<MaybeUninit<TC>>,
+{
+    /// Outer product of two **one-dimensional** arrays, writing
+    /// `c[i, j] = a[i] * b[j]` into the uninitialized `(N, M)` output; `a` and
+    /// `b` may have different dtypes and `TC` must be their promoted common
+    /// type. No conjugation. Implementations must initialize every element of
+    /// `lc`.
+    fn ext_outer(
+        &self,
+        c: &mut <Self as DeviceRawAPI<MaybeUninit<TC>>>::Raw,
+        lc: &Layout<Ix2>,
+        a: &<Self as DeviceRawAPI<TA>>::Raw,
+        la: &Layout<Ix1>,
+        b: &<Self as DeviceRawAPI<TB>>::Raw,
+        lb: &Layout<Ix1>,
+    ) -> Result<()>;
+}
+
 /// Generalized tensor contraction with Array-API dtype promotion.
 ///
 /// The operands may have different dtypes: each pair is promoted to its common
