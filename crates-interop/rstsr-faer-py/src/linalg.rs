@@ -14,13 +14,23 @@
 //! general-`ord` norms) are absent from the namespace, never stubbed — they
 //! are rust-side gaps.
 
+use core::mem::MaybeUninit;
+use core::ops::{Add, Mul};
+
+use num::{Complex, One, Zero};
 use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
 use pyo3::types::{PySequence, PySequenceMethods};
 use rstsr::prelude::rt;
 use rstsr::prelude::*;
+use rstsr_core::operators::exports::DeviceExtMatMulAPI;
+use rstsr_core::storage::exports::{DeviceCreationAnyAPI, DeviceRawAPI};
+use rstsr_dtype_traits::DTypePromoteAPI;
 
-use crate::any_tensor::{any_of, device_faer, err_py, type_err, AnyTensor, FTensor, IntoAnyTensor, NativeArray};
+use crate::any_tensor::{
+    any_of, device_faer, dispatch_bin_promote, dispatch_bin_promote_arith, err_py, lift, type_err, AnyTensor, FTensor,
+    IntoAnyTensor, NativeArray,
+};
 use crate::creation::dim_from;
 
 /// `rt::Result<FTensor<R>>` -> erased handle, by the result's own dtype, so a
@@ -81,7 +91,7 @@ macro_rules! bin_fc {
     };
 }
 
-/// Same-dtype binary dispatch over the twelve numeric dtypes (matmul, vecdot,
+/// Same-dtype binary dispatch over the twelve numeric dtypes (vecdot,
 /// tensordot); bool is declined (rstsr's product kernels are not defined on it).
 /// `$name` names the calling function in the failure messages.
 macro_rules! bin_numeric {
@@ -225,10 +235,30 @@ pub fn linalg_slogdet(x: &NativeArray) -> PyResult<(NativeArray, NativeArray)> {
 
 // ------------------------------------------------------------- tensor products
 
-/// Matrix product (also the `@` operator).
+/// Mixed-dtype matmul wrapper: the pair promotes to its common dtype
+/// ([`DTypePromoteAPI`]), which is also the result dtype, so the dispatch
+/// macro lifts the result into the promoted variant. Same-dtype pairs take the
+/// same path (promotion is the identity there).
+fn op_ext_matmul<T, U>(a: &FTensor<T>, b: &FTensor<U>) -> rt::Result<FTensor<<T as DTypePromoteAPI<U>>::Res>>
+where
+    T: DTypePromoteAPI<U> + Clone + Send + Sync + 'static,
+    U: DTypePromoteAPI<T, Res = <T as DTypePromoteAPI<U>>::Res> + Clone + Send + Sync + 'static,
+    <T as DTypePromoteAPI<U>>::Res: Clone + Send + Sync + 'static + PartialEq + Zero + One,
+    <T as DTypePromoteAPI<U>>::Res: Add<<T as DTypePromoteAPI<U>>::Res, Output = <T as DTypePromoteAPI<U>>::Res>
+        + Mul<<T as DTypePromoteAPI<U>>::Res, Output = <T as DTypePromoteAPI<U>>::Res>,
+    DeviceFaer: DeviceRawAPI<<T as DTypePromoteAPI<U>>::Res, Raw = Vec<<T as DTypePromoteAPI<U>>::Res>>
+        + DeviceCreationAnyAPI<<T as DTypePromoteAPI<U>>::Res>
+        + DeviceRawAPI<MaybeUninit<<T as DTypePromoteAPI<U>>::Res>>
+        + DeviceExtMatMulAPI<T, U, <T as DTypePromoteAPI<U>>::Res, IxD, IxD, IxD>,
+{
+    rt::ext_matmul_f(a, b)
+}
+
+/// Matrix product (also the `@` operator), promoting mixed-dtype operands to
+/// their common dtype.
 #[pyfunction]
 pub fn linalg_matmul(x1: &NativeArray, x2: &NativeArray) -> PyResult<NativeArray> {
-    let t = bin_numeric!("matmul", x1, x2, |a, b| any_res(rt::matmul_f(a, b)))?;
+    let t = dispatch_bin_promote_arith!(x1.t, x2.t, "matmul", op_ext_matmul)?;
     Ok(NativeArray { t })
 }
 

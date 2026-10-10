@@ -626,6 +626,7 @@ macro_rules! dispatch_bin_promote {
             (AnyTensor::I64(a), AnyTensor::U32(b)) => lift(($f::<i64, u32>)(a, b), crate::any_tensor::any_of),
             (AnyTensor::I64(a), AnyTensor::U64(b)) => lift(($f::<i64, u64>)(a, b), crate::any_tensor::any_of),
             (AnyTensor::I64(a), AnyTensor::U8(b)) => lift(($f::<i64, u8>)(a, b), crate::any_tensor::any_of),
+            (AnyTensor::I8(a), AnyTensor::I16(b)) => lift(($f::<i8, i16>)(a, b), crate::any_tensor::any_of),
             (AnyTensor::I8(a), AnyTensor::F32(b)) => lift(($f::<i8, f32>)(a, b), crate::any_tensor::any_of),
             (AnyTensor::I8(a), AnyTensor::F64(b)) => lift(($f::<i8, f64>)(a, b), crate::any_tensor::any_of),
             (AnyTensor::I8(a), AnyTensor::I32(b)) => lift(($f::<i8, i32>)(a, b), crate::any_tensor::any_of),
@@ -670,10 +671,8 @@ macro_rules! dispatch_bin_promote {
             (AnyTensor::U8(a), AnyTensor::U16(b)) => lift(($f::<u8, u16>)(a, b), crate::any_tensor::any_of),
             (AnyTensor::U8(a), AnyTensor::U32(b)) => lift(($f::<u8, u32>)(a, b), crate::any_tensor::any_of),
             (AnyTensor::U8(a), AnyTensor::U64(b)) => lift(($f::<u8, u64>)(a, b), crate::any_tensor::any_of),
-            // 89 arms
-
-            // 89 pair arms, generated from the DTypePromoteAPI impls of
-            // rstsr-dtype-traits/src/promotion.rs (real dtypes only).
+            // 100 pair arms, generated from the DTypePromoteAPI impls of
+            // rstsr-dtype-traits/src/promotion.rs (the ten real dtypes).
             _ => type_err(format!(
                 "{}: this dtype pair is not promoted by rstsr (gap G-009); use astype() or matching dtypes",
                 $opname
@@ -742,6 +741,7 @@ macro_rules! dispatch_bin_promote_int {
             (AnyTensor::I64(a), AnyTensor::U16(b)) => lift(($f::<i64, u16>)(a, b), crate::any_tensor::any_of),
             (AnyTensor::I64(a), AnyTensor::U32(b)) => lift(($f::<i64, u32>)(a, b), crate::any_tensor::any_of),
             (AnyTensor::I64(a), AnyTensor::U8(b)) => lift(($f::<i64, u8>)(a, b), crate::any_tensor::any_of),
+            (AnyTensor::I8(a), AnyTensor::I16(b)) => lift(($f::<i8, i16>)(a, b), crate::any_tensor::any_of),
             (AnyTensor::I8(a), AnyTensor::I32(b)) => lift(($f::<i8, i32>)(a, b), crate::any_tensor::any_of),
             (AnyTensor::I8(a), AnyTensor::I64(b)) => lift(($f::<i8, i64>)(a, b), crate::any_tensor::any_of),
             (AnyTensor::I8(a), AnyTensor::U16(b)) => lift(($f::<i8, u16>)(a, b), crate::any_tensor::any_of),
@@ -965,6 +965,7 @@ macro_rules! dispatch_bin_promote_eq {
             (AnyTensor::I64(a), AnyTensor::U8(b)) => lift(($f::<i64, u8>)(a, b), crate::any_tensor::any_of),
             (AnyTensor::I8(a), AnyTensor::C32(b)) => lift(($f::<i8, Complex<f32>>)(a, b), crate::any_tensor::any_of),
             (AnyTensor::I8(a), AnyTensor::C64(b)) => lift(($f::<i8, Complex<f64>>)(a, b), crate::any_tensor::any_of),
+            (AnyTensor::I8(a), AnyTensor::I16(b)) => lift(($f::<i8, i16>)(a, b), crate::any_tensor::any_of),
             (AnyTensor::I8(a), AnyTensor::F32(b)) => lift(($f::<i8, f32>)(a, b), crate::any_tensor::any_of),
             (AnyTensor::I8(a), AnyTensor::F64(b)) => lift(($f::<i8, f64>)(a, b), crate::any_tensor::any_of),
             (AnyTensor::I8(a), AnyTensor::I32(b)) => lift(($f::<i8, i32>)(a, b), crate::any_tensor::any_of),
@@ -1017,7 +1018,6 @@ macro_rules! dispatch_bin_promote_eq {
             (AnyTensor::U8(a), AnyTensor::U16(b)) => lift(($f::<u8, u16>)(a, b), crate::any_tensor::any_of),
             (AnyTensor::U8(a), AnyTensor::U32(b)) => lift(($f::<u8, u32>)(a, b), crate::any_tensor::any_of),
             (AnyTensor::U8(a), AnyTensor::U64(b)) => lift(($f::<u8, u64>)(a, b), crate::any_tensor::any_of),
-            _ => dispatch_bin_promote!($a, $b, $opname, $f),
         }
     };
 }
