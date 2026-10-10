@@ -58,7 +58,7 @@ where
         faer::set_global_parallelism(Par::rayon(pool.current_num_threads()));
     }
 
-    let result = crate::linalg_util::map_batch_matrices(a, order, &mut |m| faer_standard_eigh_ix2(m, uplo));
+    let result = crate::linalg_util::map_batch_square_matrices(a, order, &mut |m| faer_standard_eigh_ix2(m, uplo));
 
     if pool.is_some() {
         faer::set_global_parallelism(faer_par_orig)
@@ -66,11 +66,7 @@ where
 
     let (batch_shape, matrix, items) = result?;
     let [n, _] = matrix;
-    let (mut vals, mut vecs) = (Vec::new(), Vec::new());
-    for (w, v) in items {
-        vals.push(w);
-        vecs.push(v);
-    }
+    let (vals, vecs): (Vec<_>, Vec<_>) = items.into_iter().unzip();
     let eigenvalues = crate::linalg_util::assemble_batch_matrices_f(vals, &batch_shape, &[n], order, &device)?;
     let eigenvectors = crate::linalg_util::assemble_batch_matrices_f(vecs, &batch_shape, &[n, n], order, &device)?;
     Ok((eigenvalues, eigenvectors))
@@ -224,11 +220,7 @@ where
         faer_generalized_eigh_ix2(a2, b2, uplo, itype)
     })?;
     let [n, _] = matrix;
-    let (mut vals, mut vecs) = (Vec::new(), Vec::new());
-    for (w, v) in items {
-        vals.push(w);
-        vecs.push(v);
-    }
+    let (vals, vecs): (Vec<_>, Vec<_>) = items.into_iter().unzip();
     let eigenvalues = crate::linalg_util::assemble_batch_matrices_f(vals, &batch_shape, &[n], order, &device)?;
     let eigenvectors = crate::linalg_util::assemble_batch_matrices_f(vecs, &batch_shape, &[n, n], order, &device)?;
     Ok((eigenvalues, eigenvectors))

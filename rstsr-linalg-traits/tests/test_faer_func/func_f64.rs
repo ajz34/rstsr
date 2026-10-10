@@ -207,6 +207,7 @@ mod test {
     }
 
     /// Two SPD 3x3 matrices and their row-major stack (shape `[2, 3, 3]`).
+    #[allow(clippy::type_complexity)]
     fn spd_stack(
         device: &DeviceFaer,
     ) -> (Tensor<f64, DeviceFaer, IxD>, Tensor<f64, DeviceFaer, IxD>, Tensor<f64, DeviceFaer, IxD>) {
@@ -279,6 +280,27 @@ mod test {
         assert_eq!(ret.shape(), &[2, 3, 2]);
         assert!((fingerprint(&ret) - fingerprint(&x)).abs() < 1e-8);
 
+        // in-place broadcast: unbatched a with batched b — the solution takes b's
+        // shape, so it is solved into b (owned/mut), matching the allocating form
+        let xb2 = rt::linalg::solve_general((m0.view(), b.view()));
+        assert_eq!(xb2.shape(), &[2, 3, 2]);
+        let u = vec![1.0f64, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0];
+        let mut bu = rt::asarray((u.clone(), [2, 3, 2].c(), &device));
+        rt::linalg::solve_general((m0.view(), bu.view_mut()));
+        assert!((fingerprint(&bu) - fingerprint(&xb2)).abs() < 1e-8);
+        let rbuo = rt::linalg::solve_general((m0.view(), rt::asarray((u, [2, 3, 2].c(), &device))));
+        assert!((fingerprint(&rbuo) - fingerprint(&xb2)).abs() < 1e-8);
+
+        // in-place cannot allocate: with a stacked a a 1-D b's solution is (..., M)
+        // and does not fit b (M,); the view form allocates, the owned/mut form errors
+        let v = rt::asarray((vec![1.0f64, 0.0, 0.0], [3].c(), &device));
+        let xv = rt::linalg::solve_general((a.view(), v.view()));
+        assert_eq!(xv.shape(), &[2, 3]);
+        let vo = rt::asarray((vec![1.0f64, 0.0, 0.0], [3].c(), &device));
+        assert!(rt::linalg::solve_general_f((a.view(), vo)).is_err());
+        let mut vm = rt::asarray((vec![1.0f64, 0.0, 0.0], [3].c(), &device));
+        assert!(rt::linalg::solve_general_f((a.view(), vm.view_mut())).is_err());
+
         // solve_triangular: allocating and in-place, same batch walk as solve
         let x_tri = rt::linalg::solve_triangular((a.view(), b.view()));
         assert_eq!(x_tri.shape(), &[2, 3, 2]);
@@ -295,6 +317,18 @@ mod test {
         assert_eq!(ge.eigenvectors.shape(), &[2, 3, 3]);
         let ge0 = rt::linalg::eigh((m0.view(), m0.view()));
         assert!((fingerprint(&ge.eigenvalues.i(0).into_owned()) - fingerprint(&ge0.eigenvalues)).abs() < 1e-8);
+
+        // non-square input errors cleanly on the square entries (used to panic in faer)
+        let rect = rt::asarray((vec![1.0f64, 2.0, 3.0, 4.0, 5.0, 6.0], [2, 3].c(), &device));
+        assert!(rt::linalg::det_f(rect.view()).is_err());
+        assert!(rt::linalg::slogdet_f(rect.view()).is_err());
+        assert!(rt::linalg::inv_f(rect.view()).is_err());
+        assert!(rt::linalg::cholesky_f(rect.view()).is_err());
+        assert!(rt::linalg::eigvalsh_f(rect.view()).is_err());
+        assert!(rt::linalg::eigh_f(rect.view()).is_err());
+        let rect_stack = rt::asarray((vec![1.0f64; 12], [2, 2, 3].c(), &device));
+        assert!(rt::linalg::det_f(rect_stack.view()).is_err());
+        assert!(rt::linalg::slogdet_f(rect_stack.view()).is_err());
     }
 
     #[test]

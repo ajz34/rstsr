@@ -27,7 +27,7 @@ where
         faer::set_global_parallelism(Par::rayon(pool.current_num_threads()));
     }
 
-    let result = crate::linalg_util::map_batch_matrices(a, order, &mut faer_det_ix2);
+    let result = crate::linalg_util::map_batch_square_matrices(a, order, &mut faer_det_ix2);
 
     if pool.is_some() {
         faer::set_global_parallelism(faer_par_orig)

@@ -1,7 +1,7 @@
 #![allow(clippy::type_complexity)]
 #![allow(non_camel_case_types)]
 
-mod linalg_util;
+pub mod linalg_util;
 
 pub mod prelude;
 pub mod prelude_dev;

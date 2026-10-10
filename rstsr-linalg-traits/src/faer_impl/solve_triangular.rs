@@ -43,19 +43,11 @@ fn faer_impl_solve_triangular_nd_f<T>(
 where
     T: ComplexField,
 {
-    let device = a.device().clone();
-    let order = device.default_order();
-    let (batch_out, m, k, is_vec, mats) = crate::linalg_util::map_batch_solve(a, b, order, &mut |a2, b2| {
-        Ok(faer_impl_solve_triangular_f(a2.into(), b2.into(), uplo)?.into_owned())
-    })?;
-    let result = crate::linalg_util::assemble_batch_matrices_f(mats, &batch_out, &[m, k], order, &device)?;
-    if is_vec {
-        let mut shape = batch_out;
-        shape.push(m);
-        Ok(result.into_shape(shape))
-    } else {
-        Ok(result)
-    }
+    let order = a.device().default_order();
+    crate::linalg_util::map_batch_solve_into_output(a, b, order, &mut |a2, b2| {
+        faer_impl_solve_triangular_f(a2.into(), b2.into(), uplo)?;
+        Ok(())
+    })
 }
 
 /// n-dim in-place triangular solve: each slice of `b` is overwritten in place.
@@ -68,27 +60,10 @@ where
     T: ComplexField,
 {
     let order = a.device().default_order();
-    let (batch_a, [m, m2]) = crate::linalg_util::batch_and_matrix_shape(a.shape(), order)?;
-    rstsr_assert_eq!(m, m2, InvalidLayout, "solve_triangular: matrix a must be square, got {m}x{m2}")?;
-    let (batch_b, [bm, _bk]) = crate::linalg_util::batch_and_matrix_shape(b.shape(), order)?;
-    rstsr_assert_eq!(bm, m, InvalidLayout, "solve_triangular: b's row dimension must match a")?;
-    rstsr_assert_eq!(
-        batch_a,
-        batch_b,
-        InvalidLayout,
-        "solve_triangular: in-place batching requires matching batch dims"
-    )?;
-    let mut out = Vec::new();
-    crate::linalg_util::map_batch_matrices2_mut(
-        a,
-        b,
-        order,
-        &mut |a2, b2| {
-            faer_impl_solve_triangular_f(a2.into(), b2.into(), uplo)?;
-            Ok(())
-        },
-        &mut out,
-    )
+    crate::linalg_util::map_batch_solve_inplace(a, b, order, &mut |a2, b2| {
+        faer_impl_solve_triangular_f(a2.into(), b2.into(), uplo)?;
+        Ok(())
+    })
 }
 
 /* #region full-args */
