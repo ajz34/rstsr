@@ -212,8 +212,8 @@ pub mod rstsr_funcs {
     pub use crate::tensor::linalg::exports::{
         into_matrix_transpose, into_matrix_transpose_f, matmul, matmul_f, matmul_from, matmul_from_f,
         matmul_with_output, matmul_with_output_f, matrix_transpose, matrix_transpose_f, outer, outer_f, outer_from,
-        outer_from_f, tensordot, tensordot_f, tensordot_from, tensordot_from_f, vecdot, vecdot_f, vecdot_from,
-        vecdot_from_f,
+        outer_from_f, tensordot, tensordot_f, tensordot_from, tensordot_from_f, trace, trace_f, trace_with_dtype,
+        trace_with_dtype_f, vecdot, vecdot_f, vecdot_from, vecdot_from_f,
     };
 }
 

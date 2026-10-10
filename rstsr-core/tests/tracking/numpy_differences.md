@@ -549,3 +549,19 @@ in NumPy) — byte-for-byte the behaviour that `np.linalg.outer` and its `TestOu
 check. The top-level `np.outer` instead flattens any input, so calling `np.outer` with
 a 2-D argument succeeds there and fails here. rstsr does not offer the flattening form;
 `reshape(-1)` first if that is what is wanted.
+
+## `trace` default axes follow the device default order
+
+- **numpy:** `numpy.trace` (always `axis1=0, axis2=1` by default; NumPy is row-major only).
+- **rstsr:** core_func::linalg::test_trace::custom_trace::test_trace_stack;
+  `tensor::linalg::trace::test::test_trace_follows_device_default_order`
+- **tag:** intentional
+- **status:** open
+
+`rt::trace`'s **default axes** depend on the device default order: the last two under `RowMajor`
+(which matches the array-API `linalg.trace` contract that the conformance suite checks over
+stacks) and the first two under `ColMajor` (which matches NumPy). For a two-dimensional input the
+two conventions coincide, so NumPy's `TestNonarrayArgs::test_trace` transfers unchanged under
+either order; for a stacked input `rt::trace(&a, ())` collapses the last two axes on a row-major
+device and the first two on a column-major one. Pass an explicit `(offset, axis1, axis2)` to pin
+the axes regardless of order — that form is order-independent.
