@@ -2,6 +2,7 @@
 
 pub mod conversion;
 pub mod device;
+pub mod ext_linalg;
 pub mod matmul;
 pub mod matmul_impl;
 pub mod rayon_auto_impl;

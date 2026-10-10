@@ -210,10 +210,14 @@ The reference implementation (as in [`DeviceCpuSerial`] and [`DeviceFaer`]), fol
 
 | status | implementation | Python API | description |
 |-|-|-|-|
-| Y | [`matmul`] | [`matmul`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.matmul.html) | Computes the matrix product. |
+| Y | [`matmul`], [`ext_matmul`][^6] | [`matmul`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.matmul.html) | Computes the matrix product. |
 | Y | [`matrix_transpose`] <br> [`swapaxes`]`(-1, -2)` | [`matrix_transpose`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.matrix_transpose.html) | Transposes a matrix (or a stack of matrices) x. |
-| Y | [`tensordot`]<br>[`rt::tblis::einsum`](https://docs.rs/rstsr-tblis/latest/rstsr_tblis/einsum_impl/fn.einsum.html)<br>[`rt::tblis::tensordot`](https://docs.rs/rstsr-tblis/latest/rstsr_tblis/einsum_impl/fn.tensordot.html) | [`tensordot`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.tensordot.html) | Returns a tensor contraction of x1 and x2 over specific axes. |
-| Y | [`vecdot`] | [`vecdot`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.vecdot.html) | Computes the (vector) dot product of two arrays. |
+| Y | [`tensordot`], [`ext_tensordot`][^6][^7]<br>[`rt::tblis::einsum`](https://docs.rs/rstsr-tblis/latest/rstsr_tblis/einsum_impl/fn.einsum.html)<br>[`rt::tblis::tensordot`](https://docs.rs/rstsr-tblis/latest/rstsr_tblis/einsum_impl/fn.tensordot.html) | [`tensordot`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.tensordot.html) | Returns a tensor contraction of x1 and x2 over specific axes. |
+| Y | [`vecdot`], [`ext_vecdot`][^6] | [`vecdot`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.vecdot.html) | Computes the (vector) dot product of two arrays. |
+
+[^6]: The Array API `matmul` / `vecdot` / `tensordot` promote mixed-dtype operands to their common data type ([`DTypePromoteAPI`], the same rule as NumPy) and compute the product in that type; this is served by the `ext_` forms ([`ext_matmul`], [`ext_vecdot`], [`ext_tensordot`]) and their associated methods. These exist only for array-API compliance, not as the idiomatic rstsr surface. The same-dtype entries ([`matmul`], [`vecdot`], [`tensordot`]) require matching operand dtypes. As with the elementwise `ext_*` functions, prefer the same-dtype entries in Rust code when the operands already share a dtype.
+
+[^7]: **`rt::tensordot` and `rt::ext_tensordot` are not recommended** when efficiency matters: general axis pairs run on a naive kernel with no BLAS-backed path. Prefer [`rt::tblis::einsum`](https://docs.rs/rstsr-tblis/latest/rstsr_tblis/einsum_impl/fn.einsum.html), enabled in the main crate `rstsr` with feature `tblis` — this requires the user to build and install the TBLIS library themselves.
 
 ## Manipulation Functions
 

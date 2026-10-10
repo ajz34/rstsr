@@ -2,8 +2,8 @@ use crate::prelude_dev::*;
 use core::mem::transmute;
 
 /// Resolve a [`AxesPairIndex`] into two normalized, pairwise-aligned,
-/// non-negative axis lists for `tensordot`.
-fn resolve_tensordot_axes(
+/// non-negative axis lists for `tensordot` and `ext_tensordot`.
+pub(crate) fn resolve_tensordot_axes(
     axes: &AxesPairIndex<isize>,
     ndim_a: usize,
     ndim_b: usize,
@@ -40,7 +40,7 @@ fn resolve_tensordot_axes(
 
 /// The free (non-contracted) layouts of each operand, after asserting that the
 /// paired contracted shapes agree.
-fn split_tensordot_free<DA, DB>(
+pub(crate) fn split_tensordot_free<DA, DB>(
     la: &Layout<DA>,
     axes_a: &[isize],
     lb: &Layout<DB>,
@@ -68,6 +68,17 @@ where
 /// `a` (in order) followed by the non-contracted axes of `b` (in order). No
 /// conjugation is applied, unlike [`vecdot`].
 /// This function behaves identically under [`RowMajor`] and [`ColMajor`] device default orders.
+///
+/// <div class="warning">
+///
+/// **Efficiency Notice**
+///
+/// General axis pairs fall back to a naive kernel with no BLAS-backed path; `tensordot` is
+/// therefore not recommended when efficiency matters. Prefer
+/// [`rt::tblis::einsum`](https://docs.rs/rstsr-tblis/latest/rstsr_tblis/einsum_impl/fn.einsum.html),
+/// which requires the user to build and install the TBLIS library themselves.
+///
+/// </div>
 ///
 /// # Parameters
 ///
