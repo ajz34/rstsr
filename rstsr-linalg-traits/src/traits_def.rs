@@ -148,28 +148,19 @@ impl<T> From<PinvResult<T>> for (T, usize) {
 
 /* #region slogdet */
 
-pub struct SLogDetResult<T>
-where
-    T: BlasFloat,
-{
-    pub sign: T,
-    pub logabsdet: T::Real,
+pub struct SLogDetResult<S, L> {
+    pub sign: S,
+    pub logabsdet: L,
 }
 
-impl<T> From<(T, T::Real)> for SLogDetResult<T>
-where
-    T: BlasFloat,
-{
-    fn from((sign, logabsdet): (T, T::Real)) -> Self {
+impl<S, L> From<(S, L)> for SLogDetResult<S, L> {
+    fn from((sign, logabsdet): (S, L)) -> Self {
         Self { sign, logabsdet }
     }
 }
 
-impl<T> From<SLogDetResult<T>> for (T, T::Real)
-where
-    T: BlasFloat,
-{
-    fn from(slogdet_result: SLogDetResult<T>) -> Self {
+impl<S, L> From<SLogDetResult<S, L>> for (S, L) {
+    fn from(slogdet_result: SLogDetResult<S, L>) -> Self {
         (slogdet_result.sign, slogdet_result.logabsdet)
     }
 }
@@ -200,7 +191,6 @@ impl<U, S, Vt> From<SVDResult<U, S, Vt>> for (U, S, Vt) {
 #[builder(pattern = "owned", no_std, build_fn(error = "Error"))]
 pub struct SVDArgs_<'a, B, T>
 where
-    T: BlasFloat,
     B: DeviceAPI<T>,
 {
     #[builder(setter(into))]

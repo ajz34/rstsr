@@ -258,4 +258,14 @@ mod test_generalized_eigh {
         assert!((fingerprint(&w) - -4656.824753078057).abs() < 1e-8);
         assert!((fingerprint(&v.abs()) - -0.15861903557045487).abs() < 1e-8);
     }
+
+    #[test]
+    fn test_slogdet() {
+        let device = DeviceFaer::default();
+        let a = rt::asarray((get_vec::<c64>('a'), [1024, 1024].c(), &device));
+
+        let (sign, logabsdet) = rt::linalg::slogdet(a.view()).into();
+        assert!((sign.to_scalar() - c64!(-0.44606842323663365, 0.8949988613351316)).norm() < 1e-8);
+        assert!(logabsdet.to_scalar() - 3393.6720579594585 < 1e-8);
+    }
 }

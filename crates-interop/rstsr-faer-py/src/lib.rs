@@ -12,6 +12,7 @@ mod dlpack;
 mod dtype;
 mod indexing;
 mod info;
+mod linalg;
 mod manipulation;
 mod ops;
 mod promotion;
@@ -283,6 +284,22 @@ fn rstsr_faer(m: &Bound<'_, PyModule>) -> PyResult<()> {
 
     m.add_function(wrap_pyfunction!(dlpack::dlpack_export, m)?)?;
     m.add_function(wrap_pyfunction!(dlpack::dlpack_import, m)?)?;
+
+    // linalg surface (array-API `linalg` extension over existing rstsr entries)
+    m.add_function(wrap_pyfunction!(linalg::linalg_cholesky, m)?)?;
+    m.add_function(wrap_pyfunction!(linalg::linalg_det, m)?)?;
+    m.add_function(wrap_pyfunction!(linalg::linalg_diagonal, m)?)?;
+    m.add_function(wrap_pyfunction!(linalg::linalg_eigh, m)?)?;
+    m.add_function(wrap_pyfunction!(linalg::linalg_eigvalsh, m)?)?;
+    m.add_function(wrap_pyfunction!(linalg::linalg_inv, m)?)?;
+    m.add_function(wrap_pyfunction!(linalg::linalg_matmul, m)?)?;
+    m.add_function(wrap_pyfunction!(linalg::linalg_matrix_transpose, m)?)?;
+    m.add_function(wrap_pyfunction!(linalg::linalg_pinv, m)?)?;
+    m.add_function(wrap_pyfunction!(linalg::linalg_solve, m)?)?;
+    m.add_function(wrap_pyfunction!(linalg::linalg_svd, m)?)?;
+    m.add_function(wrap_pyfunction!(linalg::linalg_svdvals, m)?)?;
+    m.add_function(wrap_pyfunction!(linalg::linalg_slogdet, m)?)?;
+    m.add_function(wrap_pyfunction!(linalg::linalg_vecdot, m)?)?;
 
     m.add_function(wrap_pyfunction!(finfo, m)?)?;
     m.add_function(wrap_pyfunction!(iinfo, m)?)?;
