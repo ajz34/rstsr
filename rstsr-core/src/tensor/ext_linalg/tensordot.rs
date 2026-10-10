@@ -74,6 +74,26 @@ where
 /// [`tensordot`] instead requires the operands to share one dtype; this function is the
 /// array-API-fulfilment form. The axes and shape rules are those of [`tensordot`].
 ///
+/// <div class="warning">
+///
+/// **Array-API Compliance Form**
+///
+/// This function exists only for array-API compliance, not as the idiomatic rstsr surface. Prefer
+/// [`tensordot`] whenever the operands already share a dtype.
+///
+/// </div>
+///
+/// <div class="warning">
+///
+/// **Efficiency Notice**
+///
+/// General axis pairs fall back to a naive kernel with no BLAS-backed path; `ext_tensordot` is
+/// therefore not recommended when efficiency matters. Prefer
+/// [`rt::tblis::einsum`](https://docs.rs/rstsr-tblis/latest/rstsr_tblis/einsum_impl/fn.einsum.html),
+/// which requires the user to build and install the TBLIS library themselves.
+///
+/// </div>
+///
 /// # Parameters
 ///
 /// - `a`, `b`: the input operands (views and owned tensors both accepted). Corresponding contracted

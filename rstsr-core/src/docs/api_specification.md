@@ -313,8 +313,11 @@ Trait function calls like associated methods, so we also do not recommend usage 
 
 Matrix multiply is implemented in many ways. The most useful way is function [`matmul`][`matmul()`] and operator `%`.
 - functions [`matmul`][`matmul()`], [`matmul_from`] and [`matmul_with_output`];
-- associated methods [`TensorBase::matmul`], [`TensorBase::matmul_from`];
+- function [`ext_matmul`] for mixed-dtype operands (dtype promotion);
+- associated methods [`TensorBase::matmul`], [`TensorBase::matmul_from`] and [`TensorBase::ext_matmul`];
 - operator `%`.
+
+**The [`ext_matmul`] entry exists only for array-API compliance**, not as the idiomatic rstsr surface: it accepts mixed-dtype operands and computes in their promoted common data type (the same rule as NumPy). Prefer [`matmul`] (or the operator `%`) whenever the operands already share a dtype.
 
 <div class="warning">
 
@@ -328,9 +331,18 @@ Trait function calls like associated methods, so we also do not recommend usage 
 
 | Type | Identifier | Minimal Description |
 |--|--|--|
-| assoc/fn | [`vecdot`] | Computes the (vector) dot product of two arrays. |
+| assoc/fn | [`vecdot`], [`ext_vecdot`] | Computes the (vector) dot product of two arrays. |
+| assoc/fn | [`tensordot`], [`ext_tensordot`] | Contracts two arrays over specified axes. |
 
-Note we leave einsum and vectordot not implemented. For those functions, currently, we recommend users to use [`rt::tblis::einsum`](https://docs.rs/rstsr-tblis/latest/rstsr_tblis/einsum_impl/fn.einsum.html) and [`rt::tblis::vecdot`](https://docs.rs/rstsr-tblis/latest/rstsr_tblis/tensordot_impl/fn.tensordot.html), enabled in main crate `rstsr` with feature `tblis`.
+**The `ext_` forms ([`ext_vecdot`], [`ext_tensordot`]) exist only for array-API compliance**, not as the idiomatic rstsr surface: they accept mixed-dtype operands and compute in their promoted common data type (the same rule as NumPy), unlike the same-dtype [`vecdot`] / [`tensordot`], which require matching operand dtypes. Prefer the same-dtype entries whenever the operands already share a dtype.
+
+<div class="warning">
+
+**`rt::tensordot` and `rt::ext_tensordot` are not recommended** when efficiency matters: general axis pairs run on a naive kernel with no BLAS-backed path. Prefer [`rt::tblis::einsum`](https://docs.rs/rstsr-tblis/latest/rstsr_tblis/einsum_impl/fn.einsum.html), enabled in the main crate `rstsr` with feature `tblis` — this requires the user to build and install the TBLIS library themselves.
+
+`einsum` itself is not implemented in `rstsr-core`.
+
+</div>
 
 ## Common Functions
 

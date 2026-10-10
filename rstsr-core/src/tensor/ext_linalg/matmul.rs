@@ -24,6 +24,15 @@ use num::{One, Zero};
 /// broadcasting); only the dtype contract differs. As for [`matmul`], the matrix dimensions are
 /// the last two axes under [`RowMajor`] and the first two under [`ColMajor`].
 ///
+/// <div class="warning">
+///
+/// **Array-API Compliance Form**
+///
+/// This function exists only for array-API compliance, not as the idiomatic rstsr surface. Prefer
+/// [`matmul`] whenever the operands already share a dtype.
+///
+/// </div>
+///
 /// # Parameters
 ///
 /// - `a`: the left operand (views and owned tensors both accepted).

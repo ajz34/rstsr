@@ -69,6 +69,17 @@ where
 /// conjugation is applied, unlike [`vecdot`].
 /// This function behaves identically under [`RowMajor`] and [`ColMajor`] device default orders.
 ///
+/// <div class="warning">
+///
+/// **Efficiency Notice**
+///
+/// General axis pairs fall back to a naive kernel with no BLAS-backed path; `tensordot` is therefore
+/// not recommended when efficiency matters. Prefer
+/// [`rt::tblis::einsum`](https://docs.rs/rstsr-tblis/latest/rstsr_tblis/einsum_impl/fn.einsum.html),
+/// which requires the user to build and install the TBLIS library themselves.
+///
+/// </div>
+///
 /// # Parameters
 ///
 /// - `a`, `b`: impl [`TensorViewAPI`]

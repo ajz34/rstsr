@@ -20,6 +20,15 @@ use crate::prelude_dev::*;
 /// array-API-fulfilment form, like the `ext_*` element-wise arithmetic functions. The axes and
 /// broadcasting rules are those of [`vecdot`].
 ///
+/// <div class="warning">
+///
+/// **Array-API Compliance Form**
+///
+/// This function exists only for array-API compliance, not as the idiomatic rstsr surface. Prefer
+/// [`vecdot`] whenever the operands already share a dtype.
+///
+/// </div>
+///
 /// # Parameters
 ///
 /// - `a`: the first operand (conjugated; views and owned tensors both accepted).
