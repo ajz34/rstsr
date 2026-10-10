@@ -19,6 +19,7 @@ use crate::prelude_dev::*;
 /// [`vecdot`] instead requires the operands to share one dtype; this function is the
 /// array-API-fulfilment form, like the `ext_*` element-wise arithmetic functions. The axes and
 /// broadcasting rules are those of [`vecdot`].
+/// This function behaves identically under [`RowMajor`] and [`ColMajor`] device default orders.
 ///
 /// <div class="warning">
 ///
@@ -51,6 +52,8 @@ use crate::prelude_dev::*;
 /// let a = rt::tensor_from_nested!([1u8, 2, 3], &device);
 /// let b = rt::tensor_from_nested!([4u16, 5, 6], &device);
 /// let c = rt::ext_vecdot(&a, &b, None);
+/// println!("{c}");
+/// // 32
 /// # assert_eq!(format!("{c}"), "32");
 /// ```
 ///

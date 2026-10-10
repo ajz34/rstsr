@@ -1,65 +1,7 @@
 //! Tensor contraction with Array-API dtype promotion.
 
 use crate::prelude_dev::*;
-
-/// Resolve a [`AxesPairIndex`] into two normalized, pairwise-aligned,
-/// non-negative axis lists for `ext_tensordot`.
-fn resolve_tensordot_axes(
-    axes: &AxesPairIndex<isize>,
-    ndim_a: usize,
-    ndim_b: usize,
-) -> Result<(Vec<isize>, Vec<isize>)> {
-    match axes {
-        AxesPairIndex::None => unreachable!("`None` is normalized to `Val(2)` before this call"),
-        AxesPairIndex::Val(n) => {
-            let n = *n;
-            rstsr_assert!(n >= 0, InvalidValue, "when given as an integer, `axes` must be non-negative")?;
-            let n = n as usize;
-            rstsr_assert!(
-                n <= ndim_a && n <= ndim_b,
-                InvalidLayout,
-                "`axes` must not exceed the number of dimensions of either input"
-            )?;
-            let axes_a = (ndim_a - n..ndim_a).map(|x| x as isize).collect();
-            let axes_b = (0..n).map(|x| x as isize).collect();
-            Ok((axes_a, axes_b))
-        },
-        AxesPairIndex::Pair(axes_a, axes_b) => {
-            let axes_a = normalize_axes_index(axes_a.clone(), ndim_a, false, false)?;
-            let axes_b = normalize_axes_index(axes_b.clone(), ndim_b, false, false)?;
-            rstsr_assert_eq!(
-                axes_a.len(),
-                axes_b.len(),
-                InvalidValue,
-                "`axes_a` and `axes_b` must have the same length"
-            )?;
-            Ok((axes_a, axes_b))
-        },
-    }
-}
-
-/// The free (non-contracted) layouts of each operand, after asserting that the
-/// paired contracted shapes agree.
-fn split_tensordot_free<DA, DB>(
-    la: &Layout<DA>,
-    axes_a: &[isize],
-    lb: &Layout<DB>,
-    axes_b: &[isize],
-) -> Result<(Layout<IxD>, Layout<IxD>)>
-where
-    DA: DimAPI,
-    DB: DimAPI,
-{
-    let (las, lam) = la.dim_split_axes(axes_a)?;
-    let (lbs, lbm) = lb.dim_split_axes(axes_b)?;
-    rstsr_assert_eq!(
-        las.shape(),
-        lbs.shape(),
-        InvalidLayout,
-        "the dimensions of a and b along the contracted axes should be the same"
-    )?;
-    Ok((lam, lbm))
-}
+use crate::tensor::linalg::tensordot::{resolve_tensordot_axes, split_tensordot_free};
 
 /* #region ext_tensordot by function */
 
@@ -73,6 +15,7 @@ where
 ///
 /// [`tensordot`] instead requires the operands to share one dtype; this function is the
 /// array-API-fulfilment form. The axes and shape rules are those of [`tensordot`].
+/// This function behaves identically under [`RowMajor`] and [`ColMajor`] device default orders.
 ///
 /// <div class="warning">
 ///
@@ -116,6 +59,9 @@ where
 /// let a = rt::tensor_from_nested!([[1u8, 2], [3, 4]], &device);
 /// let b = rt::tensor_from_nested!([[5u16, 6], [7, 8]], &device);
 /// let c = rt::ext_tensordot(&a, &b, 1);
+/// println!("{c}");
+/// // [[ 19 22]
+/// //  [ 43 50]]
 /// # assert_eq!(format!("{c}"), "[[ 19 22]\n [ 43 50]]");
 /// ```
 ///

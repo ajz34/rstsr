@@ -7,14 +7,6 @@ use num::{One, Zero};
 
 /// Matrix multiplication of two arrays, promoting mixed-dtype operands to their common dtype.
 ///
-/// <div class="warning">
-///
-/// **Row/Column Major Notice**
-///
-/// This function behaves differently on default orders ([`RowMajor`] and [`ColMajor`]) of device.
-///
-/// </div>
-///
 /// The operands may have different dtypes: each pair is promoted to its common dtype
 /// ([`DTypePromoteAPI`], the same rule as NumPy) and the product is accumulated in that
 /// dtype. [`matmul`] instead requires the operands to share one dtype; this function is the
@@ -22,7 +14,16 @@ use num::{One, Zero};
 ///
 /// The shape rules are those of [`matmul`] (1-D / 2-D / stacked matrix products, with the same
 /// broadcasting); only the dtype contract differs. As for [`matmul`], the matrix dimensions are
-/// the last two axes under [`RowMajor`] and the first two under [`ColMajor`].
+/// the last two axes under [`RowMajor`] and the first two under [`ColMajor`]. See
+/// [`order_semantics`](crate::order_semantics) for the two orders.
+///
+/// <div class="warning">
+///
+/// **Row/Column Major Notice**
+///
+/// This function behaves differently on default orders ([`RowMajor`] and [`ColMajor`]) of device.
+///
+/// </div>
 ///
 /// <div class="warning">
 ///
@@ -57,6 +58,34 @@ use num::{One, Zero};
 /// // [[ 19 22]
 /// //  [ 43 50]]
 /// # assert_eq!(format!("{c}"), "[[ 19 22]\n [ 43 50]]");
+/// ```
+///
+/// ## Difference between [`RowMajor`] and [`ColMajor`]
+///
+/// Under [`RowMajor`] the matrix dimensions are the last two axes, so the leading axes are batch
+/// axes:
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let a = rt::arange((24, &device)).into_shape([2, 3, 4]);
+/// let b = rt::arange((40, &device)).into_shape([2, 4, 5]);
+/// println!("{:?}", rt::ext_matmul(&a, &b).shape());
+/// // [2, 3, 5]
+/// ```
+///
+/// Under [`ColMajor`] they are the first two axes, so the trailing axes are batch axes, and the
+/// same call contracts a different pair of axes:
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(ColMajor);
+/// let a = rt::arange((24, &device)).into_shape([3, 4, 2]);
+/// let b = rt::arange((40, &device)).into_shape([4, 5, 2]);
+/// println!("{:?}", rt::ext_matmul(&a, &b).shape());
+/// // [3, 5, 2]
 /// ```
 ///
 /// # Notes of API accordance
