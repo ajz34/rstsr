@@ -252,6 +252,52 @@ where
     device.with_blas_num_threads(nthreads, task)
 }
 
+/// Naive recursive walk over the batch dims (input pre-oriented so batch dims are leading).
+fn ref_slogdet_walk<'a, T, B>(
+    v: TensorView<'a, T, B, IxD>,
+    out_sign: &mut Vec<T>,
+    out_log: &mut Vec<T::Real>,
+) -> Result<()>
+where
+    T: BlasFloat,
+    B: LapackDriverAPI<T>,
+{
+    if v.ndim() == 2 {
+        let (s, l) = ref_impl_slogdet_f(v.into_dim::<Ix2>().into())?;
+        out_sign.push(s);
+        out_log.push(l);
+        return Ok(());
+    }
+    for i in 0..v.shape()[0] {
+        ref_slogdet_walk(v.i(i), out_sign, out_log)?;
+    }
+    Ok(())
+}
+
+/// n-dim `slogdet` over the batch dims (row-major: matrix = last two; col-major: first two).
+pub fn ref_impl_slogdet_nd_f<T, B>(a: TensorView<'_, T, B, IxD>) -> Result<(Tensor<T, B, IxD>, Tensor<T::Real, B, IxD>)>
+where
+    T: BlasFloat,
+    B: LapackDriverAPI<T> + DeviceCreationAnyAPI<T> + DeviceCreationAnyAPI<T::Real>,
+{
+    let device = a.device().clone();
+    let order = device.default_order();
+
+    let shape = a.shape().to_vec();
+    let batch_shape = crate::linalg_util::batch_and_square_shape(&shape, order)?;
+
+    let mut out_sign: Vec<T> = Vec::new();
+    let mut out_log: Vec<T::Real> = Vec::new();
+    match order {
+        RowMajor => ref_slogdet_walk(a, &mut out_sign, &mut out_log)?,
+        ColMajor => ref_slogdet_walk(a.reverse_axes(), &mut out_sign, &mut out_log)?,
+    }
+
+    let sign = rt::asarray_f((out_sign, batch_shape.clone(), &device))?;
+    let logabsdet = rt::asarray_f((out_log, batch_shape, &device))?;
+    Ok((sign, logabsdet))
+}
+
 /* #endregion */
 
 /* #region svd */

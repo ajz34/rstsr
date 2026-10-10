@@ -9,19 +9,13 @@ use rstsr_core::prelude_dev::*;
 
 // Neutral bounds (no BlasFloat): ComplexFloat provides Num (one/zero/*/-) and
 // `Real: Float` (ln); ComplexField is faer's own. The bridge keeps both `Real`s equal.
-pub fn faer_impl_slogdet_f<T>(a: TensorView<'_, T, DeviceFaer, Ix2>) -> Result<(T, <T as ComplexField>::Real)>
+
+/// `slogdet` of a single 2-D matrix (LU with partial pivoting); no parallel-mode handling.
+fn faer_slogdet_ix2<T>(a: TensorView<'_, T, DeviceFaer, Ix2>) -> Result<(T, <T as ComplexField>::Real)>
 where
     T: ComplexFloat + ComplexField<Real = <T as ComplexFloat>::Real>,
     <T as ComplexField>::Real: Zero,
 {
-    // set parallel mode
-    let device = a.device().clone();
-    let pool = device.get_current_pool();
-    let faer_par_orig = faer::get_global_parallelism();
-    if let Some(pool) = pool {
-        faer::set_global_parallelism(Par::rayon(pool.current_num_threads()));
-    }
-
     let faer_a = a.into_faer();
 
     // LU factorization with partial (row) pivoting: P A = L U. The U diagonal
@@ -59,11 +53,74 @@ where
         sign = T::zero() - sign;
     }
 
-    // restore parallel mode
+    Ok((sign, logabsdet))
+}
+
+/// Naive recursive walk over the batch dims (the input is pre-oriented so the
+/// batch dims are leading): collect one `(sign, logabsdet)` per matrix slice in
+/// the device's default-order flat sequence.
+fn faer_slogdet_walk<'a, T>(
+    v: TensorView<'a, T, DeviceFaer, IxD>,
+    out_sign: &mut Vec<T>,
+    out_log: &mut Vec<<T as ComplexField>::Real>,
+) -> Result<()>
+where
+    T: ComplexFloat + ComplexField<Real = <T as ComplexFloat>::Real>,
+    <T as ComplexField>::Real: Zero,
+{
+    if v.ndim() == 2 {
+        let (s, l) = faer_slogdet_ix2(v.into_dim::<Ix2>())?;
+        out_sign.push(s);
+        out_log.push(l);
+        return Ok(());
+    }
+    for i in 0..v.shape()[0] {
+        faer_slogdet_walk(v.i(i), out_sign, out_log)?;
+    }
+    Ok(())
+}
+
+/// n-dim `slogdet` over the batch dims.
+///
+/// The two matrix axes are the last two for row-major and the first two for
+/// col-major (per the device default order); all remaining dims form the batch.
+/// Outputs have the batch shape in the device default order.
+pub fn faer_impl_slogdet_f<T>(
+    a: TensorView<'_, T, DeviceFaer, IxD>,
+) -> Result<(Tensor<T, DeviceFaer, IxD>, Tensor<<T as ComplexField>::Real, DeviceFaer, IxD>)>
+where
+    T: ComplexFloat + ComplexField<Real = <T as ComplexFloat>::Real>,
+    <T as ComplexField>::Real: Zero,
+{
+    let device = a.device().clone();
+    let order = device.default_order();
+
+    let shape = a.shape().to_vec();
+    let batch_shape = crate::linalg_util::batch_and_square_shape(&shape, order)?;
+
+    // set parallel mode once for the whole batch
+    let pool = device.get_current_pool();
+    let faer_par_orig = faer::get_global_parallelism();
+    if let Some(pool) = pool {
+        faer::set_global_parallelism(Par::rayon(pool.current_num_threads()));
+    }
+
+    let mut out_sign: Vec<T> = Vec::new();
+    let mut out_log: Vec<<T as ComplexField>::Real> = Vec::new();
+    // col-major: reverse axes so the batch dims become leading (mirrors row-major);
+    // the walk then always descends axis 0, giving default-order output.
+    let result = match order {
+        RowMajor => faer_slogdet_walk(a, &mut out_sign, &mut out_log),
+        ColMajor => faer_slogdet_walk(a.reverse_axes(), &mut out_sign, &mut out_log),
+    };
+
     if pool.is_some() {
         faer::set_global_parallelism(faer_par_orig)
     }
+    result?;
 
+    let sign = asarray_f((out_sign, batch_shape.clone(), &device))?;
+    let logabsdet = asarray_f((out_log, batch_shape, &device))?;
     Ok((sign, logabsdet))
 }
 
@@ -80,11 +137,10 @@ where
     <T as ComplexField>::Real: Zero,
     D: DimAPI,
 {
-    type Out = SLogDetResult<T>;
+    type Out = SLogDetResult<Tensor<T, DeviceFaer, IxD>, Tensor<<T as ComplexField>::Real, DeviceFaer, IxD>>;
     fn slogdet_f(self) -> Result<Self::Out> {
-        rstsr_assert_eq!(self.ndim(), 2, InvalidLayout, "Currently we can only handle 2-D matrix.")?;
         let a = self;
-        let a_view = a.view().into_dim::<Ix2>();
+        let a_view = a.to_dyn();
         let (sign, logabsdet) = faer_impl_slogdet_f(a_view)?;
         Ok(SLogDetResult { sign, logabsdet })
     }
