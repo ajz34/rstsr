@@ -1,2 +1,1 @@
-mod func_c64;
-mod func_f64;
+../../../../rstsr-blas-traits/src/blas_tests_impl/linalg_func/mod.rs
