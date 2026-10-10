@@ -195,4 +195,14 @@ mod test {
         let s = rt::linalg::svdvals(a.view());
         assert!((fingerprint(&s) - 32.27742168207757).abs() < 1e-8);
     }
+
+    #[test]
+    fn test_slogdet() {
+        let device = DeviceFaer::default();
+        let mut a = rt::asarray((get_vec::<f64>('a'), [1024, 1024].c(), &device));
+
+        let (sign, logabsdet) = rt::linalg::slogdet(a.view_mut()).into();
+        assert!(sign - -1.0 < 1e-8);
+        assert!(logabsdet - 3031.1259211802403 < 1e-8);
+    }
 }

@@ -1,4 +1,5 @@
 use derive_builder::Builder;
+use num::complex::ComplexFloat;
 use rstsr_blas_traits::prelude::BlasFloat;
 use rstsr_core::prelude_dev::*;
 
@@ -150,7 +151,7 @@ impl<T> From<PinvResult<T>> for (T, usize) {
 
 pub struct SLogDetResult<T>
 where
-    T: BlasFloat,
+    T: ComplexFloat,
 {
     pub sign: T,
     pub logabsdet: T::Real,
@@ -158,7 +159,7 @@ where
 
 impl<T> From<(T, T::Real)> for SLogDetResult<T>
 where
-    T: BlasFloat,
+    T: ComplexFloat,
 {
     fn from((sign, logabsdet): (T, T::Real)) -> Self {
         Self { sign, logabsdet }
@@ -167,7 +168,7 @@ where
 
 impl<T> From<SLogDetResult<T>> for (T, T::Real)
 where
-    T: BlasFloat,
+    T: ComplexFloat,
 {
     fn from(slogdet_result: SLogDetResult<T>) -> Self {
         (slogdet_result.sign, slogdet_result.logabsdet)
@@ -200,7 +201,6 @@ impl<U, S, Vt> From<SVDResult<U, S, Vt>> for (U, S, Vt) {
 #[builder(pattern = "owned", no_std, build_fn(error = "Error"))]
 pub struct SVDArgs_<'a, B, T>
 where
-    T: BlasFloat,
     B: DeviceAPI<T>,
 {
     #[builder(setter(into))]
