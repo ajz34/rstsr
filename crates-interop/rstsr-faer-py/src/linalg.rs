@@ -23,9 +23,9 @@ use pyo3::prelude::*;
 use pyo3::types::{PySequence, PySequenceMethods};
 use rstsr::prelude::rt;
 use rstsr::prelude::*;
-use rstsr_core::operators::exports::DeviceExtMatMulAPI;
+use rstsr_core::operators::exports::{DeviceExtMatMulAPI, DeviceExtTensordotAPI, DeviceExtVecdotAPI};
 use rstsr_core::storage::exports::{DeviceCreationAnyAPI, DeviceRawAPI};
-use rstsr_dtype_traits::DTypePromoteAPI;
+use rstsr_dtype_traits::{DTypePromoteAPI, ExtNum};
 
 use crate::any_tensor::{
     any_of, device_faer, dispatch_bin_promote, dispatch_bin_promote_arith, err_py, lift, type_err, AnyTensor, FTensor,
@@ -87,30 +87,6 @@ macro_rules! bin_fc {
             (AnyTensor::C64($a), AnyTensor::C64($b)) => $body,
             (AnyTensor::Bool(_), _) | (_, AnyTensor::Bool(_)) => type_err("solve: bool dtype is not defined"),
             _ => type_err("solve: x1 and x2 must share one float/complex dtype (rstsr gap G-009); cast first"),
-        }
-    };
-}
-
-/// Same-dtype binary dispatch over the twelve numeric dtypes (vecdot,
-/// tensordot); bool is declined (rstsr's product kernels are not defined on it).
-/// `$name` names the calling function in the failure messages.
-macro_rules! bin_numeric {
-    ($name:literal, $x1:expr, $x2:expr, |$a:ident, $b:ident| $body:expr) => {
-        match (&$x1.t, &$x2.t) {
-            (AnyTensor::I8($a), AnyTensor::I8($b)) => $body,
-            (AnyTensor::I16($a), AnyTensor::I16($b)) => $body,
-            (AnyTensor::I32($a), AnyTensor::I32($b)) => $body,
-            (AnyTensor::I64($a), AnyTensor::I64($b)) => $body,
-            (AnyTensor::U8($a), AnyTensor::U8($b)) => $body,
-            (AnyTensor::U16($a), AnyTensor::U16($b)) => $body,
-            (AnyTensor::U32($a), AnyTensor::U32($b)) => $body,
-            (AnyTensor::U64($a), AnyTensor::U64($b)) => $body,
-            (AnyTensor::F32($a), AnyTensor::F32($b)) => $body,
-            (AnyTensor::F64($a), AnyTensor::F64($b)) => $body,
-            (AnyTensor::C32($a), AnyTensor::C32($b)) => $body,
-            (AnyTensor::C64($a), AnyTensor::C64($b)) => $body,
-            (AnyTensor::Bool(_), AnyTensor::Bool(_)) => type_err(concat!($name, ": bool dtype is not defined")),
-            _ => type_err(concat!($name, ": operands must share one dtype (rstsr gap G-009); cast first")),
         }
     };
 }
@@ -262,16 +238,62 @@ pub fn linalg_matmul(x1: &NativeArray, x2: &NativeArray) -> PyResult<NativeArray
     Ok(NativeArray { t })
 }
 
-/// Vector dot product over `axis` (the first argument is conjugated).
+/// Mixed-dtype vecdot wrapper: the pair promotes to its common dtype
+/// ([`DTypePromoteAPI`]), and the first operand is conjugated in that dtype
+/// (the Array-API `vecdot` contract; identity for real dtypes).
+fn op_ext_vecdot<T, U>(
+    a: &FTensor<T>,
+    b: &FTensor<U>,
+    axis: isize,
+) -> rt::Result<FTensor<<T as DTypePromoteAPI<U>>::Res>>
+where
+    T: DTypePromoteAPI<U> + Clone + Send + Sync,
+    U: Clone + Send + Sync,
+    <T as DTypePromoteAPI<U>>::Res: Clone + Send + Sync + Zero + ExtNum,
+    <T as DTypePromoteAPI<U>>::Res: Mul<<T as DTypePromoteAPI<U>>::Res, Output = <T as DTypePromoteAPI<U>>::Res>,
+    DeviceFaer: DeviceExtVecdotAPI<T, U, <T as DTypePromoteAPI<U>>::Res, IxD, IxD, IxD>
+        + DeviceAPI<<T as DTypePromoteAPI<U>>::Res>
+        + DeviceCreationAnyAPI<<T as DTypePromoteAPI<U>>::Res>
+        + DeviceRawAPI<MaybeUninit<<T as DTypePromoteAPI<U>>::Res>>,
+{
+    rt::ext_vecdot_f(a, b, axis)
+}
+
+/// Vector dot product over `axis` (the first argument is conjugated), promoting
+/// mixed-dtype operands to their common dtype.
 #[pyfunction]
 pub fn linalg_vecdot(x1: &NativeArray, x2: &NativeArray, axis: isize) -> PyResult<NativeArray> {
-    let t = bin_numeric!("vecdot", x1, x2, |a, b| any_res(rt::vecdot_f(a, b, axis)))?;
+    let t = dispatch_bin_promote_arith!(x1.t, x2.t, "vecdot", op_ext_vecdot, axis)?;
     Ok(NativeArray { t })
 }
 
+/// Mixed-dtype tensordot wrapper: the pair promotes to its common dtype
+/// ([`DTypePromoteAPI`]).
+fn op_ext_tensordot<T, U>(
+    a: &FTensor<T>,
+    b: &FTensor<U>,
+    axes: &TdAxes,
+) -> rt::Result<FTensor<<T as DTypePromoteAPI<U>>::Res>>
+where
+    T: DTypePromoteAPI<U> + Clone + Send + Sync + 'static,
+    U: Clone + Send + Sync + 'static,
+    <T as DTypePromoteAPI<U>>::Res: Clone + Send + Sync + 'static + Zero + One,
+    <T as DTypePromoteAPI<U>>::Res: Mul<<T as DTypePromoteAPI<U>>::Res, Output = <T as DTypePromoteAPI<U>>::Res>,
+    DeviceFaer: DeviceExtTensordotAPI<T, U, <T as DTypePromoteAPI<U>>::Res, IxD, IxD, IxD>
+        + DeviceAPI<<T as DTypePromoteAPI<U>>::Res>
+        + DeviceCreationAnyAPI<<T as DTypePromoteAPI<U>>::Res>
+        + DeviceRawAPI<MaybeUninit<<T as DTypePromoteAPI<U>>::Res>>,
+{
+    match axes {
+        TdAxes::Int(n) => rt::ext_tensordot_f(a, b, *n),
+        TdAxes::Pair(va, vb) => rt::ext_tensordot_f(a, b, (va.clone(), vb.clone())),
+    }
+}
+
 /// Tensor contraction over `axes` — an integer (contract the last `n` axes of
-/// `x1` with the first `n` of `x2`) or a pair of per-operand axis sequences.
-/// Top-level array-API function (not part of the `linalg` namespace).
+/// `x1` with the first `n` of `x2`) or a pair of per-operand axis sequences,
+/// promoting mixed-dtype operands to their common dtype. Top-level array-API
+/// function (not part of the `linalg` namespace).
 #[pyfunction]
 #[pyo3(signature = (x1, x2, axes = None))]
 pub fn linalg_tensordot(
@@ -280,10 +302,7 @@ pub fn linalg_tensordot(
     axes: Option<&pyo3::Bound<'_, pyo3::PyAny>>,
 ) -> PyResult<NativeArray> {
     let axes = parse_tensordot_axes(axes)?;
-    let t = bin_numeric!("tensordot", x1, x2, |a, b| match &axes {
-        TdAxes::Int(n) => any_res(rt::tensordot_f(a, b, *n)),
-        TdAxes::Pair(va, vb) => any_res(rt::tensordot_f(a, b, (va.clone(), vb.clone()))),
-    })?;
+    let t = dispatch_bin_promote_arith!(x1.t, x2.t, "tensordot", op_ext_tensordot, &axes)?;
     Ok(NativeArray { t })
 }
 

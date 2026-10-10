@@ -238,19 +238,6 @@ macro_rules! py_unary_real_numeric_same {
     };
 }
 
-macro_rules! py_unary_float_complex_same {
-    ($($pyname:ident => $wrapper:ident),* $(,)?) => {
-        $(
-            #[pyfunction]
-            pub fn $pyname(x: &NativeArray) -> PyResult<NativeArray> {
-                Ok(NativeArray {
-                    t: dispatch_t_float_complex_same!(x.t, stringify!($pyname), $wrapper())?,
-                })
-            }
-        )*
-    };
-}
-
 macro_rules! py_unary_numeric_same {
     ($($pyname:ident => $wrapper:ident),* $(,)?) => {
         $(
@@ -301,7 +288,25 @@ py_unary_numeric_same!(
 );
 py_unary_numeric_same!(positive => op_positive);
 
-py_unary_float_complex_same!(conj => op_conj);
+/// `conj`: the complex conjugate, identity for real dtypes. Integer and
+/// boolean inputs return a copy — rstsr's `conj` routes integers through the
+/// into-float block, which the spec forbids (output dtype must equal the input
+/// dtype); register G-052.
+#[pyfunction]
+pub fn conj(x: &NativeArray) -> PyResult<NativeArray> {
+    match &x.t {
+        AnyTensor::Bool(_)
+        | AnyTensor::I8(_)
+        | AnyTensor::I16(_)
+        | AnyTensor::I32(_)
+        | AnyTensor::I64(_)
+        | AnyTensor::U8(_)
+        | AnyTensor::U16(_)
+        | AnyTensor::U32(_)
+        | AnyTensor::U64(_) => Ok(NativeArray { t: x.t.deep_copy() }),
+        _ => Ok(NativeArray { t: dispatch_t_float_complex_same!(x.t, "conj", op_conj())? }),
+    }
+}
 
 /// `signbit`: the IEEE 754 sign bit as a boolean tensor (true for negative
 /// values, `-0.0` and negatively-signed NaN; real dtypes only).
