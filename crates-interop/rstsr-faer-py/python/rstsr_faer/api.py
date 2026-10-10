@@ -161,6 +161,7 @@ from .rstsr_faer import (
     linalg_solve as _linalg_solve,
     linalg_svd as _linalg_svd,
     linalg_svdvals as _linalg_svdvals,
+    linalg_slogdet as _linalg_slogdet,
     linalg_vecdot as _linalg_vecdot,
 )
 
@@ -1841,6 +1842,7 @@ def iinfo(type, /):
 
 _EighResult = collections.namedtuple("EighResult", ["eigenvalues", "eigenvectors"])
 _SVDResult = collections.namedtuple("SVDResult", ["U", "S", "Vh"])
+_SLogDetResult = collections.namedtuple("SLogDetResult", ["sign", "logabsdet"])
 
 
 def matmul(x1, x2, /):
@@ -1897,6 +1899,11 @@ def svdvals(x, /):
     return _wrap(_linalg_svdvals(_handle(x)))
 
 
+def slogdet(x, /):
+    sign, logabsdet = _linalg_slogdet(_handle(x))
+    return _SLogDetResult(_wrap(sign), _wrap(logabsdet))
+
+
 class _LinalgNamespace:
     """The array-API ``linalg`` extension namespace (API version 2025.12)."""
 
@@ -1912,6 +1919,7 @@ class _LinalgNamespace:
     solve = staticmethod(solve)
     svd = staticmethod(svd)
     svdvals = staticmethod(svdvals)
+    slogdet = staticmethod(slogdet)
     vecdot = staticmethod(vecdot)
 
 

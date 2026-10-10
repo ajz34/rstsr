@@ -210,6 +210,18 @@ pub fn linalg_svdvals(x: &NativeArray) -> PyResult<NativeArray> {
     Ok(NativeArray { t })
 }
 
+/// Sign and log-absolute-determinant, each as a 0-d array.
+#[pyfunction]
+pub fn linalg_slogdet(x: &NativeArray) -> PyResult<(NativeArray, NativeArray)> {
+    let (sign, logabsdet) = unary_fc!(x, |a| {
+        let r = err_py(rt::linalg::slogdet_f(a))?;
+        let s = any_res(rt::asarray_f((vec![r.sign], dim_from(&[]), device_faer())))?;
+        let l = any_res(rt::asarray_f((vec![r.logabsdet], dim_from(&[]), device_faer())))?;
+        Ok((s, l))
+    })?;
+    Ok((NativeArray { t: sign }, NativeArray { t: logabsdet }))
+}
+
 // ------------------------------------------------------------- tensor products
 
 /// Matrix product (also the `@` operator).
