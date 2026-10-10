@@ -10,8 +10,9 @@
 //! type is named.
 //!
 //! Names rstsr/faer does not provide (`qr`, `eig`, `eigvals`, `matrix_norm`,
-//! `matrix_power`, `matrix_rank`, `cross`, `trace`, the general-`ord` norms)
-//! are absent from the namespace, never stubbed — they are rust-side gaps.
+//! `matrix_power`, `matrix_rank`, `cross`, the general-`ord` norms) are absent
+//! from the namespace, never stubbed — they are rust-side gaps. `trace` is now
+//! available rust-side (`rt::trace`) but not yet bound here.
 
 use core::mem::MaybeUninit;
 use core::ops::{Add, Mul};

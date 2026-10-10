@@ -34,17 +34,28 @@ where
 
 /// Sum along the diagonal of a tensor.
 ///
-/// Let $\mathbf{A}$ be the matrix spanned by the two axes of `tensor` selected by `offset`. The
-/// trace is the sum over the diagonal shifted by `offset`,
+/// <div class="warning">
+///
+/// **Row/Column Major Notice**
+///
+/// This function behaves differently on default orders ([`RowMajor`] and [`ColMajor`]) of device:
+/// when `offset` does not name the axes, the diagonal is taken over the last two axes under
+/// [`RowMajor`] and over the first two under [`ColMajor`], so the surviving axes (and hence the
+/// result shape) differ.
+///
+/// </div>
+///
+/// See [`order_semantics`](crate::order_semantics) for the two device default orders.
+///
+/// Let $\mathbf{A}$ be the matrix spanned by the two axes selected by `offset`. The trace is the
+/// sum over the diagonal shifted by `offset`,
 ///
 /// $$\mathrm{tr}(\mathbf{A}) = \sum_i A_{i,\, i + \text{offset}}$$
 ///
-/// The two selected axes are removed, so for a stacked input the result has shape
-/// `tensor.shape()[..ndim - 2]`; a two-dimensional input gives a scalar-shaped (zero-dimensional)
-/// result.
-/// This function's **default axes follow the device default order**: the last two under
-/// [`RowMajor`] and the first two under [`ColMajor`]. Explicit axes select the same diagonal under
-/// either order.
+/// The two selected axes are removed; a two-dimensional input therefore gives a scalar-shaped
+/// (zero-dimensional) result, and for a stacked input the surviving axes are the remaining ones —
+/// the leading axes under [`RowMajor`] (last two consumed) and the trailing ones under
+/// [`ColMajor`] (first two consumed).
 ///
 /// # Parameters
 ///
@@ -54,8 +65,9 @@ where
 ///
 /// - `offset`: impl [`Into<DiagonalArgs>`][DiagonalArgs]
 ///
-///   - Which diagonal and over which axes; accepts `()` or `None` (main diagonal, default axes), an
-///     integer offset (same axes), or `(offset, axis1, axis2)`.
+///   - Which diagonal and over which axes; accepts `()` or `None` (main diagonal, device-default
+///     axes), an integer offset (same axes), or `(offset, axis1, axis2)`. Naming both axes makes
+///     the result order-independent.
 ///
 /// # Returns
 ///
@@ -65,8 +77,10 @@ where
 ///
 /// # Examples
 ///
-/// Under a row-major device the trace of a stack is taken over each matrix's diagonal, collapsing
-/// the last two axes:
+/// ## Difference between [`RowMajor`] and [`ColMajor`]
+///
+/// On a row-major device the diagonal of a stack is taken over the last two axes, leaving the
+/// leading axis:
 ///
 /// ```rust
 /// # use rstsr::prelude::*;
@@ -74,6 +88,34 @@ where
 /// # device.set_default_order(RowMajor);
 /// let a = rt::tensor_from_nested!([[[1, 2], [3, 4]], [[5, 6], [7, 8]]], &device);
 /// let t = rt::trace(&a, ());
+/// println!("{t}");
+/// // [ 5 13]
+/// # let expected = rt::tensor_from_nested!([5, 13], &device);
+/// # assert!(rt::allclose(&t, &expected, None));
+/// ```
+///
+/// On a column-major device it is taken over the first two, leaving the trailing axis:
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(ColMajor);
+/// let a = rt::tensor_from_nested!([[[1, 2], [3, 4]], [[5, 6], [7, 8]]], &device);
+/// let t = rt::trace(&a, ());
+/// println!("{t}");
+/// // [ 8 10]
+/// # let expected = rt::tensor_from_nested!([8, 10], &device);
+/// # assert!(rt::allclose(&t, &expected, None));
+/// ```
+///
+/// Naming the axes explicitly gives the same result under either order:
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(ColMajor);
+/// let a = rt::tensor_from_nested!([[[1, 2], [3, 4]], [[5, 6], [7, 8]]], &device);
+/// let t = rt::trace(&a, (0, -2, -1));
 /// println!("{t}");
 /// // [ 5 13]
 /// # let expected = rt::tensor_from_nested!([5, 13], &device);
@@ -94,6 +136,7 @@ where
 /// # Panics
 ///
 /// - Panics if the input has fewer than two dimensions.
+/// - Panics if `axis1` and `axis2` name the same axis.
 ///
 /// For a fallible version, use [`trace_f`].
 ///
@@ -315,6 +358,33 @@ mod test {
         let t = rt::trace(&a, (0, 0, 1));
         let expected = rt::tensor_from_nested!([8, 10], &device);
         assert!(rt::allclose(&t, &expected, None));
+    }
+
+    #[test]
+    fn test_trace_axes_validation_matches_numpy() {
+        // NumPy: `axis1 and axis2 cannot be the same` (ValueError) — compared
+        // *after* normalizing negative axes; two distinct axes of equal length
+        // are allowed.
+        let device = DeviceCpuSerial::default();
+
+        let a22 = rt::tensor_from_nested!([[0, 1], [2, 3]], &device);
+        // same axis index -> rejected, in either spelling
+        assert!(rt::trace_f(&a22, (0, 0, 0)).is_err());
+        assert!(rt::trace_f(&a22, (0, 1, 1)).is_err());
+        assert!(rt::trace_f(&a22, (0, -1, -1)).is_err());
+        // distinct, equal-length axes -> allowed (numpy.trace(a22, axis1=1, axis2=0) == 3)
+        assert_eq!(rt::trace(&a22, (0, 1, 0)).to_scalar(), 3);
+
+        // a 3-d input: `-1` and `2` normalize to the same axis and are rejected
+        let a222 = rt::arange((8, &device)).into_shape([2, 2, 2]);
+        assert!(rt::trace_f(&a222, (0, -1, 2)).is_err());
+        // ... while these agree with numpy.trace(a222, axis1=..., axis2=...)
+        let n_default = rt::tensor_from_nested!([6, 8], &device); // (0, 1)
+        assert!(rt::allclose(rt::trace(&a222, (0, 0, 1)), &n_default, None));
+        let n_trailing = rt::tensor_from_nested!([3, 11], &device); // (1, 2)
+        assert!(rt::allclose(rt::trace(&a222, (0, 1, 2)), &n_trailing, None));
+        let n_mixed = rt::tensor_from_nested!([5, 9], &device); // (0, -1)
+        assert!(rt::allclose(rt::trace(&a222, (0, 0, -1)), &n_mixed, None));
     }
 
     #[test]

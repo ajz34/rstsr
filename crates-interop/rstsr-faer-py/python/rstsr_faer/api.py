@@ -1836,11 +1836,10 @@ def iinfo(type, /):
 # ------------------------------------------------------------------- linalg --
 # array-API `linalg` extension, over rstsr's existing entries only. Members the
 # standard defines but rstsr/faer does not provide (qr, eig, eigvals,
-# matrix_norm, matrix_power, matrix_rank, cross, trace, and
-# the general-`ord` norms) are absent here — rust-side gaps, recorded in the
-# gap register, never stubbed. None of these wrappers batch: rstsr's faer
-# factorizations are 2-D only, so a stacked input is passed through and
-# declined rust-side.
+# matrix_norm, matrix_power, matrix_rank, cross, and the general-`ord` norms)
+# are absent here — rust-side gaps, recorded in the gap register, never stubbed.
+# None of these wrappers batch: rstsr's faer factorizations are 2-D only, so a
+# stacked input is passed through and declined rust-side.
 
 _EighResult = collections.namedtuple("EighResult", ["eigenvalues", "eigenvectors"])
 _SVDResult = collections.namedtuple("SVDResult", ["U", "S", "Vh"])
