@@ -4,3 +4,5 @@
 //! inside the kernel. The same-dtype entries live in the sibling `linalg` module.
 
 pub mod matmul;
+pub mod tensordot;
+pub mod vecdot;

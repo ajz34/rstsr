@@ -205,7 +205,9 @@ pub mod rstsr_funcs {
         argsort, argsort_custom, argsort_custom_f, argsort_f, sort, sort_custom, sort_custom_f, sort_f,
     };
     // ext linalg (array-api promotion-compatible linalg operations)
-    pub use crate::tensor::ext_linalg::exports::{ext_matmul, ext_matmul_f};
+    pub use crate::tensor::ext_linalg::exports::{
+        ext_matmul, ext_matmul_f, ext_tensordot, ext_tensordot_f, ext_vecdot, ext_vecdot_f,
+    };
     // linalg (array-api's basic linalg operations, not the rstsr-linalg-traits)
     pub use crate::tensor::linalg::exports::{
         into_matrix_transpose, into_matrix_transpose_f, matmul, matmul_f, matmul_from, matmul_from_f,
