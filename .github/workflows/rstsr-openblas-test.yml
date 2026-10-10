@@ -34,8 +34,7 @@ jobs:
         conda init; source $HOME/.bashrc; conda activate
         python rstsr-blas-traits/src/blas_tests_impl/linalg_func/func_validation_f64.py
     - name: test
-      # single libtest thread: each test drives OpenBLAS's own thread pool, so
-      # parallel test threads oversubscribe the runner
+      # --test-threads=1: parallel test threads oversubscribe the CPU, since each test calls multi-threaded BLAS
       run: RSTSR_DEV=1 cargo test -p rstsr-openblas --release --features="openmp linalg" -- --test-threads=1
 
   # Default features of `rstsr-openblas` are `linalg` + `openmp`; this job runs
