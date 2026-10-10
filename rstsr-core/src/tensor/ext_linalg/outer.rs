@@ -61,8 +61,8 @@ use crate::prelude_dev::*;
 ///
 /// - Array-API: `linalg.outer(x1, x2, /)` ([`linalg.outer`](https://data-apis.org/array-api/2024.12/extensions/generated/array_api.linalg.outer.html)),
 ///   with mixed-dtype operands.
-/// - NumPy: `numpy.outer(a, b, out=None)` ([`numpy.outer`](https://numpy.org/doc/stable/reference/generated/numpy.outer.html))
-///   — NumPy computes the product in the promoted dtype.
+/// - NumPy: `numpy.linalg.outer(x1, x2)` ([`numpy.linalg.outer`](https://numpy.org/doc/stable/reference/generated/numpy.linalg.outer.html))
+///   — the same one-dimensional contract; the product is computed in the promoted dtype.
 /// - RSTSR: `rt::ext_outer(&a, &b)`, method `a.ext_outer(&b)`.
 ///
 /// # Panics
@@ -76,7 +76,7 @@ use crate::prelude_dev::*;
 /// ## Similar function from other crates/libraries
 ///
 /// - Python Array API standard: [`linalg.outer`](https://data-apis.org/array-api/2024.12/extensions/generated/array_api.linalg.outer.html)
-/// - NumPy: [`numpy.outer`](https://numpy.org/doc/stable/reference/generated/numpy.outer.html)
+/// - NumPy: [`numpy.linalg.outer`](https://numpy.org/doc/stable/reference/generated/numpy.linalg.outer.html)
 ///
 /// ## Related functions in RSTSR
 ///
@@ -145,9 +145,10 @@ where
     let lb = b.layout().to_dim::<Ix1>()?;
     let (n, m) = (la.shape()[0], lb.shape()[0]);
 
-    let layout_c = match TensorIterOrder::default() {
-        TensorIterOrder::F => [n, m].f(),
-        _ => [n, m].c(),
+    // the freshly allocated result follows the input's device default order
+    let layout_c = match device.default_order() {
+        RowMajor => [n, m].c(),
+        ColMajor => [n, m].f(),
     };
     let mut storage_c = device.uninit_impl(layout_c.bounds_index()?.1)?;
     device.ext_outer(storage_c.raw_mut(), &layout_c, a.raw(), &la, b.raw(), &lb)?;

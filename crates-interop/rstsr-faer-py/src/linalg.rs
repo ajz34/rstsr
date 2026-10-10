@@ -9,7 +9,7 @@
 //! concrete dtype arm, so no generic trait bound is stated here and no faer
 //! type is named.
 //!
-//! Names rstsr/faer does not provide (`qr`, `slogdet`, `eig`, `matrix_norm`,
+//! Names rstsr/faer does not provide (`qr`, `eig`, `eigvals`, `matrix_norm`,
 //! `matrix_power`, `matrix_rank`, `cross`, `trace`, the general-`ord` norms)
 //! are absent from the namespace, never stubbed — they are rust-side gaps.
 

@@ -49,8 +49,12 @@ use crate::prelude_dev::*;
 ///
 /// - Array-API: `linalg.outer(x1, x2, /)` ([`linalg.outer`](https://data-apis.org/array-api/2024.12/extensions/generated/array_api.linalg.outer.html))
 ///   — this is the `xp.linalg` extension member.
-/// - NumPy: `numpy.outer(a, b, out=None)` ([`numpy.outer`](https://numpy.org/doc/stable/reference/generated/numpy.outer.html))
-///   — NumPy additionally flattens non-vector inputs; rstsr requires one-dimensional operands.
+/// - NumPy: `numpy.linalg.outer(x1, x2)`
+///   ([`numpy.linalg.outer`](https://numpy.org/doc/stable/reference/generated/numpy.linalg.outer.html))
+///   — the same one-dimensional contract, raising `ValueError` for a non-vector operand.
+///   The top-level `numpy.outer`
+///   ([`numpy.outer`](https://numpy.org/doc/stable/reference/generated/numpy.outer.html))
+///   instead flattens its inputs.
 /// - RSTSR: `rt::outer(&a, &b)`, method `a.outer(&b)`.
 ///
 /// # Panics
@@ -64,7 +68,7 @@ use crate::prelude_dev::*;
 /// ## Similar function from other crates/libraries
 ///
 /// - Array-API standard: [`linalg.outer`](https://data-apis.org/array-api/2024.12/extensions/generated/array_api.linalg.outer.html)
-/// - NumPy: [`numpy.outer`](https://numpy.org/doc/stable/reference/generated/numpy.outer.html)
+/// - NumPy: [`numpy.linalg.outer`](https://numpy.org/doc/stable/reference/generated/numpy.linalg.outer.html)
 ///
 /// ## Related functions in RSTSR
 ///
@@ -139,9 +143,10 @@ where
     let lb = b.layout().to_dim::<Ix1>()?;
     let (n, m) = (la.shape()[0], lb.shape()[0]);
 
-    let layout_c = match TensorIterOrder::default() {
-        TensorIterOrder::F => [n, m].f(),
-        _ => [n, m].c(),
+    // the freshly allocated result follows the input's device default order
+    let layout_c = match device.default_order() {
+        RowMajor => [n, m].c(),
+        ColMajor => [n, m].f(),
     };
     let mut storage_c = device.uninit_impl(layout_c.bounds_index()?.1)?;
     device.outer(storage_c.raw_mut(), &layout_c, a.raw(), &la, b.raw(), &lb)?;
@@ -231,6 +236,24 @@ mod test {
         let b = rt::tensor_from_nested!([7.0f64, 8.], &device);
         let expected = rt::tensor_from_nested!([[7.0f64, 8.], [21., 24.], [35., 40.]], &device);
         assert_eq!(format!("{}", rt::outer(&a, &b)), format!("{expected}"));
+    }
+
+    #[test]
+    fn test_outer_follows_device_default_order() {
+        // the freshly allocated result's memory arrangement follows the input's
+        // device default order, like its sibling linalg entries
+        for (order, expect_c_contig) in [(RowMajor, true), (ColMajor, false)] {
+            let mut device = DeviceCpuSerial::default();
+            device.set_default_order(order);
+            let a = rt::tensor_from_nested!([1.0f64, 2., 3.], &device);
+            let b = rt::tensor_from_nested!([4.0f64, 5.], &device);
+            let c = rt::outer(&a, &b);
+            assert_eq!(c.layout().c_contig(), expect_c_contig);
+            assert_eq!(c.layout().f_contig(), !expect_c_contig);
+            // and it agrees with tensordot(a, b, 0), which is the same math
+            let sibling = rt::tensordot(&a, &b, 0);
+            assert_eq!(c.layout().c_contig(), sibling.layout().c_contig());
+        }
     }
 
     #[test]

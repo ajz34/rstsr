@@ -238,6 +238,10 @@ SURFACE = [
     ("_core/tests/test_numeric.py", "TestTensordot", "test_rejects_duplicate_axes"),
     ("_core/tests/test_numeric.py", "TestTensordot", "test_zero_dimension"),
     ("_core/tests/test_numeric.py", "TestTensordot", "test_zero_dimensional"),
+    # --- linalg: np.linalg.outer (1-D only, raises otherwise). TestOuter holds
+    #     its checks as class-body asserts, so the empty method indexes the class
+    #     body itself (see _index_file). ---
+    ("linalg/tests/test_linalg.py", "TestOuter", ""),
     # --- indexing (basic indexing via Tensor::i) ---
     ("_core/tests/test_indexing.py", "TestIndexing", "test_single_int_index"),
     ("_core/tests/test_indexing.py", "TestIndexing", "test_ellipsis_index"),
@@ -325,10 +329,19 @@ def _index_file(tree, source):
     for node in ast.walk(tree):
         if isinstance(node, ast.ClassDef):
             cls = node.name
+            has_method = False
             for item in node.body:
                 if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
                     seg = ast.get_source_segment(source, item)
                     out[(cls, item.name)] = (item.lineno, seg)
+                    has_method = True
+            if not has_method:
+                # Some NumPy classes hold their checks as *class-body* asserts (an
+                # old style, e.g. linalg/tests/test_linalg.py::TestOuter), which
+                # pytest runs at import. There is no method to key on, so index
+                # the class body itself under the empty method name.
+                seg = ast.get_source_segment(source, node)
+                out[(cls, "")] = (node.lineno, seg)
         elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             # module-level (only top-level; ast.walk also visits nested, filter later)
             pass

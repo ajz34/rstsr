@@ -47,3 +47,33 @@ where
     };
     pool.map_or_else(task, |pool| pool.install(task))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The parallel branch of the promoting twin (past `PARALLEL_SWITCH`) must
+    /// agree with its serial kernel, and carry the promoted values.
+    #[test]
+    fn test_ext_parallel_branch_matches_serial() {
+        let pool = rayon::ThreadPoolBuilder::new().num_threads(2).build().unwrap();
+        let (n, m) = (32usize, 32usize);
+        let la = Layout::<Ix1>::new([n], [1isize], 0).unwrap();
+        let lb = Layout::<Ix1>::new([m], [1isize], 0).unwrap();
+        let lc = Layout::<Ix2>::new([n, m], [m as isize, 1], 0).unwrap();
+        let a: Vec<u8> = (0..n).map(|i| (i % 7) as u8).collect();
+        let b: Vec<u16> = (0..m).map(|i| (i % 5) as u16 + 1).collect();
+
+        let mut c_par = vec![MaybeUninit::<u16>::uninit(); n * m];
+        let mut c_ser = vec![MaybeUninit::<u16>::uninit(); n * m];
+        outer_ext_naive_cpu_rayon(&mut c_par, &lc, &a, &la, &b, &lb, Some(&pool)).unwrap();
+        outer_ext_naive_cpu_serial(&mut c_ser, &lc, &a, &la, &b, &lb).unwrap();
+
+        let c_par: Vec<u16> = c_par.into_iter().map(|x| unsafe { x.assume_init() }).collect();
+        let c_ser: Vec<u16> = c_ser.into_iter().map(|x| unsafe { x.assume_init() }).collect();
+        assert_eq!(c_par, c_ser);
+        // promoted u8 x u16 -> u16
+        assert_eq!(c_par[0], (a[0] as u16) * b[0]);
+        assert_eq!(c_par[n * m - 1], (a[n - 1] as u16) * b[m - 1]);
+    }
+}

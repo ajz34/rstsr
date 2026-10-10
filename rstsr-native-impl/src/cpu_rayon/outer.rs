@@ -46,3 +46,30 @@ where
     };
     pool.map_or_else(task, |pool| pool.install(task))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The parallel branch (`n * m` past `PARALLEL_SWITCH`) must agree with the
+    /// serial kernel element-for-element.
+    #[test]
+    fn test_parallel_branch_matches_serial() {
+        let pool = rayon::ThreadPoolBuilder::new().num_threads(2).build().unwrap();
+        let (n, m) = (32usize, 32usize);
+        let la = Layout::<Ix1>::new([n], [1isize], 0).unwrap();
+        let lb = Layout::<Ix1>::new([m], [1isize], 0).unwrap();
+        let lc = Layout::<Ix2>::new([n, m], [m as isize, 1], 0).unwrap();
+        let a: Vec<f64> = (0..n).map(|i| (i % 7) as f64 - 3.0).collect();
+        let b: Vec<f64> = (0..m).map(|i| (i % 5) as f64 + 1.0).collect();
+
+        let mut c_par = vec![MaybeUninit::<f64>::uninit(); n * m];
+        let mut c_ser = vec![MaybeUninit::<f64>::uninit(); n * m];
+        outer_naive_cpu_rayon(&mut c_par, &lc, &a, &la, &b, &lb, Some(&pool)).unwrap();
+        outer_naive_cpu_serial(&mut c_ser, &lc, &a, &la, &b, &lb).unwrap();
+
+        let c_par: Vec<f64> = c_par.into_iter().map(|x| unsafe { x.assume_init() }).collect();
+        let c_ser: Vec<f64> = c_ser.into_iter().map(|x| unsafe { x.assume_init() }).collect();
+        assert_eq!(c_par, c_ser);
+    }
+}

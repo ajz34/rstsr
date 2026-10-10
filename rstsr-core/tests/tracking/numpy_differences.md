@@ -534,3 +534,18 @@ out-of-place only).
 `axes = None` / `()` is accepted as the array-API default `2` (Rust has no default
 arguments); NumPy raises on `None`. This is a Rust-callers' convenience, not a behavioral
 divergence for the Python surface.
+
+## `outer` follows `np.linalg.outer` (1-D only), not `np.outer` (flattens)
+
+- **numpy:** `linalg/tests/test_linalg.py::TestOuter` (L1960) for the 1-D contract;
+  `_core/numeric.py::outer` (L906) for the top-level function.
+- **rstsr:** core_func::linalg::test_outer::numpy_outer::test_outer
+- **tag:** intentional
+- **status:** open
+
+`rt::outer` implements the array-API `linalg.outer` contract: both operands must be
+one-dimensional and a non-vector operand is rejected (`InvalidValue` here, `ValueError`
+in NumPy) — byte-for-byte the behaviour that `np.linalg.outer` and its `TestOuter`
+check. The top-level `np.outer` instead flattens any input, so calling `np.outer` with
+a 2-D argument succeeds there and fails here. rstsr does not offer the flattening form;
+`reshape(-1)` first if that is what is wanted.
