@@ -4,29 +4,37 @@ use faer::traits::ComplexField;
 use faer_ext::IntoFaer;
 use rstsr_core::prelude_dev::*;
 
-pub fn faer_impl_det_f<T>(a: TensorView<'_, T, DeviceFaer, Ix2>) -> Result<T>
+/// Determinant of a single 2-D matrix.
+fn faer_det_ix2<T>(a: TensorView<'_, T, DeviceFaer, Ix2>) -> Result<T>
 where
     T: ComplexField,
 {
-    // set parallel mode
+    Ok(a.into_faer().determinant())
+}
+
+/// n-dim `det` over the batch dims; the output has the batch shape.
+pub fn faer_impl_det_f<T>(a: TensorView<'_, T, DeviceFaer, IxD>) -> Result<Tensor<T, DeviceFaer, IxD>>
+where
+    T: ComplexField,
+{
     let device = a.device().clone();
+    let order = device.default_order();
+
+    // set parallel mode once for the whole batch
     let pool = device.get_current_pool();
     let faer_par_orig = faer::get_global_parallelism();
     if let Some(pool) = pool {
         faer::set_global_parallelism(Par::rayon(pool.current_num_threads()));
     }
 
-    let faer_a = a.into_faer();
+    let result = crate::linalg_util::map_batch_matrices(a, order, &mut faer_det_ix2);
 
-    // det computation
-    let result = faer_a.determinant();
-
-    // restore parallel mode
     if pool.is_some() {
         faer::set_global_parallelism(faer_par_orig)
     }
 
-    Ok(result)
+    let (batch_shape, _matrix, dets) = result?;
+    crate::linalg_util::batch_tensor_f(dets, batch_shape, &device)
 }
 
 #[duplicate_item(
@@ -40,12 +48,9 @@ where
     T: ComplexField,
     D: DimAPI,
 {
-    type Out = T;
+    type Out = Tensor<T, DeviceFaer, IxD>;
     fn det_f(self) -> Result<Self::Out> {
-        rstsr_assert_eq!(self.ndim(), 2, InvalidLayout, "Currently we can only handle 2-D matrix.")?;
         let a = self;
-        let a_view = a.view().into_dim::<Ix2>();
-        let result = faer_impl_det_f(a_view)?;
-        Ok(result)
+        faer_impl_det_f(a.to_dyn())
     }
 }

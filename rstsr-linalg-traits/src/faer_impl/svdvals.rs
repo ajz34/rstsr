@@ -4,31 +4,44 @@ use faer::traits::ComplexField;
 use faer_ext::IntoFaer;
 use rstsr_core::prelude_dev::*;
 
-pub fn faer_impl_svdvals_f<T>(a: TensorView<'_, T, DeviceFaer, Ix2>) -> Result<Tensor<T::Real, DeviceFaer, Ix1>>
+/// Singular values of a single 2-D matrix.
+fn faer_svdvals_ix2<T>(a: TensorView<'_, T, DeviceFaer, Ix2>) -> Result<Tensor<T::Real, DeviceFaer, Ix1>>
 where
     T: ComplexField,
 {
-    // set parallel mode
     let device = a.device().clone();
+    let faer_a = a.into_faer();
+
+    let result =
+        faer_a.singular_values().map_err(|e| rstsr_error!(FaerError, "Faer SVD singular values error: {e:?}"))?;
+    Ok(asarray((result, &device)).into_dim::<Ix1>())
+}
+
+/// n-dim `svdvals` over the batch dims; the output has shape `batch ++ [k]`
+/// (row-major) / `[k] ++ batch` (col-major), `k = min(m, n)`.
+pub fn faer_impl_svdvals_f<T>(a: TensorView<'_, T, DeviceFaer, IxD>) -> Result<Tensor<T::Real, DeviceFaer, IxD>>
+where
+    T: ComplexField,
+{
+    let device = a.device().clone();
+    let order = device.default_order();
+
+    // set parallel mode once for the whole batch
     let pool = device.get_current_pool();
     let faer_par_orig = faer::get_global_parallelism();
     if let Some(pool) = pool {
         faer::set_global_parallelism(Par::rayon(pool.current_num_threads()));
     }
 
-    let faer_a = a.into_faer();
+    let result = crate::linalg_util::map_batch_matrices(a, order, &mut faer_svdvals_ix2);
 
-    // svd computation
-    let result =
-        faer_a.singular_values().map_err(|e| rstsr_error!(FaerError, "Faer SVD singular values error: {e:?}"))?;
-    let result = asarray((result, &device)).into_dim::<Ix1>();
-
-    // restore parallel mode
     if pool.is_some() {
         faer::set_global_parallelism(faer_par_orig)
     }
 
-    Ok(result)
+    let (batch_shape, matrix, vals) = result?;
+    let k = [Ord::min(matrix[0], matrix[1])];
+    crate::linalg_util::assemble_batch_matrices_f(vals, &batch_shape, &k, order, &device)
 }
 
 #[duplicate_item(
@@ -40,15 +53,11 @@ where
 impl<ImplType> SVDvalsAPI<DeviceFaer> for Tr
 where
     T: ComplexField,
-    D: DimAPI + DimSmallerOneAPI,
-    D::SmallerOne: DimAPI,
+    D: DimAPI,
 {
-    type Out = Tensor<T::Real, DeviceFaer, D::SmallerOne>;
+    type Out = Tensor<T::Real, DeviceFaer, IxD>;
     fn svdvals_f(self) -> Result<Self::Out> {
         let a = self;
-        rstsr_assert_eq!(a.ndim(), 2, InvalidLayout, "Currently we can only handle 2-D matrix.")?;
-        let a_view = a.view().into_dim::<Ix2>();
-        let result = faer_impl_svdvals_f(a_view)?;
-        Ok(result.into_dim::<IxD>().into_dim::<D::SmallerOne>())
+        faer_impl_svdvals_f(a.to_dyn())
     }
 }

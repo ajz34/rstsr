@@ -56,30 +56,6 @@ where
     Ok((sign, logabsdet))
 }
 
-/// Naive recursive walk over the batch dims (the input is pre-oriented so the
-/// batch dims are leading): collect one `(sign, logabsdet)` per matrix slice in
-/// the device's default-order flat sequence.
-fn faer_slogdet_walk<'a, T>(
-    v: TensorView<'a, T, DeviceFaer, IxD>,
-    out_sign: &mut Vec<T>,
-    out_log: &mut Vec<<T as ComplexField>::Real>,
-) -> Result<()>
-where
-    T: ComplexFloat + ComplexField<Real = <T as ComplexFloat>::Real>,
-    <T as ComplexField>::Real: Zero,
-{
-    if v.ndim() == 2 {
-        let (s, l) = faer_slogdet_ix2(v.into_dim::<Ix2>())?;
-        out_sign.push(s);
-        out_log.push(l);
-        return Ok(());
-    }
-    for i in 0..v.shape()[0] {
-        faer_slogdet_walk(v.i(i), out_sign, out_log)?;
-    }
-    Ok(())
-}
-
 /// n-dim `slogdet` over the batch dims.
 ///
 /// The two matrix axes are the last two for row-major and the first two for
@@ -95,9 +71,6 @@ where
     let device = a.device().clone();
     let order = device.default_order();
 
-    let shape = a.shape().to_vec();
-    let batch_shape = crate::linalg_util::batch_and_square_shape(&shape, order)?;
-
     // set parallel mode once for the whole batch
     let pool = device.get_current_pool();
     let faer_par_orig = faer::get_global_parallelism();
@@ -105,22 +78,20 @@ where
         faer::set_global_parallelism(Par::rayon(pool.current_num_threads()));
     }
 
-    let mut out_sign: Vec<T> = Vec::new();
-    let mut out_log: Vec<<T as ComplexField>::Real> = Vec::new();
-    // col-major: reverse axes so the batch dims become leading (mirrors row-major);
-    // the walk then always descends axis 0, giving default-order output.
-    let result = match order {
-        RowMajor => faer_slogdet_walk(a, &mut out_sign, &mut out_log),
-        ColMajor => faer_slogdet_walk(a.reverse_axes(), &mut out_sign, &mut out_log),
-    };
+    let result = crate::linalg_util::map_batch_matrices(a, order, &mut faer_slogdet_ix2);
 
     if pool.is_some() {
         faer::set_global_parallelism(faer_par_orig)
     }
-    result?;
 
-    let sign = asarray_f((out_sign, batch_shape.clone(), &device))?;
-    let logabsdet = asarray_f((out_log, batch_shape, &device))?;
+    let (batch_shape, _matrix, items) = result?;
+    let (mut out_sign, mut out_log) = (Vec::new(), Vec::new());
+    for (s, l) in items {
+        out_sign.push(s);
+        out_log.push(l);
+    }
+    let sign = crate::linalg_util::batch_tensor_f(out_sign, batch_shape.clone(), &device)?;
+    let logabsdet = crate::linalg_util::batch_tensor_f(out_log, batch_shape, &device)?;
     Ok((sign, logabsdet))
 }
 

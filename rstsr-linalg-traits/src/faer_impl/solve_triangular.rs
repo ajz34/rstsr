@@ -34,6 +34,63 @@ where
     Ok(b.clone_to_mut())
 }
 
+/// Solve a stack of triangular systems `a x = b` (see [`faer_impl_solve_triangular_f`]).
+fn faer_impl_solve_triangular_nd_f<T>(
+    a: TensorView<'_, T, DeviceFaer, IxD>,
+    b: TensorView<'_, T, DeviceFaer, IxD>,
+    uplo: Option<FlagUpLo>,
+) -> Result<Tensor<T, DeviceFaer, IxD>>
+where
+    T: ComplexField,
+{
+    let device = a.device().clone();
+    let order = device.default_order();
+    let (batch_out, m, k, is_vec, mats) = crate::linalg_util::map_batch_solve(a, b, order, &mut |a2, b2| {
+        Ok(faer_impl_solve_triangular_f(a2.into(), b2.into(), uplo)?.into_owned())
+    })?;
+    let result = crate::linalg_util::assemble_batch_matrices_f(mats, &batch_out, &[m, k], order, &device)?;
+    if is_vec {
+        let mut shape = batch_out;
+        shape.push(m);
+        Ok(result.into_shape(shape))
+    } else {
+        Ok(result)
+    }
+}
+
+/// n-dim in-place triangular solve: each slice of `b` is overwritten in place.
+fn faer_impl_solve_triangular_inplace_nd_f<T>(
+    a: TensorView<'_, T, DeviceFaer, IxD>,
+    b: TensorMut<'_, T, DeviceFaer, IxD>,
+    uplo: Option<FlagUpLo>,
+) -> Result<()>
+where
+    T: ComplexField,
+{
+    let order = a.device().default_order();
+    let (batch_a, [m, m2]) = crate::linalg_util::batch_and_matrix_shape(a.shape(), order)?;
+    rstsr_assert_eq!(m, m2, InvalidLayout, "solve_triangular: matrix a must be square, got {m}x{m2}")?;
+    let (batch_b, [bm, _bk]) = crate::linalg_util::batch_and_matrix_shape(b.shape(), order)?;
+    rstsr_assert_eq!(bm, m, InvalidLayout, "solve_triangular: b's row dimension must match a")?;
+    rstsr_assert_eq!(
+        batch_a,
+        batch_b,
+        InvalidLayout,
+        "solve_triangular: in-place batching requires matching batch dims"
+    )?;
+    let mut out = Vec::new();
+    crate::linalg_util::map_batch_matrices2_mut(
+        a,
+        b,
+        order,
+        &mut |a2, b2| {
+            faer_impl_solve_triangular_f(a2.into(), b2.into(), uplo)?;
+            Ok(())
+        },
+        &mut out,
+    )
+}
+
 /* #region full-args */
 
 #[duplicate_item(
@@ -49,23 +106,10 @@ where
     DA: DimAPI,
     DB: DimAPI,
 {
-    type Out = Tensor<T, DeviceFaer, DB>;
+    type Out = Tensor<T, DeviceFaer, IxD>;
     fn solve_triangular_f(self) -> Result<Self::Out> {
         let (a, b, uplo) = self;
-        rstsr_assert_eq!(a.ndim(), 2, InvalidLayout, "Currently we can only handle 2-D matrix.")?;
-        rstsr_pattern!(b.ndim(), 1..=2, InvalidLayout, "Currently we can only handle 1/2-D matrix.")?;
-        let is_b_vec = b.ndim() == 1;
-        let a_view = a.view().into_dim::<Ix2>();
-        let b_view = match is_b_vec {
-            true => b.i((.., None)).into_dim::<Ix2>(),
-            false => b.view().into_dim::<Ix2>(),
-        };
-        let result = faer_impl_solve_triangular_f(a_view.into(), b_view.into(), uplo)?;
-        let result = result.into_owned().into_dim::<IxD>();
-        match is_b_vec {
-            true => Ok(result.into_shape(-1).into_dim::<DB>()),
-            false => Ok(result.into_dim::<DB>()),
-        }
+        faer_impl_solve_triangular_nd_f(a.to_dyn(), b.to_dyn(), uplo)
     }
 }
 
@@ -85,7 +129,11 @@ where
     type Out = TrB;
     fn solve_triangular_f(self) -> Result<Self::Out> {
         let (a, mut b, uplo) = self;
-        rstsr_assert_eq!(a.ndim(), 2, InvalidLayout, "Currently we can only handle 2-D matrix.")?;
+        if a.ndim() > 2 || b.ndim() > 2 {
+            let b_view = b.view_mut().into_dim::<IxD>();
+            faer_impl_solve_triangular_inplace_nd_f(a.to_dyn(), b_view, uplo)?;
+            return Ok(b);
+        }
         rstsr_pattern!(b.ndim(), 1..=2, InvalidLayout, "Currently we can only handle 1/2-D matrix.")?;
         let is_b_vec = b.ndim() == 1;
         let a_view = a.view().into_dim::<Ix2>();
@@ -112,23 +160,10 @@ where
     DA: DimAPI,
     DB: DimAPI,
 {
-    type Out = Tensor<T, DeviceFaer, DB>;
+    type Out = Tensor<T, DeviceFaer, IxD>;
     fn solve_triangular_f(self) -> Result<Self::Out> {
-        let (mut a, b, uplo) = self;
-        rstsr_assert_eq!(a.ndim(), 2, InvalidLayout, "Currently we can only handle 2-D matrix.")?;
-        rstsr_pattern!(b.ndim(), 1..=2, InvalidLayout, "Currently we can only handle 1/2-D matrix.")?;
-        let is_b_vec = b.ndim() == 1;
-        let a_view = a.view_mut().into_dim::<Ix2>();
-        let b_view = match is_b_vec {
-            true => b.i((.., None)).into_dim::<Ix2>(),
-            false => b.view().into_dim::<Ix2>(),
-        };
-        let result = faer_impl_solve_triangular_f(a_view.into(), b_view.into(), uplo)?;
-        let result = result.into_owned().into_dim::<IxD>();
-        match is_b_vec {
-            true => Ok(result.into_shape(-1).into_dim::<DB>()),
-            false => Ok(result.into_dim::<DB>()),
-        }
+        let (a, b, uplo) = self;
+        faer_impl_solve_triangular_nd_f(a.to_dyn(), b.to_dyn(), uplo)
     }
 }
 
@@ -148,7 +183,11 @@ where
     type Out = TrB;
     fn solve_triangular_f(self) -> Result<Self::Out> {
         let (mut a, mut b, uplo) = self;
-        rstsr_assert_eq!(a.ndim(), 2, InvalidLayout, "Currently we can only handle 2-D matrix.")?;
+        if a.ndim() > 2 || b.ndim() > 2 {
+            let b_view = b.view_mut().into_dim::<IxD>();
+            faer_impl_solve_triangular_inplace_nd_f(a.to_dyn(), b_view, uplo)?;
+            return Ok(b);
+        }
         rstsr_pattern!(b.ndim(), 1..=2, InvalidLayout, "Currently we can only handle 1/2-D matrix.")?;
         let is_b_vec = b.ndim() == 1;
         let a_view = a.view_mut().into_dim::<Ix2>();

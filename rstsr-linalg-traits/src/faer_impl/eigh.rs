@@ -5,7 +5,8 @@ use faer_ext::IntoFaer;
 use rstsr_core::prelude_dev::*;
 use rstsr_dtype_traits::ExtNum;
 
-pub fn faer_impl_standard_eigh_f<T>(
+/// Standard (single-matrix) eigh of a single 2-D matrix.
+fn faer_standard_eigh_ix2<T>(
     a: TensorView<'_, T, DeviceFaer, Ix2>,
     uplo: Option<FlagUpLo>,
 ) -> Result<(Tensor<T::Real, DeviceFaer, Ix1>, Tensor<T, DeviceFaer, Ix2>)>
@@ -15,15 +16,8 @@ where
     // TODO: It seems faer is suspeciously slow on eigh function?
     // However, tests shows that results are correct.
 
-    // set parallel mode
     let device = a.device().clone();
-    let pool = device.get_current_pool();
-    let faer_par_orig = faer::get_global_parallelism();
-    if let Some(pool) = pool {
-        faer::set_global_parallelism(Par::rayon(pool.current_num_threads()));
-    }
-
-    let uplo = uplo.unwrap_or(match a.device().default_order() {
+    let uplo = uplo.unwrap_or(match device.default_order() {
         RowMajor => Lower,
         ColMajor => Upper,
     });
@@ -43,15 +37,46 @@ where
     let eigenvalues = eigenvalues.mapv(|v| T::real_part_impl(&v));
     let eigenvectors = result.U().into_rstsr().into_contig(device.default_order());
 
-    // restore parallel mode
+    Ok((eigenvalues, eigenvectors))
+}
+
+/// n-dim standard `eigh` over the batch dims.
+pub fn faer_impl_standard_eigh_f<T>(
+    a: TensorView<'_, T, DeviceFaer, IxD>,
+    uplo: Option<FlagUpLo>,
+) -> Result<(Tensor<T::Real, DeviceFaer, IxD>, Tensor<T, DeviceFaer, IxD>)>
+where
+    T: ComplexField,
+{
+    let device = a.device().clone();
+    let order = device.default_order();
+
+    // set parallel mode once for the whole batch
+    let pool = device.get_current_pool();
+    let faer_par_orig = faer::get_global_parallelism();
+    if let Some(pool) = pool {
+        faer::set_global_parallelism(Par::rayon(pool.current_num_threads()));
+    }
+
+    let result = crate::linalg_util::map_batch_matrices(a, order, &mut |m| faer_standard_eigh_ix2(m, uplo));
+
     if pool.is_some() {
         faer::set_global_parallelism(faer_par_orig)
     }
 
+    let (batch_shape, matrix, items) = result?;
+    let [n, _] = matrix;
+    let (mut vals, mut vecs) = (Vec::new(), Vec::new());
+    for (w, v) in items {
+        vals.push(w);
+        vecs.push(v);
+    }
+    let eigenvalues = crate::linalg_util::assemble_batch_matrices_f(vals, &batch_shape, &[n], order, &device)?;
+    let eigenvectors = crate::linalg_util::assemble_batch_matrices_f(vecs, &batch_shape, &[n, n], order, &device)?;
     Ok((eigenvalues, eigenvectors))
 }
 
-pub fn faer_impl_generalized_eigh_f<T>(
+fn faer_generalized_eigh_ix2<T>(
     a: TensorView<'_, T, DeviceFaer, Ix2>,
     b: TensorView<'_, T, DeviceFaer, Ix2>,
     uplo: Option<FlagUpLo>,
@@ -180,6 +205,35 @@ where
     Ok(result)
 }
 
+/// n-dim generalized `eigh` over the batch dims: `a` and `b` are two stacks with
+/// one shared batch shape and the same square matrix dims.
+pub fn faer_impl_generalized_eigh_f<T>(
+    a: TensorView<'_, T, DeviceFaer, IxD>,
+    b: TensorView<'_, T, DeviceFaer, IxD>,
+    uplo: Option<FlagUpLo>,
+    itype: i32,
+) -> Result<(Tensor<T::Real, DeviceFaer, IxD>, Tensor<T, DeviceFaer, IxD>)>
+where
+    T: ComplexField,
+{
+    let device = a.device().clone();
+    let order = device.default_order();
+    crate::linalg_util::check_same_batch(&a, &b, order, "eigh")?;
+
+    let (batch_shape, matrix, items) = crate::linalg_util::map_batch_matrices2(a, b, order, &mut |a2, b2| {
+        faer_generalized_eigh_ix2(a2, b2, uplo, itype)
+    })?;
+    let [n, _] = matrix;
+    let (mut vals, mut vecs) = (Vec::new(), Vec::new());
+    for (w, v) in items {
+        vals.push(w);
+        vecs.push(v);
+    }
+    let eigenvalues = crate::linalg_util::assemble_batch_matrices_f(vals, &batch_shape, &[n], order, &device)?;
+    let eigenvectors = crate::linalg_util::assemble_batch_matrices_f(vecs, &batch_shape, &[n, n], order, &device)?;
+    Ok((eigenvalues, eigenvectors))
+}
+
 /* #region standard eigh */
 
 #[duplicate_item(
@@ -191,20 +245,13 @@ where
 impl<ImplType> EighAPI<DeviceFaer> for (Tr, Option<FlagUpLo>)
 where
     T: ComplexField,
-    D: DimAPI + DimSmallerOneAPI,
-    D::SmallerOne: DimAPI,
+    D: DimAPI,
 {
-    type Out = EighResult<Tensor<T::Real, DeviceFaer, D::SmallerOne>, Tensor<T, DeviceFaer, D>>;
+    type Out = EighResult<Tensor<T::Real, DeviceFaer, IxD>, Tensor<T, DeviceFaer, IxD>>;
     fn eigh_f(self) -> Result<Self::Out> {
         let (a, uplo) = self;
-        rstsr_assert_eq!(a.ndim(), 2, InvalidLayout, "Currently we can only handle 2-D matrix.")?;
-        let a = a.view().into_dim::<Ix2>();
-        let result = faer_impl_standard_eigh_f(a.view(), uplo)?;
-        let result = EighResult {
-            eigenvalues: result.0.into_dim::<IxD>().into_dim::<D::SmallerOne>(),
-            eigenvectors: result.1.into_owned().into_dim::<IxD>().into_dim::<D>(),
-        };
-        Ok(result)
+        let (eigenvalues, eigenvectors) = faer_impl_standard_eigh_f(a.to_dyn(), uplo)?;
+        Ok(EighResult { eigenvalues, eigenvectors })
     }
 }
 
@@ -217,10 +264,9 @@ where
 impl<ImplType> EighAPI<DeviceFaer> for (Tr, FlagUpLo)
 where
     T: ComplexField + ExtNum<AbsOut = T::Real>,
-    D: DimAPI + DimSmallerOneAPI,
-    D::SmallerOne: DimAPI,
+    D: DimAPI,
 {
-    type Out = EighResult<Tensor<T::Real, DeviceFaer, D::SmallerOne>, Tensor<T, DeviceFaer, D>>;
+    type Out = EighResult<Tensor<T::Real, DeviceFaer, IxD>, Tensor<T, DeviceFaer, IxD>>;
     fn eigh_f(self) -> Result<Self::Out> {
         let (a, uplo) = self;
         EighAPI::<DeviceFaer>::eigh_f((a, Some(uplo)))
@@ -236,10 +282,9 @@ where
 impl<ImplType> EighAPI<DeviceFaer> for Tr
 where
     T: ComplexField + ExtNum<AbsOut = T::Real>,
-    D: DimAPI + DimSmallerOneAPI,
-    D::SmallerOne: DimAPI,
+    D: DimAPI,
 {
-    type Out = EighResult<Tensor<T::Real, DeviceFaer, D::SmallerOne>, Tensor<T, DeviceFaer, D>>;
+    type Out = EighResult<Tensor<T::Real, DeviceFaer, IxD>, Tensor<T, DeviceFaer, IxD>>;
     fn eigh_f(self) -> Result<Self::Out> {
         let a = self;
         EighAPI::<DeviceFaer>::eigh_f((a, None))
@@ -260,21 +305,14 @@ where
 impl<ImplType> EighAPI<DeviceFaer> for (TrA, TrB, FlagUpLo, i32)
 where
     T: ComplexField,
-    D: DimAPI + DimSmallerOneAPI,
-    D::SmallerOne: DimAPI,
+    D: DimAPI,
 {
-    type Out = EighResult<Tensor<T::Real, DeviceFaer, D::SmallerOne>, Tensor<T, DeviceFaer, D>>;
+    type Out = EighResult<Tensor<T::Real, DeviceFaer, IxD>, Tensor<T, DeviceFaer, IxD>>;
     fn eigh_f(self) -> Result<Self::Out> {
         let (a, b, uplo, eig_type) = self;
-        rstsr_assert_eq!(a.ndim(), 2, InvalidLayout, "Currently we can only handle 2-D matrix.")?;
-        rstsr_assert_eq!(b.ndim(), 2, InvalidLayout, "Currently we can only handle 2-D matrix.")?;
         rstsr_pattern!(eig_type, 1..=3, InvalidLayout, "Only eig_type = 1, 2, or 3 allowed.")?;
-        let a_view = a.view().into_dim::<Ix2>();
-        let b_view = b.view().into_dim::<Ix2>();
-        let (vals, vecs) = faer_impl_generalized_eigh_f(a_view.view(), b_view.view(), Some(uplo), eig_type)?;
-        let vals = vals.into_dim::<IxD>().into_dim::<D::SmallerOne>();
-        let vecs = vecs.into_owned().into_dim::<IxD>().into_dim::<D>();
-        Ok(EighResult { eigenvalues: vals, eigenvectors: vecs })
+        let (eigenvalues, eigenvectors) = faer_impl_generalized_eigh_f(a.to_dyn(), b.to_dyn(), Some(uplo), eig_type)?;
+        Ok(EighResult { eigenvalues, eigenvectors })
     }
 }
 
@@ -288,10 +326,9 @@ where
 impl<ImplType> EighAPI<DeviceFaer> for (TrA, TrB, FlagUpLo)
 where
     T: ComplexField,
-    D: DimAPI + DimSmallerOneAPI,
-    D::SmallerOne: DimAPI,
+    D: DimAPI,
 {
-    type Out = EighResult<Tensor<T::Real, DeviceFaer, D::SmallerOne>, Tensor<T, DeviceFaer, D>>;
+    type Out = EighResult<Tensor<T::Real, DeviceFaer, IxD>, Tensor<T, DeviceFaer, IxD>>;
     fn eigh_f(self) -> Result<Self::Out> {
         let (a, b, uplo) = self;
         EighAPI::<DeviceFaer>::eigh_f((a, b, uplo, 1))
@@ -308,10 +345,9 @@ where
 impl<ImplType> EighAPI<DeviceFaer> for (TrA, TrB)
 where
     T: ComplexField,
-    D: DimAPI + DimSmallerOneAPI,
-    D::SmallerOne: DimAPI,
+    D: DimAPI,
 {
-    type Out = EighResult<Tensor<T::Real, DeviceFaer, D::SmallerOne>, Tensor<T, DeviceFaer, D>>;
+    type Out = EighResult<Tensor<T::Real, DeviceFaer, IxD>, Tensor<T, DeviceFaer, IxD>>;
     fn eigh_f(self) -> Result<Self::Out> {
         let (a, b) = self;
         let uplo = match a.device().default_order() {

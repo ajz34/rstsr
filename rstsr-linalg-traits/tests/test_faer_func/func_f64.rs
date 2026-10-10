@@ -40,7 +40,7 @@ mod test {
         let a = rt::asarray((a_vec, [5, 5].c(), &device));
 
         let det = rt::linalg::det(a.view());
-        assert!((det - 3.9699917597338046).abs() < 1e-8);
+        assert!((det.to_scalar() - 3.9699917597338046).abs() < 1e-8);
     }
 
     #[test]
@@ -204,5 +204,120 @@ mod test {
         let (sign, logabsdet) = rt::linalg::slogdet(a.view()).into();
         assert!(sign.to_scalar() - -1.0 < 1e-8);
         assert!(logabsdet.to_scalar() - 3031.1259211802403 < 1e-8);
+    }
+
+    /// Two SPD 3x3 matrices and their row-major stack (shape `[2, 3, 3]`).
+    fn spd_stack(
+        device: &DeviceFaer,
+    ) -> (Tensor<f64, DeviceFaer, IxD>, Tensor<f64, DeviceFaer, IxD>, Tensor<f64, DeviceFaer, IxD>) {
+        let m0 = rt::asarray((vec![4.0f64, 1.0, 0.0, 1.0, 3.0, 0.5, 0.0, 0.5, 2.0], [3, 3].c(), device));
+        let m1 = rt::asarray((vec![2.0f64, 0.0, 1.0, 0.0, 5.0, 0.0, 1.0, 0.0, 3.0], [3, 3].c(), device));
+        let a = rt::stack((vec![m0.clone(), m1.clone()], 0));
+        (m0, m1, a)
+    }
+
+    #[test]
+    fn test_batched_linalg() {
+        let device = DeviceFaer::default();
+        let (m0, m1, a) = spd_stack(&device);
+        // det: batch shape (2,)
+        let d = rt::linalg::det(a.view());
+        assert_eq!(d.shape(), &[2]);
+        assert!((d.i(0).to_scalar() - rt::linalg::det(m0.view()).to_scalar()).abs() < 1e-10);
+        assert!((d.i(1).to_scalar() - rt::linalg::det(m1.view()).to_scalar()).abs() < 1e-10);
+
+        // cholesky / inv: stack of matrices, each slice matches the 2-D result
+        let c = rt::linalg::cholesky(a.view());
+        assert_eq!(c.shape(), &[2, 3, 3]);
+        assert!((fingerprint(&c.i(0).into_owned()) - fingerprint(&rt::linalg::cholesky(m0.view()))).abs() < 1e-10);
+        let ai = rt::linalg::inv(a.view());
+        assert_eq!(ai.shape(), &[2, 3, 3]);
+        assert!((fingerprint(&ai.i(1).into_owned()) - fingerprint(&rt::linalg::inv(m1.view()))).abs() < 1e-8);
+
+        // eigvalsh / svdvals: batch of vectors
+        let w = rt::linalg::eigvalsh(a.view());
+        assert_eq!(w.shape(), &[2, 3]);
+        assert!((fingerprint(&w.i(0).into_owned()) - fingerprint(&rt::linalg::eigvalsh(m0.view()))).abs() < 1e-8);
+        let s = rt::linalg::svdvals(a.view());
+        assert_eq!(s.shape(), &[2, 3]);
+
+        // eigh / svd: multiple stacked outputs
+        let e = rt::linalg::eigh(a.view());
+        assert_eq!(e.eigenvalues.shape(), &[2, 3]);
+        assert_eq!(e.eigenvectors.shape(), &[2, 3, 3]);
+        let (u, sv, vt) = rt::linalg::svd((a.view(), true)).into();
+        assert_eq!(u.shape(), &[2, 3, 3]);
+        assert_eq!(sv.shape(), &[2, 3]);
+        assert_eq!(vt.shape(), &[2, 3, 3]);
+
+        // pinv: same shape as input for square stacks
+        let p = rt::linalg::pinv(a.view()).pinv;
+        assert_eq!(p.shape(), &[2, 3, 3]);
+
+        // solve: a (..., M, M) with b (..., M, K) -> (..., M, K)
+        let b =
+            rt::asarray((vec![1.0f64, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0], [2, 3, 2].c(), &device));
+        let x = rt::linalg::solve_general((a.view(), b.view()));
+        assert_eq!(x.shape(), &[2, 3, 2]);
+        // first slice solves m0 x0 = b0
+        let b0 = b.i(0);
+        let x0 = rt::linalg::solve_general((m0.view(), b0.view()));
+        assert!((fingerprint(&x.i(0).into_owned()) - fingerprint(&x0)).abs() < 1e-8);
+
+        // solve broadcast: a batch (2,), b batch (1,) -> (2, 3, 2)
+        let b1 = rt::asarray((vec![1.0f64, 0.0, 0.0, 0.0, 1.0, 0.0], [1, 3, 2].c(), &device));
+        let xb = rt::linalg::solve_general((a.view(), b1.view()));
+        assert_eq!(xb.shape(), &[2, 3, 2]);
+
+        // in-place: a mutable / owned b is solved into its own buffer (no copy)
+        let bd = vec![1.0f64, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0];
+        let mut bv = rt::asarray((bd.clone(), [2, 3, 2].c(), &device));
+        rt::linalg::solve_general((a.view(), bv.view_mut()));
+        assert!((fingerprint(&bv) - fingerprint(&x)).abs() < 1e-8);
+        let bo = rt::asarray((bd, [2, 3, 2].c(), &device));
+        let ret = rt::linalg::solve_general((a.view(), bo));
+        assert_eq!(ret.shape(), &[2, 3, 2]);
+        assert!((fingerprint(&ret) - fingerprint(&x)).abs() < 1e-8);
+
+        // solve_triangular: allocating and in-place, same batch walk as solve
+        let x_tri = rt::linalg::solve_triangular((a.view(), b.view()));
+        assert_eq!(x_tri.shape(), &[2, 3, 2]);
+        let x0_tri = rt::linalg::solve_triangular((m0.view(), b.i(0).view()));
+        assert!((fingerprint(&x_tri.i(0).into_owned()) - fingerprint(&x0_tri)).abs() < 1e-8);
+        let mut bv_tri =
+            rt::asarray((vec![1.0f64, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0], [2, 3, 2].c(), &device));
+        rt::linalg::solve_triangular((a.view(), bv_tri.view_mut()));
+        assert!((fingerprint(&bv_tri) - fingerprint(&x_tri)).abs() < 1e-8);
+
+        // generalized eigh over a pair of stacks
+        let ge = rt::linalg::eigh((a.view(), a.view()));
+        assert_eq!(ge.eigenvalues.shape(), &[2, 3]);
+        assert_eq!(ge.eigenvectors.shape(), &[2, 3, 3]);
+        let ge0 = rt::linalg::eigh((m0.view(), m0.view()));
+        assert!((fingerprint(&ge.eigenvalues.i(0).into_owned()) - fingerprint(&ge0.eigenvalues)).abs() < 1e-8);
+    }
+
+    #[test]
+    fn test_batched_linalg_col_major() {
+        let mut device = DeviceFaer::default();
+        device.set_default_order(ColMajor);
+        // col-major: matrix axes lead, batch trails -> (3, 3, 2)
+        let m0 = rt::asarray((vec![4.0f64, 1.0, 0.0, 1.0, 3.0, 0.5, 0.0, 0.5, 2.0], [3, 3].c(), &device));
+        let m1 = rt::asarray((vec![2.0f64, 0.0, 1.0, 0.0, 5.0, 0.0, 1.0, 0.0, 3.0], [3, 3].c(), &device));
+        let a: Tensor<f64, DeviceFaer, IxD> = rt::stack((vec![m0.clone(), m1.clone()], -1isize));
+        assert_eq!(a.shape(), &[3, 3, 2]);
+
+        let d = rt::linalg::det(a.view());
+        assert_eq!(d.shape(), &[2]);
+        assert!((d.i(0).to_scalar() - rt::linalg::det(m0.view()).to_scalar()).abs() < 1e-10);
+
+        let c = rt::linalg::cholesky(a.view());
+        assert_eq!(c.shape(), &[3, 3, 2]);
+        assert!(
+            (fingerprint(&c.i((.., .., 0)).into_owned()) - fingerprint(&rt::linalg::cholesky(m0.view()))).abs() < 1e-10
+        );
+
+        let s = rt::linalg::svdvals(a.view());
+        assert_eq!(s.shape(), &[3, 2]);
     }
 }

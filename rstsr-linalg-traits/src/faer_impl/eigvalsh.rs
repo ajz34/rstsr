@@ -4,7 +4,8 @@ use faer::traits::ComplexField;
 use faer_ext::IntoFaer;
 use rstsr_core::prelude_dev::*;
 
-pub fn faer_impl_eigvalsh_f<T>(
+/// Eigenvalues of a single 2-D symmetric/Hermitian matrix.
+fn faer_eigvalsh_ix2<T>(
     a: TensorView<'_, T, DeviceFaer, Ix2>,
     uplo: Option<FlagUpLo>,
 ) -> Result<Tensor<T::Real, DeviceFaer, Ix1>>
@@ -14,15 +15,8 @@ where
     // TODO: It seems faer is suspeciously slow on eigh function?
     // However, tests shows that results are correct.
 
-    // set parallel mode
     let device = a.device().clone();
-    let pool = device.get_current_pool();
-    let faer_par_orig = faer::get_global_parallelism();
-    if let Some(pool) = pool {
-        faer::set_global_parallelism(Par::rayon(pool.current_num_threads()));
-    }
-
-    let uplo = uplo.unwrap_or(match a.device().default_order() {
+    let uplo = uplo.unwrap_or(match device.default_order() {
         RowMajor => Lower,
         ColMajor => Upper,
     });
@@ -36,14 +30,37 @@ where
     let result = faer_a
         .self_adjoint_eigenvalues(faer_uplo)
         .map_err(|e| rstsr_error!(FaerError, "Faer SelfAdjointEigen error: {e:?}"))?;
-    let eigenvalues = asarray((result, &device)).into_dim::<Ix1>();
+    Ok(asarray((result, &device)).into_dim::<Ix1>())
+}
 
-    // restore parallel mode
+/// n-dim `eigvalsh` over the batch dims; the output has shape `batch ++ [n]`
+/// (row-major) / `[n] ++ batch` (col-major).
+pub fn faer_impl_eigvalsh_f<T>(
+    a: TensorView<'_, T, DeviceFaer, IxD>,
+    uplo: Option<FlagUpLo>,
+) -> Result<Tensor<T::Real, DeviceFaer, IxD>>
+where
+    T: ComplexField,
+{
+    let device = a.device().clone();
+    let order = device.default_order();
+
+    // set parallel mode once for the whole batch
+    let pool = device.get_current_pool();
+    let faer_par_orig = faer::get_global_parallelism();
+    if let Some(pool) = pool {
+        faer::set_global_parallelism(Par::rayon(pool.current_num_threads()));
+    }
+
+    let result = crate::linalg_util::map_batch_matrices(a, order, &mut |m| faer_eigvalsh_ix2(m, uplo));
+
     if pool.is_some() {
         faer::set_global_parallelism(faer_par_orig)
     }
 
-    Ok(eigenvalues)
+    let (batch_shape, matrix, vals) = result?;
+    let n = [matrix[0]];
+    crate::linalg_util::assemble_batch_matrices_f(vals, &batch_shape, &n, order, &device)
 }
 
 #[duplicate_item(
@@ -55,17 +72,12 @@ where
 impl<ImplType> EigvalshAPI<DeviceFaer> for (Tr, Option<FlagUpLo>)
 where
     T: ComplexField,
-    D: DimAPI + DimSmallerOneAPI,
-    D::SmallerOne: DimAPI,
+    D: DimAPI,
 {
-    type Out = Tensor<T::Real, DeviceFaer, D::SmallerOne>;
+    type Out = Tensor<T::Real, DeviceFaer, IxD>;
     fn eigvalsh_f(self) -> Result<Self::Out> {
         let (a, uplo) = self;
-        rstsr_assert_eq!(a.ndim(), 2, InvalidLayout, "Currently we can only handle 2-D matrix.")?;
-        let a = a.view().into_dim::<Ix2>();
-        let result = faer_impl_eigvalsh_f(a.view(), uplo)?;
-        let result = result.into_dim::<IxD>().into_dim::<D::SmallerOne>();
-        Ok(result)
+        faer_impl_eigvalsh_f(a.to_dyn(), uplo)
     }
 }
 
@@ -78,10 +90,9 @@ where
 impl<ImplType> EigvalshAPI<DeviceFaer> for (Tr, FlagUpLo)
 where
     T: ComplexField,
-    D: DimAPI + DimSmallerOneAPI,
-    D::SmallerOne: DimAPI,
+    D: DimAPI,
 {
-    type Out = Tensor<T::Real, DeviceFaer, D::SmallerOne>;
+    type Out = Tensor<T::Real, DeviceFaer, IxD>;
     fn eigvalsh_f(self) -> Result<Self::Out> {
         let (a, uplo) = self;
         EigvalshAPI::<DeviceFaer>::eigvalsh_f((a, Some(uplo)))
@@ -97,10 +108,9 @@ where
 impl<ImplType> EigvalshAPI<DeviceFaer> for Tr
 where
     T: ComplexField,
-    D: DimAPI + DimSmallerOneAPI,
-    D::SmallerOne: DimAPI,
+    D: DimAPI,
 {
-    type Out = Tensor<T::Real, DeviceFaer, D::SmallerOne>;
+    type Out = Tensor<T::Real, DeviceFaer, IxD>;
     fn eigvalsh_f(self) -> Result<Self::Out> {
         let a = self;
         EigvalshAPI::<DeviceFaer>::eigvalsh_f((a, None))
