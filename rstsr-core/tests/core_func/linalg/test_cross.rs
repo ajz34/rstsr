@@ -126,7 +126,8 @@ mod custom_cross {
 
     #[test]
     fn test_cross_col_major() {
-        // the values are order-independent; only the fresh result's arrangement differs
+        // for equal-rank operands the values are order-independent; only the fresh
+        // result's arrangement differs
         crate::specify_test!("test_cross_col_major");
 
         let u = [1, 2, 3];
@@ -146,5 +147,32 @@ mod custom_cross {
 
         assert_eq!(cr.to_vec(), cc.to_vec());
         assert_eq!(cc.to_vec(), vec![-3, 6, -3]);
+    }
+
+    #[test]
+    fn test_cross_col_major_broadcast() {
+        // with operands of DIFFERENT ranks the default order decides the alignment:
+        // trailing (NumPy) under RowMajor, leading (rstsr's convention) under ColMajor
+        // -- and the shared-axis check must follow the same rule, not a hard-coded one
+        crate::specify_test!("test_cross_col_major_broadcast");
+
+        let mut device_r = TESTCFG.device.clone();
+        device_r.set_default_order(RowMajor);
+        let a_r = rt::tensor_from_nested!([[1, 2], [3, 4], [5, 6]], &device_r);
+        let b_r = rt::tensor_from_nested!([1, 0, 0], &device_r);
+        // row-major aligns the (3,) to a's trailing axis (length 2), so axis 0 is not
+        // shared by both operands: rejected rather than silently mis-broadcast
+        assert!(rt::cross_f(&a_r, &b_r, 0).is_err());
+
+        let mut device_c = TESTCFG.device.clone();
+        device_c.set_default_order(ColMajor);
+        let a_c = rt::tensor_from_nested!([[1, 2], [3, 4], [5, 6]], &device_c);
+        let b_c = rt::tensor_from_nested!([1, 0, 0], &device_c);
+        // col-major aligns the (3,) to a's leading axis, which is the compute axis
+        let actual = rt::cross(&a_c, &b_c, 0);
+        let expected = rt::tensor_from_nested!([[0, 0], [5, 6], [-3, -4]], &device_c);
+        assert_equal(&actual, &expected, None);
+        // axis 1 is carried only by `a` (length 2 there), so it is not a shared axis
+        assert!(rt::cross_f(&a_c, &b_c, 1).is_err());
     }
 }

@@ -577,6 +577,9 @@ NumPy's `np.cross(a, b, axisa=-1, axisb=-1, axisc=-1, axis=None)` takes a **sepa
 each operand and for the result, so `np.cross(u, v, axisb=0)` may compute over `u`'s last axis
 and `v`'s first axis at once. `rt::cross` follows the array-API `linalg.cross(x1, x2, axis=-1)`
 contract instead: **one shared `axis`** (size 3 in both operands, counted from the back when
-negative). The cases of `TestCross::test_broadcasting_shapes` whose operand axes agree transfer
+negative). Under a `ColMajor` device the *broadcasting* of unequal-rank operands follows rstsr's
+leading-axis convention rather than NumPy's trailing one, so which axes broadcast (and therefore
+whether the shared axis exists at all) differs from NumPy there; for equal-rank operands the two
+orders agree. The cases of `TestCross::test_broadcasting_shapes` whose operand axes agree transfer
 unchanged; the mixed-axis cases are not expressible and are not transferred. `np.cross` does not
 conjugate either operand for complex input, and neither does `rt::cross`.

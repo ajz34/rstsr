@@ -15,8 +15,22 @@ use crate::prelude_dev::*;
 ///
 /// Both operands must have length 3 along `axis` (before broadcasting); the other axes broadcast
 /// against each other. `axis` counts from the back when negative, and [`None`][AxisIndex::None]
-/// (or `()`) selects the last axis (the Array-API default `axis = -1`). The result follows the
-/// input's device default order and behaves identically under [`RowMajor`] and [`ColMajor`].
+/// (or `()`) selects the last axis (the Array-API default `axis = -1`).
+///
+/// <div class="warning">
+///
+/// **Row/Column Major Notice**
+///
+/// For operands of **equal rank** this function behaves identically under [`RowMajor`] and
+/// [`ColMajor`] (only the result's memory arrangement differs). For operands of **different
+/// ranks** it does not: the lower-rank operand is aligned to the **trailing** axes under
+/// [`RowMajor`] (the NumPy rule) and to the **leading** axes under [`ColMajor`] (rstsr's
+/// convention, as in every broadcasting operation), so which axes broadcast — and hence whether
+/// `axis` is shared by both operands at all — depends on the default order.
+///
+/// </div>
+///
+/// See [`order_semantics`](crate::order_semantics) for the two device default orders.
 ///
 /// # Parameters
 ///
@@ -169,10 +183,10 @@ where
     // the array-API contract: the axis is size 3 in both operands, before broadcasting
     let ndim = a.ndim().max(b.ndim());
     let axis = cross_axis_in_output(axis.try_into().map_err(Into::into)?, ndim)?;
-    cross_check_axis(a.shape(), a.ndim(), axis, ndim)?;
-    cross_check_axis(b.shape(), b.ndim(), axis, ndim)?;
-
     let order = device.default_order();
+    cross_check_axis(a.shape(), a.ndim(), axis, ndim, order)?;
+    cross_check_axis(b.shape(), b.ndim(), axis, ndim, order)?;
+
     let (la, lb) = broadcast_layout(a.layout(), b.layout(), order)?;
     // the freshly allocated result follows the input's device default order
     let lc = match order {
@@ -196,13 +210,21 @@ pub(crate) fn cross_axis_in_output(axis: AxisIndex<isize>, ndim: usize) -> Resul
 }
 
 /// Check that an operand carries the compute axis at length 3, mapping the output-rank axis back
-/// to the operand's own rank (broadcasting aligns trailing axes).
-pub(crate) fn cross_check_axis<D>(shape: &D, ndim: usize, axis: usize, out_ndim: usize) -> Result<()>
+/// to the operand's own rank by the same rule [`broadcast_shape`] uses (trailing alignment under
+/// [`RowMajor`], leading alignment under [`ColMajor`]).
+pub(crate) fn cross_check_axis<D>(shape: &D, ndim: usize, axis: usize, out_ndim: usize, order: FlagOrder) -> Result<()>
 where
     D: DimAPI,
 {
-    let axis = axis as isize - (out_ndim as isize - ndim as isize);
-    rstsr_assert!(axis >= 0, InvalidValue, "cross: the axis must be shared by both operands")?;
+    let axis = match order {
+        RowMajor => axis as isize - (out_ndim as isize - ndim as isize),
+        ColMajor => axis as isize,
+    };
+    rstsr_assert!(
+        axis >= 0 && (axis as usize) < ndim,
+        InvalidValue,
+        "cross: the axis must be shared by both operands"
+    )?;
     rstsr_assert_eq!(shape[axis as usize], 3, InvalidValue, "cross: the axis must have length 3")?;
     Ok(())
 }

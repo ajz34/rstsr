@@ -19,7 +19,8 @@ use crate::tensor::linalg::cross::{cross_axis_in_output, cross_check_axis};
 ///
 /// [`cross`] instead requires the operands to share one dtype; this function is the
 /// array-API-fulfilment form, like the `ext_*` element-wise arithmetic functions. The shape
-/// contract is that of [`cross`]: both operands must have length 3 along `axis`.
+/// contract is that of [`cross`]: both operands must have length 3 along `axis`, and the
+/// Row/Column Major Notice of [`cross`] applies to operands of different ranks.
 ///
 /// <div class="warning">
 ///
@@ -147,10 +148,10 @@ where
     // the array-API contract: the axis is size 3 in both operands, before broadcasting
     let ndim = a.ndim().max(b.ndim());
     let axis = cross_axis_in_output(axis.try_into().map_err(Into::into)?, ndim)?;
-    cross_check_axis(a.shape(), a.ndim(), axis, ndim)?;
-    cross_check_axis(b.shape(), b.ndim(), axis, ndim)?;
-
     let order = device.default_order();
+    cross_check_axis(a.shape(), a.ndim(), axis, ndim, order)?;
+    cross_check_axis(b.shape(), b.ndim(), axis, ndim, order)?;
+
     let (la, lb) = broadcast_layout(a.layout(), b.layout(), order)?;
     // the freshly allocated result follows the input's device default order
     let lc = match order {
