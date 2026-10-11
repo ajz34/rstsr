@@ -11,6 +11,7 @@ use rstsr_core::prelude_dev::*;
    [EighAPI           ] [eigh            ] [eigh_f            ];
    [EigvalshAPI       ] [eigvalsh        ] [eigvalsh_f        ];
    [InvAPI            ] [inv             ] [inv_f             ];
+   [MatrixPowerAPI    ] [matrix_power    ] [matrix_power_f    ];
    [PinvAPI           ] [pinv            ] [pinv_f            ];
    [SLogDetAPI        ] [slogdet         ] [slogdet_f         ];
    [SolveGeneralAPI   ] [solve_general   ] [solve_general_f   ];
@@ -37,6 +38,7 @@ pub trait LinalgAPI<Inp> {
    [EighAPI           ] [eigh            ] [eigh_f            ];
    [EigvalshAPI       ] [eigvalsh        ] [eigvalsh_f        ];
    [InvAPI            ] [inv             ] [inv_f             ];
+   [MatrixPowerAPI    ] [matrix_power    ] [matrix_power_f    ];
    [PinvAPI           ] [pinv            ] [pinv_f            ];
    [SLogDetAPI        ] [slogdet         ] [slogdet_f         ];
    [SolveGeneralAPI   ] [solve_general   ] [solve_general_f   ];
@@ -59,6 +61,7 @@ where
    [EighAPI           ] [eigh            ] [eigh_f            ];
    [EigvalshAPI       ] [eigvalsh        ] [eigvalsh_f        ];
    [InvAPI            ] [inv             ] [inv_f             ];
+   [MatrixPowerAPI    ] [matrix_power    ] [matrix_power_f    ];
    [PinvAPI           ] [pinv            ] [pinv_f            ];
    [SLogDetAPI        ] [slogdet         ] [slogdet_f         ];
    [SolveGeneralAPI   ] [solve_general   ] [solve_general_f   ];

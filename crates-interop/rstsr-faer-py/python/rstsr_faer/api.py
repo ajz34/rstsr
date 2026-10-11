@@ -156,6 +156,7 @@ from .rstsr_faer import (
     linalg_eigvalsh as _linalg_eigvalsh,
     linalg_inv as _linalg_inv,
     linalg_matmul as _linalg_matmul,
+    linalg_matrix_power as _linalg_matrix_power,
     linalg_matrix_transpose as _linalg_matrix_transpose,
     linalg_outer as _linalg_outer,
     linalg_pinv as _linalg_pinv,
@@ -1836,10 +1837,10 @@ def iinfo(type, /):
 # ------------------------------------------------------------------- linalg --
 # array-API `linalg` extension, over rstsr's existing entries only. Members the
 # standard defines but rstsr/faer does not provide (qr, eig, eigvals,
-# matrix_norm, matrix_power, matrix_rank, cross, and the general-`ord` norms)
-# are absent here — rust-side gaps, recorded in the gap register, never stubbed.
-# None of these wrappers batch: rstsr's faer factorizations are 2-D only, so a
-# stacked input is passed through and declined rust-side.
+# matrix_norm, matrix_rank, cross, and the general-`ord` norms) are absent here —
+# rust-side gaps, recorded in the gap register, never stubbed.
+# `matrix_power` batches over a stack of square matrices; a 2-D-only entry
+# declines a stacked input rust-side.
 
 _EighResult = collections.namedtuple("EighResult", ["eigenvalues", "eigenvectors"])
 _SVDResult = collections.namedtuple("SVDResult", ["U", "S", "Vh"])
@@ -1891,6 +1892,10 @@ def inv(x, /):
     return _wrap(_linalg_inv(_handle(x)))
 
 
+def matrix_power(x, n, /):
+    return _wrap(_linalg_matrix_power(_handle(x), n))
+
+
 def pinv(x, /, *, rtol=None):
     return _wrap(_linalg_pinv(_handle(x), rtol))
 
@@ -1923,6 +1928,7 @@ class _LinalgNamespace:
     eigvalsh = staticmethod(eigvalsh)
     inv = staticmethod(inv)
     matmul = staticmethod(matmul)
+    matrix_power = staticmethod(matrix_power)
     matrix_transpose = staticmethod(matrix_transpose)
     outer = staticmethod(outer)
     pinv = staticmethod(pinv)

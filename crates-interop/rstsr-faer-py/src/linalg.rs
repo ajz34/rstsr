@@ -10,9 +10,10 @@
 //! type is named.
 //!
 //! Names rstsr/faer does not provide (`qr`, `eig`, `eigvals`, `matrix_norm`,
-//! `matrix_power`, `matrix_rank`, `cross`, the general-`ord` norms) are absent
-//! from the namespace, never stubbed — they are rust-side gaps. `trace` is now
-//! available rust-side (`rt::trace`) but not yet bound here.
+//! `matrix_rank`, `cross`, the general-`ord` norms) are absent from the
+//! namespace, never stubbed — they are rust-side gaps. `matrix_power` (via
+//! `rt::linalg::matrix_power`) and `trace` (`rt::trace`) are available
+//! rust-side; `matrix_power` is bound here, `trace` is not yet.
 
 use core::mem::MaybeUninit;
 use core::ops::{Add, Mul};
@@ -132,6 +133,13 @@ pub fn linalg_eigvalsh(x: &NativeArray) -> PyResult<NativeArray> {
 #[pyfunction]
 pub fn linalg_inv(x: &NativeArray) -> PyResult<NativeArray> {
     let t = unary_fc!(x, |a| any_res(rt::linalg::inv_f(a)))?;
+    Ok(NativeArray { t })
+}
+
+/// Integer matrix power; a negative exponent inverts the base first.
+#[pyfunction]
+pub fn linalg_matrix_power(x: &NativeArray, n: isize) -> PyResult<NativeArray> {
+    let t = unary_fc!(x, |a| any_res(rt::linalg::matrix_power_f((a, n))))?;
     Ok(NativeArray { t })
 }
 

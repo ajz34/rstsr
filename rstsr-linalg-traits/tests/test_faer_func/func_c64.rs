@@ -268,4 +268,94 @@ mod test_generalized_eigh {
         assert!((sign.to_scalar() - c64!(-0.44606842323663365, 0.8949988613351316)).norm() < 1e-8);
         assert!(logabsdet.to_scalar() - 3393.6720579594585 < 1e-8);
     }
+
+    #[test]
+    fn test_matrix_power() {
+        let device = DeviceFaer::default();
+        let a_vec = get_vec::<c64>('a')[..16].to_vec();
+        let a = rt::asarray((a_vec, [4, 4].c(), &device));
+
+        // n = 0 -> identity, in the input dtype
+        let p = rt::linalg::matrix_power((a.view(), 0));
+        assert!((fingerprint(&p) - c64!(-0.3150972564720475)).norm() < 1e-8);
+
+        // n = 1 -> a itself
+        let p = rt::linalg::matrix_power((a.view(), 1));
+        assert!((fingerprint(&p) - c64!(-0.5537625095088878, -3.0610178896100395)).norm() < 1e-8);
+
+        // shortcuts (2, 3) and the squaring loop (> 3)
+        for (n, golden) in [
+            (2isize, c64!(-3.3981320140425257, 0.16690991094120955)),
+            (3, c64!(-14.635121297638918, -1.0839909116245399)),
+            (5, c64!(-7.659626934528033, 29.380294417607516)),
+        ] {
+            let p = rt::linalg::matrix_power((a.view(), n));
+            assert!((fingerprint(&p) - golden).norm() < 1e-8, "n = {n}");
+        }
+
+        // negative exponent: invert once, then raise the inverse to |n|
+        for (n, golden) in [
+            (-1isize, c64!(0.23944130706023403, 0.38201618793714387)),
+            (-2, c64!(-0.40283871318247577, 0.22747768835164975)),
+        ] {
+            let p = rt::linalg::matrix_power((a.view(), n));
+            assert!((fingerprint(&p) - golden).norm() < 1e-8, "n = {n}");
+        }
+    }
+
+    #[test]
+    fn test_matrix_power_nd() {
+        let mut device = DeviceFaer::default();
+        device.set_default_order(RowMajor);
+        let a_vec = get_vec::<c64>('a')[..16].to_vec();
+
+        // stack: slice 0 is a, slice 1 is 2*a
+        let mut stacked = a_vec.clone();
+        stacked.extend(a_vec.iter().map(|x| 2.0 * x));
+        let b = rt::asarray((stacked, [2, 4, 4].c(), &device));
+
+        let p = rt::linalg::matrix_power((b.view(), 0));
+        assert_eq!(p.shape(), &[2, 4, 4]);
+        assert!((fingerprint(&p) - c64!(-0.2588243168865289)).norm() < 1e-8);
+
+        let p = rt::linalg::matrix_power((b.view(), 2));
+        assert!((fingerprint(&p) - c64!(5.8067955793386306, -11.549488782937473)).norm() < 1e-8);
+
+        let p = rt::linalg::matrix_power((b.view(), -1));
+        assert!((fingerprint(&p) - c64!(-0.06327227000728392, 0.22792209504132835)).norm() < 1e-8);
+    }
+
+    #[test]
+    fn test_matrix_power_nd_colmajor() {
+        let mut device = DeviceFaer::default();
+        device.set_default_order(ColMajor);
+        // Under ColMajor the matrix axes are the first two and the batch trails.
+        // Passing a shape (not `.c()`) makes `asarray` follow the device order (F),
+        // so each `[:, :, b]` slice equals the 2-D operand.
+        let a_vec = get_vec::<c64>('a')[..16].to_vec();
+        // F-order of the operand, so the 2-D and stacked inputs share one layout
+        let mut va = Vec::with_capacity(16);
+        for j in 0..4 {
+            for i in 0..4 {
+                va.push(a_vec[i * 4 + j]);
+            }
+        }
+        let v2a: Vec<c64> = va.iter().map(|x| 2.0 * x).collect();
+        let a2 = rt::asarray((va.clone(), [4, 4], &device));
+        let b2 = rt::asarray((v2a.clone(), [4, 4], &device));
+
+        // stack: slice 0 = a, slice 1 = 2*a (batch axis trails under ColMajor)
+        let mut stacked = va;
+        stacked.extend_from_slice(&v2a);
+        let b_t = rt::asarray((stacked, [4, 4, 2], &device));
+
+        for n in [0isize, 2, 5, -1] {
+            let p_nd = rt::linalg::matrix_power((b_t.view(), n));
+            assert_eq!(p_nd.shape(), &[4, 4, 2]);
+            let p0 = rt::linalg::matrix_power((a2.view(), n));
+            let p1 = rt::linalg::matrix_power((b2.view(), n));
+            assert!(rt::allclose(p_nd.i((.., .., 0)), &p0, None), "n = {n}");
+            assert!(rt::allclose(p_nd.i((.., .., 1)), &p1, None), "n = {n}");
+        }
+    }
 }
