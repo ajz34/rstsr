@@ -1,28 +1,23 @@
+use crate::faer_impl::batch::{map_stack_slices2, stack_shape, with_parallel};
+use crate::linalg_util::batch_and_matrix_shape;
 use crate::traits_def::{EighAPI, EighResult};
 use faer::prelude::*;
 use faer::traits::ComplexField;
 use faer_ext::IntoFaer;
+use num::Num;
 use rstsr_core::prelude_dev::*;
 use rstsr_dtype_traits::ExtNum;
 
-pub fn faer_impl_standard_eigh_f<T>(
+/// Eigendecomposition of a single 2-D symmetric/Hermitian matrix (no
+/// parallel-mode handling).
+fn faer_eigh_ix2<T>(
     a: TensorView<'_, T, DeviceFaer, Ix2>,
     uplo: Option<FlagUpLo>,
 ) -> Result<(Tensor<T::Real, DeviceFaer, Ix1>, Tensor<T, DeviceFaer, Ix2>)>
 where
     T: ComplexField,
 {
-    // TODO: It seems faer is suspeciously slow on eigh function?
-    // However, tests shows that results are correct.
-
-    // set parallel mode
     let device = a.device().clone();
-    let pool = device.get_current_pool();
-    let faer_par_orig = faer::get_global_parallelism();
-    if let Some(pool) = pool {
-        faer::set_global_parallelism(Par::rayon(pool.current_num_threads()));
-    }
-
     let uplo = uplo.unwrap_or(match a.device().default_order() {
         RowMajor => Lower,
         ColMajor => Upper,
@@ -33,7 +28,6 @@ where
         Upper => faer::Side::Upper,
     };
 
-    // eigen value computation
     let result = faer_a
         .self_adjoint_eigen(faer_uplo)
         .map_err(|e| rstsr_error!(FaerError, "Faer SelfAdjointEigen error: {e:?}"))?;
@@ -43,12 +37,37 @@ where
     let eigenvalues = eigenvalues.mapv(|v| T::real_part_impl(&v));
     let eigenvectors = result.U().into_rstsr().into_contig(device.default_order());
 
-    // restore parallel mode
-    if pool.is_some() {
-        faer::set_global_parallelism(faer_par_orig)
-    }
-
     Ok((eigenvalues, eigenvectors))
+}
+
+pub fn faer_impl_standard_eigh_f<T>(
+    a: TensorView<'_, T, DeviceFaer, IxD>,
+    uplo: Option<FlagUpLo>,
+) -> Result<(Tensor<T::Real, DeviceFaer, IxD>, Tensor<T, DeviceFaer, IxD>)>
+where
+    T: ComplexField + Num,
+{
+    let device = a.device().clone();
+    let order = device.default_order();
+    let (batch_shape, [m, n]) = batch_and_matrix_shape(a.shape(), order)?;
+    rstsr_assert_eq!(m, n, InvalidLayout, "eigh: the matrix must be square, got {m}x{n}")?;
+
+    with_parallel(&device, || {
+        let mut w = zeros_f((stack_shape(&batch_shape, &[m], order), &device))?;
+        let mut v = zeros_f((stack_shape(&batch_shape, &[m, m], order), &device))?;
+        map_stack_slices2::<T, T::Real, Ix1, T, Ix2, _>(
+            a,
+            w.view_mut(),
+            v.view_mut(),
+            order,
+            |a_slice, mut w_slice, mut v_slice| {
+                let (ew, ev) = faer_eigh_ix2(a_slice, uplo)?;
+                w_slice.assign_f(ew)?;
+                v_slice.assign_f(ev)
+            },
+        )?;
+        Ok((w, v))
+    })
 }
 
 pub fn faer_impl_generalized_eigh_f<T>(
@@ -190,21 +209,15 @@ where
 )]
 impl<ImplType> EighAPI<DeviceFaer> for (Tr, Option<FlagUpLo>)
 where
-    T: ComplexField,
+    T: ComplexField + Num,
     D: DimAPI + DimSmallerOneAPI,
     D::SmallerOne: DimAPI,
 {
     type Out = EighResult<Tensor<T::Real, DeviceFaer, D::SmallerOne>, Tensor<T, DeviceFaer, D>>;
     fn eigh_f(self) -> Result<Self::Out> {
         let (a, uplo) = self;
-        rstsr_assert_eq!(a.ndim(), 2, InvalidLayout, "Currently we can only handle 2-D matrix.")?;
-        let a = a.view().into_dim::<Ix2>();
-        let result = faer_impl_standard_eigh_f(a.view(), uplo)?;
-        let result = EighResult {
-            eigenvalues: result.0.into_dim::<IxD>().into_dim::<D::SmallerOne>(),
-            eigenvectors: result.1.into_owned().into_dim::<IxD>().into_dim::<D>(),
-        };
-        Ok(result)
+        let (vals, vecs) = faer_impl_standard_eigh_f(a.view().to_dyn(), uplo)?;
+        Ok(EighResult { eigenvalues: vals.into_dim::<D::SmallerOne>(), eigenvectors: vecs.into_dim::<D>() })
     }
 }
 
@@ -216,7 +229,7 @@ where
 )]
 impl<ImplType> EighAPI<DeviceFaer> for (Tr, FlagUpLo)
 where
-    T: ComplexField + ExtNum<AbsOut = T::Real>,
+    T: ComplexField + ExtNum<AbsOut = T::Real> + Num,
     D: DimAPI + DimSmallerOneAPI,
     D::SmallerOne: DimAPI,
 {
@@ -235,7 +248,7 @@ where
 )]
 impl<ImplType> EighAPI<DeviceFaer> for Tr
 where
-    T: ComplexField + ExtNum<AbsOut = T::Real>,
+    T: ComplexField + ExtNum<AbsOut = T::Real> + Num,
     D: DimAPI + DimSmallerOneAPI,
     D::SmallerOne: DimAPI,
 {

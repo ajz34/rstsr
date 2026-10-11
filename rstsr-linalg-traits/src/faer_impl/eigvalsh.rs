@@ -1,27 +1,20 @@
+use crate::faer_impl::batch::{map_stack_slices, stack_shape, with_parallel};
+use crate::linalg_util::batch_and_matrix_shape;
 use crate::traits_def::EigvalshAPI;
-use faer::prelude::*;
 use faer::traits::ComplexField;
 use faer_ext::IntoFaer;
 use rstsr_core::prelude_dev::*;
 
-pub fn faer_impl_eigvalsh_f<T>(
+/// Eigenvalues of a single 2-D symmetric/Hermitian matrix (no parallel-mode
+/// handling).
+fn faer_eigvalsh_ix2<T>(
     a: TensorView<'_, T, DeviceFaer, Ix2>,
     uplo: Option<FlagUpLo>,
 ) -> Result<Tensor<T::Real, DeviceFaer, Ix1>>
 where
     T: ComplexField,
 {
-    // TODO: It seems faer is suspeciously slow on eigh function?
-    // However, tests shows that results are correct.
-
-    // set parallel mode
     let device = a.device().clone();
-    let pool = device.get_current_pool();
-    let faer_par_orig = faer::get_global_parallelism();
-    if let Some(pool) = pool {
-        faer::set_global_parallelism(Par::rayon(pool.current_num_threads()));
-    }
-
     let uplo = uplo.unwrap_or(match a.device().default_order() {
         RowMajor => Lower,
         ColMajor => Upper,
@@ -32,18 +25,31 @@ where
         Upper => faer::Side::Upper,
     };
 
-    // eigen value computation
     let result = faer_a
         .self_adjoint_eigenvalues(faer_uplo)
         .map_err(|e| rstsr_error!(FaerError, "Faer SelfAdjointEigen error: {e:?}"))?;
-    let eigenvalues = asarray((result, &device)).into_dim::<Ix1>();
+    Ok(asarray((result, &device)).into_dim::<Ix1>())
+}
 
-    // restore parallel mode
-    if pool.is_some() {
-        faer::set_global_parallelism(faer_par_orig)
-    }
+pub fn faer_impl_eigvalsh_f<T>(
+    a: TensorView<'_, T, DeviceFaer, IxD>,
+    uplo: Option<FlagUpLo>,
+) -> Result<Tensor<T::Real, DeviceFaer, IxD>>
+where
+    T: ComplexField,
+{
+    let device = a.device().clone();
+    let order = device.default_order();
+    let (batch_shape, [m, n]) = batch_and_matrix_shape(a.shape(), order)?;
+    rstsr_assert_eq!(m, n, InvalidLayout, "eigvalsh: the matrix must be square, got {m}x{n}")?;
 
-    Ok(eigenvalues)
+    with_parallel(&device, || {
+        let mut out = zeros_f((stack_shape(&batch_shape, &[m], order), &device))?;
+        map_stack_slices::<T, T::Real, Ix1, _>(a, out.view_mut(), order, |a_slice, mut out_slice| {
+            out_slice.assign_f(faer_eigvalsh_ix2(a_slice, uplo)?)
+        })?;
+        Ok(out)
+    })
 }
 
 #[duplicate_item(
@@ -61,11 +67,8 @@ where
     type Out = Tensor<T::Real, DeviceFaer, D::SmallerOne>;
     fn eigvalsh_f(self) -> Result<Self::Out> {
         let (a, uplo) = self;
-        rstsr_assert_eq!(a.ndim(), 2, InvalidLayout, "Currently we can only handle 2-D matrix.")?;
-        let a = a.view().into_dim::<Ix2>();
-        let result = faer_impl_eigvalsh_f(a.view(), uplo)?;
-        let result = result.into_dim::<IxD>().into_dim::<D::SmallerOne>();
-        Ok(result)
+        let result = faer_impl_eigvalsh_f(a.view().to_dyn(), uplo)?;
+        Ok(result.into_dim::<D::SmallerOne>())
     }
 }
 
