@@ -4,16 +4,16 @@
 //! Wrapper-only: each function marshals a `NativeArray` through an rstsr entry
 //! that already exists on the faer device — the tensor-tier products
 //! (`matmul`, `vecdot`, `matrix_transpose`, `diagonal`) or the faer linalg
-//! entries (`cholesky`, `det`, `eigh`, `eigvalsh`, `inv`, `matrix_power`,
-//! `pinv`, `solve`, `svd`, `svdvals`). Every dispatch body is written once
-//! against a concrete dtype arm, so no generic trait bound is stated here and
-//! no faer type is named.
+//! entries (`cholesky`, `det`, `eigh`, `eigvalsh`, `inv`, `matrix_norm`,
+//! `matrix_power`, `pinv`, `solve`, `svd`, `svdvals`, `vector_norm`). Every
+//! dispatch body is written once against a concrete dtype arm, so no generic
+//! trait bound is stated here and no faer type is named.
 //!
-//! Names rstsr/faer does not provide (`qr`, `eig`, `eigvals`, `matrix_norm`,
-//! `matrix_rank`, `cross`, the general-`ord` norms) are absent from the
-//! namespace, never stubbed — they are rust-side gaps. `matrix_power` (via
-//! `rt::linalg::matrix_power`) and `trace` (`rt::trace`) are available
-//! rust-side; `matrix_power` is bound here, `trace` is not yet.
+//! Names rstsr/faer does not provide (`qr`, `eig`, `eigvals`, `matrix_rank`,
+//! `cross`) are absent from the namespace, never stubbed — they are rust-side
+//! gaps. `matrix_power` (via `rt::linalg::matrix_power`) and `trace`
+//! (`rt::trace`) are available rust-side; `matrix_power` is bound here,
+//! `trace` is not yet.
 
 use core::mem::MaybeUninit;
 use core::ops::{Add, Mul};
@@ -21,7 +21,7 @@ use core::ops::{Add, Mul};
 use num::{Complex, One, Zero};
 use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
-use pyo3::types::{PySequence, PySequenceMethods};
+use pyo3::types::{PyAny, PySequence, PySequenceMethods};
 use rstsr::prelude::rt;
 use rstsr::prelude::*;
 use rstsr_core::operators::exports::{
@@ -140,6 +140,51 @@ pub fn linalg_inv(x: &NativeArray) -> PyResult<NativeArray> {
 #[pyfunction]
 pub fn linalg_matrix_power(x: &NativeArray, n: isize) -> PyResult<NativeArray> {
     let t = unary_fc!(x, |a| any_res(rt::linalg::matrix_power_f((a, n))))?;
+    Ok(NativeArray { t })
+}
+
+/// A Python norm order (`None`, `'fro'`/`'nuc'`, an int, or a float) to `NormOrd`.
+fn py_to_ord(ord: &pyo3::Bound<'_, PyAny>) -> PyResult<rt::linalg::NormOrd> {
+    if ord.is_none() {
+        return Ok(rt::linalg::NormOrd::None);
+    }
+    if let Ok(s) = ord.extract::<String>() {
+        return err_py(rt::linalg::NormOrd::try_from(s.as_str()));
+    }
+    if let Ok(v) = ord.extract::<isize>() {
+        return err_py(rt::linalg::NormOrd::try_from(v));
+    }
+    if let Ok(v) = ord.extract::<f64>() {
+        return err_py(rt::linalg::NormOrd::try_from(v));
+    }
+    type_err("norm: ord must be None, 'fro'/'nuc', an int, or a float")
+}
+
+/// Matrix norm; `ord` is `'fro'` (default), `'nuc'`, `±1`, `±2`, `±inf`, or `None`.
+#[pyfunction]
+pub fn linalg_matrix_norm(x: &NativeArray, keepdims: bool, ord: &pyo3::Bound<'_, PyAny>) -> PyResult<NativeArray> {
+    let ord = py_to_ord(ord)?;
+    let t = unary_fc!(x, |a| any_res(rt::linalg::matrix_norm_f((a, rt::linalg::MatrixNormArgs { ord, keepdims }))))?;
+    Ok(NativeArray { t })
+}
+
+/// Vector norm; `ord` is a number (default `2`) or `±inf`, and `axis` (already
+/// marshalled by the Python wrapper) is `None` for the whole array or a list of
+/// axes.
+#[pyfunction]
+pub fn linalg_vector_norm(
+    x: &NativeArray,
+    ord: &pyo3::Bound<'_, PyAny>,
+    axis: Option<Vec<isize>>,
+    keepdims: bool,
+) -> PyResult<NativeArray> {
+    let ord = py_to_ord(ord)?;
+    let axes = match axis {
+        Some(v) => AxesIndex::Vec(v),
+        None => AxesIndex::None,
+    };
+    let t =
+        unary_fc!(x, |a| any_res(rt::linalg::vector_norm_f((a, rt::linalg::VectorNormArgs { ord, axes, keepdims }))))?;
     Ok(NativeArray { t })
 }
 

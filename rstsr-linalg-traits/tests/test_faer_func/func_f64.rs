@@ -586,4 +586,145 @@ mod test {
             assert!(rt::allclose(p_nd.i((.., .., 1)), &p1, None), "n = {n}");
         }
     }
+
+    #[test]
+    fn test_matrix_norm() {
+        let device = DeviceFaer::default();
+        // NumPy's 2x2 case (numpy/linalg/tests/test_linalg.py: test_matrix_2x2)
+        let a = rt::asarray((vec![1.0f64, 3.0, 5.0, 7.0], [2, 2].c(), &device));
+
+        // the default order is 'fro'
+        assert!((rt::linalg::matrix_norm(a.view()).to_scalar() - 84f64.sqrt()).abs() < 1e-12);
+        assert!((rt::linalg::matrix_norm((a.view(), "fro")).to_scalar() - 84f64.sqrt()).abs() < 1e-12);
+        assert!((rt::linalg::matrix_norm((a.view(), "nuc")).to_scalar() - 10.0).abs() < 1e-12);
+        assert!((rt::linalg::matrix_norm((a.view(), 1)).to_scalar() - 10.0).abs() < 1e-12);
+        assert!((rt::linalg::matrix_norm((a.view(), -1)).to_scalar() - 6.0).abs() < 1e-12);
+        assert!((rt::linalg::matrix_norm((a.view(), 2)).to_scalar() - 9.123105625617661).abs() < 1e-12);
+        assert!((rt::linalg::matrix_norm((a.view(), -2)).to_scalar() - 0.8768943743823404).abs() < 1e-12);
+        assert!((rt::linalg::matrix_norm((a.view(), f64::INFINITY)).to_scalar() - 12.0).abs() < 1e-12);
+        assert!((rt::linalg::matrix_norm((a.view(), f64::NEG_INFINITY)).to_scalar() - 4.0).abs() < 1e-12);
+
+        // keepdims
+        let k = rt::linalg::matrix_norm((a.view(), ("fro", true)));
+        assert_eq!(k.shape(), &[1, 1]);
+
+        // orders a matrix has no norm for (NumPy raises for 0, 3 and an unknown string)
+        assert!(rt::linalg::matrix_norm_f((a.view(), 0)).is_err());
+        assert!(rt::linalg::matrix_norm_f((a.view(), 3)).is_err());
+        assert!(rt::linalg::matrix_norm_f((a.view(), "nofro")).is_err());
+    }
+
+    #[test]
+    fn test_matrix_norm_nd() {
+        let mut device = DeviceFaer::default();
+        device.set_default_order(RowMajor);
+        // stack [a; 2a] of the 2x2 case
+        let stacked = rt::asarray((vec![1.0f64, 3.0, 5.0, 7.0, 2.0, 6.0, 10.0, 14.0], [2, 2, 2].c(), &device));
+
+        let n = rt::linalg::matrix_norm((stacked.view(), "nuc"));
+        assert_eq!(n.shape(), &[2]);
+        assert!((n[[0]] - 10.0).abs() < 1e-12);
+        assert!((n[[1]] - 20.0).abs() < 1e-12);
+
+        let f = rt::linalg::matrix_norm((stacked.view(), "fro"));
+        assert!((f[[0]] - 84f64.sqrt()).abs() < 1e-12);
+        assert!((f[[1]] - 2.0 * 84f64.sqrt()).abs() < 1e-12);
+
+        let k = rt::linalg::matrix_norm((stacked.view(), ("nuc", true)));
+        assert_eq!(k.shape(), &[2, 1, 1]);
+    }
+
+    #[test]
+    fn test_matrix_norm_nd_colmajor() {
+        let mut device = DeviceFaer::default();
+        device.set_default_order(ColMajor);
+        // logical A = [[1, 3], [5, 7]]; under ColMajor `asarray` fills in F order
+        let a = rt::asarray((vec![1.0f64, 5.0, 3.0, 7.0], [2, 2], &device));
+        assert!((rt::linalg::matrix_norm((a.view(), "fro")).to_scalar() - 84f64.sqrt()).abs() < 1e-12);
+        assert!((rt::linalg::matrix_norm((a.view(), "nuc")).to_scalar() - 10.0).abs() < 1e-12);
+        assert!((rt::linalg::matrix_norm((a.view(), 1)).to_scalar() - 10.0).abs() < 1e-12);
+        assert!((rt::linalg::matrix_norm((a.view(), f64::INFINITY)).to_scalar() - 12.0).abs() < 1e-12);
+
+        // the matrix axes are the first two under ColMajor, the batch trails
+        let stacked = rt::asarray((vec![1.0f64, 5.0, 3.0, 7.0, 2.0, 10.0, 6.0, 14.0], [2, 2, 2], &device));
+        let n = rt::linalg::matrix_norm((stacked.view(), "nuc"));
+        assert_eq!(n.shape(), &[2]);
+        assert!((n[[0]] - 10.0).abs() < 1e-12);
+        assert!((n[[1]] - 20.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn test_vector_norm() {
+        let device = DeviceFaer::default();
+        // NumPy's vector case (numpy/linalg/tests/test_linalg.py: test_vector)
+        let v = rt::asarray((vec![1.0f64, 2.0, 3.0, 4.0], [4].c(), &device));
+
+        assert!((rt::linalg::vector_norm(v.view()).to_scalar() - 30f64.sqrt()).abs() < 1e-12);
+        assert!((rt::linalg::vector_norm((v.view(), 2)).to_scalar() - 30f64.sqrt()).abs() < 1e-12);
+        assert!((rt::linalg::vector_norm((v.view(), 1)).to_scalar() - 10.0).abs() < 1e-12);
+        assert!((rt::linalg::vector_norm((v.view(), 0)).to_scalar() - 4.0).abs() < 1e-12);
+        assert!((rt::linalg::vector_norm((v.view(), -1)).to_scalar() - 12.0 / 25.0).abs() < 1e-12);
+        assert!((rt::linalg::vector_norm((v.view(), -2)).to_scalar() - (205f64 / 144.0).powf(-0.5)).abs() < 1e-12);
+        assert!((rt::linalg::vector_norm((v.view(), 3)).to_scalar() - 100f64.powf(1.0 / 3.0)).abs() < 1e-12);
+        assert!((rt::linalg::vector_norm((v.view(), f64::INFINITY)).to_scalar() - 4.0).abs() < 1e-12);
+        assert!((rt::linalg::vector_norm((v.view(), f64::NEG_INFINITY)).to_scalar() - 1.0).abs() < 1e-12);
+
+        // 'fro'/'nuc' are matrix orders, rejected for vectors
+        assert!(rt::linalg::vector_norm_f((v.view(), "fro")).is_err());
+        assert!(rt::linalg::vector_norm_f((v.view(), "nuc")).is_err());
+    }
+
+    #[test]
+    fn test_vector_norm_axis() {
+        let device = DeviceFaer::default();
+        // NumPy: x = arange(9).reshape(3, 3)
+        let x = rt::asarray((vec![0.0f64, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0], [3, 3].c(), &device));
+
+        // axis = 0 -> column-wise 2-norms
+        let n = rt::linalg::vector_norm((x.view(), (2, AxesIndex::Val(0))));
+        assert_eq!(n.shape(), &[3]);
+        assert!((n[[0]] - 45f64.sqrt()).abs() < 1e-12);
+        assert!((n[[1]] - 66f64.sqrt()).abs() < 1e-12);
+        assert!((n[[2]] - 93f64.sqrt()).abs() < 1e-12);
+
+        // axis = None (the default) flattens; keepdims keeps both axes
+        assert!((rt::linalg::vector_norm(x.view()).to_scalar() - 204f64.sqrt()).abs() < 1e-12);
+        let k = rt::linalg::vector_norm((x.view(), (rt::linalg::NormOrd::None, AxesIndex::None, true)));
+        assert_eq!(k.shape(), &[1, 1]);
+        assert!((k.to_scalar() - 204f64.sqrt()).abs() < 1e-12);
+    }
+
+    #[test]
+    fn test_norm_empty() {
+        // NumPy: every order of an empty matrix / vector is 0
+        // (numpy/linalg/tests/test_linalg.py: test_matrix_norm_empty / test_vector_norm_empty)
+        let device = DeviceFaer::default();
+        let z = rt::asarray((vec![0.0f64; 0], [0, 2].c(), &device));
+        for ord in ["fro", "nuc"] {
+            assert_eq!(rt::linalg::matrix_norm((z.view(), ord)).to_scalar(), 0.0);
+        }
+        for ord in [1.0f64, 2.0, f64::INFINITY] {
+            assert_eq!(rt::linalg::matrix_norm((z.view(), ord)).to_scalar(), 0.0);
+        }
+        // the min-based orders too: NumPy itself is inconsistent on an empty
+        // input (it raises for the matrix -2 and for -inf, and gives `inf` for
+        // the vector -1); rstsr returns 0 under every order
+        for ord in [-1.0f64, -2.0, f64::NEG_INFINITY] {
+            assert_eq!(rt::linalg::matrix_norm((z.view(), ord)).to_scalar(), 0.0);
+        }
+
+        let zv = rt::asarray((vec![0.0f64; 0], [0].c(), &device));
+        for ord in [1.0f64, 2.0, f64::INFINITY] {
+            assert_eq!(rt::linalg::vector_norm((zv.view(), ord)).to_scalar(), 0.0);
+        }
+        for ord in [-1.0f64, f64::NEG_INFINITY] {
+            assert_eq!(rt::linalg::vector_norm((zv.view(), ord)).to_scalar(), 0.0);
+        }
+
+        // an empty batch is empty (NumPy: shape (0,)), not an error
+        let eb = rt::asarray((vec![0.0f64; 0], [0, 1, 1].c(), &device));
+        assert_eq!(rt::linalg::matrix_norm((eb.view(), f64::NEG_INFINITY)).shape(), &[0]);
+        let eb2 = rt::asarray((vec![0.0f64; 0], [0, 3].c(), &device));
+        assert_eq!(rt::linalg::vector_norm((eb2.view(), (2, AxesIndex::Val(1)))).shape(), &[0]);
+    }
 }
