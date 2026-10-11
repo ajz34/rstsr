@@ -40,7 +40,26 @@ mod test {
         let a = rt::asarray((a_vec, [5, 5].c(), &device));
 
         let det = rt::linalg::det(a.view());
-        assert!((det - 3.9699917597338046).abs() < 1e-8);
+        assert!((det.to_scalar() - 3.9699917597338046).abs() < 1e-8);
+    }
+
+    #[test]
+    fn test_det_nd() {
+        let device = DeviceFaer::default();
+        let a_vec = get_vec::<f64>('a')[..5 * 5].to_vec();
+        let a = rt::asarray((a_vec.clone(), [5, 5].c(), &device));
+        let det0 = rt::linalg::det(a.view()).to_scalar();
+
+        // same matrix stacked twice; each slice must match the 2-D result
+        let mut stacked = a_vec.clone();
+        stacked.extend_from_slice(&a_vec);
+        let b = rt::asarray((stacked, [2, 5, 5].c(), &device));
+        let det = rt::linalg::det(b.view());
+        assert_eq!(det.ndim(), 1);
+        assert_eq!(det.shape()[0], 2);
+        for i in 0..2 {
+            assert!((det.i(i).to_scalar() - det0).abs() < 1e-8);
+        }
     }
 
     #[test]

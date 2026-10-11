@@ -30,10 +30,9 @@ use rstsr_core::storage::exports::{DeviceCreationAnyAPI, DeviceRawAPI};
 use rstsr_dtype_traits::{DTypePromoteAPI, ExtNum};
 
 use crate::any_tensor::{
-    any_of, device_faer, dispatch_bin_promote, dispatch_bin_promote_arith, err_py, lift, type_err, AnyTensor, FTensor,
+    any_of, dispatch_bin_promote, dispatch_bin_promote_arith, err_py, lift, type_err, AnyTensor, FTensor,
     IntoAnyTensor, NativeArray,
 };
-use crate::creation::dim_from;
 
 /// `rt::Result<FTensor<R>>` -> erased handle, by the result's own dtype, so a
 /// real-valued eigenvalue/singular-value output lands in the right variant.
@@ -103,13 +102,11 @@ pub fn linalg_cholesky(x: &NativeArray, upper: bool) -> PyResult<NativeArray> {
     Ok(NativeArray { t })
 }
 
-/// Determinant as a 0-d array.
+/// Determinant: a 0-d array for a 2-D input, or the batch-shaped array for a
+/// stack of matrices.
 #[pyfunction]
 pub fn linalg_det(x: &NativeArray) -> PyResult<NativeArray> {
-    let t = unary_fc!(x, |a| {
-        let d = err_py(rt::linalg::det_f(a))?;
-        any_res(rt::asarray_f((vec![d], dim_from(&[]), device_faer())))
-    })?;
+    let t = unary_fc!(x, |a| any_res(rt::linalg::det_f(a)))?;
     Ok(NativeArray { t })
 }
 

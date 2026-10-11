@@ -346,6 +346,32 @@ pub(crate) fn solve_plan(a: &[usize], b: &[usize], order: FlagOrder, op: &str) -
     Ok(SolvePlan { batch_out, m, k, is_vec })
 }
 
+/// As [`map_stack_slices`], for a scalar-per-matrix output: `out` has the batch
+/// shape and `f` writes one scalar into it per matrix slice.
+pub(crate) fn map_stack_scalars<TA, TB, F>(
+    a: TensorView<'_, TA, DeviceFaer, IxD>,
+    mut out: TensorMut<'_, TB, DeviceFaer, IxD>,
+    order: FlagOrder,
+    mut f: F,
+) -> Result<()>
+where
+    F: FnMut(TensorView<'_, TA, DeviceFaer, Ix2>, &mut TB) -> Result<()>,
+{
+    let (a_batch, a_inner) = split_inner(a.layout(), order, 2)?;
+    let a_iters = IterLayout::new(&a_batch, TensorIterOrder::C)?;
+    let o_iters = IterLayout::new(out.layout(), TensorIterOrder::C)?;
+    for (off_a, off) in izip!(a_iters, o_iters) {
+        let a_slice = {
+            let mut inner = a_inner.clone().into_dim::<Ix2>()?;
+            unsafe { inner.set_offset(off_a) };
+            let (storage, _) = a.view().into_raw_parts();
+            unsafe { TensorView::new_unchecked(storage, inner) }
+        };
+        f(a_slice, &mut out.raw_mut()[off])?;
+    }
+    Ok(())
+}
+
 /// As [`map_stack_slices`], for scalar-per-matrix outputs: `out1`/`out2` have
 /// the batch shape and `f` writes one scalar into each per matrix.
 pub(crate) fn map_stack_scalars2<TA, TB1, TB2, F>(
