@@ -2,14 +2,15 @@ use crate::traits_def::CholeskyAPI;
 use faer::prelude::*;
 use faer::traits::ComplexField;
 use faer_ext::IntoFaer;
+use num::Num;
 use rstsr_core::prelude_dev::*;
 
 pub fn faer_impl_cholesky_f<T>(
-    a: TensorView<'_, T, DeviceFaer, Ix2>,
+    a: TensorView<'_, T, DeviceFaer, IxD>,
     uplo: Option<FlagUpLo>,
-) -> Result<Tensor<T, DeviceFaer, Ix2>>
+) -> Result<Tensor<T, DeviceFaer, IxD>>
 where
-    T: ComplexField,
+    T: ComplexField + Num,
 {
     // set parallel mode
     let device = a.device().clone();
@@ -18,6 +19,90 @@ where
     if let Some(pool) = pool {
         faer::set_global_parallelism(Par::rayon(pool.current_num_threads()));
     }
+
+    let out = match device.default_order() {
+        RowMajor => {
+            let la = a.layout();
+            let (la_o, la_i) = la.dim_split_at(-2)?;
+            rstsr_assert_eq!(
+                la_i.shape()[0],
+                la_i.shape()[1],
+                InvalidLayout,
+                "the last two dimensions of a should be equal (square matrix)"
+            )?;
+            let mut out = zeros_f((a.shape().to_vec(), &device))?;
+            let (lo_o, lo_i) = out.layout().dim_split_at(-2)?;
+
+            let la_o_iter = IterLayout::new(&la_o, TensorIterOrder::C)?;
+            let lo_o_iter = IterLayout::new(&lo_o, TensorIterOrder::C)?;
+            for (offset_a, offset_o) in izip!(la_o_iter, lo_o_iter) {
+                let mut la_i_ix2 = la_i.clone().into_dim::<Ix2>()?;
+                let mut lo_i_ix2 = lo_i.clone().into_dim::<Ix2>()?;
+                unsafe { la_i_ix2.set_offset(offset_a) };
+                unsafe { lo_i_ix2.set_offset(offset_o) };
+                let a_offset = {
+                    let (storage, _) = a.view().into_raw_parts();
+                    unsafe { TensorView::new_unchecked(storage, la_i_ix2.clone()) }
+                };
+                let out_offset = {
+                    let (storage, _) = out.view_mut().into_raw_parts();
+                    unsafe { TensorMut::new_unchecked(storage, lo_i_ix2.clone()) }
+                };
+                faer_impl_cholesky_ix2_f(a_offset, uplo, out_offset)?;
+            }
+            out
+        },
+        ColMajor => {
+            let la = a.layout();
+            let (la_i, la_o) = la.dim_split_at(2)?;
+            rstsr_assert_eq!(
+                la_i.shape()[0],
+                la_i.shape()[1],
+                InvalidLayout,
+                "the first two dimensions of a should be equal (square matrix)"
+            )?;
+            let mut out = zeros_f((a.shape().to_vec(), &device))?;
+            let (lo_i, lo_o) = out.layout().dim_split_at(2)?;
+
+            let la_o_iter = IterLayout::new(&la_o, TensorIterOrder::C)?;
+            let lo_o_iter = IterLayout::new(&lo_o, TensorIterOrder::C)?;
+            for (offset_a, offset_o) in izip!(la_o_iter, lo_o_iter) {
+                let mut la_i_ix2 = la_i.clone().into_dim::<Ix2>()?;
+                let mut lo_i_ix2 = lo_i.clone().into_dim::<Ix2>()?;
+                unsafe { la_i_ix2.set_offset(offset_a) };
+                unsafe { lo_i_ix2.set_offset(offset_o) };
+                let a_offset = {
+                    let (storage, _) = a.view().into_raw_parts();
+                    unsafe { TensorView::new_unchecked(storage, la_i_ix2.clone()) }
+                };
+                let out_offset = {
+                    let (storage, _) = out.view_mut().into_raw_parts();
+                    unsafe { TensorMut::new_unchecked(storage, lo_i_ix2.clone()) }
+                };
+                faer_impl_cholesky_ix2_f(a_offset, uplo, out_offset)?;
+            }
+            out
+        },
+    };
+
+    // restore parallel mode
+    if pool.is_some() {
+        faer::set_global_parallelism(faer_par_orig)
+    }
+
+    Ok(out)
+}
+
+pub fn faer_impl_cholesky_ix2_f<T>(
+    a: TensorView<'_, T, DeviceFaer, Ix2>,
+    uplo: Option<FlagUpLo>,
+    mut out: TensorMut<'_, T, DeviceFaer, Ix2>,
+) -> Result<()>
+where
+    T: ComplexField,
+{
+    // set parallel mode
+    let device = a.device().clone();
 
     let uplo = uplo.unwrap_or(match a.device().default_order() {
         RowMajor => Lower,
@@ -40,12 +125,7 @@ where
     // convert to rstsr tensor with certain layout
     let result = result.into_rstsr().into_contig(device.default_order());
 
-    // restore parallel mode
-    if pool.is_some() {
-        faer::set_global_parallelism(faer_par_orig)
-    }
-
-    Ok(result)
+    out.assign_f(result)
 }
 
 #[duplicate_item(
@@ -56,15 +136,13 @@ where
 )]
 impl<ImplType> CholeskyAPI<DeviceFaer> for (Tr, Option<FlagUpLo>)
 where
-    T: ComplexField,
+    T: ComplexField + Num,
     D: DimAPI,
 {
     type Out = Tensor<T, DeviceFaer, D>;
     fn cholesky_f(self) -> Result<Self::Out> {
         let (a, uplo) = self;
-        rstsr_assert_eq!(a.ndim(), 2, InvalidLayout, "Currently we can only handle 2-D matrix.")?;
-        let a = a.view().into_dim::<Ix2>();
-        let result = faer_impl_cholesky_f(a.view(), uplo)?;
+        let result = faer_impl_cholesky_f(a.view().to_dyn(), uplo)?;
         let result = result.into_dim::<IxD>().into_dim::<D>();
         Ok(result)
     }
@@ -78,7 +156,7 @@ where
 )]
 impl<ImplType> CholeskyAPI<DeviceFaer> for (Tr, FlagUpLo)
 where
-    T: ComplexField,
+    T: ComplexField + Num,
     D: DimAPI,
 {
     type Out = Tensor<T, DeviceFaer, D>;
@@ -96,7 +174,7 @@ where
 )]
 impl<ImplType> CholeskyAPI<DeviceFaer> for Tr
 where
-    T: ComplexField,
+    T: ComplexField + Num,
     D: DimAPI,
 {
     type Out = Tensor<T, DeviceFaer, D>;
