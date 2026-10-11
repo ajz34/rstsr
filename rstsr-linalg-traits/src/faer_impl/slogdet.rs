@@ -29,10 +29,10 @@ where
     for i in 0..n {
         let diag = u[(i, i)];
         let mag: <T as ComplexField>::Real = T::abs_impl(&diag);
-        logabsdet = logabsdet + mag.ln();
+        logabsdet += mag.ln();
         // a zero pivot (singular matrix) drives the sign to zero, as NumPy does
         let phase = if mag == <T as ComplexField>::Real::zero() { T::zero() } else { diag / T::from_real_impl(&mag) };
-        sign = sign * phase;
+        sign *= phase;
     }
 
     // det(P) = (-1)^(number of transpositions), and transpositions = n - cycles

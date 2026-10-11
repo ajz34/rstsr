@@ -70,8 +70,8 @@ duplicate = { version = "2.0" }
 serde = { version = "1.0", default-features = false, features = ["derive"] }
 # optional dependencies
 rayon = { version = ">=1.10" }
-faer = { version = "0.22", default-features = false, features = ["rayon", "linalg"] }
-faer-ext = { version = "0.6" }
+faer = { version = "0.24", default-features = false, features = ["rayon", "linalg"] }
+faer-ext = { version = "0.8" }
 tblis = { version = "0.2" }
 opt-einsum-path = { version = "0.2", features = ["par_rand"] }
 # dev dependencies
