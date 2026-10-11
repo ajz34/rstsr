@@ -297,6 +297,31 @@ mod test {
             assert!(rt::allclose(p_nd.i((.., .., 1)), &p1, None), "n = {n}");
         }
     }
+
+    #[test]
+    fn test_matrix_norm() {
+        let device = DeviceFaer::default();
+        // A = [[1+1j, 2], [3, 4-1j]]
+        let a = rt::asarray((vec![c64!(1.0, 1.0), c64!(2.0), c64!(3.0), c64!(4.0, -1.0)], [2, 2].c(), &device));
+
+        // fro = sqrt(2 + 4 + 9 + 17) = sqrt(32), real output
+        assert!((rt::linalg::matrix_norm((a.view(), "fro")).to_scalar() - 32f64.sqrt()).abs() < 1e-12);
+        // 1-norm = max column sum of |x| = 2 + sqrt(17)
+        assert!((rt::linalg::matrix_norm((a.view(), 1)).to_scalar() - (2.0 + 17f64.sqrt())).abs() < 1e-12);
+        // inf-norm = max row sum of |x| = 3 + sqrt(17)
+        assert!((rt::linalg::matrix_norm((a.view(), f64::INFINITY)).to_scalar() - (3.0 + 17f64.sqrt())).abs() < 1e-12);
+    }
+
+    #[test]
+    fn test_vector_norm() {
+        let device = DeviceFaer::default();
+        let v = rt::asarray((vec![c64!(3.0, 4.0), c64!(0.0)], [2].c(), &device));
+
+        // |3 + 4j| = 5
+        assert!((rt::linalg::vector_norm(v.view()).to_scalar() - 5.0).abs() < 1e-12);
+        assert!((rt::linalg::vector_norm((v.view(), f64::INFINITY)).to_scalar() - 5.0).abs() < 1e-12);
+        assert!((rt::linalg::vector_norm((v.view(), 0)).to_scalar() - 1.0).abs() < 1e-12);
+    }
 }
 
 #[cfg(test)]

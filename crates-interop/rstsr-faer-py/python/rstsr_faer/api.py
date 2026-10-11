@@ -156,6 +156,7 @@ from .rstsr_faer import (
     linalg_eigvalsh as _linalg_eigvalsh,
     linalg_inv as _linalg_inv,
     linalg_matmul as _linalg_matmul,
+    linalg_matrix_norm as _linalg_matrix_norm,
     linalg_matrix_power as _linalg_matrix_power,
     linalg_matrix_transpose as _linalg_matrix_transpose,
     linalg_outer as _linalg_outer,
@@ -165,6 +166,7 @@ from .rstsr_faer import (
     linalg_svdvals as _linalg_svdvals,
     linalg_slogdet as _linalg_slogdet,
     linalg_vecdot as _linalg_vecdot,
+    linalg_vector_norm as _linalg_vector_norm,
     linalg_tensordot as _linalg_tensordot,
 )
 
@@ -1837,8 +1839,8 @@ def iinfo(type, /):
 # ------------------------------------------------------------------- linalg --
 # array-API `linalg` extension, over rstsr's existing entries only. Members the
 # standard defines but rstsr/faer does not provide (qr, eig, eigvals,
-# matrix_norm, matrix_rank, cross, and the general-`ord` norms) are absent here —
-# rust-side gaps, recorded in the gap register, never stubbed.
+# matrix_rank, cross) are absent here — rust-side gaps, recorded in the gap
+# register, never stubbed.
 
 _EighResult = collections.namedtuple("EighResult", ["eigenvalues", "eigenvectors"])
 _SVDResult = collections.namedtuple("SVDResult", ["U", "S", "Vh"])
@@ -1894,6 +1896,14 @@ def matrix_power(x, n, /):
     return _wrap(_linalg_matrix_power(_handle(x), n))
 
 
+def matrix_norm(x, /, *, keepdims=False, ord="fro"):
+    return _wrap(_linalg_matrix_norm(_handle(x), _py_bool(keepdims), ord))
+
+
+def vector_norm(x, /, *, axis=None, keepdims=False, ord=2):
+    return _wrap(_linalg_vector_norm(_handle(x), ord, axis, _py_bool(keepdims)))
+
+
 def pinv(x, /, *, rtol=None):
     return _wrap(_linalg_pinv(_handle(x), rtol))
 
@@ -1926,6 +1936,7 @@ class _LinalgNamespace:
     eigvalsh = staticmethod(eigvalsh)
     inv = staticmethod(inv)
     matmul = staticmethod(matmul)
+    matrix_norm = staticmethod(matrix_norm)
     matrix_power = staticmethod(matrix_power)
     matrix_transpose = staticmethod(matrix_transpose)
     outer = staticmethod(outer)
@@ -1936,6 +1947,7 @@ class _LinalgNamespace:
     slogdet = staticmethod(slogdet)
     tensordot = staticmethod(tensordot)
     vecdot = staticmethod(vecdot)
+    vector_norm = staticmethod(vector_norm)
 
 
 linalg = _LinalgNamespace()

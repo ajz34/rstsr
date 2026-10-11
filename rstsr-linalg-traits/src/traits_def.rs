@@ -11,6 +11,7 @@ use rstsr_core::prelude_dev::*;
    [EighAPI           ] [eigh            ] [eigh_f            ];
    [EigvalshAPI       ] [eigvalsh        ] [eigvalsh_f        ];
    [InvAPI            ] [inv             ] [inv_f             ];
+   [MatrixNormAPI     ] [matrix_norm     ] [matrix_norm_f     ];
    [MatrixPowerAPI    ] [matrix_power    ] [matrix_power_f    ];
    [PinvAPI           ] [pinv            ] [pinv_f            ];
    [SLogDetAPI        ] [slogdet         ] [slogdet_f         ];
@@ -19,6 +20,7 @@ use rstsr_core::prelude_dev::*;
    [SolveTriangularAPI] [solve_triangular] [solve_triangular_f];
    [SVDAPI            ] [svd             ] [svd_f             ];
    [SVDvalsAPI        ] [svdvals         ] [svdvals_f         ];
+   [VectorNormAPI     ] [vector_norm     ] [vector_norm_f     ];
 )]
 pub trait LinalgAPI<Inp> {
     type Out;
@@ -38,6 +40,7 @@ pub trait LinalgAPI<Inp> {
    [EighAPI           ] [eigh            ] [eigh_f            ];
    [EigvalshAPI       ] [eigvalsh        ] [eigvalsh_f        ];
    [InvAPI            ] [inv             ] [inv_f             ];
+   [MatrixNormAPI     ] [matrix_norm     ] [matrix_norm_f     ];
    [MatrixPowerAPI    ] [matrix_power    ] [matrix_power_f    ];
    [PinvAPI           ] [pinv            ] [pinv_f            ];
    [SLogDetAPI        ] [slogdet         ] [slogdet_f         ];
@@ -46,6 +49,7 @@ pub trait LinalgAPI<Inp> {
    [SolveTriangularAPI] [solve_triangular] [solve_triangular_f];
    [SVDAPI            ] [svd             ] [svd_f             ];
    [SVDvalsAPI        ] [svdvals         ] [svdvals_f         ];
+   [VectorNormAPI     ] [vector_norm     ] [vector_norm_f     ];
 )]
 pub fn func_f<Args, Inp>(args: Args) -> Result<<Args as LinalgAPI<Inp>>::Out>
 where
@@ -61,6 +65,7 @@ where
    [EighAPI           ] [eigh            ] [eigh_f            ];
    [EigvalshAPI       ] [eigvalsh        ] [eigvalsh_f        ];
    [InvAPI            ] [inv             ] [inv_f             ];
+   [MatrixNormAPI     ] [matrix_norm     ] [matrix_norm_f     ];
    [MatrixPowerAPI    ] [matrix_power    ] [matrix_power_f    ];
    [PinvAPI           ] [pinv            ] [pinv_f            ];
    [SLogDetAPI        ] [slogdet         ] [slogdet_f         ];
@@ -69,6 +74,7 @@ where
    [SolveTriangularAPI] [solve_triangular] [solve_triangular_f];
    [SVDAPI            ] [svd             ] [svd_f             ];
    [SVDvalsAPI        ] [svdvals         ] [svdvals_f         ];
+   [VectorNormAPI     ] [vector_norm     ] [vector_norm_f     ];
 )]
 pub fn func<Args, Inp>(args: Args) -> <Args as LinalgAPI<Inp>>::Out
 where
@@ -205,5 +211,252 @@ where
 }
 
 pub type SVDArgs<'a, B, T> = SVDArgs_Builder<'a, B, T>;
+
+/* #endregion */
+
+/* #region norm */
+
+/// Norm order shared by [`matrix_norm`] and [`vector_norm`].
+///
+/// `None` is the default and resolves to each operation's own default order
+/// (`'fro'` for [`matrix_norm`], `2` for [`vector_norm`]), so the same value
+/// names different orders in the two operations. `P` holds a numeric order;
+/// `vector_norm` accepts any real `p`, `matrix_norm` only `±1`/`±2`.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub enum NormOrd {
+    /// The operation's own default order (`'fro'` for matrices, `2` for vectors).
+    #[default]
+    None,
+    /// Frobenius norm (matrix only).
+    Fro,
+    /// Nuclear norm (matrix only).
+    Nuc,
+    /// A numeric order `p`.
+    P(f64),
+    /// `+inf`.
+    Inf,
+    /// `-inf`.
+    NegInf,
+}
+
+impl NormOrd {
+    /// Resolve to a [`matrix_norm`] order: `None` becomes [`NormOrd::Fro`], and a
+    /// numeric order outside `±1`/`±2` is rejected.
+    pub fn resolve_matrix(self) -> Result<Self> {
+        match self {
+            NormOrd::None => Ok(NormOrd::Fro),
+            NormOrd::Fro | NormOrd::Nuc | NormOrd::Inf | NormOrd::NegInf => Ok(self),
+            NormOrd::P(p) if p == 1.0 || p == -1.0 || p == 2.0 || p == -2.0 => Ok(NormOrd::P(p)),
+            NormOrd::P(p) => Err(rstsr_error!(InvalidValue, "matrix_norm: invalid norm order {p} for a matrix")),
+        }
+    }
+
+    /// Resolve to a [`vector_norm`] order: `None` becomes the `2`-norm, and the
+    /// matrix-only orders (`'fro'`/`'nuc'`) are rejected.
+    pub fn resolve_vector(self) -> Result<Self> {
+        match self {
+            NormOrd::None => Ok(NormOrd::P(2.0)),
+            NormOrd::P(_) | NormOrd::Inf | NormOrd::NegInf => Ok(self),
+            NormOrd::Fro => Err(rstsr_error!(InvalidValue, "vector_norm: 'fro' is not a vector norm order")),
+            NormOrd::Nuc => Err(rstsr_error!(InvalidValue, "vector_norm: 'nuc' is not a vector norm order")),
+        }
+    }
+}
+
+impl TryFrom<()> for NormOrd {
+    type Error = Error;
+    fn try_from(_: ()) -> Result<Self> {
+        Ok(NormOrd::None)
+    }
+}
+
+impl TryFrom<Option<()>> for NormOrd {
+    type Error = Error;
+    fn try_from(_: Option<()>) -> Result<Self> {
+        Ok(NormOrd::None)
+    }
+}
+
+#[allow(clippy::try_from_instead_of_from_str)]
+impl TryFrom<&str> for NormOrd {
+    type Error = Error;
+    fn try_from(s: &str) -> Result<Self> {
+        match s {
+            "fro" => Ok(NormOrd::Fro),
+            "nuc" => Ok(NormOrd::Nuc),
+            _ => Err(rstsr_error!(InvalidValue, "invalid norm order '{s}'")),
+        }
+    }
+}
+
+impl TryFrom<isize> for NormOrd {
+    type Error = Error;
+    fn try_from(v: isize) -> Result<Self> {
+        Ok(NormOrd::P(v as f64))
+    }
+}
+
+impl TryFrom<f64> for NormOrd {
+    type Error = Error;
+    fn try_from(v: f64) -> Result<Self> {
+        Ok(if v == f64::INFINITY {
+            NormOrd::Inf
+        } else if v == f64::NEG_INFINITY {
+            NormOrd::NegInf
+        } else {
+            NormOrd::P(v)
+        })
+    }
+}
+
+/// Arguments for [`matrix_norm`]: the norm order and `keepdims`.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct MatrixNormArgs {
+    pub ord: NormOrd,
+    pub keepdims: bool,
+}
+
+/// Arguments for [`vector_norm`]: the norm order, the axis or axes to reduce
+/// (`AxesIndex::None` reduces all of them), and `keepdims`.
+#[derive(Debug, Clone)]
+pub struct VectorNormArgs {
+    pub ord: NormOrd,
+    pub axes: AxesIndex<isize>,
+    pub keepdims: bool,
+}
+
+impl Default for VectorNormArgs {
+    fn default() -> Self {
+        Self { ord: NormOrd::None, axes: AxesIndex::None, keepdims: false }
+    }
+}
+
+macro_rules! impl_norm_args_default {
+    ($Args: ident) => {
+        impl TryFrom<()> for $Args {
+            type Error = Error;
+            fn try_from(_: ()) -> Result<Self> {
+                Ok(Self::default())
+            }
+        }
+
+        impl TryFrom<Option<()>> for $Args {
+            type Error = Error;
+            fn try_from(_: Option<()>) -> Result<Self> {
+                Ok(Self::default())
+            }
+        }
+
+        impl TryFrom<bool> for $Args {
+            type Error = Error;
+            fn try_from(keepdims: bool) -> Result<Self> {
+                Ok(Self { keepdims, ..Default::default() })
+            }
+        }
+    };
+}
+
+impl_norm_args_default!(MatrixNormArgs);
+impl_norm_args_default!(VectorNormArgs);
+
+impl TryFrom<NormOrd> for MatrixNormArgs {
+    type Error = Error;
+    fn try_from(ord: NormOrd) -> Result<Self> {
+        Ok(Self { ord, keepdims: false })
+    }
+}
+
+impl TryFrom<(NormOrd, bool)> for MatrixNormArgs {
+    type Error = Error;
+    fn try_from((ord, keepdims): (NormOrd, bool)) -> Result<Self> {
+        Ok(Self { ord, keepdims })
+    }
+}
+
+impl TryFrom<NormOrd> for VectorNormArgs {
+    type Error = Error;
+    fn try_from(ord: NormOrd) -> Result<Self> {
+        Ok(Self { ord, ..Default::default() })
+    }
+}
+
+impl TryFrom<(NormOrd, bool)> for VectorNormArgs {
+    type Error = Error;
+    fn try_from((ord, keepdims): (NormOrd, bool)) -> Result<Self> {
+        Ok(Self { ord, keepdims, ..Default::default() })
+    }
+}
+
+/// `ord` value forms accepted anywhere an order is expected: the enum itself,
+/// `"fro"`/`"nuc"`, an integer, or a float (`±inf` included).
+macro_rules! impl_matrix_norm_args_ord {
+    ($($t: ty),* $(,)?) => {$(
+        #[allow(clippy::try_from_instead_of_from_str)]
+        impl TryFrom<$t> for MatrixNormArgs {
+            type Error = Error;
+            fn try_from(ord: $t) -> Result<Self> {
+                Ok(Self { ord: NormOrd::try_from(ord)?, keepdims: false })
+            }
+        }
+
+        impl TryFrom<($t, bool)> for MatrixNormArgs {
+            type Error = Error;
+            fn try_from((ord, keepdims): ($t, bool)) -> Result<Self> {
+                Ok(Self { ord: NormOrd::try_from(ord)?, keepdims })
+            }
+        }
+    )*};
+}
+
+impl_matrix_norm_args_ord!(&str, isize, f64);
+
+macro_rules! impl_vector_norm_args_ord {
+    ($($t: ty),* $(,)?) => {$(
+        #[allow(clippy::try_from_instead_of_from_str)]
+        impl TryFrom<$t> for VectorNormArgs {
+            type Error = Error;
+            fn try_from(ord: $t) -> Result<Self> {
+                Ok(Self { ord: NormOrd::try_from(ord)?, ..Default::default() })
+            }
+        }
+
+        impl TryFrom<($t, bool)> for VectorNormArgs {
+            type Error = Error;
+            fn try_from((ord, keepdims): ($t, bool)) -> Result<Self> {
+                Ok(Self { ord: NormOrd::try_from(ord)?, keepdims, ..Default::default() })
+            }
+        }
+
+        impl TryFrom<($t, AxesIndex<isize>)> for VectorNormArgs {
+            type Error = Error;
+            fn try_from((ord, axes): ($t, AxesIndex<isize>)) -> Result<Self> {
+                Ok(Self { ord: NormOrd::try_from(ord)?, axes, keepdims: false })
+            }
+        }
+
+        impl TryFrom<($t, AxesIndex<isize>, bool)> for VectorNormArgs {
+            type Error = Error;
+            fn try_from((ord, axes, keepdims): ($t, AxesIndex<isize>, bool)) -> Result<Self> {
+                Ok(Self { ord: NormOrd::try_from(ord)?, axes, keepdims })
+            }
+        }
+    )*};
+}
+
+impl_vector_norm_args_ord!(&str, isize, f64);
+
+impl TryFrom<(NormOrd, AxesIndex<isize>)> for VectorNormArgs {
+    type Error = Error;
+    fn try_from((ord, axes): (NormOrd, AxesIndex<isize>)) -> Result<Self> {
+        Ok(Self { ord, axes, keepdims: false })
+    }
+}
+
+impl TryFrom<(NormOrd, AxesIndex<isize>, bool)> for VectorNormArgs {
+    type Error = Error;
+    fn try_from((ord, axes, keepdims): (NormOrd, AxesIndex<isize>, bool)) -> Result<Self> {
+        Ok(Self { ord, axes, keepdims })
+    }
+}
 
 /* #endregion */

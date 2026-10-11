@@ -5,6 +5,7 @@ pub mod eigh;
 pub mod eigvalsh;
 pub mod inv;
 pub mod matrix_power;
+pub mod norm;
 pub mod pinv;
 pub mod slogdet;
 pub mod solve_general;

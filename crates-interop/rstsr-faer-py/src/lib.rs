@@ -294,6 +294,7 @@ fn rstsr_faer(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(linalg::linalg_inv, m)?)?;
     m.add_function(wrap_pyfunction!(linalg::linalg_matmul, m)?)?;
     m.add_function(wrap_pyfunction!(linalg::linalg_matrix_transpose, m)?)?;
+    m.add_function(wrap_pyfunction!(linalg::linalg_matrix_norm, m)?)?;
     m.add_function(wrap_pyfunction!(linalg::linalg_matrix_power, m)?)?;
     m.add_function(wrap_pyfunction!(linalg::linalg_outer, m)?)?;
     m.add_function(wrap_pyfunction!(linalg::linalg_pinv, m)?)?;
@@ -302,6 +303,7 @@ fn rstsr_faer(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(linalg::linalg_svdvals, m)?)?;
     m.add_function(wrap_pyfunction!(linalg::linalg_slogdet, m)?)?;
     m.add_function(wrap_pyfunction!(linalg::linalg_vecdot, m)?)?;
+    m.add_function(wrap_pyfunction!(linalg::linalg_vector_norm, m)?)?;
     m.add_function(wrap_pyfunction!(linalg::linalg_tensordot, m)?)?;
 
     m.add_function(wrap_pyfunction!(finfo, m)?)?;
