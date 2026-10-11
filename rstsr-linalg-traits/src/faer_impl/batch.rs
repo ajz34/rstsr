@@ -33,6 +33,17 @@ pub(crate) fn stack_shape(batch_shape: &[usize], inner_shape: &[usize], order: F
     }
 }
 
+/// Split a stacked shape into its batch shape and 2-D matrix shape. The matrix
+/// axes are the last two under `RowMajor` and the first two under `ColMajor`.
+pub(crate) fn batch_and_matrix_shape(shape: &[usize], order: FlagOrder) -> Result<(Vec<usize>, [usize; 2])> {
+    let ndim = shape.len();
+    rstsr_assert!(ndim >= 2, InvalidLayout, "linalg: expected at least 2 dimensions, got {ndim}")?;
+    Ok(match order {
+        RowMajor => (shape[..ndim - 2].to_vec(), [shape[ndim - 2], shape[ndim - 1]]),
+        ColMajor => (shape[2..].to_vec(), [shape[0], shape[1]]),
+    })
+}
+
 /// Split a stacked layout into its (batch, inner) parts. The `inner_ndim` axes
 /// are trailing under `RowMajor`, leading under `ColMajor`.
 fn split_inner(layout: &Layout<IxD>, order: FlagOrder, inner_ndim: usize) -> Result<(Layout<IxD>, Layout<IxD>)> {
@@ -185,6 +196,34 @@ where
             unsafe { TensorMut::new_unchecked(storage, o3_i) }
         };
         f(a_slice, o1_slice, o2_slice, o3_slice)?;
+    }
+    Ok(())
+}
+
+/// As [`map_stack_slices`], for scalar-per-matrix outputs: `out1`/`out2` have
+/// the batch shape and `f` writes one scalar into each per matrix.
+pub(crate) fn map_stack_scalars2<TA, TB1, TB2, F>(
+    a: TensorView<'_, TA, DeviceFaer, IxD>,
+    mut out1: TensorMut<'_, TB1, DeviceFaer, IxD>,
+    mut out2: TensorMut<'_, TB2, DeviceFaer, IxD>,
+    order: FlagOrder,
+    mut f: F,
+) -> Result<()>
+where
+    F: FnMut(TensorView<'_, TA, DeviceFaer, Ix2>, &mut TB1, &mut TB2) -> Result<()>,
+{
+    let (a_batch, a_inner) = split_inner(a.layout(), order, 2)?;
+    let a_iters = IterLayout::new(&a_batch, TensorIterOrder::C)?;
+    let o1_iters = IterLayout::new(out1.layout(), TensorIterOrder::C)?;
+    let o2_iters = IterLayout::new(out2.layout(), TensorIterOrder::C)?;
+    for (off_a, off1, off2) in izip!(a_iters, o1_iters, o2_iters) {
+        let a_slice = {
+            let mut inner = a_inner.clone().into_dim::<Ix2>()?;
+            unsafe { inner.set_offset(off_a) };
+            let (storage, _) = a.view().into_raw_parts();
+            unsafe { TensorView::new_unchecked(storage, inner) }
+        };
+        f(a_slice, &mut out1.raw_mut()[off1], &mut out2.raw_mut()[off2])?;
     }
     Ok(())
 }

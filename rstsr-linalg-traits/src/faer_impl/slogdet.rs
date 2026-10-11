@@ -1,5 +1,5 @@
+use crate::faer_impl::batch::{batch_and_matrix_shape, map_stack_scalars2, with_parallel};
 use crate::traits_def::{SLogDetAPI, SLogDetResult};
-use faer::prelude::*;
 use faer::traits::{ComplexField, IndexCore};
 use faer_ext::IntoFaer;
 
@@ -56,35 +56,11 @@ where
     Ok((sign, logabsdet))
 }
 
-/// Naive recursive walk over the batch dims (the input is pre-oriented so the
-/// batch dims are leading): collect one `(sign, logabsdet)` per matrix slice in
-/// the device's default-order flat sequence.
-fn faer_slogdet_walk<'a, T>(
-    v: TensorView<'a, T, DeviceFaer, IxD>,
-    out_sign: &mut Vec<T>,
-    out_log: &mut Vec<<T as ComplexField>::Real>,
-) -> Result<()>
-where
-    T: ComplexFloat + ComplexField<Real = <T as ComplexFloat>::Real>,
-    <T as ComplexField>::Real: Zero,
-{
-    if v.ndim() == 2 {
-        let (s, l) = faer_slogdet_ix2(v.into_dim::<Ix2>())?;
-        out_sign.push(s);
-        out_log.push(l);
-        return Ok(());
-    }
-    for i in 0..v.shape()[0] {
-        faer_slogdet_walk(v.i(i), out_sign, out_log)?;
-    }
-    Ok(())
-}
-
 /// n-dim `slogdet` over the batch dims.
 ///
-/// The two matrix axes are the last two for row-major and the first two for
-/// col-major (per the device default order); all remaining dims form the batch.
-/// Outputs have the batch shape in the device default order.
+/// The two matrix axes are the last two under `RowMajor` and the first two
+/// under `ColMajor` (device default order); all remaining dims form the batch.
+/// The outputs (`sign`, `logabsdet`) have the batch shape.
 pub fn faer_impl_slogdet_f<T>(
     a: TensorView<'_, T, DeviceFaer, IxD>,
 ) -> Result<(Tensor<T, DeviceFaer, IxD>, Tensor<<T as ComplexField>::Real, DeviceFaer, IxD>)>
@@ -94,34 +70,20 @@ where
 {
     let device = a.device().clone();
     let order = device.default_order();
+    let (batch_shape, [m, n]) = batch_and_matrix_shape(a.shape(), order)?;
+    rstsr_assert_eq!(m, n, InvalidLayout, "slogdet: the matrix must be square, got {m}x{n}")?;
 
-    let shape = a.shape().to_vec();
-    let batch_shape = crate::linalg_util::batch_and_square_shape(&shape, order)?;
-
-    // set parallel mode once for the whole batch
-    let pool = device.get_current_pool();
-    let faer_par_orig = faer::get_global_parallelism();
-    if let Some(pool) = pool {
-        faer::set_global_parallelism(Par::rayon(pool.current_num_threads()));
-    }
-
-    let mut out_sign: Vec<T> = Vec::new();
-    let mut out_log: Vec<<T as ComplexField>::Real> = Vec::new();
-    // col-major: reverse axes so the batch dims become leading (mirrors row-major);
-    // the walk then always descends axis 0, giving default-order output.
-    let result = match order {
-        RowMajor => faer_slogdet_walk(a, &mut out_sign, &mut out_log),
-        ColMajor => faer_slogdet_walk(a.reverse_axes(), &mut out_sign, &mut out_log),
-    };
-
-    if pool.is_some() {
-        faer::set_global_parallelism(faer_par_orig)
-    }
-    result?;
-
-    let sign = asarray_f((out_sign, batch_shape.clone(), &device))?;
-    let logabsdet = asarray_f((out_log, batch_shape, &device))?;
-    Ok((sign, logabsdet))
+    with_parallel(&device, || {
+        let mut sign = zeros_f((batch_shape.clone(), &device))?;
+        let mut logabsdet = zeros_f((batch_shape.clone(), &device))?;
+        map_stack_scalars2(a, sign.view_mut(), logabsdet.view_mut(), order, |a_slice, s, l| {
+            let (sv, lv) = faer_slogdet_ix2(a_slice)?;
+            *s = sv;
+            *l = lv;
+            Ok(())
+        })?;
+        Ok((sign, logabsdet))
+    })
 }
 
 #[duplicate_item(

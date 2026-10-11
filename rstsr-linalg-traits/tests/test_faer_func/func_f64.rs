@@ -205,4 +205,27 @@ mod test {
         assert!(sign.to_scalar() - -1.0 < 1e-8);
         assert!(logabsdet.to_scalar() - 3031.1259211802403 < 1e-8);
     }
+
+    #[test]
+    fn test_slogdet_nd() {
+        let device = DeviceFaer::default();
+        let vec_a: Vec<f64> = vec![4.0, 1.0, 1.0, 1.0, 3.0, 0.0, 1.0, 0.0, 2.0];
+
+        let a = rt::asarray((vec_a.clone(), [3, 3].c(), &device));
+        let (sign0, log0) = rt::linalg::slogdet(a.view()).into();
+        let (sign0, log0) = (sign0.to_scalar(), log0.to_scalar());
+
+        // same matrix stacked twice; each slice must match the 2-D result
+        let mut stacked = vec_a.clone();
+        stacked.extend_from_slice(&vec_a);
+        let b = rt::asarray((stacked, [2, 3, 3].c(), &device));
+        let (sign, log) = rt::linalg::slogdet(b.view()).into();
+
+        assert_eq!(sign.ndim(), 1);
+        assert_eq!(sign.shape()[0], 2);
+        for i in 0..2 {
+            assert!((sign.i(i).to_scalar() - sign0).abs() < 1e-12);
+            assert!((log.i(i).to_scalar() - log0).abs() < 1e-12);
+        }
+    }
 }

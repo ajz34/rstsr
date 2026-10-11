@@ -1,5 +1,5 @@
+use crate::faer_impl::batch::batch_and_matrix_shape;
 use crate::faer_impl::batch::{map_stack_slices2, stack_shape, with_parallel};
-use crate::linalg_util::batch_and_matrix_shape;
 use crate::traits_def::{EighAPI, EighResult};
 use faer::prelude::*;
 use faer::traits::ComplexField;
