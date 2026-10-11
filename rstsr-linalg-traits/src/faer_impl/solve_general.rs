@@ -1,3 +1,4 @@
+use crate::faer_impl::batch::{map_stack_slices_inplace, solve_plan, with_parallel};
 use crate::traits_def::SolveGeneralAPI;
 use faer::prelude::*;
 use faer::traits::ComplexField;
@@ -5,39 +6,55 @@ use faer_ext::IntoFaer;
 use rstsr_blas_traits::prelude_dev::*;
 use rstsr_core::prelude_dev::*;
 
+/// n-dim `solve_general`: solve `a x = b` for a stack `a` of `(..., M, M)`
+/// matrices and right-hand side `b` of `(..., M, K)` matrices or `(..., M)`
+/// vectors. The two batch shapes broadcast against each other.
+///
+/// `a` must be square; a rectangular `a` is rejected rather than solved in the
+/// least-squares sense (the array-API contract).
+///
+/// An owned or contiguous mutable `b` is solved in place (its own buffer is the
+/// output, so no data is copied); only the non-contiguous mutable and the
+/// immutable cases allocate a work buffer. Because an in-place solve cannot grow,
+/// a batched `a` whose batch does not fit into `b`'s requires an immutable `b`
+/// (the allocating form).
 pub fn faer_impl_solve_general_f<'b, T>(
-    a: TensorReference<'_, T, DeviceFaer, Ix2>,
-    b: TensorReference<'b, T, DeviceFaer, Ix2>,
-) -> Result<TensorMutable<'b, T, DeviceFaer, Ix2>>
+    a: TensorView<'_, T, DeviceFaer, IxD>,
+    b: TensorReference<'b, T, DeviceFaer, IxD>,
+) -> Result<TensorMutable<'b, T, DeviceFaer, IxD>>
 where
     T: ComplexField,
 {
-    // set parallel mode
     let device = a.device().clone();
-    let pool = device.get_current_pool();
-    let faer_par_orig = faer::get_global_parallelism();
-    if let Some(pool) = pool {
-        faer::set_global_parallelism(Par::rayon(pool.current_num_threads()));
-    }
+    let order = device.default_order();
+    let plan = solve_plan(a.shape(), b.shape(), order, "solve_general")?;
+    let a_b = a.to_broadcast_f(plan.a_shape(order))?;
+    let out_shape = plan.out_shape(order);
 
-    let faer_a = a.view().into_faer();
-
-    // solve linear system
-    let svd_result = faer_a.svd().map_err(|e| rstsr_error!(FaerError, "Faer SVD error: {e:?}"))?;
-
-    // handle b for mutable
-    let mut b = overwritable_convert(b)?;
-    let b_view = b.view_mut().into_dim::<Ix2>();
-    let faer_b = b_view.into_faer();
-
-    svd_result.solve_in_place(faer_b);
-
-    // restore parallel mode
-    if pool.is_some() {
-        faer::set_global_parallelism(faer_par_orig)
-    }
-
-    Ok(b.clone_to_mut())
+    with_parallel(&device, || {
+        // Decide from `b` itself: an immutable `b` that must grow to the solution
+        // shape is broadcast straight from its view, so the contiguity copy
+        // `overwritable_convert` would make is never taken.
+        let target = if b.shape().as_slice() == out_shape.as_slice() {
+            overwritable_convert(b)?
+        } else if b.is_ref() {
+            TensorMutable::Owned(TensorView::from(b).to_broadcast_f(out_shape)?.to_owned())
+        } else {
+            return rstsr_raise!(
+                InvalidLayout,
+                "solve_general: an in-place solve needs the solution shape to equal b's shape"
+            );
+        };
+        let done = map_stack_slices_inplace(a_b, target, order, |a_slice, b_slice| {
+            // solve linear system
+            let faer_a = a_slice.into_faer();
+            let faer_b = b_slice.into_faer();
+            let svd_result = faer_a.svd().map_err(|e| rstsr_error!(FaerError, "Faer SVD error: {e:?}"))?;
+            svd_result.solve_in_place(faer_b);
+            Ok(())
+        })?;
+        Ok(done.clone_to_mut())
+    })
 }
 
 #[duplicate_item(
@@ -53,23 +70,13 @@ where
     DA: DimAPI,
     DB: DimAPI,
 {
-    type Out = Tensor<T, DeviceFaer, DB>;
+    type Out = Tensor<T, DeviceFaer, IxD>;
     fn solve_general_f(self) -> Result<Self::Out> {
         let (a, b) = self;
-        rstsr_assert_eq!(a.ndim(), 2, InvalidLayout, "Currently we can only handle 2-D matrix.")?;
-        rstsr_pattern!(b.ndim(), 1..=2, InvalidLayout, "Currently we can only handle 1/2-D matrix.")?;
-        let is_b_vec = b.ndim() == 1;
-        let a_view = a.view().into_dim::<Ix2>();
-        let b_view = match is_b_vec {
-            true => b.i((.., None)).into_dim::<Ix2>(),
-            false => b.view().into_dim::<Ix2>(),
-        };
-        let result = faer_impl_solve_general_f(a_view.into(), b_view.into())?;
-        let result = result.into_owned().into_dim::<IxD>();
-        match is_b_vec {
-            true => Ok(result.into_shape(-1).into_dim::<DB>()),
-            false => Ok(result.into_dim::<DB>()),
-        }
+        let a_dyn = a.to_dyn();
+        let b_dyn = b.to_dyn();
+        let result = faer_impl_solve_general_f(a_dyn, b_dyn.into())?;
+        Ok(result.into_owned())
     }
 }
 
@@ -89,15 +96,9 @@ where
     type Out = TrB;
     fn solve_general_f(self) -> Result<Self::Out> {
         let (a, mut b) = self;
-        rstsr_assert_eq!(a.ndim(), 2, InvalidLayout, "Currently we can only handle 2-D matrix.")?;
-        rstsr_pattern!(b.ndim(), 1..=2, InvalidLayout, "Currently we can only handle 1/2-D matrix.")?;
-        let is_b_vec = b.ndim() == 1;
-        let a_view = a.view().into_dim::<Ix2>();
-        let b_view = match is_b_vec {
-            true => b.i_mut((.., None)).into_dim::<Ix2>(),
-            false => b.view_mut().into_dim::<Ix2>(),
-        };
-        let result = faer_impl_solve_general_f(a_view.into(), b_view.into())?;
+        let a_dyn = a.to_dyn();
+        let b_ref = b.view_mut().into_dim::<IxD>();
+        let result = faer_impl_solve_general_f(a_dyn, b_ref.into())?;
         result.clone_to_mut();
         Ok(b)
     }
@@ -116,23 +117,13 @@ where
     DA: DimAPI,
     DB: DimAPI,
 {
-    type Out = Tensor<T, DeviceFaer, DB>;
+    type Out = Tensor<T, DeviceFaer, IxD>;
     fn solve_general_f(self) -> Result<Self::Out> {
-        let (mut a, b) = self;
-        rstsr_assert_eq!(a.ndim(), 2, InvalidLayout, "Currently we can only handle 2-D matrix.")?;
-        rstsr_pattern!(b.ndim(), 1..=2, InvalidLayout, "Currently we can only handle 1/2-D matrix.")?;
-        let is_b_vec = b.ndim() == 1;
-        let a_view = a.view_mut().into_dim::<Ix2>();
-        let b_view = match is_b_vec {
-            true => b.i((.., None)).into_dim::<Ix2>(),
-            false => b.view().into_dim::<Ix2>(),
-        };
-        let result = faer_impl_solve_general_f(a_view.into(), b_view.into())?;
-        let result = result.into_owned().into_dim::<IxD>();
-        match is_b_vec {
-            true => Ok(result.into_shape(-1).into_dim::<DB>()),
-            false => Ok(result.into_dim::<DB>()),
-        }
+        let (a, b) = self;
+        let a_dyn = a.to_dyn();
+        let b_dyn = b.to_dyn();
+        let result = faer_impl_solve_general_f(a_dyn, b_dyn.into())?;
+        Ok(result.into_owned())
     }
 }
 
@@ -151,16 +142,10 @@ where
 {
     type Out = TrB;
     fn solve_general_f(self) -> Result<Self::Out> {
-        let (mut a, mut b) = self;
-        rstsr_assert_eq!(a.ndim(), 2, InvalidLayout, "Currently we can only handle 2-D matrix.")?;
-        rstsr_pattern!(b.ndim(), 1..=2, InvalidLayout, "Currently we can only handle 1/2-D matrix.")?;
-        let is_b_vec = b.ndim() == 1;
-        let a_view = a.view_mut().into_dim::<Ix2>();
-        let b_view = match is_b_vec {
-            true => b.i_mut((.., None)).into_dim::<Ix2>(),
-            false => b.view_mut().into_dim::<Ix2>(),
-        };
-        let result = faer_impl_solve_general_f(a_view.into(), b_view.into())?;
+        let (a, mut b) = self;
+        let a_dyn = a.to_dyn();
+        let b_ref = b.view_mut().into_dim::<IxD>();
+        let result = faer_impl_solve_general_f(a_dyn, b_ref.into())?;
         result.clone_to_mut();
         Ok(b)
     }

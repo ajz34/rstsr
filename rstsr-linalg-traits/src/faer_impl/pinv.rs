@@ -1,11 +1,14 @@
+use crate::faer_impl::batch::batch_and_matrix_shape;
+use crate::faer_impl::batch::{map_stack_slices, stack_shape, with_parallel};
 use crate::traits_def::{PinvAPI, PinvResult};
-use faer::prelude::*;
 use faer::traits::ComplexField;
 use faer_ext::IntoFaer;
 use num::{Float, FromPrimitive, Num, Zero};
 use rstsr_core::prelude_dev::*;
 
-pub fn faer_impl_pinv_f<T>(
+/// Pseudoinverse (and its rank) of a single 2-D matrix (no parallel-mode
+/// handling).
+fn faer_pinv_ix2<T>(
     a: TensorView<'_, T, DeviceFaer, Ix2>,
     atol: Option<T::Real>,
     rtol: Option<T::Real>,
@@ -14,14 +17,6 @@ where
     T: ComplexField + DivAssign<T::Real> + Num + Send + Sync + 'static,
     T::Real: Float + FromPrimitive + Send + Sync,
 {
-    // set parallel mode
-    let device = a.device().clone();
-    let pool = device.get_current_pool();
-    let faer_par_orig = faer::get_global_parallelism();
-    if let Some(pool) = pool {
-        faer::set_global_parallelism(Par::rayon(pool.current_num_threads()));
-    }
-
     // compute rcond value
     let atol = atol.unwrap_or(T::Real::zero());
     let rtol = rtol.unwrap_or({
@@ -31,16 +26,18 @@ where
     });
 
     // transform to faer matrix
+    let device = a.device().clone();
     let faer_a = a.into_faer();
 
     // svd computation
     let svd_result = faer_a.thin_svd().map_err(|e| rstsr_error!(FaerError, "Faer SvD error: {e:?}"))?;
     let (u, s, v) = (svd_result.U(), svd_result.S(), svd_result.V());
 
-    // return to rstsr tensors
-    let u = u.into_rstsr().into_owned();
-    let s = s.column_vector().into_rstsr();
-    let v = v.into_rstsr();
+    // return to rstsr tensors; `into_rstsr` homes them on `DeviceFaer::default()`,
+    // so each device must be changed back to the input's
+    let u = u.into_rstsr().into_owned().change_device_f(&device)?;
+    let s = s.column_vector().into_rstsr().change_device_f(&device)?;
+    let v = v.into_rstsr().change_device_f(&device)?;
 
     // compute pinv
     let s = s.mapv(|x| T::real_part_impl(&x));
@@ -52,10 +49,34 @@ where
     let a_pinv = v.i((.., ..rank)) % u.mapv(|x| T::conj_impl(&x)).t();
     let pinv = a_pinv.into_dim::<Ix2>();
 
-    // restore parallel mode
-    if pool.is_some() {
-        faer::set_global_parallelism(faer_par_orig)
-    }
+    Ok(PinvResult { pinv, rank })
+}
+
+/// n-dim `pinv`. The `rank` scalar reports the largest per-matrix rank in the
+/// stack (the array-API drops it).
+pub fn faer_impl_pinv_f<T>(
+    a: TensorView<'_, T, DeviceFaer, IxD>,
+    atol: Option<T::Real>,
+    rtol: Option<T::Real>,
+) -> Result<PinvResult<Tensor<T, DeviceFaer, IxD>>>
+where
+    T: ComplexField + DivAssign<T::Real> + Num + Send + Sync + 'static,
+    T::Real: Float + FromPrimitive + Send + Sync,
+{
+    let device = a.device().clone();
+    let order = device.default_order();
+    let (batch_shape, [m, n]) = batch_and_matrix_shape(a.shape(), order)?;
+
+    let mut rank = 0;
+    let pinv = with_parallel(&device, || {
+        let mut out = zeros_f((stack_shape(&batch_shape, &[n, m], order), &device))?;
+        map_stack_slices::<T, T, Ix2, _>(a, out.view_mut(), order, |a_slice, mut out_slice| {
+            let r = faer_pinv_ix2(a_slice, atol, rtol)?;
+            rank = Ord::max(rank, r.rank);
+            out_slice.assign_f(r.pinv)
+        })?;
+        Ok(out)
+    })?;
 
     Ok(PinvResult { pinv, rank })
 }
@@ -75,11 +96,8 @@ where
     type Out = PinvResult<Tensor<T, DeviceFaer, D>>;
     fn pinv_f(self) -> Result<Self::Out> {
         let (a, atol, rtol) = self;
-        rstsr_assert_eq!(a.ndim(), 2, InvalidLayout, "Currently we can only handle 2-D matrix.")?;
-        let a_view = a.view().into_dim::<Ix2>();
-        let result = faer_impl_pinv_f(a_view, Some(atol), Some(rtol))?;
-        // convert dimensions
-        Ok(PinvResult { pinv: result.pinv.into_dim::<IxD>().into_dim::<D>(), rank: result.rank })
+        let result = faer_impl_pinv_f(a.view().to_dyn(), Some(atol), Some(rtol))?;
+        Ok(PinvResult { pinv: result.pinv.into_dim::<D>(), rank: result.rank })
     }
 }
 
@@ -98,10 +116,7 @@ where
     type Out = PinvResult<Tensor<T, DeviceFaer, D>>;
     fn pinv_f(self) -> Result<Self::Out> {
         let a = self;
-        rstsr_assert_eq!(a.ndim(), 2, InvalidLayout, "Currently we can only handle 2-D matrix.")?;
-        let a_view = a.view().into_dim::<Ix2>();
-        let result = faer_impl_pinv_f(a_view, None, None)?;
-        // convert dimensions
-        Ok(PinvResult { pinv: result.pinv.into_dim::<IxD>().into_dim::<D>(), rank: result.rank })
+        let result = faer_impl_pinv_f(a.view().to_dyn(), None, None)?;
+        Ok(PinvResult { pinv: result.pinv.into_dim::<D>(), rank: result.rank })
     }
 }

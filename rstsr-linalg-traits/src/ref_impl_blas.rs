@@ -284,7 +284,13 @@ where
     let order = device.default_order();
 
     let shape = a.shape().to_vec();
-    let batch_shape = crate::linalg_util::batch_and_square_shape(&shape, order)?;
+    let ndim = shape.len();
+    rstsr_assert!(ndim >= 2, InvalidLayout, "linalg: expected at least 2 dimensions, got {ndim}")?;
+    let (batch_shape, [m, n]) = match order {
+        RowMajor => (shape[..ndim - 2].to_vec(), [shape[ndim - 2], shape[ndim - 1]]),
+        ColMajor => (shape[2..].to_vec(), [shape[0], shape[1]]),
+    };
+    rstsr_assert_eq!(m, n, InvalidLayout, "linalg: expected square matrices, got {m}x{n}")?;
 
     let mut out_sign: Vec<T> = Vec::new();
     let mut out_log: Vec<T::Real> = Vec::new();

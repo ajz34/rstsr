@@ -40,7 +40,25 @@ mod test {
         let a = rt::asarray((a_vec, [5, 5].c(), &device));
 
         let det = rt::linalg::det(a.view());
-        assert!((det - 3.9699917597338046).abs() < 1e-8);
+        assert!((det.to_scalar() - 3.9699917597338046).abs() < 1e-8);
+    }
+
+    #[test]
+    fn test_det_nd() {
+        let device = DeviceFaer::default();
+        let a_vec = get_vec::<f64>('a')[..5 * 5].to_vec();
+        let a = rt::asarray((a_vec.clone(), [5, 5].c(), &device));
+        let det0 = rt::linalg::det(a.view()).to_scalar();
+
+        // distinct matrices per slot: slice 1 is 2*a, so its det scales by 2**5
+        let mut stacked = a_vec.clone();
+        stacked.extend(a_vec.iter().map(|x| 2.0 * x));
+        let b = rt::asarray((stacked, [2, 5, 5].c(), &device));
+        let det = rt::linalg::det(b.view());
+        assert_eq!(det.ndim(), 1);
+        assert_eq!(det.shape()[0], 2);
+        assert!((det.i(0).to_scalar() - det0).abs() < 1e-8);
+        assert!((det.i(1).to_scalar() - 32.0 * det0).abs() < 1e-8);
     }
 
     #[test]
@@ -204,5 +222,285 @@ mod test {
         let (sign, logabsdet) = rt::linalg::slogdet(a.view()).into();
         assert!(sign.to_scalar() - -1.0 < 1e-8);
         assert!(logabsdet.to_scalar() - 3031.1259211802403 < 1e-8);
+    }
+
+    #[test]
+    fn test_slogdet_nd() {
+        let device = DeviceFaer::default();
+        let vec_a: Vec<f64> = vec![4.0, 1.0, 1.0, 1.0, 3.0, 0.0, 1.0, 0.0, 2.0];
+
+        let a = rt::asarray((vec_a.clone(), [3, 3].c(), &device));
+        let (sign0, log0) = rt::linalg::slogdet(a.view()).into();
+        let (sign0, log0) = (sign0.to_scalar(), log0.to_scalar());
+
+        // distinct matrices per slot: slice 1 is 2*a, so log|det| gains 3*ln(2)
+        let mut stacked = vec_a.clone();
+        stacked.extend(vec_a.iter().map(|x| 2.0 * x));
+        let b = rt::asarray((stacked, [2, 3, 3].c(), &device));
+        let (sign, log) = rt::linalg::slogdet(b.view()).into();
+
+        assert_eq!(sign.ndim(), 1);
+        assert_eq!(sign.shape()[0], 2);
+        assert!((sign.i(0).to_scalar() - sign0).abs() < 1e-12);
+        assert!((log.i(0).to_scalar() - log0).abs() < 1e-12);
+        assert!((sign.i(1).to_scalar() - sign0).abs() < 1e-12);
+        assert!((log.i(1).to_scalar() - log0 - 3.0 * 2f64.ln()).abs() < 1e-12);
+    }
+
+    #[test]
+    fn test_solve_general_nd() {
+        let mut device = DeviceFaer::default();
+        device.set_default_order(RowMajor);
+        // well-conditioned 4x4 system, stacked twice along the batch axis
+        let a_slice: Vec<f64> = vec![4.0, 1.0, 0.0, 0.5, 1.0, 3.0, 0.5, 0.0, 0.0, 0.5, 2.0, 1.0, 0.5, 0.0, 1.0, 2.5];
+        let b_slice: Vec<f64> = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
+
+        let a2 = rt::asarray((a_slice.clone(), [4, 4].c(), &device));
+        let b2 = rt::asarray((b_slice.clone(), [4, 2].c(), &device));
+        let x2 = rt::linalg::solve_general((a2.view(), b2.view()));
+        let fp2 = fingerprint(&x2);
+
+        // distinct systems per slot: slice 1 is (2*a, 3*b), so x1 = 1.5 * x0
+        let mut a_st = a_slice.clone();
+        a_st.extend(a_slice.iter().map(|x| 2.0 * x));
+        let mut b_st = b_slice.clone();
+        b_st.extend(b_slice.iter().map(|x| 3.0 * x));
+        let a_nd = rt::asarray((a_st, [2, 4, 4].c(), &device));
+
+        // allocating path (b as an immutable view)
+        let b_nd = rt::asarray((b_st.clone(), [2, 4, 2].c(), &device));
+        let x_nd = rt::linalg::solve_general((a_nd.view(), b_nd.view()));
+        assert_eq!(x_nd.ndim(), 3);
+        assert_eq!(x_nd.shape(), &[2, 4, 2]);
+        assert!((fingerprint(&x_nd.i(0).to_owned()) - fp2).abs() < 1e-8);
+        assert!((fingerprint(&x_nd.i(1).to_owned()) - 1.5 * fp2).abs() < 1e-8);
+
+        // in-place path (b owned): b's own buffer holds the solution
+        let mut b_mut = rt::asarray((b_st, [2, 4, 2].c(), &device));
+        rt::linalg::solve_general((a_nd.view(), b_mut.view_mut()));
+        assert!((fingerprint(&b_mut) - fingerprint(&x_nd)).abs() < 1e-8);
+    }
+
+    #[test]
+    fn test_solve_general_vec_nd() {
+        let mut device = DeviceFaer::default();
+        device.set_default_order(RowMajor);
+        let a_slice: Vec<f64> = vec![4.0, 1.0, 0.0, 0.5, 1.0, 3.0, 0.5, 0.0, 0.0, 0.5, 2.0, 1.0, 0.5, 0.0, 1.0, 2.5];
+        let b_vec: Vec<f64> = vec![1.0, 2.0, 3.0, 4.0];
+
+        let a2 = rt::asarray((a_slice.clone(), [4, 4].c(), &device));
+        let b2 = rt::asarray((b_vec.clone(), [4].c(), &device));
+        let x2 = rt::linalg::solve_general((a2.view(), b2.view()));
+        let fp2 = fingerprint(&x2);
+
+        // 1-D b broadcasts into a's batch -> result (2, 4);
+        // slice 1 is 2*a with the same b, so x1 = 0.5 * x0
+        let mut a_st = a_slice.clone();
+        a_st.extend(a_slice.iter().map(|x| 2.0 * x));
+        let a_nd = rt::asarray((a_st, [2, 4, 4].c(), &device));
+        let x_nd = rt::linalg::solve_general((a_nd.view(), b2.view()));
+        assert_eq!(x_nd.shape(), &[2, 4]);
+        assert!((fingerprint(&x_nd.i(0).to_owned()) - fp2).abs() < 1e-8);
+        assert!((fingerprint(&x_nd.i(1).to_owned()) - 0.5 * fp2).abs() < 1e-8);
+    }
+
+    #[test]
+    fn test_solve_triangular_nd() {
+        let mut device = DeviceFaer::default();
+        device.set_default_order(RowMajor);
+        // lower-triangular, stacked twice
+        let a_slice: Vec<f64> = vec![2.0, 0.0, 0.0, 1.0, 3.0, 0.0, 0.5, 0.5, 4.0];
+        let b_slice: Vec<f64> = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
+
+        let a2 = rt::asarray((a_slice.clone(), [3, 3].c(), &device));
+        let b2 = rt::asarray((b_slice.clone(), [3, 2].c(), &device));
+        let x2 = rt::linalg::solve_triangular((a2.view(), b2.view()));
+        let fp2 = fingerprint(&x2);
+
+        // distinct systems per slot: slice 1 is (2*a, 3*b), so x1 = 1.5 * x0
+        let mut a_st = a_slice.clone();
+        a_st.extend(a_slice.iter().map(|x| 2.0 * x));
+        let mut b_st = b_slice.clone();
+        b_st.extend(b_slice.iter().map(|x| 3.0 * x));
+        let a_nd = rt::asarray((a_st, [2, 3, 3].c(), &device));
+        let b_nd = rt::asarray((b_st.clone(), [2, 3, 2].c(), &device));
+
+        let x_nd = rt::linalg::solve_triangular((a_nd.view(), b_nd.view()));
+        assert_eq!(x_nd.shape(), &[2, 3, 2]);
+        assert!((fingerprint(&x_nd.i(0).to_owned()) - fp2).abs() < 1e-8);
+        assert!((fingerprint(&x_nd.i(1).to_owned()) - 1.5 * fp2).abs() < 1e-8);
+
+        // in-place path (b owned): b's own buffer holds the solution
+        let mut b_mut = rt::asarray((b_st, [2, 3, 2].c(), &device));
+        rt::linalg::solve_triangular((a_nd.view(), b_mut.view_mut()));
+        assert!((fingerprint(&b_mut) - fingerprint(&x_nd)).abs() < 1e-8);
+    }
+
+    #[test]
+    fn test_solve_general_nd_colmajor() {
+        let mut device = DeviceFaer::default();
+        device.set_default_order(ColMajor);
+        // Under ColMajor the matrix axes are the first two and the batch trails.
+        // Passing a shape (not an explicit `.c()` layout) makes `asarray` follow the
+        // device order (F), so each `[:, :, b]` slice equals the 2-D operand.
+        let a_slice: Vec<f64> = vec![4.0, 1.0, 0.0, 0.5, 1.0, 3.0, 0.5, 0.0, 0.0, 0.5, 2.0, 1.0, 0.5, 0.0, 1.0, 2.5];
+        let b_slice: Vec<f64> = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
+
+        let a2 = rt::asarray((a_slice.clone(), [4, 4], &device));
+        let b2 = rt::asarray((b_slice.clone(), [4, 2], &device));
+        let x2 = rt::linalg::solve_general((a2.view(), b2.view()));
+        let fp2 = fingerprint(&x2);
+
+        // distinct systems per slot: slice 1 is (2*a, 3*b), so x1 = 1.5 * x0
+        let mut a_st = a_slice.clone();
+        a_st.extend(a_slice.iter().map(|x| 2.0 * x));
+        let mut b_st = b_slice.clone();
+        b_st.extend(b_slice.iter().map(|x| 3.0 * x));
+        let a_nd = rt::asarray((a_st, [4, 4, 2], &device));
+        let b_nd = rt::asarray((b_st, [4, 2, 2], &device));
+
+        let x_nd = rt::linalg::solve_general((a_nd.view(), b_nd.view()));
+        assert_eq!(x_nd.shape(), &[4, 2, 2]);
+        assert!((fingerprint(&x_nd.i((.., .., 0)).to_owned()) - fp2).abs() < 1e-8);
+        assert!((fingerprint(&x_nd.i((.., .., 1)).to_owned()) - 1.5 * fp2).abs() < 1e-8);
+    }
+
+    #[test]
+    fn test_solve_general_broadcast() {
+        let mut device = DeviceFaer::default();
+        device.set_default_order(RowMajor);
+        let a_slice: Vec<f64> = vec![4.0, 1.0, 0.0, 0.5, 1.0, 3.0, 0.5, 0.0, 0.0, 0.5, 2.0, 1.0, 0.5, 0.0, 1.0, 2.5];
+        let b_slice: Vec<f64> = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
+
+        let a2 = rt::asarray((a_slice.clone(), [4, 4].c(), &device));
+        let b2 = rt::asarray((b_slice.clone(), [4, 2].c(), &device));
+        let x2 = rt::linalg::solve_general((a2.view(), b2.view()));
+        let fp2 = fingerprint(&x2);
+
+        // a's slot 1 is 2*a; b's slot 1 is 3*b, so x1 = 1.5 * x0 throughout
+        let mut a_st = a_slice.clone();
+        a_st.extend(a_slice.iter().map(|x| 2.0 * x));
+        let mut b_st = b_slice.clone();
+        b_st.extend(b_slice.iter().map(|x| 3.0 * x));
+        let a_nd = rt::asarray((a_st, [2, 4, 4].c(), &device));
+
+        // b's batch is size 1 -> broadcast up to a's batch; result outgrows b
+        let b_1 = rt::asarray((b_slice.clone(), [1, 4, 2].c(), &device));
+        let x = rt::linalg::solve_general((a_nd.view(), b_1.view()));
+        assert_eq!(x.shape(), &[2, 4, 2]);
+        assert!((fingerprint(&x.i(0).to_owned()) - fp2).abs() < 1e-8);
+        assert!((fingerprint(&x.i(1).to_owned()) - 0.5 * fp2).abs() < 1e-8);
+
+        // a unbatched: it broadcasts into b's batch
+        let b_nd = rt::asarray((b_st.clone(), [2, 4, 2].c(), &device));
+        let x = rt::linalg::solve_general((a2.view(), b_nd.view()));
+        assert_eq!(x.shape(), &[2, 4, 2]);
+        assert!((fingerprint(&x.i(0).to_owned()) - fp2).abs() < 1e-8);
+        assert!((fingerprint(&x.i(1).to_owned()) - 3.0 * fp2).abs() < 1e-8);
+
+        // in-place: a unbatched broadcasting into an owned batched b
+        let mut b_mut = rt::asarray((b_st, [2, 4, 2].c(), &device));
+        rt::linalg::solve_general((a2.view(), b_mut.view_mut()));
+        assert!((fingerprint(&b_mut.i(0).to_owned()) - fp2).abs() < 1e-8);
+        assert!((fingerprint(&b_mut.i(1).to_owned()) - 3.0 * fp2).abs() < 1e-8);
+    }
+
+    #[test]
+    fn test_solve_triangular_broadcast() {
+        let mut device = DeviceFaer::default();
+        device.set_default_order(RowMajor);
+        let a_slice: Vec<f64> = vec![2.0, 0.0, 0.0, 1.0, 3.0, 0.0, 0.5, 0.5, 4.0];
+        let b_slice: Vec<f64> = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
+
+        let a2 = rt::asarray((a_slice.clone(), [3, 3].c(), &device));
+        let b2 = rt::asarray((b_slice.clone(), [3, 2].c(), &device));
+        let x2 = rt::linalg::solve_triangular((a2.view(), b2.view()));
+        let fp2 = fingerprint(&x2);
+
+        // a's slot 1 is 2*a; b's slot 1 is 3*b, so x1 = 1.5 * x0 throughout
+        let mut a_st = a_slice.clone();
+        a_st.extend(a_slice.iter().map(|x| 2.0 * x));
+        let a_nd = rt::asarray((a_st, [2, 3, 3].c(), &device));
+
+        // b's batch is size 1 -> broadcast up to a's batch
+        let b_1 = rt::asarray((b_slice.clone(), [1, 3, 2].c(), &device));
+        let x = rt::linalg::solve_triangular((a_nd.view(), b_1.view()));
+        assert_eq!(x.shape(), &[2, 3, 2]);
+        assert!((fingerprint(&x.i(0).to_owned()) - fp2).abs() < 1e-8);
+        assert!((fingerprint(&x.i(1).to_owned()) - 0.5 * fp2).abs() < 1e-8);
+
+        // a unbatched: it broadcasts into b's batch
+        let mut b_st = b_slice.clone();
+        b_st.extend(b_slice.iter().map(|x| 3.0 * x));
+        let b_nd = rt::asarray((b_st.clone(), [2, 3, 2].c(), &device));
+        let x = rt::linalg::solve_triangular((a2.view(), b_nd.view()));
+        assert_eq!(x.shape(), &[2, 3, 2]);
+        assert!((fingerprint(&x.i(0).to_owned()) - fp2).abs() < 1e-8);
+        assert!((fingerprint(&x.i(1).to_owned()) - 3.0 * fp2).abs() < 1e-8);
+
+        // in-place: a unbatched broadcasting into an owned batched b
+        let mut b_mut = rt::asarray((b_st, [2, 3, 2].c(), &device));
+        rt::linalg::solve_triangular((a2.view(), b_mut.view_mut()));
+        assert!((fingerprint(&b_mut.i(0).to_owned()) - fp2).abs() < 1e-8);
+        assert!((fingerprint(&b_mut.i(1).to_owned()) - 3.0 * fp2).abs() < 1e-8);
+    }
+
+    #[test]
+    fn test_generalized_eigh_nd() {
+        let mut device = DeviceFaer::default();
+        device.set_default_order(RowMajor);
+        // symmetric a, positive-definite b
+        let a_slice: Vec<f64> = vec![4.0, 1.0, 1.0, 3.0];
+        let b_slice: Vec<f64> = vec![2.0, 0.5, 0.5, 1.5];
+
+        let a2 = rt::asarray((a_slice.clone(), [2, 2].c(), &device));
+        let b2 = rt::asarray((b_slice.clone(), [2, 2].c(), &device));
+        let (w2, v2) = rt::linalg::eigh((a2.view(), b2.view(), Lower, 1)).into();
+        let fp_w2 = fingerprint(&w2);
+        let fp_v2 = fingerprint(&v2.abs());
+
+        // a's slot 1 is 2*a, b's batch size 1 -> broadcast to (2, 2, 2) / (2, 2);
+        // the scaled slot's eigenvalues double, its eigenvectors do not
+        let mut a_st = a_slice.clone();
+        a_st.extend(a_slice.iter().map(|x| 2.0 * x));
+        let a_nd = rt::asarray((a_st, [2, 2, 2].c(), &device));
+        let b_1 = rt::asarray((b_slice.clone(), [1, 2, 2].c(), &device));
+        let (w, v) = rt::linalg::eigh((a_nd.view(), b_1.view(), Lower, 1)).into();
+        assert_eq!(w.shape(), &[2, 2]);
+        assert_eq!(v.shape(), &[2, 2, 2]);
+        assert!((fingerprint(&w.i(0).to_owned()) - fp_w2).abs() < 1e-8);
+        assert!((fingerprint(&w.i(1).to_owned()) - 2.0 * fp_w2).abs() < 1e-8);
+        assert!((fingerprint(&v.i(0).to_owned().abs()) - fp_v2).abs() < 1e-6);
+        assert!((fingerprint(&v.i(1).to_owned().abs()) - fp_v2).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_generalized_eigh_nd_colmajor() {
+        let mut device = DeviceFaer::default();
+        device.set_default_order(ColMajor);
+        // Under ColMajor the matrix axes are the first two and the batch trails.
+        // Passing a shape (not an explicit `.c()` layout) makes `asarray` follow
+        // the device order (F), so each `[:, :, b]` slice equals the 2-D operand.
+        let a_slice: Vec<f64> = vec![4.0, 1.0, 1.0, 3.0];
+        let b_slice: Vec<f64> = vec![2.0, 0.5, 0.5, 1.5];
+
+        let a2 = rt::asarray((a_slice.clone(), [2, 2], &device));
+        let b2 = rt::asarray((b_slice.clone(), [2, 2], &device));
+        let (w2, v2) = rt::linalg::eigh((a2.view(), b2.view(), Lower, 1)).into();
+        let fp_w2 = fingerprint(&w2);
+        let fp_v2 = fingerprint(&v2.abs());
+
+        // a's slot 1 is 2*a, b's batch size 1 -> broadcast up to a's batch
+        let mut a_st = a_slice.clone();
+        a_st.extend(a_slice.iter().map(|x| 2.0 * x));
+        let a_nd = rt::asarray((a_st, [2, 2, 2], &device));
+        let b_1 = rt::asarray((b_slice.clone(), [2, 2, 1], &device));
+        let (w, v) = rt::linalg::eigh((a_nd.view(), b_1.view(), Lower, 1)).into();
+        assert_eq!(w.shape(), &[2, 2]);
+        assert_eq!(v.shape(), &[2, 2, 2]);
+        assert!((fingerprint(&w.i((.., 0)).to_owned()) - fp_w2).abs() < 1e-8);
+        assert!((fingerprint(&w.i((.., 1)).to_owned()) - 2.0 * fp_w2).abs() < 1e-8);
+        assert!((fingerprint(&v.i((.., .., 0)).to_owned().abs()) - fp_v2).abs() < 1e-6);
+        assert!((fingerprint(&v.i((.., .., 1)).to_owned().abs()) - fp_v2).abs() < 1e-6);
     }
 }
