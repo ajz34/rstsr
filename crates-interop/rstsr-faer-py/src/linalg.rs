@@ -2,18 +2,18 @@
 //! entries.
 //!
 //! Wrapper-only: each function marshals a `NativeArray` through an rstsr entry
-//! that already exists on the faer device — the tensor-tier products
-//! (`matmul`, `vecdot`, `cross`, `matrix_transpose`, `diagonal`) or the faer linalg
-//! entries (`cholesky`, `det`, `eigh`, `eigvalsh`, `inv`, `matrix_norm`,
-//! `matrix_power`, `pinv`, `solve`, `svd`, `svdvals`, `vector_norm`). Every
-//! dispatch body is written once against a concrete dtype arm, so no generic
-//! trait bound is stated here and no faer type is named.
+//! that already exists on the faer device — the tensor-tier entries
+//! (`matmul`, `vecdot`, `cross`, `matrix_transpose`, `diagonal`, `trace`) or
+//! the faer linalg entries (`cholesky`, `det`, `eigh`, `eigvalsh`, `inv`,
+//! `matrix_norm`, `matrix_power`, `pinv`, `solve`, `svd`, `svdvals`,
+//! `vector_norm`). Every dispatch body is written once against a concrete dtype
+//! arm, so no generic trait bound is stated here and no faer type is named.
 //!
 //! Names rstsr/faer does not provide (`qr`, `eig`, `eigvals`, `matrix_rank`)
-//! are absent from the namespace, never stubbed — they are rust-side
-//! gaps. `matrix_power` (via `rt::linalg::matrix_power`) and `trace`
-//! (`rt::trace`) are available rust-side; `matrix_power` is bound here,
-//! `trace` is not yet.
+//! are absent from the namespace, never stubbed — they are rust-side gaps.
+//!
+//! `solve` accepts a same-dtype float/complex pair only; the Python layer
+//! promotes a mixed-dtype pair first — see `DTYPE-CASTS.md` in this crate.
 
 use core::mem::MaybeUninit;
 use core::ops::{Add, Mul, Sub};
@@ -27,12 +27,13 @@ use rstsr::prelude::*;
 use rstsr_core::operators::exports::{
     DeviceExtCrossAPI, DeviceExtMatMulAPI, DeviceExtOuterAPI, DeviceExtTensordotAPI, DeviceExtVecdotAPI,
 };
+use rstsr_core::operators::reduction::OpSumAPI;
 use rstsr_core::storage::exports::{DeviceCreationAnyAPI, DeviceRawAPI};
 use rstsr_dtype_traits::{DTypePromoteAPI, ExtNum};
 
 use crate::any_tensor::{
-    any_of, dispatch_bin_promote, dispatch_bin_promote_arith, err_py, lift, type_err, AnyTensor, FTensor,
-    IntoAnyTensor, NativeArray,
+    any_of, dispatch_bin_promote, dispatch_bin_promote_arith, dispatch_t_numeric_same, err_py, lift, type_err,
+    AnyTensor, FTensor, IntoAnyTensor, NativeArray,
 };
 
 /// `rt::Result<FTensor<R>>` -> erased handle, by the result's own dtype, so a
@@ -461,4 +462,22 @@ pub fn linalg_diagonal(x: &NativeArray, offset: isize) -> PyResult<NativeArray> 
     let t =
         unary_all!(x, |a| { err_py(rt::diagonal_f(a, (offset, -2isize, -1isize))).map(|v| any_of(v.into_owned())) })?;
     Ok(NativeArray { t })
+}
+
+/// Trace with the output dtype pinned to the input dtype (the `TOut = T`
+/// reduction, the same shape as `op_sum_axes`): the Python layer has already
+/// cast the input to the accumulation dtype, so the sum must not widen it
+/// again (see `DTYPE-CASTS.md`).
+fn op_trace<T>(t: &FTensor<T>, offset: isize) -> rt::Result<FTensor<T>>
+where
+    DeviceFaer: DeviceRawAPI<T, Raw = Vec<T>> + OpSumAPI<T, IxD, TOut = T>,
+{
+    rt::trace_f(t, offset)
+}
+
+/// Sum along the `offset` diagonal of the innermost two axes (a stack of
+/// matrices, one sum per matrix; the two innermost axes are dropped).
+#[pyfunction]
+pub fn linalg_trace(x: &NativeArray, offset: isize) -> PyResult<NativeArray> {
+    Ok(NativeArray { t: dispatch_t_numeric_same!(x.t, "trace", op_trace(offset))? })
 }

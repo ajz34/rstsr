@@ -16,7 +16,9 @@ namespace `rstsr_faer.api` on top of `DeviceFaer`, so the data-apis
 - The crate is a pure **wrapper**: marshalling, validation and rstsr calls
   only, with no numeric algorithms in either layer. A capability rstsr lacks
   becomes a rust-side fix request recorded in the grading task's gap register,
-  never a shim-side reimplementation.
+  never a shim-side reimplementation. One deliberate exception — pre-casting
+  operands to their promoted dtype for the single-dtype set / join / solve
+  kernels — is documented in [`DTYPE-CASTS.md`](DTYPE-CASTS.md).
 
 ## Layout
 
