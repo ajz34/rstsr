@@ -228,4 +228,131 @@ mod test {
             assert!((log.i(i).to_scalar() - log0).abs() < 1e-12);
         }
     }
+
+    #[test]
+    fn test_solve_general_nd() {
+        let mut device = DeviceFaer::default();
+        device.set_default_order(RowMajor);
+        // well-conditioned 4x4 system, stacked twice along the batch axis
+        let a_slice: Vec<f64> = vec![4.0, 1.0, 0.0, 0.5, 1.0, 3.0, 0.5, 0.0, 0.0, 0.5, 2.0, 1.0, 0.5, 0.0, 1.0, 2.5];
+        let b_slice: Vec<f64> = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
+
+        let a2 = rt::asarray((a_slice.clone(), [4, 4].c(), &device));
+        let b2 = rt::asarray((b_slice.clone(), [4, 2].c(), &device));
+        let x2 = rt::linalg::solve_general((a2.view(), b2.view()));
+        let fp2 = fingerprint(&x2);
+
+        let mut a_st = a_slice.clone();
+        a_st.extend_from_slice(&a_slice);
+        let mut b_st = b_slice.clone();
+        b_st.extend_from_slice(&b_slice);
+        let a_nd = rt::asarray((a_st, [2, 4, 4].c(), &device));
+
+        // allocating path (b as an immutable view)
+        let b_nd = rt::asarray((b_st.clone(), [2, 4, 2].c(), &device));
+        let x_nd = rt::linalg::solve_general((a_nd.view(), b_nd.view()));
+        assert_eq!(x_nd.ndim(), 3);
+        assert_eq!(x_nd.shape(), &[2, 4, 2]);
+        for i in 0..2 {
+            assert!((fingerprint(&x_nd.i(i).to_owned()) - fp2).abs() < 1e-8);
+        }
+
+        // in-place path (b owned): b's own buffer holds the solution
+        let mut b_mut = rt::asarray((b_st, [2, 4, 2].c(), &device));
+        rt::linalg::solve_general((a_nd.view(), b_mut.view_mut()));
+        assert!((fingerprint(&b_mut) - fingerprint(&x_nd)).abs() < 1e-8);
+    }
+
+    #[test]
+    fn test_solve_general_vec_nd() {
+        let mut device = DeviceFaer::default();
+        device.set_default_order(RowMajor);
+        let a_slice: Vec<f64> = vec![4.0, 1.0, 0.0, 0.5, 1.0, 3.0, 0.5, 0.0, 0.0, 0.5, 2.0, 1.0, 0.5, 0.0, 1.0, 2.5];
+        let b_slice: Vec<f64> = vec![1.0, 2.0, 3.0, 4.0];
+
+        let a2 = rt::asarray((a_slice.clone(), [4, 4].c(), &device));
+        let b2 = rt::asarray((b_slice.clone(), [4].c(), &device));
+        let x2 = rt::linalg::solve_general((a2.view(), b2.view()));
+        let fp2 = fingerprint(&x2);
+
+        let mut a_st = a_slice.clone();
+        a_st.extend_from_slice(&a_slice);
+        let mut b_st = b_slice.clone();
+        b_st.extend_from_slice(&b_slice);
+        let a_nd = rt::asarray((a_st, [2, 4, 4].c(), &device));
+        let b_nd = rt::asarray((b_st.clone(), [2, 4].c(), &device));
+
+        let x_nd = rt::linalg::solve_general((a_nd.view(), b_nd.view()));
+        assert_eq!(x_nd.shape(), &[2, 4]);
+        for i in 0..2 {
+            assert!((fingerprint(&x_nd.i(i).to_owned()) - fp2).abs() < 1e-8);
+        }
+
+        // in-place path
+        let mut b_mut = rt::asarray((b_st, [2, 4].c(), &device));
+        rt::linalg::solve_general((a_nd.view(), b_mut.view_mut()));
+        assert!((fingerprint(&b_mut) - fingerprint(&x_nd)).abs() < 1e-8);
+    }
+
+    #[test]
+    fn test_solve_triangular_nd() {
+        let mut device = DeviceFaer::default();
+        device.set_default_order(RowMajor);
+        // lower-triangular, stacked twice
+        let a_slice: Vec<f64> = vec![2.0, 0.0, 0.0, 1.0, 3.0, 0.0, 0.5, 0.5, 4.0];
+        let b_slice: Vec<f64> = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
+
+        let a2 = rt::asarray((a_slice.clone(), [3, 3].c(), &device));
+        let b2 = rt::asarray((b_slice.clone(), [3, 2].c(), &device));
+        let x2 = rt::linalg::solve_triangular((a2.view(), b2.view()));
+        let fp2 = fingerprint(&x2);
+
+        let mut a_st = a_slice.clone();
+        a_st.extend_from_slice(&a_slice);
+        let mut b_st = b_slice.clone();
+        b_st.extend_from_slice(&b_slice);
+        let a_nd = rt::asarray((a_st, [2, 3, 3].c(), &device));
+        let b_nd = rt::asarray((b_st.clone(), [2, 3, 2].c(), &device));
+
+        let x_nd = rt::linalg::solve_triangular((a_nd.view(), b_nd.view()));
+        assert_eq!(x_nd.shape(), &[2, 3, 2]);
+        for i in 0..2 {
+            assert!((fingerprint(&x_nd.i(i).to_owned()) - fp2).abs() < 1e-8);
+        }
+
+        // in-place path (b owned): b's own buffer holds the solution
+        let mut b_mut = rt::asarray((b_st, [2, 3, 2].c(), &device));
+        rt::linalg::solve_triangular((a_nd.view(), b_mut.view_mut()));
+        assert!((fingerprint(&b_mut) - fingerprint(&x_nd)).abs() < 1e-8);
+    }
+
+    #[test]
+    fn test_solve_general_nd_colmajor() {
+        let mut device = DeviceFaer::default();
+        device.set_default_order(ColMajor);
+        // Under ColMajor the matrix axes are the first two and the batch trails.
+        // Passing a shape (not an explicit `.c()` layout) makes `asarray` follow the
+        // device order (F), so each `[:, :, b]` slice equals the 2-D operand.
+        let a_slice: Vec<f64> = vec![4.0, 1.0, 0.0, 0.5, 1.0, 3.0, 0.5, 0.0, 0.0, 0.5, 2.0, 1.0, 0.5, 0.0, 1.0, 2.5];
+        let b_slice: Vec<f64> = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
+
+        let a2 = rt::asarray((a_slice.clone(), [4, 4], &device));
+        let b2 = rt::asarray((b_slice.clone(), [4, 2], &device));
+        let x2 = rt::linalg::solve_general((a2.view(), b2.view()));
+        let fp2 = fingerprint(&x2);
+
+        let mut a_st = a_slice.clone();
+        a_st.extend_from_slice(&a_slice);
+        let mut b_st = b_slice.clone();
+        b_st.extend_from_slice(&b_slice);
+        let a_nd = rt::asarray((a_st, [4, 4, 2], &device));
+        let b_nd = rt::asarray((b_st, [4, 2, 2], &device));
+
+        let x_nd = rt::linalg::solve_general((a_nd.view(), b_nd.view()));
+        assert_eq!(x_nd.shape(), &[4, 2, 2]);
+        for i in 0..2 {
+            let slice = x_nd.i((.., .., i)).to_owned();
+            assert!((fingerprint(&slice) - fp2).abs() < 1e-8);
+        }
+    }
 }

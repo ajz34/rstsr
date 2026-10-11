@@ -200,6 +200,81 @@ where
     Ok(())
 }
 
+/// Solve every system of the stack `a` (`(..., M, M)`) in place into the
+/// matching slice of `b` (`(..., M, K)`, or `(..., M)` for the vector form,
+/// widened to `(..., M, 1)` per slice). `a` is read-only; `b` is the (mutable)
+/// right-hand side, so an owned/contiguous `b` is solved without any copy. The
+/// `b` is returned so a caller wrapping it in
+/// [`TensorMutable::ToBeCloned`] can finalize with `clone_to_mut`.
+pub(crate) fn map_stack_slices_inplace<'b, TA, TB, F>(
+    a: TensorView<'_, TA, DeviceFaer, IxD>,
+    mut b: TensorMutable<'b, TB, DeviceFaer, IxD>,
+    order: FlagOrder,
+    mut f: F,
+) -> Result<TensorMutable<'b, TB, DeviceFaer, IxD>>
+where
+    F: FnMut(TensorView<'_, TA, DeviceFaer, Ix2>, TensorMut<'_, TB, DeviceFaer, Ix2>) -> Result<()>,
+{
+    // inner ndim of b: 2 for a matrix stack, 1 for a vector stack
+    let b_inner_ndim = b.view().ndim() + 2 - a.ndim();
+    let (a_iters, a_inner) = batch_parts(a.layout(), order, 2)?;
+    let (b_iters, b_inner) = batch_parts(b.view().layout(), order, b_inner_ndim)?;
+    for (off_a, off_b) in izip!(a_iters, b_iters) {
+        let mut a_i = a_inner.clone().into_dim::<Ix2>()?;
+        let mut b_i = b_inner.clone().into_dim::<IxD>()?;
+        unsafe { a_i.set_offset(off_a) };
+        unsafe { b_i.set_offset(off_b) };
+        let a_slice = {
+            let (storage, _) = a.view().into_raw_parts();
+            unsafe { TensorView::new_unchecked(storage, a_i) }
+        };
+        let (storage, _) = b.view_mut().into_raw_parts();
+        let mut b_slice = unsafe { TensorMut::new_unchecked(storage, b_i) };
+        // a 1-D vector slice is widened to (M, 1)
+        match b_inner_ndim {
+            1 => f(a_slice, b_slice.i_mut((.., None)).into_dim::<Ix2>())?,
+            _ => f(a_slice, b_slice.view_mut().into_dim::<Ix2>())?,
+        }
+    }
+    Ok(b)
+}
+
+/// Validate the operand shapes of a batched `solve`: `a` is `(..., M, M)` and
+/// `b` is `(..., M, K)` or the vector form `(..., M)`; the batch shapes must
+/// agree. Matrix axes follow `order` (last two under `RowMajor`, first two
+/// under `ColMajor`).
+pub(crate) fn check_solve_shapes(a: &[usize], b: &[usize], order: FlagOrder, op: &str) -> Result<()> {
+    let ndim_a = a.len();
+    let ndim_b = b.len();
+    rstsr_assert!(ndim_a >= 2, InvalidLayout, "{op}: a must be at least 2-D, got {ndim_a}")?;
+    rstsr_assert!(
+        ndim_b == ndim_a || ndim_b + 1 == ndim_a,
+        InvalidLayout,
+        "{op}: b must be (..., M, K) or (..., M); got a.ndim() = {ndim_a}, b.ndim() = {ndim_b}"
+    )?;
+    let (batch_a, [m, n]) = batch_and_matrix_shape(a, order)?;
+    rstsr_assert_eq!(m, n, InvalidLayout, "{op}: a must be square, got {m}x{n}")?;
+
+    let is_vec = ndim_b + 1 == ndim_a;
+    let (batch_b, b_m) = if is_vec {
+        let batch = match order {
+            RowMajor => b[..ndim_b - 1].to_vec(),
+            ColMajor => b[1..].to_vec(),
+        };
+        let m_axis = match order {
+            RowMajor => ndim_b - 1,
+            ColMajor => 0,
+        };
+        (batch, b[m_axis])
+    } else {
+        let (batch, [bm, _bk]) = batch_and_matrix_shape(b, order)?;
+        (batch, bm)
+    };
+    rstsr_assert_eq!(b_m, m, InvalidLayout, "{op}: b's row dimension must match a, got {b_m} vs {m}")?;
+    rstsr_assert_eq!(batch_b, batch_a, InvalidLayout, "{op}: a and b must share one batch shape")?;
+    Ok(())
+}
+
 /// As [`map_stack_slices`], for scalar-per-matrix outputs: `out1`/`out2` have
 /// the batch shape and `f` writes one scalar into each per matrix.
 pub(crate) fn map_stack_scalars2<TA, TB1, TB2, F>(
