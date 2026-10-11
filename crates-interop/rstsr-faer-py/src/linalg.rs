@@ -3,11 +3,11 @@
 //!
 //! Wrapper-only: each function marshals a `NativeArray` through an rstsr entry
 //! that already exists on the faer device — the tensor-tier products
-//! (`matmul`, `vecdot`, `matrix_transpose`, `diagonal`) or the faer
-//! factorizations (`cholesky`, `det`, `eigh`, `eigvalsh`, `inv`, `pinv`,
-//! `solve`, `svd`, `svdvals`). Every dispatch body is written once against a
-//! concrete dtype arm, so no generic trait bound is stated here and no faer
-//! type is named.
+//! (`matmul`, `vecdot`, `matrix_transpose`, `diagonal`) or the faer linalg
+//! entries (`cholesky`, `det`, `eigh`, `eigvalsh`, `inv`, `matrix_power`,
+//! `pinv`, `solve`, `svd`, `svdvals`). Every dispatch body is written once
+//! against a concrete dtype arm, so no generic trait bound is stated here and
+//! no faer type is named.
 //!
 //! Names rstsr/faer does not provide (`qr`, `eig`, `eigvals`, `matrix_norm`,
 //! `matrix_rank`, `cross`, the general-`ord` norms) are absent from the

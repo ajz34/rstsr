@@ -1839,8 +1839,6 @@ def iinfo(type, /):
 # standard defines but rstsr/faer does not provide (qr, eig, eigvals,
 # matrix_norm, matrix_rank, cross, and the general-`ord` norms) are absent here —
 # rust-side gaps, recorded in the gap register, never stubbed.
-# `matrix_power` batches over a stack of square matrices; a 2-D-only entry
-# declines a stacked input rust-side.
 
 _EighResult = collections.namedtuple("EighResult", ["eigenvalues", "eigenvectors"])
 _SVDResult = collections.namedtuple("SVDResult", ["U", "S", "Vh"])

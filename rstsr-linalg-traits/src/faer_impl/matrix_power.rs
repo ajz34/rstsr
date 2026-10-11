@@ -26,11 +26,11 @@ where
     rstsr_assert_eq!(m, k, InvalidLayout, "matrix_power: the matrix must be square, got {m}x{k}")?;
 
     if n == 0 {
+        let eye: Tensor<T, DeviceFaer, Ix2> = eye_f((m, &device))?.into_dim::<Ix2>();
         return with_parallel(&device, || {
             let mut out = zeros_f((stack_shape(&batch_shape, &[m, m], order), &device))?;
             map_stack_slices::<T, T, Ix2, _>(a, out.view_mut(), order, |_a_slice, mut out_slice| {
-                let eye: Tensor<T, DeviceFaer, Ix2> = eye_f((m, &device))?.into_dim::<Ix2>();
-                out_slice.assign_f(eye)
+                out_slice.assign_f(eye.view())
             })?;
             Ok(out)
         });
@@ -65,7 +65,11 @@ where
                     z = matmul_f(&z, &z)?;
                 }
             }
-            result.ok_or_else(|| rstsr_error!(RuntimeError, "matrix_power: empty exponent result"))
+            match result {
+                Some(result) => Ok(result),
+                // `e >= 4` has at least one set bit, so the loop always assigns `result`
+                None => unreachable!("matrix_power: exponentiation loop set no result"),
+            }
         },
     }
 }
