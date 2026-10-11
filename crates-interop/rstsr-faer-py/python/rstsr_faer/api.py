@@ -1837,10 +1837,10 @@ def iinfo(type, /):
 
 
 # ------------------------------------------------------------------- linalg --
-# array-API `linalg` extension, over rstsr's existing entries only. Members the
-# standard defines but rstsr/faer does not provide (qr, eig, eigvals,
-# matrix_rank, cross) are absent here — rust-side gaps, recorded in the gap
-# register, never stubbed.
+# array-API `linalg` extension; each member is a thin wrapper over a rstsr/faer
+# entry. Members the standard defines but rstsr/faer does not provide (qr, eig,
+# eigvals, matrix_rank, cross) are absent here — rust-side gaps, recorded in the
+# gap register, never stubbed.
 
 _EighResult = collections.namedtuple("EighResult", ["eigenvalues", "eigenvectors"])
 _SVDResult = collections.namedtuple("SVDResult", ["U", "S", "Vh"])
@@ -1901,7 +1901,7 @@ def matrix_norm(x, /, *, keepdims=False, ord="fro"):
 
 
 def vector_norm(x, /, *, axis=None, keepdims=False, ord=2):
-    return _wrap(_linalg_vector_norm(_handle(x), ord, axis, _py_bool(keepdims)))
+    return _wrap(_linalg_vector_norm(_handle(x), ord, _norm_axes(axis), _py_bool(keepdims)))
 
 
 def pinv(x, /, *, rtol=None):

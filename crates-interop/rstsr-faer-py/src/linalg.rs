@@ -160,20 +160,6 @@ fn py_to_ord(ord: &pyo3::Bound<'_, PyAny>) -> PyResult<rt::linalg::NormOrd> {
     type_err("norm: ord must be None, 'fro'/'nuc', an int, or a float")
 }
 
-/// A Python axis argument (`None`, an int, or a tuple of ints) to `AxesIndex`.
-fn py_to_axes(axis: &pyo3::Bound<'_, PyAny>) -> PyResult<AxesIndex<isize>> {
-    if axis.is_none() {
-        return Ok(AxesIndex::None);
-    }
-    if let Ok(v) = axis.extract::<isize>() {
-        return Ok(AxesIndex::Val(v));
-    }
-    if let Ok(v) = axis.extract::<Vec<isize>>() {
-        return Ok(AxesIndex::Vec(v));
-    }
-    type_err("vector_norm: axis must be None, an int, or a tuple of ints")
-}
-
 /// Matrix norm; `ord` is `'fro'` (default), `'nuc'`, `±1`, `±2`, `±inf`, or `None`.
 #[pyfunction]
 pub fn linalg_matrix_norm(x: &NativeArray, keepdims: bool, ord: &pyo3::Bound<'_, PyAny>) -> PyResult<NativeArray> {
@@ -182,17 +168,21 @@ pub fn linalg_matrix_norm(x: &NativeArray, keepdims: bool, ord: &pyo3::Bound<'_,
     Ok(NativeArray { t })
 }
 
-/// Vector norm; `ord` is a number (default `2`) or `±inf`, and `axis` is `None`
-/// (the whole array), an int, or a tuple of ints.
+/// Vector norm; `ord` is a number (default `2`) or `±inf`, and `axis` (already
+/// marshalled by the Python wrapper) is `None` for the whole array or a list of
+/// axes.
 #[pyfunction]
 pub fn linalg_vector_norm(
     x: &NativeArray,
     ord: &pyo3::Bound<'_, PyAny>,
-    axis: &pyo3::Bound<'_, PyAny>,
+    axis: Option<Vec<isize>>,
     keepdims: bool,
 ) -> PyResult<NativeArray> {
     let ord = py_to_ord(ord)?;
-    let axes = py_to_axes(axis)?;
+    let axes = match axis {
+        Some(v) => AxesIndex::Vec(v),
+        None => AxesIndex::None,
+    };
     let t =
         unary_fc!(x, |a| any_res(rt::linalg::vector_norm_f((a, rt::linalg::VectorNormArgs { ord, axes, keepdims }))))?;
     Ok(NativeArray { t })

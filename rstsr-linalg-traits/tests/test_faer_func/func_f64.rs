@@ -706,9 +706,18 @@ mod test {
         for ord in [1.0f64, 2.0, f64::INFINITY] {
             assert_eq!(rt::linalg::matrix_norm((z.view(), ord)).to_scalar(), 0.0);
         }
+        // the min-based orders too: NumPy itself is inconsistent on an empty
+        // input (it raises for the matrix -2 and for -inf, and gives `inf` for
+        // the vector -1); rstsr returns 0 under every order
+        for ord in [-1.0f64, -2.0, f64::NEG_INFINITY] {
+            assert_eq!(rt::linalg::matrix_norm((z.view(), ord)).to_scalar(), 0.0);
+        }
 
         let zv = rt::asarray((vec![0.0f64; 0], [0].c(), &device));
         for ord in [1.0f64, 2.0, f64::INFINITY] {
+            assert_eq!(rt::linalg::vector_norm((zv.view(), ord)).to_scalar(), 0.0);
+        }
+        for ord in [-1.0f64, f64::NEG_INFINITY] {
             assert_eq!(rt::linalg::vector_norm((zv.view(), ord)).to_scalar(), 0.0);
         }
 

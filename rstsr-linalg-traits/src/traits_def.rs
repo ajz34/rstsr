@@ -1,3 +1,4 @@
+use core::str::FromStr;
 use derive_builder::Builder;
 use rstsr_blas_traits::prelude::BlasFloat;
 use rstsr_core::prelude_dev::*;
@@ -277,7 +278,6 @@ impl TryFrom<Option<()>> for NormOrd {
     }
 }
 
-#[allow(clippy::try_from_instead_of_from_str)]
 impl TryFrom<&str> for NormOrd {
     type Error = Error;
     fn try_from(s: &str) -> Result<Self> {
@@ -286,6 +286,13 @@ impl TryFrom<&str> for NormOrd {
             "nuc" => Ok(NormOrd::Nuc),
             _ => Err(rstsr_error!(InvalidValue, "invalid norm order '{s}'")),
         }
+    }
+}
+
+impl FromStr for NormOrd {
+    type Err = Error;
+    fn from_str(s: &str) -> Result<Self> {
+        Self::try_from(s)
     }
 }
 
@@ -391,7 +398,6 @@ impl TryFrom<(NormOrd, bool)> for VectorNormArgs {
 /// `"fro"`/`"nuc"`, an integer, or a float (`±inf` included).
 macro_rules! impl_matrix_norm_args_ord {
     ($($t: ty),* $(,)?) => {$(
-        #[allow(clippy::try_from_instead_of_from_str)]
         impl TryFrom<$t> for MatrixNormArgs {
             type Error = Error;
             fn try_from(ord: $t) -> Result<Self> {
@@ -412,7 +418,6 @@ impl_matrix_norm_args_ord!(&str, isize, f64);
 
 macro_rules! impl_vector_norm_args_ord {
     ($($t: ty),* $(,)?) => {$(
-        #[allow(clippy::try_from_instead_of_from_str)]
         impl TryFrom<$t> for VectorNormArgs {
             type Error = Error;
             fn try_from(ord: $t) -> Result<Self> {
@@ -456,6 +461,20 @@ impl TryFrom<(NormOrd, AxesIndex<isize>, bool)> for VectorNormArgs {
     type Error = Error;
     fn try_from((ord, axes, keepdims): (NormOrd, AxesIndex<isize>, bool)) -> Result<Self> {
         Ok(Self { ord, axes, keepdims })
+    }
+}
+
+impl FromStr for MatrixNormArgs {
+    type Err = Error;
+    fn from_str(s: &str) -> Result<Self> {
+        Self::try_from(s)
+    }
+}
+
+impl FromStr for VectorNormArgs {
+    type Err = Error;
+    fn from_str(s: &str) -> Result<Self> {
+        Self::try_from(s)
     }
 }
 
