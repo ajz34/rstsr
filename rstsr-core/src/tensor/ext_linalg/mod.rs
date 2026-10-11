@@ -4,6 +4,7 @@
 //! operands may have different dtypes, each pair promoted to their common dtype
 //! before the kernel. The same-dtype entries live in [`crate::tensor::linalg`].
 
+pub mod cross;
 pub mod matmul;
 pub mod outer;
 pub mod tensordot;
@@ -12,6 +13,7 @@ pub mod vecdot;
 pub mod exports {
     use super::*;
 
+    pub use cross::*;
     pub use matmul::*;
     pub use outer::*;
     pub use tensordot::*;

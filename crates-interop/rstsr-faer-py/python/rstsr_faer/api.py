@@ -160,6 +160,7 @@ from .rstsr_faer import (
     linalg_matrix_power as _linalg_matrix_power,
     linalg_matrix_transpose as _linalg_matrix_transpose,
     linalg_outer as _linalg_outer,
+    linalg_cross as _linalg_cross,
     linalg_pinv as _linalg_pinv,
     linalg_solve as _linalg_solve,
     linalg_svd as _linalg_svd,
@@ -1839,7 +1840,7 @@ def iinfo(type, /):
 # ------------------------------------------------------------------- linalg --
 # array-API `linalg` extension; each member is a thin wrapper over a rstsr/faer
 # entry. Members the standard defines but rstsr/faer does not provide (qr, eig,
-# eigvals, matrix_rank, cross) are absent here — rust-side gaps, recorded in the
+# eigvals, matrix_rank) are absent here — rust-side gaps, recorded in the
 # gap register, never stubbed.
 
 _EighResult = collections.namedtuple("EighResult", ["eigenvalues", "eigenvectors"])
@@ -1865,6 +1866,10 @@ def tensordot(x1, x2, /, *, axes=2):
 
 def outer(x1, x2, /):
     return _wrap(_linalg_outer(_handle(x1), _handle(x2)))
+
+
+def cross(x1, x2, /, *, axis=-1):
+    return _wrap(_linalg_cross(_handle(x1), _handle(x2), axis))
 
 
 def cholesky(x, /, *, upper=False):
@@ -1940,6 +1945,7 @@ class _LinalgNamespace:
     matrix_power = staticmethod(matrix_power)
     matrix_transpose = staticmethod(matrix_transpose)
     outer = staticmethod(outer)
+    cross = staticmethod(cross)
     pinv = staticmethod(pinv)
     solve = staticmethod(solve)
     svd = staticmethod(svd)

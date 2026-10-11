@@ -1,3 +1,4 @@
+pub mod test_cross;
 pub mod test_ext_linalg;
 pub mod test_matmul_doc;
 pub mod test_outer;

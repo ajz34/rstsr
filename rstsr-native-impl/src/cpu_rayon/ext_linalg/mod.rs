@@ -4,6 +4,7 @@
 //! different dtypes and each pair is promoted to its common dtype inside the
 //! kernel.
 
+pub mod cross;
 pub mod matmul;
 pub mod outer;
 pub mod tensordot;
