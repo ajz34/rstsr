@@ -169,6 +169,7 @@ from .rstsr_faer import (
     linalg_vecdot as _linalg_vecdot,
     linalg_vector_norm as _linalg_vector_norm,
     linalg_tensordot as _linalg_tensordot,
+    linalg_trace as _linalg_trace,
 )
 
 __array_api_version__ = "2025.12"
@@ -1884,6 +1885,13 @@ def diagonal(x, /, *, offset=0):
     return _wrap(_linalg_diagonal(_handle(x), offset))
 
 
+def trace(x, /, *, offset=0, dtype=None):
+    # `dtype` is the accumulation dtype (the sum rule); rstsr's trace reduces in
+    # the input dtype, so cast the input first — see DTYPE-CASTS.md
+    y = _accumulated(x, dtype)
+    return _wrap(_linalg_trace(_handle(y), offset))
+
+
 def eigh(x, /):
     w, v = _linalg_eigh(_handle(x))
     return _EighResult(_wrap(w), _wrap(v))
@@ -1914,6 +1922,11 @@ def pinv(x, /, *, rtol=None):
 
 
 def solve(x1, x2, /):
+    # rstsr's solve is same-dtype; promote a mixed pair to its common dtype
+    # first — see DTYPE-CASTS.md
+    if isinstance(x1, Array) and isinstance(x2, Array) and x1.dtype is not x2.dtype:
+        common = _promote_pair(x1.dtype, x2.dtype, "solve")
+        x1, x2 = astype(x1, common), astype(x2, common)
     return _wrap(_linalg_solve(_handle(x1), _handle(x2)))
 
 
@@ -1952,6 +1965,7 @@ class _LinalgNamespace:
     svdvals = staticmethod(svdvals)
     slogdet = staticmethod(slogdet)
     tensordot = staticmethod(tensordot)
+    trace = staticmethod(trace)
     vecdot = staticmethod(vecdot)
     vector_norm = staticmethod(vector_norm)
 
