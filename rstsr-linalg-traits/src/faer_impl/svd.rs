@@ -27,10 +27,12 @@ where
     let s = s.column_vector().into_rstsr();
     let v = v.into_rstsr();
 
+    // `into_rstsr` homes the results on `DeviceFaer::default()`, so each device
+    // must be changed back to the input's
     Ok(SVDResult {
-        u: u.into_contig(device.default_order()),
-        s: s.mapv(|v| T::real_part_impl(&v)).into_contig(device.default_order()),
-        vt: v.into_reverse_axes().into_contig(device.default_order()),
+        u: u.into_contig(device.default_order()).change_device_f(&device)?,
+        s: s.mapv(|v| T::real_part_impl(&v)).into_contig(device.default_order()).change_device_f(&device)?,
+        vt: v.into_reverse_axes().into_contig(device.default_order()).change_device_f(&device)?,
     })
 }
 

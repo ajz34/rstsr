@@ -198,7 +198,8 @@ pub fn linalg_svdvals(x: &NativeArray) -> PyResult<NativeArray> {
     Ok(NativeArray { t })
 }
 
-/// Sign and log-absolute-determinant, each as a 0-d array.
+/// Sign and log-absolute-determinant: a 0-d array for a 2-D input, or the
+/// batch-shaped arrays for a stack of matrices.
 #[pyfunction]
 pub fn linalg_slogdet(x: &NativeArray) -> PyResult<(NativeArray, NativeArray)> {
     let (sign, logabsdet) = unary_fc!(x, |a| {

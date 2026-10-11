@@ -56,7 +56,9 @@ where
         Upper => result.L().adjoint().to_owned(),
     };
     // convert to rstsr tensor with certain layout
-    let result = result.into_rstsr().into_contig(device.default_order());
+    // `into_rstsr` homes the result on `DeviceFaer::default()`, so the device
+    // must be changed back to the input's, else `assign_f` below rejects it
+    let result = result.into_rstsr().into_contig(device.default_order()).change_device_f(&device)?;
 
     out.assign_f(result)
 }

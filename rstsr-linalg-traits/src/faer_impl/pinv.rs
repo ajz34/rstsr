@@ -26,16 +26,18 @@ where
     });
 
     // transform to faer matrix
+    let device = a.device().clone();
     let faer_a = a.into_faer();
 
     // svd computation
     let svd_result = faer_a.thin_svd().map_err(|e| rstsr_error!(FaerError, "Faer SvD error: {e:?}"))?;
     let (u, s, v) = (svd_result.U(), svd_result.S(), svd_result.V());
 
-    // return to rstsr tensors
-    let u = u.into_rstsr().into_owned();
-    let s = s.column_vector().into_rstsr();
-    let v = v.into_rstsr();
+    // return to rstsr tensors; `into_rstsr` homes them on `DeviceFaer::default()`,
+    // so each device must be changed back to the input's
+    let u = u.into_rstsr().into_owned().change_device_f(&device)?;
+    let s = s.column_vector().into_rstsr().change_device_f(&device)?;
+    let v = v.into_rstsr().change_device_f(&device)?;
 
     // compute pinv
     let s = s.mapv(|x| T::real_part_impl(&x));

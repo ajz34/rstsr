@@ -32,10 +32,11 @@ where
         .self_adjoint_eigen(faer_uplo)
         .map_err(|e| rstsr_error!(FaerError, "Faer SelfAdjointEigen error: {e:?}"))?;
 
-    // convert eigenvalues to real
+    // convert eigenvalues to real; `into_rstsr` homes the results on
+    // `DeviceFaer::default()`, so each device must be changed back to the input's
     let eigenvalues: TensorView<T, DeviceFaer, _> = result.S().column_vector().into_rstsr();
-    let eigenvalues = eigenvalues.mapv(|v| T::real_part_impl(&v));
-    let eigenvectors = result.U().into_rstsr().into_contig(device.default_order());
+    let eigenvalues = eigenvalues.mapv(|v| T::real_part_impl(&v)).change_device_f(&device)?;
+    let eigenvectors = result.U().into_rstsr().into_contig(device.default_order()).change_device_f(&device)?;
 
     Ok((eigenvalues, eigenvectors))
 }
@@ -98,8 +99,7 @@ where
     )?;
     let batch_out = broadcast_shapes_f(&[batch_a, batch_b], order)?;
 
-    let mut full = batch_out.clone();
-    full.extend_from_slice(&[m, m]);
+    let full = stack_shape(&batch_out, &[m, m], order);
     let a_b = a.broadcast_to(full.clone());
     let b_b = b.broadcast_to(full);
     let faer_par = device.get_current_pool().map_or(Par::Seq, |pool| Par::rayon(pool.current_num_threads()));
@@ -186,12 +186,14 @@ where
             let eig_a = a
                 .self_adjoint_eigen(faer_uplo)
                 .map_err(|e| rstsr_error!(FaerError, "Faer SelfAdjointEigen error: {e:?}"))?;
-            let e = eig_a.S().column_vector().into_rstsr().mapv(|v| T::real_part_impl(&v));
+            // `into_rstsr` homes its result on `DeviceFaer::default()`, so change
+            // each device back to the input's
+            let e = eig_a.S().column_vector().into_rstsr().mapv(|v| T::real_part_impl(&v)).change_device_f(&device)?;
 
             // inv(l.t.conj) @ c
             let mut c = eig_a.U().to_owned();
             faer::linalg::triangular_solve::solve_upper_triangular_in_place(l.adjoint(), c.as_mut(), faer_par);
-            let c = c.into_rstsr().into_contig(device.default_order());
+            let c = c.into_rstsr().into_contig(device.default_order()).change_device_f(&device)?;
 
             (e, c)
         },
@@ -211,7 +213,9 @@ where
             let eig_a = a
                 .self_adjoint_eigen(faer_uplo)
                 .map_err(|e| rstsr_error!(FaerError, "Faer SelfAdjointEigen error: {e:?}"))?;
-            let e = eig_a.S().column_vector().into_rstsr().mapv(|v| T::real_part_impl(&v));
+            // `into_rstsr` homes its result on `DeviceFaer::default()`, so change
+            // each device back to the input's
+            let e = eig_a.S().column_vector().into_rstsr().mapv(|v| T::real_part_impl(&v)).change_device_f(&device)?;
 
             let mut c = eig_a.U().to_owned();
             match itype {
@@ -223,7 +227,7 @@ where
                 ),
                 _ => unreachable!(),
             };
-            let c = c.into_rstsr().into_contig(device.default_order());
+            let c = c.into_rstsr().into_contig(device.default_order()).change_device_f(&device)?;
 
             (e, c)
         },

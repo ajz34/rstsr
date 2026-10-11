@@ -16,7 +16,9 @@ where
     let faer_a = a.into_faer();
     let svd_result = faer_a.svd().map_err(|e| rstsr_error!(FaerError, "Faer SvD error: {e:?}"))?;
     let result = svd_result.inverse();
-    Ok(result.as_ref().into_rstsr().into_contig(device.default_order()))
+    // `into_rstsr` homes the result on `DeviceFaer::default()`, so the device
+    // must be changed back to the input's
+    result.as_ref().into_rstsr().into_contig(device.default_order()).change_device_f(&device)
 }
 
 pub fn faer_impl_inv_f<T>(a: TensorView<'_, T, DeviceFaer, IxD>) -> Result<Tensor<T, DeviceFaer, IxD>>

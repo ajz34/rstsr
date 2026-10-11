@@ -10,6 +10,9 @@ use rstsr_core::prelude_dev::*;
 /// triangular matrices and right-hand side `b` of `(..., M, K)` matrices or
 /// `(..., M)` vectors. The two batch shapes broadcast against each other.
 ///
+/// `a` must be square; a rectangular `a` is rejected rather than solved in the
+/// least-squares sense (the array-API contract).
+///
 /// An owned or contiguous mutable `b` is solved in place (its own buffer is the
 /// output, so no data is copied); only the non-contiguous mutable and the
 /// immutable cases allocate a work buffer. Because an in-place solve cannot grow,
@@ -34,20 +37,18 @@ where
     let a_b = a.to_broadcast_f(plan.a_shape(order))?;
     let out_shape = plan.out_shape(order);
 
-    let b_mut = overwritable_convert(b)?;
-    let target = if b_mut.view().shape().as_slice() == out_shape.as_slice() {
-        b_mut
+    // Decide from `b` itself: an immutable `b` that must grow to the solution
+    // shape is broadcast straight from its view, so the contiguity copy
+    // `overwritable_convert` would make is never taken.
+    let target = if b.shape().as_slice() == out_shape.as_slice() {
+        overwritable_convert(b)?
+    } else if b.is_ref() {
+        TensorMutable::Owned(TensorView::from(b).to_broadcast_f(out_shape)?.to_owned())
     } else {
-        match b_mut {
-            // the solution batch outgrows b: only an allocating (owned) b can hold it
-            TensorMutable::Owned(t) => TensorMutable::Owned(t.to_broadcast_f(out_shape)?.to_owned()),
-            _ => {
-                return rstsr_raise!(
-                    InvalidLayout,
-                    "solve_triangular: an in-place solve needs the solution shape to equal b's shape"
-                )
-            },
-        }
+        return rstsr_raise!(
+            InvalidLayout,
+            "solve_triangular: an in-place solve needs the solution shape to equal b's shape"
+        );
     };
     let done = map_stack_slices_inplace(a_b, target, order, |a_slice, b_slice| {
         let faer_a = a_slice.into_faer();
