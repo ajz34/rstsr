@@ -200,6 +200,63 @@ where
     Ok(())
 }
 
+/// As [`map_stack_slices`], for two read-only inputs and two outputs computed
+/// together from matching slices (generalized `eigh`: operands `a`, `b` ->
+/// eigenvalues and eigenvectors).
+pub(crate) fn map_stack_slices2x2<TA, TB, TC1, DC1, TC2, DC2, F>(
+    a: TensorView<'_, TA, DeviceFaer, IxD>,
+    b: TensorView<'_, TB, DeviceFaer, IxD>,
+    mut out1: TensorMut<'_, TC1, DeviceFaer, IxD>,
+    mut out2: TensorMut<'_, TC2, DeviceFaer, IxD>,
+    order: FlagOrder,
+    mut f: F,
+) -> Result<()>
+where
+    DC1: DimAPI,
+    DC2: DimAPI,
+    F: FnMut(
+        TensorView<'_, TA, DeviceFaer, Ix2>,
+        TensorView<'_, TB, DeviceFaer, Ix2>,
+        TensorMut<'_, TC1, DeviceFaer, DC1>,
+        TensorMut<'_, TC2, DeviceFaer, DC2>,
+    ) -> Result<()>,
+{
+    let inner1 = out1.ndim() + 2 - a.ndim();
+    let inner2 = out2.ndim() + 2 - a.ndim();
+    let (a_iters, a_inner) = batch_parts(a.layout(), order, 2)?;
+    let (b_iters, b_inner) = batch_parts(b.layout(), order, 2)?;
+    let (o1_iters, o1_inner) = batch_parts(out1.layout(), order, inner1)?;
+    let (o2_iters, o2_inner) = batch_parts(out2.layout(), order, inner2)?;
+    for (off_a, off_b, off1, off2) in izip!(a_iters, b_iters, o1_iters, o2_iters) {
+        let mut a_i = a_inner.clone().into_dim::<Ix2>()?;
+        let mut b_i = b_inner.clone().into_dim::<Ix2>()?;
+        let mut o1_i = o1_inner.clone().into_dim::<DC1>()?;
+        let mut o2_i = o2_inner.clone().into_dim::<DC2>()?;
+        unsafe { a_i.set_offset(off_a) };
+        unsafe { b_i.set_offset(off_b) };
+        unsafe { o1_i.set_offset(off1) };
+        unsafe { o2_i.set_offset(off2) };
+        let a_slice = {
+            let (storage, _) = a.view().into_raw_parts();
+            unsafe { TensorView::new_unchecked(storage, a_i) }
+        };
+        let b_slice = {
+            let (storage, _) = b.view().into_raw_parts();
+            unsafe { TensorView::new_unchecked(storage, b_i) }
+        };
+        let o1_slice = {
+            let (storage, _) = out1.view_mut().into_raw_parts();
+            unsafe { TensorMut::new_unchecked(storage, o1_i) }
+        };
+        let o2_slice = {
+            let (storage, _) = out2.view_mut().into_raw_parts();
+            unsafe { TensorMut::new_unchecked(storage, o2_i) }
+        };
+        f(a_slice, b_slice, o1_slice, o2_slice)?;
+    }
+    Ok(())
+}
+
 /// Solve every system of the stack `a` (`(..., M, M)`) in place into the
 /// matching slice of `b` (`(..., M, K)`, or `(..., M)` for the vector form,
 /// widened to `(..., M, 1)` per slice). `a` is read-only; `b` is the (mutable)
@@ -239,40 +296,54 @@ where
     Ok(b)
 }
 
-/// Validate the operand shapes of a batched `solve`: `a` is `(..., M, M)` and
-/// `b` is `(..., M, K)` or the vector form `(..., M)`; the batch shapes must
-/// agree. Matrix axes follow `order` (last two under `RowMajor`, first two
-/// under `ColMajor`).
-pub(crate) fn check_solve_shapes(a: &[usize], b: &[usize], order: FlagOrder, op: &str) -> Result<()> {
+/// Broadcast plan for a batched `solve`: `a` is `(..., M, M)`, `b` is
+/// `(..., M, K)` or the vector form `(..., M)`, and the two batch shapes
+/// broadcast to `batch_out`. Matrix axes follow `order` (last two under
+/// `RowMajor`, first two under `ColMajor`).
+pub(crate) struct SolvePlan {
+    pub batch_out: Vec<usize>,
+    pub m: usize,
+    pub k: usize,
+    pub is_vec: bool,
+}
+
+impl SolvePlan {
+    /// Shape of the broadcast solution: `batch_out ++ [M, K]` (`batch_out ++ [M]`
+    /// for the vector form), placed per `order` (batch then inner under
+    /// `RowMajor`, inner then batch under `ColMajor`).
+    pub fn out_shape(&self, order: FlagOrder) -> Vec<usize> {
+        let inner = if self.is_vec { vec![self.m] } else { vec![self.m, self.k] };
+        stack_shape(&self.batch_out, &inner, order)
+    }
+
+    /// Shape of the broadcast matrix stack: `batch_out ++ [M, M]`, per `order`.
+    pub fn a_shape(&self, order: FlagOrder) -> Vec<usize> {
+        stack_shape(&self.batch_out, &[self.m, self.m], order)
+    }
+}
+
+pub(crate) fn solve_plan(a: &[usize], b: &[usize], order: FlagOrder, op: &str) -> Result<SolvePlan> {
     let ndim_a = a.len();
     let ndim_b = b.len();
     rstsr_assert!(ndim_a >= 2, InvalidLayout, "{op}: a must be at least 2-D, got {ndim_a}")?;
-    rstsr_assert!(
-        ndim_b == ndim_a || ndim_b + 1 == ndim_a,
-        InvalidLayout,
-        "{op}: b must be (..., M, K) or (..., M); got a.ndim() = {ndim_a}, b.ndim() = {ndim_b}"
-    )?;
+    rstsr_assert!(ndim_b >= 1, InvalidLayout, "{op}: b must have at least 1 dimension")?;
+    // array-API rule: b is a vector iff it is 1-D; otherwise it is a matrix stack
+    // `(..., M, K)` (numpy / array-api-tests `solve_args`). Only the batch dims
+    // broadcast.
+    let is_vec = ndim_b == 1;
     let (batch_a, [m, n]) = batch_and_matrix_shape(a, order)?;
     rstsr_assert_eq!(m, n, InvalidLayout, "{op}: a must be square, got {m}x{n}")?;
 
-    let is_vec = ndim_b + 1 == ndim_a;
-    let (batch_b, b_m) = if is_vec {
-        let batch = match order {
-            RowMajor => b[..ndim_b - 1].to_vec(),
-            ColMajor => b[1..].to_vec(),
-        };
-        let m_axis = match order {
-            RowMajor => ndim_b - 1,
-            ColMajor => 0,
-        };
-        (batch, b[m_axis])
+    let (batch_b, k) = if is_vec {
+        rstsr_assert_eq!(b[0], m, InvalidLayout, "{op}: vector b length must match a, got {} vs {m}", b[0])?;
+        (Vec::new(), 1)
     } else {
-        let (batch, [bm, _bk]) = batch_and_matrix_shape(b, order)?;
-        (batch, bm)
+        let (batch, [bm, bk]) = batch_and_matrix_shape(b, order)?;
+        rstsr_assert_eq!(bm, m, InvalidLayout, "{op}: b's row dimension must match a, got {bm} vs {m}")?;
+        (batch, bk)
     };
-    rstsr_assert_eq!(b_m, m, InvalidLayout, "{op}: b's row dimension must match a, got {b_m} vs {m}")?;
-    rstsr_assert_eq!(batch_b, batch_a, InvalidLayout, "{op}: a and b must share one batch shape")?;
-    Ok(())
+    let batch_out = broadcast_shapes_f(&[batch_a, batch_b], order)?;
+    Ok(SolvePlan { batch_out, m, k, is_vec })
 }
 
 /// As [`map_stack_slices`], for scalar-per-matrix outputs: `out1`/`out2` have

@@ -1,4 +1,4 @@
-use crate::faer_impl::batch::{check_solve_shapes, map_stack_slices_inplace, with_parallel};
+use crate::faer_impl::batch::{map_stack_slices_inplace, solve_plan, with_parallel};
 use crate::traits_def::SolveGeneralAPI;
 use faer::prelude::*;
 use faer::traits::ComplexField;
@@ -8,12 +8,13 @@ use rstsr_core::prelude_dev::*;
 
 /// n-dim `solve_general`: solve `a x = b` for a stack `a` of `(..., M, M)`
 /// matrices and right-hand side `b` of `(..., M, K)` matrices or `(..., M)`
-/// vectors.
+/// vectors. The two batch shapes broadcast against each other.
 ///
 /// An owned or contiguous mutable `b` is solved in place (its own buffer is the
 /// output, so no data is copied); only the non-contiguous mutable and the
-/// immutable cases allocate a contiguous work buffer, as selected by
-/// [`overwritable_convert`].
+/// immutable cases allocate a work buffer. Because an in-place solve cannot grow,
+/// a batched `a` whose batch does not fit into `b`'s requires an immutable `b`
+/// (the allocating form).
 pub fn faer_impl_solve_general_f<'b, T>(
     a: TensorView<'_, T, DeviceFaer, IxD>,
     b: TensorReference<'b, T, DeviceFaer, IxD>,
@@ -23,11 +24,27 @@ where
 {
     let device = a.device().clone();
     let order = device.default_order();
-    check_solve_shapes(a.shape(), b.shape(), order, "solve_general")?;
+    let plan = solve_plan(a.shape(), b.shape(), order, "solve_general")?;
+    let a_b = a.to_broadcast_f(plan.a_shape(order))?;
+    let out_shape = plan.out_shape(order);
 
     with_parallel(&device, || {
         let b_mut = overwritable_convert(b)?;
-        let done = map_stack_slices_inplace(a, b_mut, order, |a_slice, b_slice| {
+        let target = if b_mut.view().shape().as_slice() == out_shape.as_slice() {
+            b_mut
+        } else {
+            match b_mut {
+                // the solution batch outgrows b: only an allocating (owned) b can hold it
+                TensorMutable::Owned(t) => TensorMutable::Owned(t.to_broadcast_f(out_shape)?.to_owned()),
+                _ => {
+                    return rstsr_raise!(
+                        InvalidLayout,
+                        "solve_general: an in-place solve needs the solution shape to equal b's shape"
+                    )
+                },
+            }
+        };
+        let done = map_stack_slices_inplace(a_b, target, order, |a_slice, b_slice| {
             // solve linear system
             let faer_a = a_slice.into_faer();
             let faer_b = b_slice.into_faer();
@@ -52,13 +69,13 @@ where
     DA: DimAPI,
     DB: DimAPI,
 {
-    type Out = Tensor<T, DeviceFaer, DB>;
+    type Out = Tensor<T, DeviceFaer, IxD>;
     fn solve_general_f(self) -> Result<Self::Out> {
         let (a, b) = self;
         let a_dyn = a.to_dyn();
         let b_dyn = b.to_dyn();
         let result = faer_impl_solve_general_f(a_dyn, b_dyn.into())?;
-        Ok(result.into_owned().into_dim::<DB>())
+        Ok(result.into_owned())
     }
 }
 
@@ -99,13 +116,13 @@ where
     DA: DimAPI,
     DB: DimAPI,
 {
-    type Out = Tensor<T, DeviceFaer, DB>;
+    type Out = Tensor<T, DeviceFaer, IxD>;
     fn solve_general_f(self) -> Result<Self::Out> {
         let (a, b) = self;
         let a_dyn = a.to_dyn();
         let b_dyn = b.to_dyn();
         let result = faer_impl_solve_general_f(a_dyn, b_dyn.into())?;
-        Ok(result.into_owned().into_dim::<DB>())
+        Ok(result.into_owned())
     }
 }
 
