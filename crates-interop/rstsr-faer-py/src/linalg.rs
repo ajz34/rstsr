@@ -3,16 +3,17 @@
 //!
 //! Wrapper-only: each function marshals a `NativeArray` through an rstsr entry
 //! that already exists on the faer device — the tensor-tier products
-//! (`matmul`, `vecdot`, `matrix_transpose`, `diagonal`) or the faer
-//! factorizations (`cholesky`, `det`, `eigh`, `eigvalsh`, `inv`, `pinv`,
-//! `solve`, `svd`, `svdvals`). Every dispatch body is written once against a
-//! concrete dtype arm, so no generic trait bound is stated here and no faer
-//! type is named.
+//! (`matmul`, `vecdot`, `matrix_transpose`, `diagonal`) or the faer linalg
+//! entries (`cholesky`, `det`, `eigh`, `eigvalsh`, `inv`, `matrix_power`,
+//! `pinv`, `solve`, `svd`, `svdvals`). Every dispatch body is written once
+//! against a concrete dtype arm, so no generic trait bound is stated here and
+//! no faer type is named.
 //!
 //! Names rstsr/faer does not provide (`qr`, `eig`, `eigvals`, `matrix_norm`,
-//! `matrix_power`, `matrix_rank`, `cross`, the general-`ord` norms) are absent
-//! from the namespace, never stubbed — they are rust-side gaps. `trace` is now
-//! available rust-side (`rt::trace`) but not yet bound here.
+//! `matrix_rank`, `cross`, the general-`ord` norms) are absent from the
+//! namespace, never stubbed — they are rust-side gaps. `matrix_power` (via
+//! `rt::linalg::matrix_power`) and `trace` (`rt::trace`) are available
+//! rust-side; `matrix_power` is bound here, `trace` is not yet.
 
 use core::mem::MaybeUninit;
 use core::ops::{Add, Mul};
@@ -132,6 +133,13 @@ pub fn linalg_eigvalsh(x: &NativeArray) -> PyResult<NativeArray> {
 #[pyfunction]
 pub fn linalg_inv(x: &NativeArray) -> PyResult<NativeArray> {
     let t = unary_fc!(x, |a| any_res(rt::linalg::inv_f(a)))?;
+    Ok(NativeArray { t })
+}
+
+/// Integer matrix power; a negative exponent inverts the base first.
+#[pyfunction]
+pub fn linalg_matrix_power(x: &NativeArray, n: isize) -> PyResult<NativeArray> {
+    let t = unary_fc!(x, |a| any_res(rt::linalg::matrix_power_f((a, n))))?;
     Ok(NativeArray { t })
 }
 
