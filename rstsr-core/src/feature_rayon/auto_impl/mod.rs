@@ -2,6 +2,7 @@ pub mod adv_indexing;
 pub mod array_indexing;
 pub mod assignment;
 pub mod creation;
+pub mod cross;
 pub mod nonzero;
 pub mod op_binary_arithmetic;
 pub mod op_binary_common;

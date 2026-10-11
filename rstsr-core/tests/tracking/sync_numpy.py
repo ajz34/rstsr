@@ -82,6 +82,9 @@ SURFACE = [
     ("_core/tests/test_numeric.py", "TestRoll", "test_roll_big_int"),
     # --- test_numeric.py (linear algebra) ---
     ("_core/tests/test_numeric.py", "TestNonarrayArgs", "test_trace"),
+    # --- _core/tests/test_numeric.py (linalg: cross) ---
+    ("_core/tests/test_numeric.py", "TestCross", "test_3x3"),
+    ("_core/tests/test_numeric.py", "TestCross", "test_broadcasting_shapes"),
     # --- test_regression.py ---
     ("_core/tests/test_regression.py", "TestRegression", "test_reshape_order"),
     ("_core/tests/test_regression.py", "TestRegression", "test_reshape_zero_strides"),

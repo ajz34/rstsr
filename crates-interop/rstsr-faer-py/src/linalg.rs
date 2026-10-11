@@ -3,20 +3,20 @@
 //!
 //! Wrapper-only: each function marshals a `NativeArray` through an rstsr entry
 //! that already exists on the faer device — the tensor-tier products
-//! (`matmul`, `vecdot`, `matrix_transpose`, `diagonal`) or the faer linalg
+//! (`matmul`, `vecdot`, `cross`, `matrix_transpose`, `diagonal`) or the faer linalg
 //! entries (`cholesky`, `det`, `eigh`, `eigvalsh`, `inv`, `matrix_norm`,
 //! `matrix_power`, `pinv`, `solve`, `svd`, `svdvals`, `vector_norm`). Every
 //! dispatch body is written once against a concrete dtype arm, so no generic
 //! trait bound is stated here and no faer type is named.
 //!
-//! Names rstsr/faer does not provide (`qr`, `eig`, `eigvals`, `matrix_rank`,
-//! `cross`) are absent from the namespace, never stubbed — they are rust-side
+//! Names rstsr/faer does not provide (`qr`, `eig`, `eigvals`, `matrix_rank`)
+//! are absent from the namespace, never stubbed — they are rust-side
 //! gaps. `matrix_power` (via `rt::linalg::matrix_power`) and `trace`
 //! (`rt::trace`) are available rust-side; `matrix_power` is bound here,
 //! `trace` is not yet.
 
 use core::mem::MaybeUninit;
-use core::ops::{Add, Mul};
+use core::ops::{Add, Mul, Sub};
 
 use num::{Complex, One, Zero};
 use pyo3::exceptions::PyTypeError;
@@ -25,7 +25,7 @@ use pyo3::types::{PyAny, PySequence, PySequenceMethods};
 use rstsr::prelude::rt;
 use rstsr::prelude::*;
 use rstsr_core::operators::exports::{
-    DeviceExtMatMulAPI, DeviceExtOuterAPI, DeviceExtTensordotAPI, DeviceExtVecdotAPI,
+    DeviceExtCrossAPI, DeviceExtMatMulAPI, DeviceExtOuterAPI, DeviceExtTensordotAPI, DeviceExtVecdotAPI,
 };
 use rstsr_core::storage::exports::{DeviceCreationAnyAPI, DeviceRawAPI};
 use rstsr_dtype_traits::{DTypePromoteAPI, ExtNum};
@@ -381,6 +381,36 @@ where
 #[pyfunction]
 pub fn linalg_outer(x1: &NativeArray, x2: &NativeArray) -> PyResult<NativeArray> {
     let t = dispatch_bin_promote_arith!(x1.t, x2.t, "outer", op_ext_outer)?;
+    Ok(NativeArray { t })
+}
+
+/// Mixed-dtype cross-product wrapper: each product pair promotes to its common
+/// dtype ([`DTypePromoteAPI`]), which is also the result dtype.
+fn op_ext_cross<T, U>(
+    a: &FTensor<T>,
+    b: &FTensor<U>,
+    axis: isize,
+) -> rt::Result<FTensor<<T as DTypePromoteAPI<U>>::Res>>
+where
+    T: DTypePromoteAPI<U> + Clone + Send + Sync,
+    U: Clone + Send + Sync,
+    <T as DTypePromoteAPI<U>>::Res: Clone + Send + Sync,
+    <T as DTypePromoteAPI<U>>::Res: Mul<<T as DTypePromoteAPI<U>>::Res, Output = <T as DTypePromoteAPI<U>>::Res>
+        + Sub<<T as DTypePromoteAPI<U>>::Res, Output = <T as DTypePromoteAPI<U>>::Res>,
+    DeviceFaer: DeviceExtCrossAPI<T, U, <T as DTypePromoteAPI<U>>::Res, IxD>
+        + DeviceAPI<<T as DTypePromoteAPI<U>>::Res>
+        + DeviceCreationAnyAPI<<T as DTypePromoteAPI<U>>::Res>
+        + DeviceRawAPI<MaybeUninit<<T as DTypePromoteAPI<U>>::Res>>,
+{
+    // the shim's handles are dynamic (`IxD`); the core entry keeps the broadcast rank
+    rt::ext_cross_f(a, b, axis).map(|t| t.into_dim::<IxD>())
+}
+
+/// Cross product of 3-element vectors along `axis` (default the last axis),
+/// promoting mixed-dtype operands to their common dtype.
+#[pyfunction]
+pub fn linalg_cross(x1: &NativeArray, x2: &NativeArray, axis: isize) -> PyResult<NativeArray> {
+    let t = dispatch_bin_promote_arith!(x1.t, x2.t, "cross", op_ext_cross, axis)?;
     Ok(NativeArray { t })
 }
 

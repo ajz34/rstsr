@@ -16,6 +16,8 @@ pub use crate::cpu_serial::adv_indexing_take_along::*;
 pub use crate::cpu_serial::array_indexing::*;
 pub use crate::cpu_serial::assignment::*;
 pub use crate::cpu_serial::creation::*;
+pub use crate::cpu_serial::cross::*;
+pub use crate::cpu_serial::ext_linalg::cross::*;
 pub use crate::cpu_serial::ext_linalg::matmul::*;
 pub use crate::cpu_serial::ext_linalg::outer::*;
 pub use crate::cpu_serial::ext_linalg::tensordot::*;
@@ -41,6 +43,8 @@ mod cpu_rayon {
     pub use crate::cpu_rayon::array_indexing::*;
     pub use crate::cpu_rayon::assignment::*;
     pub use crate::cpu_rayon::creation::*;
+    pub use crate::cpu_rayon::cross::*;
+    pub use crate::cpu_rayon::ext_linalg::cross::*;
     pub use crate::cpu_rayon::ext_linalg::matmul::*;
     pub use crate::cpu_rayon::ext_linalg::outer::*;
     pub use crate::cpu_rayon::ext_linalg::tensordot::*;

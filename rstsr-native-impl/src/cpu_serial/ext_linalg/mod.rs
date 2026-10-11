@@ -5,6 +5,7 @@
 //! common dtype inside the kernel. The same-dtype kernels live in the
 //! corresponding `linalg`/`matmul_naive` modules.
 
+pub mod cross;
 pub mod matmul;
 pub mod outer;
 pub mod tensordot;

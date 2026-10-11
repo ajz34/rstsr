@@ -102,3 +102,28 @@ mod doc_ext_outer {
         assert_eq!(format!("{c}"), "[[ 4 5]\n [ 8 10]\n [ 12 15]]");
     }
 }
+
+#[cfg(test)]
+mod doc_ext_cross {
+    use super::*;
+    static FUNC: &str = "doc_ext_cross";
+
+    #[test]
+    fn test_doc() {
+        crate::specify_test!("test_doc");
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        let a = rt::tensor_from_nested!([1i8, 2, 3], &device);
+        let b = rt::tensor_from_nested!([4i16, 5, 6], &device);
+        let c = rt::ext_cross(&a, &b, -1);
+        println!("{c}");
+        // [-3  6 -3]
+        // i8 x i16 -> i16
+        assert_eq!(c.to_vec(), vec![-3i16, 6, -3]);
+
+        // the same-dtype form agrees when the operands already share a dtype
+        let a2 = rt::tensor_from_nested!([1i16, 2, 3], &device);
+        assert_eq!(c.to_vec(), rt::cross(&a2, &b, -1).to_vec());
+    }
+}
