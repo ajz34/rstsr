@@ -152,7 +152,9 @@ from .rstsr_faer import (
     linalg_cholesky as _linalg_cholesky,
     linalg_det as _linalg_det,
     linalg_diagonal as _linalg_diagonal,
+    linalg_eig as _linalg_eig,
     linalg_eigh as _linalg_eigh,
+    linalg_eigvals as _linalg_eigvals,
     linalg_eigvalsh as _linalg_eigvalsh,
     linalg_inv as _linalg_inv,
     linalg_matmul as _linalg_matmul,
@@ -1841,10 +1843,10 @@ def iinfo(type, /):
 
 # ------------------------------------------------------------------- linalg --
 # array-API `linalg` extension; each member is a thin wrapper over a rstsr/faer
-# entry. Members the standard defines but rstsr/faer does not provide (qr, eig,
-# eigvals, matrix_rank) are absent here — rust-side gaps, recorded in the
-# gap register, never stubbed.
+# entry. Members the standard defines but rstsr/faer does not provide (qr) are
+# absent here — a rust-side gap, recorded in the gap register, never stubbed.
 
+_EigResult = collections.namedtuple("EigResult", ["eigenvalues", "eigenvectors"])
 _EighResult = collections.namedtuple("EighResult", ["eigenvalues", "eigenvectors"])
 _SVDResult = collections.namedtuple("SVDResult", ["U", "S", "Vh"])
 _SLogDetResult = collections.namedtuple("SLogDetResult", ["sign", "logabsdet"])
@@ -1893,9 +1895,18 @@ def trace(x, /, *, offset=0, dtype=None):
     return _wrap(_linalg_trace(_handle(y), offset))
 
 
+def eig(x, /):
+    w, v = _linalg_eig(_handle(x))
+    return _EigResult(_wrap(w), _wrap(v))
+
+
 def eigh(x, /):
     w, v = _linalg_eigh(_handle(x))
     return _EighResult(_wrap(w), _wrap(v))
+
+
+def eigvals(x, /):
+    return _wrap(_linalg_eigvals(_handle(x)))
 
 
 def eigvalsh(x, /):
@@ -1978,7 +1989,9 @@ class _LinalgNamespace:
     cholesky = staticmethod(cholesky)
     det = staticmethod(det)
     diagonal = staticmethod(diagonal)
+    eig = staticmethod(eig)
     eigh = staticmethod(eigh)
+    eigvals = staticmethod(eigvals)
     eigvalsh = staticmethod(eigvalsh)
     inv = staticmethod(inv)
     matmul = staticmethod(matmul)

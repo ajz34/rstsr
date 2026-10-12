@@ -9,7 +9,9 @@ use rstsr_core::prelude_dev::*;
     LinalgAPI            func               func_f             ;
    [CholeskyAPI       ] [cholesky        ] [cholesky_f        ];
    [DetAPI            ] [det             ] [det_f             ];
+   [EigAPI            ] [eig             ] [eig_f             ];
    [EighAPI           ] [eigh            ] [eigh_f            ];
+   [EigvalsAPI        ] [eigvals         ] [eigvals_f         ];
    [EigvalshAPI       ] [eigvalsh        ] [eigvalsh_f        ];
    [InvAPI            ] [inv             ] [inv_f             ];
    [MatrixNormAPI     ] [matrix_norm     ] [matrix_norm_f     ];
@@ -39,7 +41,9 @@ pub trait LinalgAPI<Inp> {
     LinalgAPI            func               func_f             ;
    [CholeskyAPI       ] [cholesky        ] [cholesky_f        ];
    [DetAPI            ] [det             ] [det_f             ];
+   [EigAPI            ] [eig             ] [eig_f             ];
    [EighAPI           ] [eigh            ] [eigh_f            ];
+   [EigvalsAPI        ] [eigvals         ] [eigvals_f         ];
    [EigvalshAPI       ] [eigvalsh        ] [eigvalsh_f        ];
    [InvAPI            ] [inv             ] [inv_f             ];
    [MatrixNormAPI     ] [matrix_norm     ] [matrix_norm_f     ];
@@ -65,7 +69,9 @@ where
     LinalgAPI            func               func_f             ;
    [CholeskyAPI       ] [cholesky        ] [cholesky_f        ];
    [DetAPI            ] [det             ] [det_f             ];
+   [EigAPI            ] [eig             ] [eig_f             ];
    [EighAPI           ] [eigh            ] [eigh_f            ];
+   [EigvalsAPI        ] [eigvals         ] [eigvals_f         ];
    [EigvalshAPI       ] [eigvalsh        ] [eigvalsh_f        ];
    [InvAPI            ] [inv             ] [inv_f             ];
    [MatrixNormAPI     ] [matrix_norm     ] [matrix_norm_f     ];
@@ -85,6 +91,27 @@ where
     Args: LinalgAPI<Inp>,
 {
     Args::func(args)
+}
+
+/* #endregion */
+
+/* #region eig */
+
+pub struct EigResult<W, V> {
+    pub eigenvalues: W,
+    pub eigenvectors: V,
+}
+
+impl<W, V> From<(W, V)> for EigResult<W, V> {
+    fn from((vals, vecs): (W, V)) -> Self {
+        Self { eigenvalues: vals, eigenvectors: vecs }
+    }
+}
+
+impl<W, V> From<EigResult<W, V>> for (W, V) {
+    fn from(eig_result: EigResult<W, V>) -> Self {
+        (eig_result.eigenvalues, eig_result.eigenvectors)
+    }
 }
 
 /* #endregion */

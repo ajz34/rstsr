@@ -85,6 +85,54 @@ mod test {
     }
 
     #[test]
+    fn test_eig() {
+        let device = DeviceFaer::default();
+        let a = rt::asarray((get_vec::<c64>('a'), [1024, 1024].c(), &device));
+        let r = rt::linalg::eig(a.view());
+        let (w, v) = (r.eigenvalues, r.eigenvectors);
+
+        // a non-Hermitian spectrum is unordered, and numpy's and faer's orders
+        // differ; sort to a canonical order (lexicographic by real then
+        // imaginary, matching np.sort / np.argsort) so the fingerprints are
+        // backend-independent
+        let n = w.shape()[0];
+        let mut order: Vec<usize> = (0..n).collect();
+        order.sort_by(|&i, &j| {
+            let (wi, wj) = (w.i(i).to_scalar(), w.i(j).to_scalar());
+            wi.re.partial_cmp(&wj.re).unwrap().then(wi.im.partial_cmp(&wj.im).unwrap())
+        });
+
+        // eigenvalues, in canonical order
+        let ws: Vec<c64> = order.iter().map(|&i| w.i(i).to_scalar()).collect();
+        let ws = rt::asarray((ws, &device));
+        assert!((fingerprint(&ws) - c64!(-53.51484095091083, -871.7616347408099)).norm() < 1e-8);
+
+        // eigenvector columns reordered the same way, then elementwise |v|
+        // (phase- and sign-invariant) before fingerprinting
+        let mut va = Vec::with_capacity(n * n);
+        for i in 0..n {
+            for &j in &order {
+                let z = v[[i, j]];
+                va.push((z.re * z.re + z.im * z.im).sqrt());
+            }
+        }
+        let va = rt::asarray((va, [n, n].c(), &device));
+        assert!((fingerprint(&va) - 4.93240163375621).abs() < 1e-8);
+    }
+
+    #[test]
+    fn test_eigvals() {
+        let device = DeviceFaer::default();
+        let a = rt::asarray((get_vec::<c64>('a'), [1024, 1024].c(), &device));
+
+        // see `test_eig` for the canonical sort
+        let mut w: Vec<c64> = rt::linalg::eigvals(a.view()).to_vec();
+        w.sort_by(|x, y| x.re.partial_cmp(&y.re).unwrap().then(x.im.partial_cmp(&y.im).unwrap()));
+        let w = rt::asarray((w, &device));
+        assert!((fingerprint(&w) - c64!(-53.51484095091083, -871.7616347408099)).norm() < 1e-8);
+    }
+
+    #[test]
     fn test_inv() {
         let device = DeviceFaer::default();
         let a = rt::asarray((get_vec::<c64>('a'), [1024, 1024].c(), &device));

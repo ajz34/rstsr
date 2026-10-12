@@ -92,6 +92,54 @@ mod test {
     }
 
     #[test]
+    fn test_eig() {
+        let device = DeviceFaer::default();
+        let a = rt::asarray((get_vec::<f64>('a'), [1024, 1024].c(), &device));
+        let r = rt::linalg::eig(a.view());
+        let (w, v) = (r.eigenvalues, r.eigenvectors);
+
+        // a non-Hermitian spectrum is unordered, and numpy's and faer's orders
+        // differ; sort to a canonical order (lexicographic by real then
+        // imaginary, matching np.sort / np.argsort) so the fingerprints are
+        // backend-independent
+        let n = w.shape()[0];
+        let mut order: Vec<usize> = (0..n).collect();
+        order.sort_by(|&i, &j| {
+            let (wi, wj) = (w.i(i).to_scalar(), w.i(j).to_scalar());
+            wi.re.partial_cmp(&wj.re).unwrap().then(wi.im.partial_cmp(&wj.im).unwrap())
+        });
+
+        // eigenvalues, in canonical order
+        let ws: Vec<num::Complex<f64>> = order.iter().map(|&i| w.i(i).to_scalar()).collect();
+        let ws = rt::asarray((ws, &device));
+        assert!((fingerprint(&ws) - num::Complex::new(-36.380652131982586, -116.87071686473277)).norm() < 1e-8);
+
+        // eigenvector columns reordered the same way, then elementwise |v|
+        // (phase- and sign-invariant) before fingerprinting
+        let mut va = Vec::with_capacity(n * n);
+        for i in 0..n {
+            for &j in &order {
+                let z = v[[i, j]];
+                va.push((z.re * z.re + z.im * z.im).sqrt());
+            }
+        }
+        let va = rt::asarray((va, [n, n].c(), &device));
+        assert!((fingerprint(&va) - -12.000277853410061).abs() < 1e-8);
+    }
+
+    #[test]
+    fn test_eigvals() {
+        let device = DeviceFaer::default();
+        let a = rt::asarray((get_vec::<f64>('a'), [1024, 1024].c(), &device));
+
+        // see `test_eig` for the canonical sort
+        let mut w: Vec<num::Complex<f64>> = rt::linalg::eigvals(a.view()).to_vec();
+        w.sort_by(|x, y| x.re.partial_cmp(&y.re).unwrap().then(x.im.partial_cmp(&y.im).unwrap()));
+        let w = rt::asarray((w, &device));
+        assert!((fingerprint(&w) - num::Complex::new(-36.380652131982586, -116.87071686473277)).norm() < 1e-8);
+    }
+
+    #[test]
     fn test_inv() {
         let device = DeviceFaer::default();
         let a = rt::asarray((get_vec::<f64>('a'), [1024, 1024].c(), &device));
@@ -120,6 +168,23 @@ mod test {
         let (a_pinv, rank) = rt::linalg::pinv((a.view(), 20.0, 0.3)).into();
         assert!((fingerprint(&a_pinv) - -0.3244041253699862).abs() < 1e-8);
         assert_eq!(rank, 161);
+    }
+
+    #[test]
+    fn test_pinv_empty() {
+        // a zero-size matrix axis must not panic (the SVD would return an empty
+        // singular-value vector); pinv is the transposed zero matrix, rank 0
+        let device = DeviceFaer::default();
+
+        let a = rt::asarray((Vec::<f64>::new(), [0, 5].c(), &device)).into_dim::<Ix2>();
+        let (pinv, rank) = rt::linalg::pinv(a.view()).into();
+        assert_eq!(*pinv.shape(), [5, 0]);
+        assert_eq!(rank, 0);
+
+        let a = rt::asarray((Vec::<f64>::new(), [3, 0].c(), &device)).into_dim::<Ix2>();
+        let (pinv, rank) = rt::linalg::pinv(a.view()).into();
+        assert_eq!(*pinv.shape(), [0, 3]);
+        assert_eq!(rank, 0);
     }
 
     #[test]

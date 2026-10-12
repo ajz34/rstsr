@@ -290,7 +290,9 @@ fn rstsr_faer(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(linalg::linalg_det, m)?)?;
     m.add_function(wrap_pyfunction!(linalg::linalg_diagonal, m)?)?;
     m.add_function(wrap_pyfunction!(linalg::linalg_trace, m)?)?;
+    m.add_function(wrap_pyfunction!(linalg::linalg_eig, m)?)?;
     m.add_function(wrap_pyfunction!(linalg::linalg_eigh, m)?)?;
+    m.add_function(wrap_pyfunction!(linalg::linalg_eigvals, m)?)?;
     m.add_function(wrap_pyfunction!(linalg::linalg_eigvalsh, m)?)?;
     m.add_function(wrap_pyfunction!(linalg::linalg_inv, m)?)?;
     m.add_function(wrap_pyfunction!(linalg::linalg_matmul, m)?)?;

@@ -67,6 +67,13 @@ where
     let order = device.default_order();
     let (batch_shape, [m, n]) = batch_and_matrix_shape(a.shape(), order)?;
 
+    // a zero-size matrix axis yields a zero pinv of shape (n, m) and rank 0;
+    // the SVD below would otherwise panic on an empty singular-value vector
+    if m == 0 || n == 0 {
+        let pinv = zeros_f((stack_shape(&batch_shape, &[n, m], order), &device))?;
+        return Ok(PinvResult { pinv, rank: 0 });
+    }
+
     let mut rank = 0;
     let pinv = with_parallel(&device, || {
         let mut out = zeros_f((stack_shape(&batch_shape, &[n, m], order), &device))?;
