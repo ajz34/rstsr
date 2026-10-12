@@ -513,9 +513,19 @@ mod test_generalized_eigh {
             (fingerprint(&positive_diag_r(&r, &device)) - c64!(0.24039511237941724, 239.69822983660995)).norm() < 1e-8
         );
 
-        // wide 512x1024
+        // wide 512x1024 (here K == M, so complete matches reduced)
         let a = rt::asarray((a_vec.clone(), [512, 1024].c(), &device));
         let (q, r) = rt::linalg::qr(a.view()).into();
+        let q = q.into_dim::<Ix2>();
+        let r = r.into_dim::<Ix2>();
+        assert_eq!(*q.shape(), [512, 512]);
+        assert_eq!(*r.shape(), [512, 1024]);
+        assert!((fingerprint(&thin_abs_q(&q, 512, &device)) - -0.7203599314373099).abs() < 1e-8);
+        assert!(
+            (fingerprint(&positive_diag_r(&r, &device)) - c64!(-47.17594962775703, 808.8519384383662)).norm() < 1e-8
+        );
+
+        let (q, r) = rt::linalg::qr((a.view(), rt::linalg::QrMode::Complete)).into();
         let q = q.into_dim::<Ix2>();
         let r = r.into_dim::<Ix2>();
         assert_eq!(*q.shape(), [512, 512]);
@@ -528,5 +538,29 @@ mod test_generalized_eigh {
         // the string form of `mode` parses to the same enum
         let (q2, _r2) = rt::linalg::qr((a.view(), "reduced")).into();
         assert_eq!(q2.shape(), q.shape());
+    }
+
+    #[test]
+    fn test_qr_empty() {
+        let device = DeviceFaer::default();
+        // complete mode on a (3, 0) matrix: Q is the 3x3 identity, R is empty
+        let a = rt::asarray((Vec::<c64>::new(), [3, 0].c(), &device)).into_dim::<Ix2>();
+        let (q, r) = rt::linalg::qr((a.view(), rt::linalg::QrMode::Complete)).into();
+        let q = q.into_dim::<Ix2>();
+        let r = r.into_dim::<Ix2>();
+        assert_eq!(*q.shape(), [3, 3]);
+        assert_eq!(*r.shape(), [3, 0]);
+        for i in 0..3 {
+            for j in 0..3 {
+                assert_eq!(q[[i, j]], if i == j { c64!(1.0) } else { c64!(0.0) });
+            }
+        }
+
+        // reduced mode: Q is empty
+        let (q, r) = rt::linalg::qr(a.view()).into();
+        let q = q.into_dim::<Ix2>();
+        let r = r.into_dim::<Ix2>();
+        assert_eq!(*q.shape(), [3, 0]);
+        assert_eq!(*r.shape(), [0, 0]);
     }
 }

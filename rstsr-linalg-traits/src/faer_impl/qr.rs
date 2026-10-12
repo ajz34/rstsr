@@ -7,7 +7,9 @@
 //! column of `Q` is fixed only up to a unit factor — so callers compare results
 //! after canonicalizing the phase of `R`'s diagonal.
 
-use crate::faer_impl::batch::{batch_and_matrix_shape, map_stack_slices2, stack_shape, with_parallel};
+use crate::faer_impl::batch::{
+    batch_and_matrix_shape, map_stack_slices, map_stack_slices2, stack_shape, with_parallel,
+};
 use crate::traits_def::{QrAPI, QrMode, QrResult};
 use faer::traits::ComplexField;
 use faer::Mat;
@@ -63,10 +65,15 @@ where
         QrMode::Complete => (m, m),
     };
 
-    // a zero-size matrix axis or batch yields empty outputs (faer is not called)
+    // a zero-size matrix axis or batch yields empty outputs (faer is not called);
+    // in complete mode with no columns, Q is the identity completion (numpy)
     if m == 0 || n == 0 || batch_shape.contains(&0) {
-        let q = zeros_f((stack_shape(&batch_shape, &[m, q_cols], order), &device))?;
         let r = zeros_f((stack_shape(&batch_shape, &[r_rows, n], order), &device))?;
+        let mut q = zeros_f((stack_shape(&batch_shape, &[m, q_cols], order), &device))?;
+        if matches!(mode, QrMode::Complete) && m > 0 {
+            let eye: Tensor<T, DeviceFaer, Ix2> = eye_f((m, &device))?.into_dim::<Ix2>();
+            map_stack_slices::<T, T, Ix2, _>(a, q.view_mut(), order, |_a, mut q_slice| q_slice.assign_f(&eye))?;
+        }
         return Ok(QrResult { q, r });
     }
 

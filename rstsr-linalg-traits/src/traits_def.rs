@@ -301,18 +301,6 @@ impl FromStr for QrMode {
     }
 }
 
-impl From<()> for QrMode {
-    fn from(_: ()) -> Self {
-        QrMode::Reduced
-    }
-}
-
-impl From<Option<()>> for QrMode {
-    fn from(_: Option<()>) -> Self {
-        QrMode::Reduced
-    }
-}
-
 /* #endregion */
 
 /* #region norm */
