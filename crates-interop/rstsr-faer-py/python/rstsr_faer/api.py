@@ -165,6 +165,7 @@ from .rstsr_faer import (
     linalg_outer as _linalg_outer,
     linalg_cross as _linalg_cross,
     linalg_pinv as _linalg_pinv,
+    linalg_qr as _linalg_qr,
     linalg_solve as _linalg_solve,
     linalg_svd as _linalg_svd,
     linalg_svdvals as _linalg_svdvals,
@@ -1843,9 +1844,9 @@ def iinfo(type, /):
 
 # ------------------------------------------------------------------- linalg --
 # array-API `linalg` extension; each member is a thin wrapper over a rstsr/faer
-# entry. Members the standard defines but rstsr/faer does not provide (qr) are
-# absent here — a rust-side gap, recorded in the gap register, never stubbed.
+# entry. Every member the standard defines is provided here — none is stubbed.
 
+_QRResult = collections.namedtuple("QRResult", ["Q", "R"])
 _EigResult = collections.namedtuple("EigResult", ["eigenvalues", "eigenvectors"])
 _EighResult = collections.namedtuple("EighResult", ["eigenvalues", "eigenvectors"])
 _SVDResult = collections.namedtuple("SVDResult", ["U", "S", "Vh"])
@@ -1960,6 +1961,11 @@ def pinv(x, /, *, rtol=None):
     return _wrap(_linalg_pinv(_handle(x), rtol))
 
 
+def qr(x, /, *, mode="reduced"):
+    q, r = _linalg_qr(_handle(x), mode)
+    return _QRResult(_wrap(q), _wrap(r))
+
+
 def solve(x1, x2, /):
     # rstsr's solve is same-dtype; promote a mixed pair to its common dtype
     # first — see DTYPE-CASTS.md
@@ -2002,6 +2008,7 @@ class _LinalgNamespace:
     outer = staticmethod(outer)
     cross = staticmethod(cross)
     pinv = staticmethod(pinv)
+    qr = staticmethod(qr)
     solve = staticmethod(solve)
     svd = staticmethod(svd)
     svdvals = staticmethod(svdvals)

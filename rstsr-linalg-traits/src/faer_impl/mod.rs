@@ -10,6 +10,7 @@ pub mod matrix_power;
 pub mod matrix_rank;
 pub mod norm;
 pub mod pinv;
+pub mod qr;
 pub mod slogdet;
 pub mod solve_general;
 pub mod solve_triangular;

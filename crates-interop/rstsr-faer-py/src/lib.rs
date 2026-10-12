@@ -303,6 +303,7 @@ fn rstsr_faer(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(linalg::linalg_outer, m)?)?;
     m.add_function(wrap_pyfunction!(linalg::linalg_cross, m)?)?;
     m.add_function(wrap_pyfunction!(linalg::linalg_pinv, m)?)?;
+    m.add_function(wrap_pyfunction!(linalg::linalg_qr, m)?)?;
     m.add_function(wrap_pyfunction!(linalg::linalg_solve, m)?)?;
     m.add_function(wrap_pyfunction!(linalg::linalg_svd, m)?)?;
     m.add_function(wrap_pyfunction!(linalg::linalg_svdvals, m)?)?;
