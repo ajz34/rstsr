@@ -6,12 +6,12 @@
 //! (`matmul`, `vecdot`, `cross`, `matrix_transpose`, `diagonal`, `trace`) or
 //! the faer linalg entries (`cholesky`, `det`, `eig`, `eigh`, `eigvals`,
 //! `eigvalsh`, `inv`, `matrix_norm`, `matrix_power`, `matrix_rank`, `pinv`,
-//! `solve`, `svd`, `svdvals`, `vector_norm`). Every dispatch body is written
-//! once against a concrete dtype arm, so no generic trait bound is stated here
-//! and no faer type is named.
+//! `qr`, `solve`, `svd`, `svdvals`, `vector_norm`). Every dispatch body is
+//! written once against a concrete dtype arm, so no generic trait bound is
+//! stated here and no faer type is named.
 //!
-//! Names rstsr/faer does not provide (`qr`) are absent from the namespace,
-//! never stubbed — a rust-side gap.
+//! Every member of the standard's `linalg` extension is provided here — none is
+//! stubbed.
 //!
 //! `solve` accepts a same-dtype float/complex pair only; the Python layer
 //! promotes a mixed-dtype pair first — see `DTYPE-CASTS.md` in this crate.
@@ -289,6 +289,17 @@ pub fn linalg_pinv(x: &NativeArray, rtol: Option<f64>) -> PyResult<NativeArray> 
         _ => return type_err("linalg: rstsr/faer provides pinv only for float/complex dtypes"),
     };
     Ok(NativeArray { t })
+}
+
+/// QR decomposition `(Q, R)`; `mode` is `'reduced'` (default) or `'complete'`.
+#[pyfunction]
+pub fn linalg_qr(x: &NativeArray, mode: &str) -> PyResult<(NativeArray, NativeArray)> {
+    let mode = err_py(rt::linalg::QrMode::try_from(mode))?;
+    let (q, r) = unary_fc!(x, |a| {
+        let res = err_py(rt::linalg::qr_f((a, mode)))?;
+        Ok((any_of(res.q), any_of(res.r)))
+    })?;
+    Ok((NativeArray { t: q }, NativeArray { t: r }))
 }
 
 /// Solve a general linear system `a x = b`.

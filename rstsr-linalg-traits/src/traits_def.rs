@@ -18,6 +18,7 @@ use rstsr_core::prelude_dev::*;
    [MatrixPowerAPI    ] [matrix_power    ] [matrix_power_f    ];
    [MatrixRankAPI     ] [matrix_rank     ] [matrix_rank_f     ];
    [PinvAPI           ] [pinv            ] [pinv_f            ];
+   [QrAPI             ] [qr              ] [qr_f              ];
    [SLogDetAPI        ] [slogdet         ] [slogdet_f         ];
    [SolveGeneralAPI   ] [solve_general   ] [solve_general_f   ];
    [SolveSymmetricAPI ] [solve_symmetric ] [solve_symmetric_f ];
@@ -50,6 +51,7 @@ pub trait LinalgAPI<Inp> {
    [MatrixPowerAPI    ] [matrix_power    ] [matrix_power_f    ];
    [MatrixRankAPI     ] [matrix_rank     ] [matrix_rank_f     ];
    [PinvAPI           ] [pinv            ] [pinv_f            ];
+   [QrAPI             ] [qr              ] [qr_f              ];
    [SLogDetAPI        ] [slogdet         ] [slogdet_f         ];
    [SolveGeneralAPI   ] [solve_general   ] [solve_general_f   ];
    [SolveSymmetricAPI ] [solve_symmetric ] [solve_symmetric_f ];
@@ -78,6 +80,7 @@ where
    [MatrixPowerAPI    ] [matrix_power    ] [matrix_power_f    ];
    [MatrixRankAPI     ] [matrix_rank     ] [matrix_rank_f     ];
    [PinvAPI           ] [pinv            ] [pinv_f            ];
+   [QrAPI             ] [qr              ] [qr_f              ];
    [SLogDetAPI        ] [slogdet         ] [slogdet_f         ];
    [SolveGeneralAPI   ] [solve_general   ] [solve_general_f   ];
    [SolveSymmetricAPI ] [solve_symmetric ] [solve_symmetric_f ];
@@ -242,6 +245,73 @@ where
 }
 
 pub type SVDArgs<'a, B, T> = SVDArgs_Builder<'a, B, T>;
+
+/* #endregion */
+
+/* #region qr */
+
+/// QR factorization result: the orthogonal/unitary `Q` and upper-triangular `R`.
+pub struct QrResult<Q, R> {
+    pub q: Q,
+    pub r: R,
+}
+
+impl<Q, R> From<(Q, R)> for QrResult<Q, R> {
+    fn from((q, r): (Q, R)) -> Self {
+        Self { q, r }
+    }
+}
+
+impl<Q, R> From<QrResult<Q, R>> for (Q, R) {
+    fn from(qr_result: QrResult<Q, R>) -> Self {
+        (qr_result.q, qr_result.r)
+    }
+}
+
+/// The [`qr`] factorization mode, named by the array-API string `'reduced'`
+/// (default) or `'complete'`.
+///
+/// `#[non_exhaustive]`: only these two modes exist today, but further modes can
+/// be added without a breaking change.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub enum QrMode {
+    /// Reduced (thin): `Q` is `(..., M, K)`, `R` is `(..., K, N)` for `K = min(M, N)`.
+    #[default]
+    Reduced,
+    /// Complete: `Q` is `(..., M, M)`, `R` is `(..., M, N)`.
+    Complete,
+}
+
+impl TryFrom<&str> for QrMode {
+    type Error = Error;
+    fn try_from(s: &str) -> Result<Self> {
+        match s {
+            "reduced" => Ok(QrMode::Reduced),
+            "complete" => Ok(QrMode::Complete),
+            _ => Err(rstsr_error!(InvalidValue, "invalid qr mode '{s}'")),
+        }
+    }
+}
+
+impl FromStr for QrMode {
+    type Err = Error;
+    fn from_str(s: &str) -> Result<Self> {
+        Self::try_from(s)
+    }
+}
+
+impl From<()> for QrMode {
+    fn from(_: ()) -> Self {
+        QrMode::Reduced
+    }
+}
+
+impl From<Option<()>> for QrMode {
+    fn from(_: Option<()>) -> Self {
+        QrMode::Reduced
+    }
+}
 
 /* #endregion */
 

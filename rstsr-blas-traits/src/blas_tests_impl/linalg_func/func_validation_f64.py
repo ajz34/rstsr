@@ -194,4 +194,54 @@ assert np.isclose(fingerprint(a_pinv), -0.3244041253699862)
 assert rank == 161
 fingerprint(a_pinv), rank
 
+# ### qr
+
+
+def _qr_canon(q, r):
+    # Q/R are unique only up to the sign of each column; make R's diagonal
+    # real-positive so numpy's and faer's conventions agree
+    k = np.diag(r).size
+    d = np.diag(r)
+    d = d / np.abs(d)
+    q = q.copy()
+    q[:, :k] = q[:, :k] * d[np.newaxis, :]
+    r = r.copy()
+    r[:k, :] = r[:k, :] / d[:, np.newaxis]
+    return q, r
+
+
+# tall 1024x512; reduced (default) and complete share the thin Q and R
+a = a_raw[:1024*512].copy().reshape(1024, 512)
+q, r = np.linalg.qr(a)
+q, r = _qr_canon(q, r)
+assert np.isclose(fingerprint(np.abs(q[:, :512])), -3.816695392252389)
+fingerprint(np.abs(q[:, :512]))
+assert np.isclose(fingerprint(r), -245.99004994559718)
+fingerprint(r)
+
+a = a_raw[:1024*512].copy().reshape(1024, 512)
+q, r = np.linalg.qr(a, mode="complete")
+q, r = _qr_canon(q, r)
+assert np.isclose(fingerprint(np.abs(q[:, :512])), -3.816695392252389)
+fingerprint(np.abs(q[:, :512]))
+assert np.isclose(fingerprint(r), -245.99004994559718)
+fingerprint(r)
+
+# wide 512x1024
+a = a_raw[:1024*512].copy().reshape(512, 1024)
+q, r = np.linalg.qr(a)
+q, r = _qr_canon(q, r)
+assert np.isclose(fingerprint(np.abs(q[:, :512])), -0.9769304656721726)
+fingerprint(np.abs(q[:, :512]))
+assert np.isclose(fingerprint(r), 405.0109813743518)
+fingerprint(r)
+
+a = a_raw[:1024*512].copy().reshape(512, 1024)
+q, r = np.linalg.qr(a, mode="complete")
+q, r = _qr_canon(q, r)
+assert np.isclose(fingerprint(np.abs(q[:, :512])), -0.9769304656721726)
+fingerprint(np.abs(q[:, :512]))
+assert np.isclose(fingerprint(r), 405.0109813743518)
+fingerprint(r)
+
 

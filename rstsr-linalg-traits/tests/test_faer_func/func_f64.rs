@@ -982,4 +982,70 @@ mod test {
         let eb2 = rt::asarray((vec![0.0f64; 0], [0, 3].c(), &device));
         assert_eq!(rt::linalg::vector_norm((eb2.view(), (2, AxesIndex::Val(1)))).shape(), &[0]);
     }
+
+    // |Q| over the first `k` columns — the only unique part of Q (in complete
+    // mode the remaining columns are an arbitrary orthonormal completion).
+    fn thin_abs_q(q: &Tensor<f64, DeviceFaer, Ix2>, k: usize, device: &DeviceFaer) -> Tensor<f64, DeviceFaer, IxD> {
+        let m = q.shape()[0];
+        let mut v = Vec::with_capacity(m * k);
+        for i in 0..m {
+            for j in 0..k {
+                v.push(q[[i, j]].abs());
+            }
+        }
+        rt::asarray((v, [m, k].c(), device))
+    }
+
+    // rescale each row by the sign of R's diagonal so it is real-positive:
+    // Q/R are otherwise fixed only up to the sign of each column
+    fn positive_diag_r(r: &Tensor<f64, DeviceFaer, Ix2>, device: &DeviceFaer) -> Tensor<f64, DeviceFaer, IxD> {
+        let [rows, n] = *r.shape();
+        let diag = rows.min(n);
+        let mut v = Vec::with_capacity(rows * n);
+        for i in 0..rows {
+            let s = if i < diag && r[[i, i]] < 0.0 { -1.0 } else { 1.0 };
+            for j in 0..n {
+                v.push(r[[i, j]] * s);
+            }
+        }
+        rt::asarray((v, [rows, n].c(), device))
+    }
+
+    #[test]
+    fn test_qr() {
+        let device = DeviceFaer::default();
+        let a_vec = get_vec::<f64>('a')[..1024 * 512].to_vec();
+
+        // tall 1024x512: reduced (default) and complete share the thin Q and R
+        let a = rt::asarray((a_vec.clone(), [1024, 512].c(), &device));
+        let (q, r) = rt::linalg::qr(a.view()).into();
+        let q = q.into_dim::<Ix2>();
+        let r = r.into_dim::<Ix2>();
+        assert_eq!(*q.shape(), [1024, 512]);
+        assert_eq!(*r.shape(), [512, 512]);
+        assert!((fingerprint(&thin_abs_q(&q, 512, &device)) - -3.816695392252389).abs() < 1e-8);
+        assert!((fingerprint(&positive_diag_r(&r, &device)) - -245.99004994559718).abs() < 1e-8);
+
+        let (q, r) = rt::linalg::qr((a.view(), rt::linalg::QrMode::Complete)).into();
+        let q = q.into_dim::<Ix2>();
+        let r = r.into_dim::<Ix2>();
+        assert_eq!(*q.shape(), [1024, 1024]);
+        assert_eq!(*r.shape(), [1024, 512]);
+        assert!((fingerprint(&thin_abs_q(&q, 512, &device)) - -3.816695392252389).abs() < 1e-8);
+        assert!((fingerprint(&positive_diag_r(&r, &device)) - -245.99004994559718).abs() < 1e-8);
+
+        // wide 512x1024
+        let a = rt::asarray((a_vec.clone(), [512, 1024].c(), &device));
+        let (q, r) = rt::linalg::qr(a.view()).into();
+        let q = q.into_dim::<Ix2>();
+        let r = r.into_dim::<Ix2>();
+        assert_eq!(*q.shape(), [512, 512]);
+        assert_eq!(*r.shape(), [512, 1024]);
+        assert!((fingerprint(&thin_abs_q(&q, 512, &device)) - -0.9769304656721726).abs() < 1e-8);
+        assert!((fingerprint(&positive_diag_r(&r, &device)) - 405.0109813743518).abs() < 1e-8);
+
+        // the string form of `mode` parses to the same enum
+        let (q2, _r2) = rt::linalg::qr((a.view(), "reduced")).into();
+        assert_eq!(q2.shape(), q.shape());
+    }
 }
