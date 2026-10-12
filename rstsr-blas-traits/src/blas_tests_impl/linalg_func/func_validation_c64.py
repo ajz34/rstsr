@@ -116,6 +116,23 @@ assert np.isclose(fingerprint(w), -4656.824753078057)
 assert np.isclose(fingerprint(np.abs(v)), -0.15861903557045487)
 fingerprint(w), fingerprint(np.abs(v))
 
+# ### eig
+
+a = a_raw.copy().reshape(1024, 1024)
+w, v = np.linalg.eig(a)
+# a non-Hermitian spectrum is unordered; sort to a canonical order so the
+# reference is backend-independent (np.sort on complex sorts lexicographically
+# by real then imaginary)
+assert np.isclose(fingerprint(np.sort(w)), -53.51484095091083-871.7616347408099j)
+fingerprint(np.sort(w))
+
+# ### eigvals
+
+a = a_raw.copy().reshape(1024, 1024)
+w = np.linalg.eigvals(a)
+assert np.isclose(fingerprint(np.sort(w)), -53.51484095091083-871.7616347408099j)
+fingerprint(np.sort(w))
+
 # ### inv
 
 a = a_raw.copy().reshape(1024, 1024)

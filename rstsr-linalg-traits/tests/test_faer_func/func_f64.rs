@@ -92,6 +92,32 @@ mod test {
     }
 
     #[test]
+    fn test_eig() {
+        let device = DeviceFaer::default();
+        let a = rt::asarray((get_vec::<f64>('a'), [1024, 1024].c(), &device));
+
+        // a non-Hermitian spectrum is unordered; sort to a canonical order
+        // (lexicographic by real then imaginary, matching np.sort) so the
+        // fingerprint is backend-independent
+        let mut w: Vec<num::Complex<f64>> = rt::linalg::eig(a.view()).eigenvalues.to_vec();
+        w.sort_by(|x, y| x.re.partial_cmp(&y.re).unwrap().then(x.im.partial_cmp(&y.im).unwrap()));
+        let w = rt::asarray((w, &device));
+        assert!((fingerprint(&w) - num::Complex::new(-36.380652131982586, -116.87071686473277)).norm() < 1e-8);
+    }
+
+    #[test]
+    fn test_eigvals() {
+        let device = DeviceFaer::default();
+        let a = rt::asarray((get_vec::<f64>('a'), [1024, 1024].c(), &device));
+
+        // see `test_eig` for the canonical sort
+        let mut w: Vec<num::Complex<f64>> = rt::linalg::eigvals(a.view()).to_vec();
+        w.sort_by(|x, y| x.re.partial_cmp(&y.re).unwrap().then(x.im.partial_cmp(&y.im).unwrap()));
+        let w = rt::asarray((w, &device));
+        assert!((fingerprint(&w) - num::Complex::new(-36.380652131982586, -116.87071686473277)).norm() < 1e-8);
+    }
+
+    #[test]
     fn test_inv() {
         let device = DeviceFaer::default();
         let a = rt::asarray((get_vec::<f64>('a'), [1024, 1024].c(), &device));

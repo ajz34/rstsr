@@ -4,14 +4,14 @@
 //! Wrapper-only: each function marshals a `NativeArray` through an rstsr entry
 //! that already exists on the faer device — the tensor-tier entries
 //! (`matmul`, `vecdot`, `cross`, `matrix_transpose`, `diagonal`, `trace`) or
-//! the faer linalg entries (`cholesky`, `det`, `eigh`, `eigvalsh`, `inv`,
-//! `matrix_norm`, `matrix_power`, `matrix_rank`, `pinv`, `solve`, `svd`,
-//! `svdvals`, `vector_norm`). Every dispatch body is written once against a
-//! concrete dtype arm, so no generic trait bound is stated here and no faer type
-//! is named.
+//! the faer linalg entries (`cholesky`, `det`, `eig`, `eigh`, `eigvals`,
+//! `eigvalsh`, `inv`, `matrix_norm`, `matrix_power`, `matrix_rank`, `pinv`,
+//! `solve`, `svd`, `svdvals`, `vector_norm`). Every dispatch body is written
+//! once against a concrete dtype arm, so no generic trait bound is stated here
+//! and no faer type is named.
 //!
-//! Names rstsr/faer does not provide (`qr`, `eig`, `eigvals`) are absent from
-//! the namespace, never stubbed — they are rust-side gaps.
+//! Names rstsr/faer does not provide (`qr`) are absent from the namespace,
+//! never stubbed — a rust-side gap.
 //!
 //! `solve` accepts a same-dtype float/complex pair only; the Python layer
 //! promotes a mixed-dtype pair first — see `DTYPE-CASTS.md` in this crate.
@@ -115,6 +115,17 @@ pub fn linalg_det(x: &NativeArray) -> PyResult<NativeArray> {
     Ok(NativeArray { t })
 }
 
+/// General (non-Hermitian) eigendecomposition; both outputs are complex — the
+/// complex counterpart of a real input. Eigenvalues are unsorted.
+#[pyfunction]
+pub fn linalg_eig(x: &NativeArray) -> PyResult<(NativeArray, NativeArray)> {
+    let (w, v) = unary_fc!(x, |a| {
+        let r = err_py(rt::linalg::eig_f(a))?;
+        Ok((any_of(r.eigenvalues), any_of(r.eigenvectors)))
+    })?;
+    Ok((NativeArray { t: w }, NativeArray { t: v }))
+}
+
 /// Symmetric/Hermitian eigendecomposition; the eigenvector triangle follows the
 /// device default order (rstsr has no `uplo` argument in the array-API sense).
 #[pyfunction]
@@ -130,6 +141,13 @@ pub fn linalg_eigh(x: &NativeArray) -> PyResult<(NativeArray, NativeArray)> {
 #[pyfunction]
 pub fn linalg_eigvalsh(x: &NativeArray) -> PyResult<NativeArray> {
     let t = unary_fc!(x, |a| any_res(rt::linalg::eigvalsh_f((a, None::<FlagUpLo>))))?;
+    Ok(NativeArray { t })
+}
+
+/// Eigenvalues of a general (non-Hermitian) matrix; complex, unsorted.
+#[pyfunction]
+pub fn linalg_eigvals(x: &NativeArray) -> PyResult<NativeArray> {
+    let t = unary_fc!(x, |a| any_res(rt::linalg::eigvals_f(a)))?;
     Ok(NativeArray { t })
 }
 
