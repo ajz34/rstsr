@@ -34,8 +34,8 @@ where
     let (batch_shape, [m, n]) = batch_and_matrix_shape(a.shape(), order)?;
     rstsr_assert_eq!(m, n, InvalidLayout, "eigvals: the matrix must be square, got {m}x{n}")?;
 
-    // a zero-size matrix axis yields an empty spectrum (faer is not called)
-    if m == 0 || n == 0 {
+    // a zero-size matrix axis or batch yields an empty spectrum (faer is not called)
+    if m == 0 || n == 0 || batch_shape.contains(&0) {
         return zeros_f((stack_shape(&batch_shape, &[m], order), &device));
     }
 
