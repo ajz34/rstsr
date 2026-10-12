@@ -200,10 +200,10 @@ where
 
 /// Matrix rank (the count of singular values above the tolerance). `rtol` is
 /// absent/`None` for the default `max(M, N) * eps`, a Python float for one
-/// tolerance on every matrix, or a tensor in the input's real dtype for one
-/// tolerance per matrix (the Python layer shapes an array to its batch shape —
-/// binding marshalling, not a promotion pre-cast). The rank is an index output,
-/// lifted to the namespace's int64.
+/// tolerance on every matrix, or an array in the input's real dtype for one
+/// tolerance per matrix — the kernel broadcasts it against the batch (the
+/// Python layer only casts the dtype; binding marshalling, not a promotion
+/// pre-cast). The rank is an index output, lifted to the namespace's int64.
 #[pyfunction]
 pub fn linalg_matrix_rank(x: &NativeArray, rtol: Option<&pyo3::Bound<'_, PyAny>>) -> PyResult<NativeArray> {
     match &x.t {

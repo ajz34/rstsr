@@ -1926,8 +1926,17 @@ def matrix_rank(x, /, *, rtol=None):
     # and only an array is cast to x's real dtype — marshalling, not a
     # promotion cast (the rust entry holds the two cases apart)
     if isinstance(rtol, Array):
-        rtol = _handle(astype(rtol, _REAL_FLOATING_OF[x.dtype.name]))
+        real = _REAL_FLOATING_OF.get(x.dtype.name)
+        if real is None:
+            raise TypeError(
+                f"matrix_rank is defined only for real and complex floating dtypes, got {x.dtype.name}"
+            )
+        rtol = _handle(astype(rtol, real))
     elif rtol is not None:
+        if not isinstance(rtol, (_py_bool, _py_int, _py_float)):
+            raise TypeError(
+                f"rtol must be a real floating-point scalar, got {type(rtol).__name__}"
+            )
         rtol = float(rtol)
     return _wrap(_linalg_matrix_rank(_handle(x), rtol))
 

@@ -9,6 +9,12 @@
 //! no device. Singular values come from [`faer_impl_svdvals_f`]. Unlike NumPy
 //! there is no Hermitian fast path: every matrix is ranked from its SVD.
 //!
+//! The two matrix axes are the input's **leading** axes under a row-major device
+//! and its **trailing** axes under a column-major one; the batch is the rest, and
+//! an `Array` tolerance is broadcast against it in that same device order (so
+//! under row-major the alignment matches NumPy's trailing rule, under
+//! column-major it mirrors it).
+//!
 //! A matrix axis of size zero yields rank `0` for every matrix (the stack
 //! collapses to a single zero rank per matrix), matching NumPy.
 
@@ -41,6 +47,13 @@ where
     let order = device.default_order();
     let (batch_shape, [m, n]) = batch_and_matrix_shape(a.shape(), order)?;
 
+    // validate `rtol` up front, before the empty-input short-circuit below (and
+    // the SVD) can skip it: a bad tolerance errors on an empty input too
+    if let MatrixRankRtol::Array(t) = &rtol {
+        rstsr_assert!(t.device().same_device(&device), DeviceMismatch, "matrix_rank: rtol is on a different device")?;
+        broadcast_shapes_f(&[t.shape().to_vec(), batch_shape.clone()], order)?;
+    }
+
     // zero-size matrix axes give rank 0; an empty batch stays empty
     if m == 0 || n == 0 || batch_shape.contains(&0) {
         return zeros_f((batch_shape, &device));
@@ -63,12 +76,8 @@ where
             MatrixRankRtol::None => smax.mapv(|x| x * default_scale),
             MatrixRankRtol::Float(f) => smax.mapv(|x| x * f),
             MatrixRankRtol::Array(t) => {
-                rstsr_assert!(
-                    t.device().same_device(&device),
-                    DeviceMismatch,
-                    "matrix_rank: rtol is on a different device"
-                )?;
-                // broadcast the batch tolerance, then re-insert the singular-value singleton
+                // broadcast the batch tolerance (validated above), then re-insert
+                // the singular-value singleton
                 let target = stack_shape(&batch_shape, &[1], order);
                 let rb = into_broadcast_f(t.view(), batch_shape)?;
                 let r_exp = rb.into_shape_f(target)?;

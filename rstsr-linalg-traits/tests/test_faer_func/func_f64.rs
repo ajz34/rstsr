@@ -659,9 +659,11 @@ mod test {
         // full-rank 2x2
         let a = rt::asarray((vec![1.0f64, 2.0, 3.0, 4.0], [2, 2].c(), &device));
         assert_eq!(rt::linalg::matrix_rank(a.view()).to_scalar(), 2);
-        // `()` and `None` are the default tolerance too
+        // `()`, `None`, and the args default are the default tolerance too
         assert_eq!(rt::linalg::matrix_rank((a.view(), ())).to_scalar(), 2);
         assert_eq!(rt::linalg::matrix_rank((a.view(), None)).to_scalar(), 2);
+        let default = rt::linalg::MatrixRankRtol::<f64, DeviceFaer>::default();
+        assert_eq!(rt::linalg::matrix_rank((a.view(), default)).to_scalar(), 2);
         // rank 1: the second row is twice the first
         let b = rt::asarray((vec![1.0f64, 2.0, 2.0, 4.0], [2, 2].c(), &device));
         assert_eq!(rt::linalg::matrix_rank(b.view()).to_scalar(), 1);
@@ -757,6 +759,31 @@ mod test {
         assert_eq!((r[[0]], r[[1]]), (0, 0));
         let r = rt::linalg::matrix_rank(rt::asarray((vec![0.0f64; 0], [2, 3, 0, 4].c(), &device)).view());
         assert_eq!(r.shape(), &[2, 3]);
+    }
+
+    #[test]
+    fn test_matrix_rank_empty_validates_rtol() {
+        let device = DeviceFaer::default();
+        // a zero-size matrix axis: rank 0 for each matrix
+        let empty = rt::asarray((vec![0.0f64; 0], [3, 0, 2].c(), &device));
+        let r = rt::linalg::matrix_rank(empty.view());
+        assert_eq!(r.shape(), &[3]);
+        assert_eq!((r[[0]], r[[1]], r[[2]]), (0, 0, 0));
+
+        // ...but `rtol` is validated even on the empty short-circuit: a
+        // non-broadcastable array (batch is [3]) errors rather than being ignored
+        let bad = rt::asarray((vec![1e-8f64; 4], [4].c(), &device));
+        assert!(rt::linalg::matrix_rank_f((empty.view(), bad)).is_err());
+
+        // ...and so is a device mismatch
+        let mut col = DeviceFaer::default();
+        col.set_default_order(ColMajor);
+        assert!(rt::linalg::matrix_rank_f((empty.view(), rt::from_scalar(1e-8f64, &col))).is_err());
+
+        // a valid tolerance still yields zero rank
+        let ok = rt::asarray((vec![1e-8f64, 1.0, 1e-8], [3].c(), &device));
+        let r = rt::linalg::matrix_rank((empty.view(), ok));
+        assert_eq!((r[[0]], r[[1]], r[[2]]), (0, 0, 0));
     }
 
     // NumPy: numpy/linalg/tests/test_linalg.py TestMatrixRank::test_symmetric_rank

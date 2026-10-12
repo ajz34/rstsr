@@ -491,19 +491,29 @@ impl FromStr for VectorNormArgs {
 /// representation, and the array's device is checked against the input's before
 /// the rank is computed. `None` selects the default `max(M, N) * eps`.
 ///
+/// **Order notice.** The input's two matrix axes are its *leading* axes under a
+/// row-major device but its *trailing* axes under a column-major one; the batch
+/// is whatever remains, and an [`Array`](MatrixRankRtol::Array) tolerance is
+/// broadcast against the batch in that same device order. On a row-major device
+/// this is NumPy's trailing alignment against `shape(x)[:-2]`; on a
+/// column-major device the matrix axes are the right-most and the tolerance
+/// aligns from the opposite end.
+///
 /// `TR` is the input's real scalar type (`T::Real`) and `B` its device. `From`
 /// converts the scalar, array, `()`, and `None` forms, so
-/// `matrix_rank((x, 1e-8))`, `matrix_rank((x, rtol_array))`, and
-/// `matrix_rank((x, None))` all resolve.
+/// `matrix_rank((x, 1e-8))` (an `f64` input), `matrix_rank((x, rtol_array))`,
+/// and `matrix_rank((x, None))` all resolve. A scalar is taken as the input's
+/// own real type — with an `f32` input write `1e-8_f32` (a bare `1e-8` is `f64`
+/// and does not convert).
 pub enum MatrixRankRtol<TR, B>
 where
     B: DeviceRawAPI<TR>,
 {
     /// The default tolerance `max(M, N) * eps`.
     None,
-    /// One tolerance for every matrix — a scalar, such as a Python float.
+    /// One tolerance for every matrix — a scalar of the input's real type.
     Float(TR),
-    /// One tolerance per matrix, broadcast against `shape(x)[:-2]`.
+    /// One tolerance per matrix, broadcast against the batch in device order.
     Array(Tensor<TR, B, IxD>),
 }
 
