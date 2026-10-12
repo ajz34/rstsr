@@ -245,11 +245,8 @@ impl GESVDDriverAPI<T> for DeviceBLAS {
             lwork as blas_int,
             &mut info,
         );
-        if info != 0 {
-            return info;
-        }
 
-        // backup superb from workspace
+        // Backup superb from workspace (unconditional, per LAPACKE)
         for i in 0..m.min(n).saturating_sub(1) {
             superb.add(i).write(work[i + 1]);
         }
@@ -518,7 +515,7 @@ impl GESVDDriverAPI<T> for DeviceBLAS {
             &mut info,
         );
 
-        // backup superb from rwork
+        // Backup superb from rwork (unconditional, per LAPACKE)
         #[allow(clippy::needless_range_loop)]
         for i in 0..m.min(n).saturating_sub(1) {
             superb.add(i).write(rwork[i]);
