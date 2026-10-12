@@ -1,5 +1,132 @@
 # Changelog
 
+## v0.10.0-alpha.2 -- 2026-10-12
+
+This cycle completes the Python array API standard's `linalg` extension and
+fills in the advanced-indexing, promoted-dtype and remaining element-wise
+surface. As in alpha.1, the surface is still moving: further API-breaking
+changes are expected within the alpha: we haven't touched BLAS vendor devices.
+
+API breaking changes
+
+- The faer linear-algebra entries take n-dimensional (stacked) input and return
+  dynamic-dimension outputs: `det_f` returns the determinant as a `Tensor<_,
+  IxD>` — a 0-d array for a 2-D input, read back with `.to_scalar()` — instead
+  of a bare scalar, and the allocating `solve_general` / `solve_triangular` and
+  the generalized `eigh` return `IxD` tensors instead of their previous fixed
+  ranks. (RESTGroup/rstsr#140)
+- `SLogDetResult` carries two independent type parameters, and `slogdet` on a
+  plain 2-D matrix returns a pair of 0-d tensors instead of `(T, T::Real)`
+  scalars — destructure the result as `(sign, logabsdet)`. (RESTGroup/rstsr#133)
+- `ExtNum` gains a required `ext_rem` method, and several element-trait bounds
+  are re-pointed: `OpSignBitAPI` moves onto `ExtReal`, `ceil` / `floor` /
+  `trunc` return the input type, and `pow` follows the promoted binary-op
+  shape. The `rstsr_native_impl::scalar_math` module is removed (ties-to-even
+  now lives in `ExtNum::ext_round`). Trait implementors are affected; call
+  sites are not. (RESTGroup/rstsr#123, #124)
+
+New features
+
+- **Advanced (fancy) indexing and assignment.** `rt::array_index` gathers by
+  integer index arrays and boolean masks with NumPy's vectorized semantics: the
+  index arrays broadcast, their result dimensions follow NumPy's placement rule
+  (in place for a contiguous run of indexers, at the front otherwise), basic
+  indexers mix freely in the same key, and a mask is lowered to its `nonzero`
+  coordinates. The setter counterparts write the same keys —
+  `rt::array_index_assign` plus the derived `put_along_axis` / `index_put` /
+  `mask_assign` — and `rt::mask_select` / `rt::mask_fill` cover the whole-tensor
+  single-mask case (`x[mask]`, `x[mask] = value`). The gather kernels run on the
+  rayon pool (about 5–6× at kernel level); the scatters are serial by design,
+  since duplicate index targets are last-write-wins in the device order. New
+  device traits back each family. (RESTGroup/rstsr#126, #127, #128, #129)
+- **The array-API `linalg` extension is complete.** Every member the standard
+  defines is now present. The faer device gains stacked (n-dimensional) forms of
+  `cholesky`, `det`, `eigh` / `eigvalsh`, `inv`, `pinv`, `svd` / `svdvals`,
+  `slogdet` and `solve` — with vector or matrix right-hand sides and batch
+  broadcasting — and the remaining members: `matrix_power`, `matrix_norm` /
+  `vector_norm`, `matrix_rank`, the general (non-Hermitian) `eig` / `eigvals`,
+  and `qr`. The device-independent tier adds `tensordot`, `outer` /
+  `outer_from`, `trace` (with its `dtype` form) and `cross`.
+  (RESTGroup/rstsr#133, #135, #138, #140, #141, #142, #143, #145, #146, #147)
+- **Mixed-dtype (promoted) entries.** A family of `ext_*` forms serves the
+  array-API promotion contract — `ext_add` / `ext_sub` / `ext_mul` / `ext_div`
+  and the bitwise and shift operators, `ext_matmul` / `ext_vecdot` /
+  `ext_tensordot`, `ext_outer`, `ext_cross` and `ext_neg` — promoting their
+  operands to the common data type in the kernel and accumulating there.
+  Promotion is resolved on the device impl, so the tensor tier carries no
+  element-type bound; the same-dtype functions and the Rust operators remain the
+  idiomatic surface. (RESTGroup/rstsr#125, #137, #138, #143)
+- Floored element-wise remainder, `signbit` extended to unsigned and half
+  dtypes, `pow` for integer bases with integer exponents and complex bases, and
+  `clip` with optional `(lo, hi)` bounds. (RESTGroup/rstsr#123, #124, #132)
+- `rstsr-faer-py`: `result_type`, `can_cast` and `isdtype` for runtime dtype
+  queries, over a `dtype_promote` binding derived from the very
+  `DTypePromoteAPI` impls the operations use. (RESTGroup/rstsr#131)
+
+Behavior change
+
+- `maximum` / `minimum` and the `max` / `min` reductions now propagate NaN
+  (IEEE 754-2019 `maximum` / `minimum`, the standard's contract); the previous
+  behavior dropped it. (RESTGroup/rstsr#124)
+- `signbit` returns the sign bit proper (true for negative values, `-0.0` and
+  negatively-signed NaN) instead of the inverse of `is_positive()`.
+  (RESTGroup/rstsr#124)
+- `ceil` / `floor` / `trunc` / `round` preserve the input dtype instead of
+  widening integers to `f64`; `round` is componentwise and ties-to-even, and
+  `round` / `ext_neg` accept complex. (RESTGroup/rstsr#124)
+- `rem` on floating-point dtypes follows the standard's floored `remainder`
+  (the result takes the sign of the divisor), including the signed-zero and
+  infinite-divisor cases, instead of Rust's `fmod`; `pow` with a negative
+  integer exponent now fails with `InvalidValue`. (RESTGroup/rstsr#123, #124)
+- `solve_general` / `solve_triangular` reject a rectangular `a` with
+  `InvalidLayout` rather than solving it in the least-squares sense, following
+  the standard. (RESTGroup/rstsr#140)
+
+Python array-API conformance (validation instrument, not published)
+
+- The `rstsr_faer.api` namespace now covers the `linalg` extension end to end
+  (including `Array.__matmul__`), `x[key]` for integer-array and boolean-mask
+  keys with the matching `__setitem__`, the promoted `ext_*` entries, and the
+  runtime dtype queries. (RESTGroup/rstsr#131, #133, #137, #138, #142, #143,
+  #144, #145, #146, #147)
+- Against `array-api-tests` (pinned `6c0b59f`, spec 2025.12) the standing is
+  1332 passed / 17 failed / 33 skipped of 1382, up from 1144 / 156 / 82 at
+  alpha.1. The residual 17 are the 14 out-of-scope `fft` name nodes and three
+  `linalg` value nodes (`matrix_rank` / `pinv` / `svd`) held back by one faer
+  SVD non-convergence on large-magnitude inputs. (RESTGroup/rstsr#130, #131,
+  #132, #144)
+
+Enhancement
+
+- Refresh faer to 0.24 (`faer-ext` to 0.8); backend behavior is unchanged.
+  (RESTGroup/rstsr#139)
+- Document the shim-side dtype pre-casts ("dtype-cheating": `solve`, `isin`,
+  `concat` / `stack`) in a new `DTYPE-CASTS.md`, distinguishing them from the
+  casts the standard itself mandates. (RESTGroup/rstsr#144)
+
+Bug Fix
+
+- `Layout::diagonal` rejects `axis1 == axis2` (previously an unsound view past
+  the end of the buffer); `Layout::is_broadcasted` no longer misreads a
+  zero-size layout as broadcast, so contiguous empty tensors are writable
+  again; and `Layout::dim_narrow` follows Python's slicing rules for negative
+  steps. (RESTGroup/rstsr#126, #127, #138)
+- `pinv` returns the transposed zero matrix with rank 0 for a zero-size matrix
+  axis instead of panicking; `eig` / `eigvals` treat a zero-size batch axis as
+  empty output. (RESTGroup/rstsr#146)
+- `rstsr-faer-py`: a `uint64` scalar carrier so large unsigned values no longer
+  read back as negative, `conj` preserving integer dtypes, and a set of surface
+  corrections (`finfo` on complex dtypes, `devices()` / `dtypes()` shapes,
+  positional-or-keyword `shape`, `astype(device=…)`). (RESTGroup/rstsr#130,
+  #137)
+
+Dev infrastructure
+
+- Deduplicate the five BLAS device crates' `linalg_func` / `driver_impl` test
+  sources into `rstsr-blas-traits/src/blas_tests_impl/`, symlinked into each
+  device, with only genuine device divergences kept as real files.
+  (RESTGroup/rstsr#134)
+
 ## v0.10.0-alpha.1 -- 2026-10-08
 
 Its theme is conformance to the Python array API standard, so the surface is still
