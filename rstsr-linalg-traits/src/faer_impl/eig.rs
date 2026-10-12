@@ -19,9 +19,7 @@ use rstsr_core::prelude_dev::*;
 /// Rescale each eigenvector column to unit 2-norm — faer's `eigen()` does not
 /// normalize (its back-substitution fixes the pivot at `1`), while numpy and
 /// the array API expect unit-norm columns.
-fn normalize_columns<T>(
-    mut v: Tensor<Complex<T::Real>, DeviceFaer, Ix2>,
-) -> Tensor<Complex<T::Real>, DeviceFaer, Ix2>
+fn normalize_columns<T>(mut v: Tensor<Complex<T::Real>, DeviceFaer, Ix2>) -> Tensor<Complex<T::Real>, DeviceFaer, Ix2>
 where
     T: ComplexField,
 {
