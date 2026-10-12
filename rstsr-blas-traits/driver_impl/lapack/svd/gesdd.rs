@@ -81,17 +81,17 @@ pub unsafe fn fn_work(
             let lda_t = m.max(1);
             let ldu_t = nrows_u.max(1);
             let ldvt_t = nrows_vt.max(1);
-            // Check leading dimension(s)
+            // Check leading dimension(s); Fortran (reference-LAPACK) argument indices
             if lda < n {
-                *info = -6;
+                *info = -5;
                 return *info;
             }
             if ldu < ncols_u {
-                *info = -9;
+                *info = -8;
                 return *info;
             }
             if ldvt < ncols_vt {
-                *info = -11;
+                *info = -10;
                 return *info;
             }
             // Query optimal working array(s) size if requested
@@ -326,17 +326,17 @@ pub unsafe fn fn_work(
             let lda_t = m.max(1);
             let ldu_t = nrows_u.max(1);
             let ldvt_t = nrows_vt.max(1);
-            // Check leading dimension(s)
+            // Check leading dimension(s); Fortran (reference-LAPACK) argument indices
             if lda < n {
-                *info = -6;
+                *info = -5;
                 return *info;
             }
             if ldu < ncols_u {
-                *info = -9;
+                *info = -8;
                 return *info;
             }
             if ldvt < ncols_vt {
-                *info = -11;
+                *info = -10;
                 return *info;
             }
             // Query optimal working array(s) size if requested
@@ -465,8 +465,11 @@ impl GESDDDriverAPI<T> for DeviceBLAS {
             Err(_) => return -1010,
         };
         // complex rwork: LAPACK >= 3.6 documented formula (no query)
-        let lrwork =
-            if jobz == 'N' { (7 * min_mn).max(1) } else { (min_mn * (5 * min_mn + 7).max(2 * max_mn + 2 * min_mn + 1)).max(1) };
+        let lrwork = if jobz == 'N' {
+            (7 * min_mn).max(1)
+        } else {
+            (min_mn * (5 * min_mn + 7).max(2 * max_mn + 2 * min_mn + 1)).max(1)
+        };
         let mut rwork: Vec<<T as ComplexFloat>::Real> = match uninitialized_vec(lrwork) {
             Ok(rwork) => rwork,
             Err(_) => return -1010,

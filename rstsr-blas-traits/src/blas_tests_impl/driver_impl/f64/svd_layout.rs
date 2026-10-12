@@ -46,8 +46,7 @@ fn make_case_f64(
         // fully non-contiguous (strided both dims)
         "non-contig" => {
             let buf = rt::asarray((v, [m + 4, n + 4].c(), device)).into_dim::<Ix2>().into_owned();
-            let strided =
-                buf.i((slice!(None, None, 2), slice!(None, None, 2))).into_dim::<Ix2>().into_owned();
+            let strided = buf.i((slice!(None, None, 2), slice!(None, None, 2))).into_dim::<Ix2>().into_owned();
             let a = strided.i((0..m, 0..n)).into_dim::<Ix2>().into_owned();
             (a, buf)
         },

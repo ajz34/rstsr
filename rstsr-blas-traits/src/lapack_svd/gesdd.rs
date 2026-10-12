@@ -46,11 +46,7 @@ where
         let Self { a, full_matrices, compute_uv } = self;
         let device = a.device().clone();
 
-        let order = match (a.c_prefer(), a.f_prefer()) {
-            (true, false) => RowMajor,
-            (false, true) => ColMajor,
-            (false, false) | (true, true) => device.default_order(),
-        };
+        let order = get_output_order(&[], &[(a.c_prefer(), a.f_prefer())], device.default_order());
 
         // gesdd overwrites its input; clone-or-consume in the call order
         let mut a = overwritable_convert_with_order(a, order)?;

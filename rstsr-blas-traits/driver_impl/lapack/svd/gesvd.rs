@@ -77,17 +77,17 @@ pub unsafe fn fn_work(
             let lda_t = m.max(1);
             let ldu_t = nrows_u.max(1);
             let ldvt_t = nrows_vt.max(1);
-            // Check leading dimension(s)
+            // Check leading dimension(s); Fortran (reference-LAPACK) argument indices
             if lda < n {
-                *info = -7;
+                *info = -6;
                 return *info;
             }
             if (jobu == 'A' || jobu == 'S') && ldu < ncols_u {
-                *info = -10;
+                *info = -9;
                 return *info;
             }
             if (jobvt == 'A' || jobvt == 'S') && ldvt < ncols_vt {
-                *info = -12;
+                *info = -11;
                 return *info;
             }
             // Query optimal working array(s) size if requested
@@ -323,17 +323,17 @@ pub unsafe fn fn_work(
             let lda_t = m.max(1);
             let ldu_t = nrows_u.max(1);
             let ldvt_t = nrows_vt.max(1);
-            // Check leading dimension(s)
+            // Check leading dimension(s); Fortran (reference-LAPACK) argument indices
             if lda < n {
-                *info = -7;
+                *info = -6;
                 return *info;
             }
             if (jobu == 'A' || jobu == 'S') && ldu < ncols_u {
-                *info = -10;
+                *info = -9;
                 return *info;
             }
             if (jobvt == 'A' || jobvt == 'S') && ldvt < ncols_vt {
-                *info = -12;
+                *info = -11;
                 return *info;
             }
             // Query optimal working array(s) size if requested
