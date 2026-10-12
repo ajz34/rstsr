@@ -26,6 +26,9 @@ pub trait BlasDriverBaseAPI<T>:
     + OpSumAPI<T::Real, Ix1, TOut = T::Real>
     + OpMaxAPI<T::Real, Ix1, TOut = T::Real>
     + OpLogAPI<T::Real, Ix1, TOut = T::Real>
+    // zero-size identity synthesis (SVD family, ADR-0009 §6)
+    + DeviceCreationNumAPI<T>
+    + OpAssignAPI<T, Ix1>
 where
     T: BlasFloat,
 {

@@ -44,57 +44,57 @@ where
         self,
     ) -> Result<(Tensor<T::Real, B, Ix1>, Option<Tensor<T, B, Ix2>>, Option<Tensor<T, B, Ix2>>)> {
         let Self { a, full_matrices, compute_uv } = self;
-
         let device = a.device().clone();
+
         let order = match (a.c_prefer(), a.f_prefer()) {
             (true, false) => RowMajor,
             (false, true) => ColMajor,
-            (false, false) | (true, true) => a.device().default_order(),
+            (false, false) | (true, true) => device.default_order(),
         };
-        let mut a = overwritable_convert_with_order(a, order)?;
-        let [m, n] = *a.view().shape();
-        rstsr_assert_eq!(a.view().shape(), &[m, n], InvalidLayout, "GESDD: A shape")?;
-        let lda = a.view().ld(order).unwrap();
 
-        // determine job type and matrix sizes
+        // gesdd overwrites its input; clone-or-consume in the call order
+        let mut a = overwritable_convert_with_order(a, order)?;
         let jobz = match (compute_uv, full_matrices) {
             (false, _) => 'N',
             (true, false) => 'S',
             (true, true) => 'A',
         };
+        let [m, n] = *a.view().shape();
         let minmn = m.min(n);
+        let lda = a.view().ld(order).unwrap();
 
         let ([u0, u1], [vt0, vt1]) = match jobz {
-            'N' => ([1, 1], [1, 1]),
+            'N' => ([0, 0], [0, 0]),
             'S' => ([m, minmn], [minmn, n]),
             'A' => ([m, m], [n, n]),
             _ => unreachable!(),
         };
 
-        // empty matrix (min(m, n) == 0): nothing to compute; return the factors
-        // with their LAPACK shapes, zero-filled where they carry no values
-        // (e.g. VT under jobz 'A'). Also skips the drivers, which do not handle
-        // the degenerate layouts of zero-sized dimensions.
         if minmn == 0 {
+            // zero-size: LAPACK returns identity sub-blocks for U/VT
             let s = zeros_f(([0], &device))?.into_dim::<Ix1>();
-            return match compute_uv {
-                false => Ok((s, None, None)),
-                true => {
-                    let u = zeros_f(([u0, u1], order, &device))?.into_dim::<Ix2>();
-                    let vt = zeros_f(([vt0, vt1], order, &device))?.into_dim::<Ix2>();
-                    Ok((s, Some(u), Some(vt)))
-                },
-            };
+            if !compute_uv {
+                return Ok((s, None, None));
+            }
+            let u_eye = eye_f((u0, u1, 0isize, order, &device))?.into_dim::<Ix2>();
+            let vt_eye = eye_f((vt0, vt1, 0isize, order, &device))?.into_dim::<Ix2>();
+            return Ok((s, Some(u_eye), Some(vt_eye)));
         }
 
-        let mut u = unsafe { empty_f(([u0, u1], order, &device))?.into_dim::<Ix2>() };
-        let mut vt = unsafe { empty_f(([vt0, vt1], order, &device))?.into_dim::<Ix2>() };
+        // factor buffers in the call order
+        let mut u_f = match jobz {
+            'N' => None,
+            _ => Some(unsafe { empty_f(([u0, u1], order, &device))?.into_dim::<Ix2>() }),
+        };
+        let mut vt_f = match jobz {
+            'N' => None,
+            _ => Some(unsafe { empty_f(([vt0, vt1], order, &device))?.into_dim::<Ix2>() }),
+        };
         let mut s = unsafe { empty_f(([minmn], &device))?.into_dim::<Ix1>() };
 
-        let ldu = u.view().ld(order).unwrap();
-        let ldvt = vt.view().ld(order).unwrap();
+        let ldu = u_f.as_ref().map_or(1, |u| u.view().ld(order).unwrap());
+        let ldvt = vt_f.as_ref().map_or(1, |v| v.view().ld(order).unwrap());
 
-        // run driver
         let info = unsafe {
             B::driver_gesdd(
                 order,
@@ -104,20 +104,18 @@ where
                 a.view_mut().as_mut_ptr(),
                 lda,
                 s.as_mut_ptr(),
-                u.as_mut_ptr(),
+                u_f.as_mut().map_or(std::ptr::null_mut(), |u| u.as_mut_ptr()),
                 ldu,
-                vt.as_mut_ptr(),
+                vt_f.as_mut().map_or(std::ptr::null_mut(), |v| v.as_mut_ptr()),
                 ldvt,
             )
         };
-        let info = info as i32;
-        if info != 0 {
-            rstsr_errcode!(info, "Lapack GESDD")?;
-        }
+        map_lapack_info(info, "Lapack GESDD")?;
 
-        match compute_uv {
-            false => Ok((s, None, None)),
-            true => Ok((s, Some(u), Some(vt))),
+        if compute_uv {
+            Ok((s, u_f, vt_f))
+        } else {
+            Ok((s, None, None))
         }
     }
 
