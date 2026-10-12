@@ -14,6 +14,7 @@ use rstsr_core::prelude_dev::*;
    [InvAPI            ] [inv             ] [inv_f             ];
    [MatrixNormAPI     ] [matrix_norm     ] [matrix_norm_f     ];
    [MatrixPowerAPI    ] [matrix_power    ] [matrix_power_f    ];
+   [MatrixRankAPI     ] [matrix_rank     ] [matrix_rank_f     ];
    [PinvAPI           ] [pinv            ] [pinv_f            ];
    [SLogDetAPI        ] [slogdet         ] [slogdet_f         ];
    [SolveGeneralAPI   ] [solve_general   ] [solve_general_f   ];
@@ -43,6 +44,7 @@ pub trait LinalgAPI<Inp> {
    [InvAPI            ] [inv             ] [inv_f             ];
    [MatrixNormAPI     ] [matrix_norm     ] [matrix_norm_f     ];
    [MatrixPowerAPI    ] [matrix_power    ] [matrix_power_f    ];
+   [MatrixRankAPI     ] [matrix_rank     ] [matrix_rank_f     ];
    [PinvAPI           ] [pinv            ] [pinv_f            ];
    [SLogDetAPI        ] [slogdet         ] [slogdet_f         ];
    [SolveGeneralAPI   ] [solve_general   ] [solve_general_f   ];
@@ -68,6 +70,7 @@ where
    [InvAPI            ] [inv             ] [inv_f             ];
    [MatrixNormAPI     ] [matrix_norm     ] [matrix_norm_f     ];
    [MatrixPowerAPI    ] [matrix_power    ] [matrix_power_f    ];
+   [MatrixRankAPI     ] [matrix_rank     ] [matrix_rank_f     ];
    [PinvAPI           ] [pinv            ] [pinv_f            ];
    [SLogDetAPI        ] [slogdet         ] [slogdet_f         ];
    [SolveGeneralAPI   ] [solve_general   ] [solve_general_f   ];
@@ -475,6 +478,101 @@ impl FromStr for VectorNormArgs {
     type Err = Error;
     fn from_str(s: &str) -> Result<Self> {
         Self::try_from(s)
+    }
+}
+
+/* #endregion */
+
+/* #region matrix_rank */
+
+/// The relative tolerance handed to [`matrix_rank`] — the entry's argument type.
+///
+/// A scalar carries no device; an array does — so the two cannot share one
+/// representation, and the array's device is checked against the input's before
+/// the rank is computed. `None` selects the default `max(M, N) * eps`.
+///
+/// **Order notice.** The input's two matrix axes are its *leading* axes under a
+/// row-major device but its *trailing* axes under a column-major one; the batch
+/// is whatever remains, and an [`Array`](MatrixRankRtol::Array) tolerance is
+/// broadcast against the batch in that same device order. On a row-major device
+/// this is NumPy's trailing alignment against `shape(x)[:-2]`; on a
+/// column-major device the matrix axes are the right-most and the tolerance
+/// aligns from the opposite end.
+///
+/// `TR` is the input's real scalar type (`T::Real`) and `B` its device. `From`
+/// converts the scalar, array, `()`, and `None` forms, so
+/// `matrix_rank((x, 1e-8))` (an `f64` input), `matrix_rank((x, rtol_array))`,
+/// and `matrix_rank((x, None))` all resolve. A scalar is taken as the input's
+/// own real type — with an `f32` input write `1e-8_f32` (a bare `1e-8` is `f64`
+/// and does not convert).
+pub enum MatrixRankRtol<TR, B>
+where
+    B: DeviceRawAPI<TR>,
+{
+    /// The default tolerance `max(M, N) * eps`.
+    None,
+    /// One tolerance for every matrix — a scalar of the input's real type.
+    Float(TR),
+    /// One tolerance per matrix, broadcast against the batch in device order.
+    Array(Tensor<TR, B, IxD>),
+}
+
+// not derived: `#[derive(Default)]` would add spurious `TR: Default, B: Default` bounds
+#[allow(clippy::derivable_impls)]
+impl<TR, B> Default for MatrixRankRtol<TR, B>
+where
+    B: DeviceRawAPI<TR>,
+{
+    fn default() -> Self {
+        Self::None
+    }
+}
+
+impl<TR, B> From<Tensor<TR, B, IxD>> for MatrixRankRtol<TR, B>
+where
+    B: DeviceRawAPI<TR>,
+{
+    fn from(rtol: Tensor<TR, B, IxD>) -> Self {
+        Self::Array(rtol)
+    }
+}
+
+// the scalar overload is written per real type, not as a generic `From<TR>`:
+// a generic impl would overlap `From<()>`/`From<Option<()>>` at `TR = ()`
+impl<B> From<f32> for MatrixRankRtol<f32, B>
+where
+    B: DeviceRawAPI<f32>,
+{
+    fn from(rtol: f32) -> Self {
+        Self::Float(rtol)
+    }
+}
+
+impl<B> From<f64> for MatrixRankRtol<f64, B>
+where
+    B: DeviceRawAPI<f64>,
+{
+    fn from(rtol: f64) -> Self {
+        Self::Float(rtol)
+    }
+}
+
+impl<TR, B> From<()> for MatrixRankRtol<TR, B>
+where
+    B: DeviceRawAPI<TR>,
+{
+    fn from(_: ()) -> Self {
+        Self::None
+    }
+}
+
+impl<TR, B> From<Option<()>> for MatrixRankRtol<TR, B>
+where
+    B: DeviceRawAPI<TR>,
+{
+    /// `None` is equivalent to `()`: both request the default tolerance.
+    fn from(_: Option<()>) -> Self {
+        Self::None
     }
 }
 

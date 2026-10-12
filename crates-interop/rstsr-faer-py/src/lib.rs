@@ -297,6 +297,7 @@ fn rstsr_faer(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(linalg::linalg_matrix_transpose, m)?)?;
     m.add_function(wrap_pyfunction!(linalg::linalg_matrix_norm, m)?)?;
     m.add_function(wrap_pyfunction!(linalg::linalg_matrix_power, m)?)?;
+    m.add_function(wrap_pyfunction!(linalg::linalg_matrix_rank, m)?)?;
     m.add_function(wrap_pyfunction!(linalg::linalg_outer, m)?)?;
     m.add_function(wrap_pyfunction!(linalg::linalg_cross, m)?)?;
     m.add_function(wrap_pyfunction!(linalg::linalg_pinv, m)?)?;

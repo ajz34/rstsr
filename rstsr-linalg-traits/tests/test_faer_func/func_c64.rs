@@ -322,6 +322,25 @@ mod test {
         assert!((rt::linalg::vector_norm((v.view(), f64::INFINITY)).to_scalar() - 5.0).abs() < 1e-12);
         assert!((rt::linalg::vector_norm((v.view(), 0)).to_scalar() - 1.0).abs() < 1e-12);
     }
+
+    #[test]
+    fn test_matrix_rank() {
+        let device = DeviceFaer::default();
+        // full rank: A = [[1+1j, 2], [3, 4-1j]]
+        let a = rt::asarray((vec![c64!(1.0, 1.0), c64!(2.0), c64!(3.0), c64!(4.0, -1.0)], [2, 2].c(), &device));
+        assert_eq!(rt::linalg::matrix_rank(a.view()).to_scalar(), 2);
+
+        // rank 1: the second row is 2 times the first
+        let b = rt::asarray((vec![c64!(1.0), c64!(2.0, 1.0), c64!(2.0), c64!(4.0, 2.0)], [2, 2].c(), &device));
+        assert_eq!(rt::linalg::matrix_rank(b.view()).to_scalar(), 1);
+
+        // the rtol is a real tensor (or a bare scalar) even for a complex input
+        let tight = rt::from_scalar(1e-8f64, &device);
+        assert_eq!(rt::linalg::matrix_rank((a.view(), tight)).to_scalar(), 2);
+        assert_eq!(rt::linalg::matrix_rank((a.view(), 1.0f64)).to_scalar(), 0);
+        let big = rt::from_scalar(1.0f64, &device);
+        assert_eq!(rt::linalg::matrix_rank((a.view(), big)).to_scalar(), 0);
+    }
 }
 
 #[cfg(test)]

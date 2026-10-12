@@ -5,12 +5,13 @@
 //! that already exists on the faer device — the tensor-tier entries
 //! (`matmul`, `vecdot`, `cross`, `matrix_transpose`, `diagonal`, `trace`) or
 //! the faer linalg entries (`cholesky`, `det`, `eigh`, `eigvalsh`, `inv`,
-//! `matrix_norm`, `matrix_power`, `pinv`, `solve`, `svd`, `svdvals`,
-//! `vector_norm`). Every dispatch body is written once against a concrete dtype
-//! arm, so no generic trait bound is stated here and no faer type is named.
+//! `matrix_norm`, `matrix_power`, `matrix_rank`, `pinv`, `solve`, `svd`,
+//! `svdvals`, `vector_norm`). Every dispatch body is written once against a
+//! concrete dtype arm, so no generic trait bound is stated here and no faer type
+//! is named.
 //!
-//! Names rstsr/faer does not provide (`qr`, `eig`, `eigvals`, `matrix_rank`)
-//! are absent from the namespace, never stubbed — they are rust-side gaps.
+//! Names rstsr/faer does not provide (`qr`, `eig`, `eigvals`) are absent from
+//! the namespace, never stubbed — they are rust-side gaps.
 //!
 //! `solve` accepts a same-dtype float/complex pair only; the Python layer
 //! promotes a mixed-dtype pair first — see `DTYPE-CASTS.md` in this crate.
@@ -18,7 +19,8 @@
 use core::mem::MaybeUninit;
 use core::ops::{Add, Mul, Sub};
 
-use num::{Complex, One, Zero};
+use num::complex::ComplexFloat;
+use num::{Complex, FromPrimitive, One, Zero};
 use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PySequence, PySequenceMethods};
@@ -33,8 +35,9 @@ use rstsr_dtype_traits::{DTypePromoteAPI, ExtNum};
 
 use crate::any_tensor::{
     any_of, dispatch_bin_promote, dispatch_bin_promote_arith, dispatch_t_numeric_same, err_py, lift, type_err,
-    AnyTensor, FTensor, IntoAnyTensor, NativeArray,
+    AnyTensor, AnyTensorRef, FTensor, IntoAnyTensor, NativeArray,
 };
+use crate::ops::idx_lift;
 
 /// `rt::Result<FTensor<R>>` -> erased handle, by the result's own dtype, so a
 /// real-valued eigenvalue/singular-value output lands in the right variant.
@@ -167,6 +170,49 @@ pub fn linalg_matrix_norm(x: &NativeArray, keepdims: bool, ord: &pyo3::Bound<'_,
     let ord = py_to_ord(ord)?;
     let t = unary_fc!(x, |a| any_res(rt::linalg::matrix_norm_f((a, rt::linalg::MatrixNormArgs { ord, keepdims }))))?;
     Ok(NativeArray { t })
+}
+
+/// `rtol` for `matrix_rank`: a bare Python float becomes a scalar tolerance (no
+/// device), a tensor one per matrix. The element type is the input's **real**
+/// projection `T::Real` — float32 for both `f32` and `c32`, float64 for both
+/// `f64` and `c64`; the Python layer has already cast an array to that dtype.
+fn matrix_rank_rtol<T>(
+    rtol: Option<&pyo3::Bound<'_, PyAny>>,
+) -> PyResult<rt::linalg::MatrixRankRtol<T::Real, DeviceFaer>>
+where
+    T: ComplexFloat,
+    T::Real: num::FromPrimitive + Clone + Send + Sync + 'static,
+    AnyTensor: AnyTensorRef<T::Real>,
+{
+    let Some(r) = rtol else {
+        return Ok(rt::linalg::MatrixRankRtol::None);
+    };
+    if let Ok(f) = r.extract::<f64>() {
+        let f = T::Real::from_f64(f)
+            .ok_or_else(|| PyTypeError::new_err("matrix_rank: rtol is not representable in the input's real dtype"))?;
+        return Ok(rt::linalg::MatrixRankRtol::Float(f));
+    }
+    match r.cast::<NativeArray>()?.borrow().t.tensor_ref() {
+        Some(t) => Ok(rt::linalg::MatrixRankRtol::Array(t.clone())),
+        None => type_err("matrix_rank: rtol must have the input's real floating dtype"),
+    }
+}
+
+/// Matrix rank (the count of singular values above the tolerance). `rtol` is
+/// absent/`None` for the default `max(M, N) * eps`, a Python float for one
+/// tolerance on every matrix, or an array in the input's real dtype for one
+/// tolerance per matrix — the kernel broadcasts it against the batch (the
+/// Python layer only casts the dtype; binding marshalling, not a promotion
+/// pre-cast). The rank is an index output, lifted to the namespace's int64.
+#[pyfunction]
+pub fn linalg_matrix_rank(x: &NativeArray, rtol: Option<&pyo3::Bound<'_, PyAny>>) -> PyResult<NativeArray> {
+    match &x.t {
+        AnyTensor::F32(a) => idx_lift(rt::linalg::matrix_rank_f((a, matrix_rank_rtol::<f32>(rtol)?))),
+        AnyTensor::C32(a) => idx_lift(rt::linalg::matrix_rank_f((a, matrix_rank_rtol::<Complex<f32>>(rtol)?))),
+        AnyTensor::F64(a) => idx_lift(rt::linalg::matrix_rank_f((a, matrix_rank_rtol::<f64>(rtol)?))),
+        AnyTensor::C64(a) => idx_lift(rt::linalg::matrix_rank_f((a, matrix_rank_rtol::<Complex<f64>>(rtol)?))),
+        _ => type_err("linalg: matrix_rank is provided only for float/complex dtypes"),
+    }
 }
 
 /// Vector norm; `ord` is a number (default `2`) or `±inf`, and `axis` (already
