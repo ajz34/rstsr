@@ -158,6 +158,7 @@ from .rstsr_faer import (
     linalg_matmul as _linalg_matmul,
     linalg_matrix_norm as _linalg_matrix_norm,
     linalg_matrix_power as _linalg_matrix_power,
+    linalg_matrix_rank as _linalg_matrix_rank,
     linalg_matrix_transpose as _linalg_matrix_transpose,
     linalg_outer as _linalg_outer,
     linalg_cross as _linalg_cross,
@@ -1913,6 +1914,24 @@ def matrix_norm(x, /, *, keepdims=False, ord="fro"):
     return _wrap(_linalg_matrix_norm(_handle(x), _py_bool(keepdims), ord))
 
 
+_REAL_FLOATING_OF = {
+    "float32": float32, "float64": float64,
+    "complex64": float32, "complex128": float64,
+}
+
+
+def matrix_rank(x, /, *, rtol=None):
+    # `rtol` is a real floating scalar or an array broadcast against the matrix
+    # stack; a scalar carries no device, so it passes through as a Python float
+    # and only an array is cast to x's real dtype — marshalling, not a
+    # promotion cast (the rust entry holds the two cases apart)
+    if isinstance(rtol, Array):
+        rtol = _handle(astype(rtol, _REAL_FLOATING_OF[x.dtype.name]))
+    elif rtol is not None:
+        rtol = float(rtol)
+    return _wrap(_linalg_matrix_rank(_handle(x), rtol))
+
+
 def vector_norm(x, /, *, axis=None, keepdims=False, ord=2):
     return _wrap(_linalg_vector_norm(_handle(x), ord, _norm_axes(axis), _py_bool(keepdims)))
 
@@ -1956,6 +1975,7 @@ class _LinalgNamespace:
     matmul = staticmethod(matmul)
     matrix_norm = staticmethod(matrix_norm)
     matrix_power = staticmethod(matrix_power)
+    matrix_rank = staticmethod(matrix_rank)
     matrix_transpose = staticmethod(matrix_transpose)
     outer = staticmethod(outer)
     cross = staticmethod(cross)
