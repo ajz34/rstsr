@@ -3,6 +3,7 @@ use crate::DeviceBLAS;
 use num::complex::ComplexFloat;
 use num::{Complex, Zero};
 use rstsr_blas_traits::prelude::*;
+use rstsr_blas_traits::util::util_error::lwork_from_query;
 use rstsr_common::prelude_dev::*;
 
 use rstsr_native_impl::prelude_dev::*;
@@ -221,7 +222,9 @@ impl GESDDDriverAPI<T> for DeviceBLAS {
         if info != 0 {
             return info;
         }
-        let lwork = work_query.re() as usize;
+        let Some(lwork) = lwork_from_query(work_query) else {
+            return -1010;
+        };
 
         // allocate memory for work array
         let mut work: Vec<T> = match uninitialized_vec(lwork) {
@@ -463,7 +466,7 @@ impl GESDDDriverAPI<T> for DeviceBLAS {
         };
         // complex rwork: LAPACK >= 3.6 documented formula (no query)
         let lrwork =
-            if jobz == 'N' { (7 * min_mn).max(1) } else { min_mn * (5 * min_mn + 7).max(2 * max_mn + 2 * min_mn + 1) };
+            if jobz == 'N' { (7 * min_mn).max(1) } else { (min_mn * (5 * min_mn + 7).max(2 * max_mn + 2 * min_mn + 1)).max(1) };
         let mut rwork: Vec<<T as ComplexFloat>::Real> = match uninitialized_vec(lrwork) {
             Ok(rwork) => rwork,
             Err(_) => return -1010,
@@ -493,7 +496,9 @@ impl GESDDDriverAPI<T> for DeviceBLAS {
         if info != 0 {
             return info;
         }
-        let lwork = work_query.re() as usize;
+        let Some(lwork) = lwork_from_query(work_query) else {
+            return -1010;
+        };
 
         // allocate memory for work array
         let mut work: Vec<T> = match uninitialized_vec(lwork) {

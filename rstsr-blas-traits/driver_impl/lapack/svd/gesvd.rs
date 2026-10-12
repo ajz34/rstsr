@@ -3,6 +3,7 @@ use crate::DeviceBLAS;
 use num::complex::ComplexFloat;
 use num::{Complex, Zero};
 use rstsr_blas_traits::prelude::*;
+use rstsr_blas_traits::util::util_error::lwork_from_query;
 use rstsr_common::prelude_dev::*;
 
 use rstsr_native_impl::prelude_dev::*;
@@ -216,7 +217,9 @@ impl GESVDDriverAPI<T> for DeviceBLAS {
         if info != 0 {
             return info;
         }
-        let lwork = work_query.re() as usize;
+        let Some(lwork) = lwork_from_query(work_query) else {
+            return -1010;
+        };
 
         // allocate memory for work array
         let mut work: Vec<T> = match uninitialized_vec(lwork) {
@@ -485,7 +488,9 @@ impl GESVDDriverAPI<T> for DeviceBLAS {
         if info != 0 {
             return info;
         }
-        let lwork = work_query.re() as usize;
+        let Some(lwork) = lwork_from_query(work_query) else {
+            return -1010;
+        };
 
         // allocate memory for work array
         let mut work: Vec<T> = match uninitialized_vec(lwork) {
@@ -512,9 +517,6 @@ impl GESVDDriverAPI<T> for DeviceBLAS {
             rwork.as_mut_ptr(),
             &mut info,
         );
-        if info != 0 {
-            return info;
-        }
 
         // backup superb from rwork
         #[allow(clippy::needless_range_loop)]

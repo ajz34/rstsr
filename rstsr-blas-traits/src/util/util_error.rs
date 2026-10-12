@@ -1,4 +1,6 @@
 use crate::prelude_dev::*;
+use num::complex::ComplexFloat;
+use num::ToPrimitive;
 use rstsr_core::prelude_dev::*;
 
 /// Map a raw LAPACK `info` return to a rstsr error.
@@ -38,4 +40,25 @@ pub fn blas_int_as_i32(x: blas_int) -> i32 {
     {
         x
     }
+}
+
+/// Hardened read-back of a LAPACK workspace-query value (ADR-0009 §4):
+/// one-ulp round-up guard for f32-mantissa query results, checked
+/// conversion into `blas_int` range, and the `MAX(1, ·)` clamp.
+/// `None` — unusable query value (non-finite or negative; vendor malfunction).
+pub fn lwork_from_query<T>(work_query: T) -> Option<usize>
+where
+    T: ComplexFloat,
+    T::Real: ToPrimitive,
+{
+    let re: f64 = work_query.re().to_f64()?;
+    if !re.is_finite() || re < 0.0 {
+        return None;
+    }
+    // f32-mantissa query values >= 2^24 truncate low on conversion: grow one ulp
+    let grown = if size_of::<T::Real>() == 4 { re * (1.0 + f32::EPSILON as f64) } else { re };
+    if grown >= blas_int::MAX as f64 {
+        return None;
+    }
+    Some((grown as usize).max(1))
 }
