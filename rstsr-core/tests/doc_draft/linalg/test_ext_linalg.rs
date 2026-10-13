@@ -181,9 +181,9 @@ mod doc_ext_cross_overload {
         let b = rt::tensor_from_nested!([4i16, 5, 6], &device);
 
         // () or None: the last axis (Array-API default axis = -1)
-        println!("{}", rt::ext_cross(&a, &b, ()));
+        println!("{}", rt::ext_cross(&a, &b, None));
         // [ -3 6 -3]
-        assert_eq!(format!("{}", rt::ext_cross(&a, &b, ())), "[ -3 6 -3]");
+        assert_eq!(format!("{}", rt::ext_cross(&a, &b, None)), "[ -3 6 -3]");
 
         // integer: an explicit axis shared by both operands
         let m = rt::tensor_from_nested!([[1i8, 2, 3], [4, 5, 6]], &device);
@@ -215,9 +215,9 @@ mod doc_ext_tensordot_overload {
         assert_eq!(format!("{}", rt::ext_tensordot(&a, &b, 1)), "[[ 19 22]\n [ 43 50]]");
 
         // None or (): the default n = 2 (full contraction)
-        println!("{}", rt::ext_tensordot(&a, &b, ()));
+        println!("{}", rt::ext_tensordot(&a, &b, None));
         // 70
-        assert_eq!(format!("{}", rt::ext_tensordot(&a, &b, ())), "70");
+        assert_eq!(format!("{}", rt::ext_tensordot(&a, &b, None)), "70");
 
         // (axes_a, axes_b): contract different axes of each operand
         println!("{}", rt::ext_tensordot(&a, &b, ([1, 0], [0, 1])));

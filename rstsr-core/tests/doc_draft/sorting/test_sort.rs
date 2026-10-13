@@ -19,9 +19,9 @@ mod doc_sort {
 
         // # Examples: ascending sort of a 1-D tensor
         let a = rt::tensor_from_nested!([3, 1, 2], &device);
-        println!("{}", rt::sort(&a, ()));
+        println!("{}", rt::sort(&a, None));
         // [ 1 2 3]
-        assert_eq!(format!("{}", rt::sort(&a, ())), "[ 1 2 3]");
+        assert_eq!(format!("{}", rt::sort(&a, None)), "[ 1 2 3]");
 
         // # Examples: axis matters on a 2-D tensor
         let b = rt::tensor_from_nested!([[9, 1, 5], [2, 8, 3]], &device);
@@ -29,16 +29,16 @@ mod doc_sort {
         // [[ 2 1 3]
         //  [ 9 8 5]]
         assert_eq!(format!("{}", rt::sort(&b, 0)), "[[ 2 1 3]\n [ 9 8 5]]");
-        println!("{}", rt::sort(&b, ()));
+        println!("{}", rt::sort(&b, None));
         // [[ 1 5 9]
         //  [ 2 3 8]]
-        assert_eq!(format!("{}", rt::sort(&b, ())), "[[ 1 5 9]\n [ 2 3 8]]");
+        assert_eq!(format!("{}", rt::sort(&b, None)), "[[ 1 5 9]\n [ 2 3 8]]");
 
         // # Overload List: one call per distinct behavior
         let a = rt::tensor_from_nested!([3, 1, 2], &device);
-        println!("{}", rt::sort(&a, ())); // defaults
-                                          // [ 1 2 3]
-        assert_eq!(format!("{}", rt::sort(&a, ())), "[ 1 2 3]");
+        println!("{}", rt::sort(&a, None)); // defaults
+                                            // [ 1 2 3]
+        assert_eq!(format!("{}", rt::sort(&a, None)), "[ 1 2 3]");
         println!("{}", rt::sort(&a, 0)); // integer axis
                                          // [ 1 2 3]
         assert_eq!(format!("{}", rt::sort(&a, 0)), "[ 1 2 3]");

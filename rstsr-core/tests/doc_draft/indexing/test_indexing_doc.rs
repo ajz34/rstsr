@@ -386,9 +386,9 @@ mod doc_diagonal {
         device.set_default_order(RowMajor);
 
         let a = rt::arange((9, &device)).into_shape([3, 3]);
-        println!("{}", a.diagonal(()));
+        println!("{}", a.diagonal(None));
         // [ 0 4 8]
-        assert_eq!(format!("{}", a.diagonal(())), "[ 0 4 8]");
+        assert_eq!(format!("{}", a.diagonal(None)), "[ 0 4 8]");
         println!("{}", a.diagonal(1));
         // [ 1 5]
         assert_eq!(format!("{}", a.diagonal(1)), "[ 1 5]");
@@ -402,7 +402,7 @@ mod doc_diagonal {
 
         // mutable diagonal, written in place
         let mut c: Tensor<i32, _> = rt::zeros(([3, 3], &device));
-        let mut d = c.diagonal_mut(());
+        let mut d = c.diagonal_mut(None);
         d += 2;
         println!("{c}");
         // [[ 2 0 0]
@@ -414,8 +414,8 @@ mod doc_diagonal {
         // diagonal_mut writes are unchanged
         let a_f = a.to_contig(ColMajor);
         assert!(a_f.f_contig());
-        println!("{}", a_f.diagonal(()));
-        assert_eq!(format!("{}", a_f.diagonal(())), "[ 0 4 8]");
+        println!("{}", a_f.diagonal(None));
+        assert_eq!(format!("{}", a_f.diagonal(None)), "[ 0 4 8]");
         assert_eq!(format!("{}", a_f.diagonal(1)), "[ 1 5]");
 
         // on a ColMajor-default device, zeros are F-contiguous; diagonal_mut
@@ -424,7 +424,7 @@ mod doc_diagonal {
         device_c.set_default_order(ColMajor);
         let mut c_c: Tensor<i32, _> = rt::zeros(([3, 3], &device_c));
         assert!(c_c.f_contig());
-        let mut d_c = c_c.diagonal_mut(());
+        let mut d_c = c_c.diagonal_mut(None);
         d_c += 2;
         assert_eq!(format!("{c_c}"), "[[ 2 0 0]\n [ 0 2 0]\n [ 0 0 2]]");
     }
@@ -496,12 +496,12 @@ mod doc_diagonal_overloads {
         let mut device = TESTCFG.device.clone();
         device.set_default_order(RowMajor);
 
-        // main diagonal: () (or None)
+        // main diagonal: None (or ())
         let a = rt::arange((9, &device)).into_shape([3, 3]);
-        println!("{}", a.diagonal(()));
+        println!("{}", a.diagonal(None));
         // [ 0 4 8]
-        assert_eq!(format!("{}", a.diagonal(())), "[ 0 4 8]");
         assert_eq!(format!("{}", a.diagonal(None)), "[ 0 4 8]");
+        assert_eq!(format!("{}", a.diagonal(())), "[ 0 4 8]"); // () alias
 
         // single integer: the offset, default axes
         println!("{}", a.diagonal(1));

@@ -326,7 +326,7 @@ where
 /// # let mut device = DeviceCpu::default();
 /// # device.set_default_order(RowMajor);
 /// let a = rt::arange((9, &device)).into_shape([3, 3]);
-/// println!("{}", a.diagonal(()));
+/// println!("{}", a.diagonal(None));
 /// // [ 0 4 8]
 /// println!("{}", a.diagonal(1));
 /// // [ 1 5]
@@ -357,7 +357,7 @@ where
 /// # let mut device = DeviceCpu::default();
 /// # device.set_default_order(RowMajor);
 /// let mut c: Tensor<i32, _> = rt::zeros(([3, 3], &device));
-/// let mut d = c.diagonal_mut(());
+/// let mut d = c.diagonal_mut(None);
 /// d += 2;
 /// println!("{c}");
 /// // [[ 2 0 0]
@@ -381,7 +381,7 @@ where
 /// # let mut device = DeviceCpu::default();
 /// # device.set_default_order(RowMajor);
 /// let a = rt::arange((9, &device)).into_shape([3, 3]);
-/// println!("{}", a.diagonal(())); // main diagonal
+/// println!("{}", a.diagonal(None)); // main diagonal
 /// // [ 0 4 8]
 /// println!("{}", a.diagonal(1));  // offset = 1, default axes
 /// // [ 1 5]
@@ -389,7 +389,7 @@ where
 /// let b = rt::arange((24, &device)).into_shape([2, 3, 4]);
 /// println!("{:?}", b.diagonal((0, 0, 1)).shape()); // (offset, axis1, axis2)
 /// // [4, 2]
-/// # assert_eq!(format!("{}", a.diagonal(())), "[ 0 4 8]");
+/// # assert_eq!(format!("{}", a.diagonal(None)), "[ 0 4 8]");
 /// # assert_eq!(format!("{}", a.diagonal(1)), "[ 1 5]");
 /// # assert_eq!(b.diagonal((0, 0, 1)).shape(), &[4, 2]);
 /// ```

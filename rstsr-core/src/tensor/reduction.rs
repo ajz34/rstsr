@@ -436,7 +436,7 @@ impl<const N: usize> From<([isize; N], bool)> for VarArgs {
 /// # device.set_default_order(RowMajor);
 /// let a = rt::tensor_from_nested!([1, 2, 3], &device);
 /// // default: axis = None (1-D only), include_initial = false
-/// let s = rt::cumulative_sum(&a, ());
+/// let s = rt::cumulative_sum(&a, None);
 /// assert_eq!(s.to_vec(), vec![1, 3, 6]);
 /// // prepend the initial value 0
 /// let s = rt::cumulative_sum(&a, true);
@@ -1045,9 +1045,9 @@ where
 /// - `tensor`: [`&TensorAny<R, T, B, D>`](TensorAny), the input.
 /// - `args`: [`VarArgs`] grouping `axes`, `keepdims`, and `correction`.
 ///
-///   - Overloads: `()` (default: reduce all axes), a `bool` (`keepdims`), an integer or integer
-///     list (the reduced axes), or an `(axes, keepdims)` pair. `correction` has no shorthand - set
-///     it with a [`VarArgs`] literal.
+///   - Overloads: `()` or `None` (default: reduce all axes), a `bool` (`keepdims`), an integer or
+///     integer list (the reduced axes), or an `(axes, keepdims)` pair. `correction` has no
+///     shorthand - set it with a [`VarArgs`] literal.
 ///
 /// # Returns
 ///
@@ -1063,11 +1063,11 @@ where
 /// # let mut device = DeviceCpu::default();
 /// # device.set_default_order(RowMajor);
 /// let a = rt::tensor_from_nested!([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], &device);
-/// println!("{}", rt::var_with_args(&a, ()));
+/// println!("{}", rt::var_with_args(&a, None));
 /// // 2.916666666666666
 /// println!("{}", rt::var_with_args(&a, 0));
 /// // [ 2.25 2.25 2.25]
-/// # assert_eq!(format!("{}", rt::var_with_args(&a, ())), "2.916666666666666");
+/// # assert_eq!(format!("{}", rt::var_with_args(&a, None)), "2.916666666666666");
 /// # assert_eq!(format!("{}", rt::var_with_args(&a, 0)), "[ 2.25 2.25 2.25]");
 /// ```
 ///
@@ -1075,7 +1075,7 @@ where
 ///
 /// `args` accepts the following (all of them `Into<VarArgs>`):
 ///
-/// - `()` (or [`VarArgs::default`]) — reduce all axes, `keepdims = false`, no correction.
+/// - `()` or `None` (or [`VarArgs::default`]) — reduce all axes, `keepdims = false`, no correction.
 /// - a `bool` — `keepdims` shorthand (all axes).
 /// - an integer (`isize` / `i32` / `i64` / `usize`) — the single reduced axis.
 /// - a list (`Vec<isize>` / `[isize; N]`, and their `i32`/`i64`/`u32`/`u64`/`usize` variants) — the
@@ -1088,8 +1088,8 @@ where
 /// # let mut device = DeviceCpu::default();
 /// # device.set_default_order(RowMajor);
 /// let a = rt::tensor_from_nested!([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], &device);
-/// // () default: the whole reduction, no correction
-/// println!("{}", rt::var_with_args(&a, ()));
+/// // None default: the whole reduction, no correction
+/// println!("{}", rt::var_with_args(&a, None));
 /// // 2.916666666666666
 /// // bool: keepdims
 /// println!("{}", rt::var_with_args(&a, true));
@@ -1101,7 +1101,7 @@ where
 /// let args = VarArgs { correction: Some(1.0), ..Default::default() };
 /// println!("{}", rt::var_with_args(&a, args));
 /// // 3.499999999999999
-/// # assert_eq!(format!("{}", rt::var_with_args(&a, ())), "2.916666666666666");
+/// # assert_eq!(format!("{}", rt::var_with_args(&a, None)), "2.916666666666666");
 /// # assert_eq!(format!("{}", rt::var_with_args(&a, true)), "[[ 2.916666666666666]]");
 /// # assert_eq!(format!("{}", rt::var_with_args(&a, 0)), "[ 2.25 2.25 2.25]");
 /// # let args = VarArgs { correction: Some(1.0), ..Default::default() };
@@ -1206,9 +1206,9 @@ where
 /// - `tensor`: [`&TensorAny<R, T, B, D>`](TensorAny), the input.
 /// - `args`: [`VarArgs`] grouping `axes`, `keepdims`, and `correction`.
 ///
-///   - Overloads: `()` (default: reduce all axes), a `bool` (`keepdims`), an integer or integer
-///     list (the reduced axes), or an `(axes, keepdims)` pair. `correction` has no shorthand - set
-///     it with a [`VarArgs`] literal.
+///   - Overloads: `()` or `None` (default: reduce all axes), a `bool` (`keepdims`), an integer or
+///     integer list (the reduced axes), or an `(axes, keepdims)` pair. `correction` has no
+///     shorthand - set it with a [`VarArgs`] literal.
 ///
 /// # Returns
 ///
@@ -1224,11 +1224,11 @@ where
 /// # let mut device = DeviceCpu::default();
 /// # device.set_default_order(RowMajor);
 /// let a = rt::tensor_from_nested!([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], &device);
-/// println!("{}", rt::std_with_args(&a, ()));
+/// println!("{}", rt::std_with_args(&a, None));
 /// // 1.707825127659933
 /// println!("{}", rt::std_with_args(&a, 0));
 /// // [ 1.5 1.5 1.5]
-/// # assert_eq!(format!("{}", rt::std_with_args(&a, ())), "1.707825127659933");
+/// # assert_eq!(format!("{}", rt::std_with_args(&a, None)), "1.707825127659933");
 /// # assert_eq!(format!("{}", rt::std_with_args(&a, 0)), "[ 1.5 1.5 1.5]");
 /// ```
 ///
@@ -1236,7 +1236,7 @@ where
 ///
 /// `args` accepts the following (all of them `Into<VarArgs>`):
 ///
-/// - `()` (or [`VarArgs::default`]) — reduce all axes, `keepdims = false`, no correction.
+/// - `()` or `None` (or [`VarArgs::default`]) — reduce all axes, `keepdims = false`, no correction.
 /// - a `bool` — `keepdims` shorthand (all axes).
 /// - an integer (`isize` / `i32` / `i64` / `usize`) — the single reduced axis.
 /// - a list (`Vec<isize>` / `[isize; N]`, and their `i32`/`i64`/`u32`/`u64`/`usize` variants) — the
@@ -1249,8 +1249,8 @@ where
 /// # let mut device = DeviceCpu::default();
 /// # device.set_default_order(RowMajor);
 /// let a = rt::tensor_from_nested!([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], &device);
-/// // () default: the whole reduction, no correction
-/// println!("{}", rt::std_with_args(&a, ()));
+/// // None default: the whole reduction, no correction
+/// println!("{}", rt::std_with_args(&a, None));
 /// // 1.707825127659933
 /// // integer: one axis
 /// println!("{}", rt::std_with_args(&a, 0));
@@ -1259,7 +1259,7 @@ where
 /// let args = VarArgs { correction: Some(1.0), ..Default::default() };
 /// println!("{}", rt::std_with_args(&a, args));
 /// // 1.8708286933869704
-/// # assert_eq!(format!("{}", rt::std_with_args(&a, ())), "1.707825127659933");
+/// # assert_eq!(format!("{}", rt::std_with_args(&a, None)), "1.707825127659933");
 /// # assert_eq!(format!("{}", rt::std_with_args(&a, 0)), "[ 1.5 1.5 1.5]");
 /// # let args = VarArgs { correction: Some(1.0), ..Default::default() };
 /// # assert_eq!(format!("{}", rt::std_with_args(&a, args)), "1.8708286933869704");
@@ -1749,12 +1749,12 @@ where
 /// # let mut device = DeviceCpu::default();
 /// # device.set_default_order(RowMajor);
 /// let a = rt::tensor_from_nested!([1, 2, 3, 4], &device);
-/// println!("{}", rt::cumulative_sum(&a, ()));
+/// println!("{}", rt::cumulative_sum(&a, None));
 /// // [ 1 3 6 10]
 /// // include the initial value 0
 /// println!("{}", rt::cumulative_sum(&a, true));
 /// // [ 0 1 3 6 10]
-/// # assert_eq!(format!("{}", rt::cumulative_sum(&a, ())), "[ 1 3 6 10]");
+/// # assert_eq!(format!("{}", rt::cumulative_sum(&a, None)), "[ 1 3 6 10]");
 /// # assert_eq!(format!("{}", rt::cumulative_sum(&a, true)), "[ 0 1 3 6 10]");
 /// ```
 ///
@@ -1793,7 +1793,7 @@ where
 /// # device.set_default_order(RowMajor);
 /// let a = rt::tensor_from_nested!([1, 2, 3], &device);
 /// // default: axis = None on a 1-D input
-/// println!("{}", rt::cumulative_sum(&a, ()));
+/// println!("{}", rt::cumulative_sum(&a, None));
 /// // [ 1 3 6]
 /// // bool: prepend the initial value 0
 /// println!("{}", rt::cumulative_sum(&a, true));
@@ -1808,7 +1808,7 @@ where
 /// // [[ 0 0 0]
 /// //  [ 1 2 3]
 /// //  [ 5 7 9]]
-/// # assert_eq!(format!("{}", rt::cumulative_sum(&a, ())), "[ 1 3 6]");
+/// # assert_eq!(format!("{}", rt::cumulative_sum(&a, None)), "[ 1 3 6]");
 /// # assert_eq!(format!("{}", rt::cumulative_sum(&a, true)), "[ 0 1 3 6]");
 /// # assert_eq!(format!("{}", rt::cumulative_sum(&b, 1)), "[[ 1 3 6]\n [ 4 9 15]]");
 /// # assert_eq!(format!("{}", rt::cumulative_sum(&b, (0, true))), "[[ 0 0 0]\n [ 1 2 3]\n [ 5 7 9]]");
@@ -1916,12 +1916,12 @@ where
 /// # let mut device = DeviceCpu::default();
 /// # device.set_default_order(RowMajor);
 /// let a = rt::tensor_from_nested!([1, 2, 3, 4], &device);
-/// println!("{}", rt::cumulative_prod(&a, ()));
+/// println!("{}", rt::cumulative_prod(&a, None));
 /// // [ 1 2 6 24]
 /// // include the initial value 1
 /// println!("{}", rt::cumulative_prod(&a, true));
 /// // [ 1 1 2 6 24]
-/// # assert_eq!(format!("{}", rt::cumulative_prod(&a, ())), "[ 1 2 6 24]");
+/// # assert_eq!(format!("{}", rt::cumulative_prod(&a, None)), "[ 1 2 6 24]");
 /// # assert_eq!(format!("{}", rt::cumulative_prod(&a, true)), "[ 1 1 2 6 24]");
 /// ```
 ///
@@ -1960,7 +1960,7 @@ where
 /// # device.set_default_order(RowMajor);
 /// let a = rt::tensor_from_nested!([1, 2, 3], &device);
 /// // default: axis = None on a 1-D input
-/// println!("{}", rt::cumulative_prod(&a, ()));
+/// println!("{}", rt::cumulative_prod(&a, None));
 /// // [ 1 2 6]
 /// // bool: prepend the initial value 1
 /// println!("{}", rt::cumulative_prod(&a, true));
@@ -1975,7 +1975,7 @@ where
 /// // [[ 1 1 1]
 /// //  [ 1 2 3]
 /// //  [ 4 10 18]]
-/// # assert_eq!(format!("{}", rt::cumulative_prod(&a, ())), "[ 1 2 6]");
+/// # assert_eq!(format!("{}", rt::cumulative_prod(&a, None)), "[ 1 2 6]");
 /// # assert_eq!(format!("{}", rt::cumulative_prod(&a, true)), "[ 1 1 2 6]");
 /// # assert_eq!(format!("{}", rt::cumulative_prod(&b, 1)), "[[ 1 2 6]\n [ 4 20 120]]");
 /// # assert_eq!(format!("{}", rt::cumulative_prod(&b, (0, true))), "[[ 1 1 1]\n [ 1 2 3]\n [ 4 10 18]]");

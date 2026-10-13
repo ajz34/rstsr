@@ -7,6 +7,17 @@ use num::{One, Zero};
 
 /// Matrix multiplication of two arrays, promoting mixed-dtype operands to their common dtype.
 ///
+/// <div class="warning">
+///
+/// **Type Promotion Extension**
+///
+/// This `ext_` variant exists for parity with the Python Array API standard's
+/// type-promotion rules. In ordinary Rust usage, prefer [`matmul`] (rstsr's
+/// native promotion) instead; reach for `ext_` only when matching Array-API
+/// promotion is required.
+///
+/// </div>
+///
 /// The operands may have different dtypes: each pair is promoted to its common dtype
 /// ([`DTypePromoteAPI`], the same rule as NumPy) and the product is accumulated in that
 /// dtype. [`matmul`] instead requires the operands to share one dtype; this function is the
@@ -22,15 +33,6 @@ use num::{One, Zero};
 /// **Row/Column Major Notice**
 ///
 /// This function behaves differently on default orders ([`RowMajor`] and [`ColMajor`]) of device.
-///
-/// </div>
-///
-/// <div class="warning">
-///
-/// **Array-API Compliance Form**
-///
-/// This function exists only for array-API compliance, not as the idiomatic rstsr surface. Prefer
-/// [`matmul`] whenever the operands already share a dtype.
 ///
 /// </div>
 ///

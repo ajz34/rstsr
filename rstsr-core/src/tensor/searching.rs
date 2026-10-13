@@ -98,9 +98,9 @@ where
 /// # device.set_default_order(RowMajor);
 /// let x1 = rt::tensor_from_nested!([11, 12, 14, 15, 16], &device);
 /// let x2 = rt::tensor_from_nested!([10, 13, 17], &device);
-/// println!("{}", rt::searchsorted(&x1, &x2, ()));
+/// println!("{}", rt::searchsorted(&x1, &x2, None));
 /// // [ 0 2 5]
-/// # assert_eq!(format!("{}", rt::searchsorted(&x1, &x2, ())), "[ 0 2 5]");
+/// # assert_eq!(format!("{}", rt::searchsorted(&x1, &x2, None)), "[ 0 2 5]");
 /// ```
 ///
 /// Insertion side (`side = "right"`):
@@ -134,7 +134,7 @@ where
 /// # device.set_default_order(RowMajor);
 /// let x1 = rt::tensor_from_nested!([10, 20, 30], &device);
 /// let v = rt::tensor_from_nested!([20], &device);
-/// println!("{}", rt::searchsorted(&x1, &v, ())); // defaults
+/// println!("{}", rt::searchsorted(&x1, &v, None)); // defaults
 /// // [ 1]
 /// println!("{}", rt::searchsorted(&x1, &v, SearchSide::Right)); // enum side
 /// // [ 2]

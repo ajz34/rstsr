@@ -19,14 +19,14 @@ mod doc_argsort {
 
         // # Examples: default argsort
         let a = rt::tensor_from_nested!([3, 1, 2], &device);
-        println!("{}", rt::argsort(&a, ()));
+        println!("{}", rt::argsort(&a, None));
         // [ 1 2 0]
-        assert_eq!(format!("{}", rt::argsort(&a, ())), "[ 1 2 0]");
+        assert_eq!(format!("{}", rt::argsort(&a, None)), "[ 1 2 0]");
 
         // # Overload List: one call per distinct behavior
-        println!("{}", rt::argsort(&a, ())); // defaults
-                                             // [ 1 2 0]
-        assert_eq!(format!("{}", rt::argsort(&a, ())), "[ 1 2 0]");
+        println!("{}", rt::argsort(&a, None)); // defaults
+                                               // [ 1 2 0]
+        assert_eq!(format!("{}", rt::argsort(&a, None)), "[ 1 2 0]");
         println!("{}", rt::argsort(&a, 0)); // integer axis
                                             // [ 1 2 0]
         assert_eq!(format!("{}", rt::argsort(&a, 0)), "[ 1 2 0]");

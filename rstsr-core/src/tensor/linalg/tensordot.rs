@@ -157,14 +157,14 @@ where
 /// println!("{}", rt::tensordot(&a, &b, 1));
 /// // [[ 19 22]
 /// //  [ 43 50]]
-/// println!("{}", rt::tensordot(&a, &b, ()));
+/// println!("{}", rt::tensordot(&a, &b, None));
 /// // 70
 /// println!("{}", rt::tensordot(&a, &b, ([1, 0], [0, 1])));
 /// // 69
 /// println!("{}", rt::tensordot(&a, &b, [0, 1]));
 /// // 70
 /// # assert_eq!(format!("{}", rt::tensordot(&a, &b, 1)), "[[ 19 22]\n [ 43 50]]");
-/// # assert_eq!(format!("{}", rt::tensordot(&a, &b, ())), "70");
+/// # assert_eq!(format!("{}", rt::tensordot(&a, &b, None)), "70");
 /// # assert_eq!(format!("{}", rt::tensordot(&a, &b, ([1, 0], [0, 1]))), "69");
 /// # assert_eq!(format!("{}", rt::tensordot(&a, &b, [0, 1])), "70");
 /// ```

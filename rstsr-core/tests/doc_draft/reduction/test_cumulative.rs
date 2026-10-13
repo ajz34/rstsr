@@ -16,7 +16,7 @@ mod doc_cumulative_args {
 
         // twin of the CumulativeArgs docstring example
         let a = rt::tensor_from_nested!([1, 2, 3], &device);
-        let s = rt::cumulative_sum(&a, ());
+        let s = rt::cumulative_sum(&a, None);
         assert_eq!(s.to_vec(), vec![1, 3, 6]);
         let s = rt::cumulative_sum(&a, true);
         assert_eq!(s.to_vec(), vec![0, 1, 3, 6]);
@@ -39,8 +39,8 @@ mod doc_cumulative_sum {
 
         // 1-D default args scan along the only axis
         let a = rt::tensor_from_nested!([1, 2, 3, 4], &device);
-        println!("{}", rt::cumulative_sum(&a, ()));
-        assert_eq!(format!("{}", rt::cumulative_sum(&a, ())), "[ 1 3 6 10]");
+        println!("{}", rt::cumulative_sum(&a, None));
+        assert_eq!(format!("{}", rt::cumulative_sum(&a, None)), "[ 1 3 6 10]");
         // include the initial value 0
         println!("{}", rt::cumulative_sum(&a, true));
         assert_eq!(format!("{}", rt::cumulative_sum(&a, true)), "[ 0 1 3 6 10]");
@@ -75,8 +75,8 @@ mod doc_cumulative_prod {
 
         // 1-D default args scan along the only axis
         let a = rt::tensor_from_nested!([1, 2, 3, 4], &device);
-        println!("{}", rt::cumulative_prod(&a, ()));
-        assert_eq!(format!("{}", rt::cumulative_prod(&a, ())), "[ 1 2 6 24]");
+        println!("{}", rt::cumulative_prod(&a, None));
+        assert_eq!(format!("{}", rt::cumulative_prod(&a, None)), "[ 1 2 6 24]");
         // include the initial value 1
         println!("{}", rt::cumulative_prod(&a, true));
         assert_eq!(format!("{}", rt::cumulative_prod(&a, true)), "[ 1 1 2 6 24]");

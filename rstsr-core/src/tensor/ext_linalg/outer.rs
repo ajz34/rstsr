@@ -7,6 +7,17 @@ use crate::prelude_dev::*;
 /// Outer product of two one-dimensional arrays, promoting mixed-dtype operands to their common
 /// dtype.
 ///
+/// <div class="warning">
+///
+/// **Type Promotion Extension**
+///
+/// This `ext_` variant exists for parity with the Python Array API standard's
+/// type-promotion rules. In ordinary Rust usage, prefer [`outer`] (rstsr's
+/// native promotion) instead; reach for `ext_` only when matching Array-API
+/// promotion is required.
+///
+/// </div>
+///
 /// Let $\mathbf{a}$ be a vector of length $N$ in `a` and $\mathbf{b}$ be a vector of length $M$ in
 /// `b`. The outer product is the $N \times M$ array
 ///
@@ -19,15 +30,6 @@ use crate::prelude_dev::*;
 /// array-API-fulfilment form, like the `ext_*` element-wise arithmetic functions. The shape
 /// contract is that of [`outer`]: both operands must be one-dimensional.
 /// This function behaves identically under [`RowMajor`] and [`ColMajor`] device default orders.
-///
-/// <div class="warning">
-///
-/// **Array-API Compliance Form**
-///
-/// This function exists only for array-API compliance, not as the idiomatic rstsr surface. Prefer
-/// [`outer`] whenever the operands already share a dtype.
-///
-/// </div>
 ///
 /// # Parameters
 ///

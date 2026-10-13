@@ -89,9 +89,9 @@ fn decline_complex_sort<T: 'static>() -> Result<()> {
 /// # let mut device = DeviceCpu::default();
 /// # device.set_default_order(RowMajor);
 /// let a = rt::tensor_from_nested!([3, 1, 2], &device);
-/// println!("{}", rt::argsort(&a, ()));
+/// println!("{}", rt::argsort(&a, None));
 /// // [ 1 2 0]
-/// # assert_eq!(format!("{}", rt::argsort(&a, ())), "[ 1 2 0]");
+/// # assert_eq!(format!("{}", rt::argsort(&a, None)), "[ 1 2 0]");
 /// ```
 ///
 /// # Overload List
@@ -109,7 +109,7 @@ fn decline_complex_sort<T: 'static>() -> Result<()> {
 /// # let mut device = DeviceCpu::default();
 /// # device.set_default_order(RowMajor);
 /// let a = rt::tensor_from_nested!([3, 1, 2], &device);
-/// println!("{}", rt::argsort(&a, ()));               // defaults
+/// println!("{}", rt::argsort(&a, None));             // defaults
 /// // [ 1 2 0]
 /// println!("{}", rt::argsort(&a, 0));                // integer axis
 /// // [ 1 2 0]
@@ -119,7 +119,7 @@ fn decline_complex_sort<T: 'static>() -> Result<()> {
 /// // [ 0 2 1]
 /// println!("{}", rt::argsort(&a, (0, false, true))); // axis + ascending + stable
 /// // [ 1 2 0]
-/// # assert_eq!(format!("{}", rt::argsort(&a, ())), "[ 1 2 0]");
+/// # assert_eq!(format!("{}", rt::argsort(&a, None)), "[ 1 2 0]");
 /// # assert_eq!(format!("{}", rt::argsort(&a, true)), "[ 0 2 1]");
 /// ```
 ///
@@ -265,9 +265,9 @@ where
 /// # let mut device = DeviceCpu::default();
 /// # device.set_default_order(RowMajor);
 /// let a = rt::tensor_from_nested!([3, 1, 2], &device);
-/// println!("{}", rt::sort(&a, ()));
+/// println!("{}", rt::sort(&a, None));
 /// // [ 1 2 3]
-/// # assert_eq!(format!("{}", rt::sort(&a, ())), "[ 1 2 3]");
+/// # assert_eq!(format!("{}", rt::sort(&a, None)), "[ 1 2 3]");
 /// ```
 ///
 /// Sorting a 2-D tensor along `axis = 0` and along the last axis:
@@ -280,11 +280,11 @@ where
 /// println!("{}", rt::sort(&b, 0));
 /// // [[ 2 1 3]
 /// //  [ 9 8 5]]
-/// println!("{}", rt::sort(&b, ()));
+/// println!("{}", rt::sort(&b, None));
 /// // [[ 1 5 9]
 /// //  [ 2 3 8]]
 /// # assert_eq!(format!("{}", rt::sort(&b, 0)), "[[ 2 1 3]\n [ 9 8 5]]");
-/// # assert_eq!(format!("{}", rt::sort(&b, ())), "[[ 1 5 9]\n [ 2 3 8]]");
+/// # assert_eq!(format!("{}", rt::sort(&b, None)), "[[ 1 5 9]\n [ 2 3 8]]");
 /// ```
 ///
 /// # Overload List
@@ -302,7 +302,7 @@ where
 /// # let mut device = DeviceCpu::default();
 /// # device.set_default_order(RowMajor);
 /// let a = rt::tensor_from_nested!([3, 1, 2], &device);
-/// println!("{}", rt::sort(&a, ()));              // defaults
+/// println!("{}", rt::sort(&a, None));            // defaults
 /// // [ 1 2 3]
 /// println!("{}", rt::sort(&a, 0));               // integer axis
 /// // [ 1 2 3]
@@ -312,7 +312,7 @@ where
 /// // [ 3 2 1]
 /// println!("{}", rt::sort(&a, (0, true, true))); // axis + descending + stable
 /// // [ 3 2 1]
-/// # assert_eq!(format!("{}", rt::sort(&a, ())), "[ 1 2 3]");
+/// # assert_eq!(format!("{}", rt::sort(&a, None)), "[ 1 2 3]");
 /// # assert_eq!(format!("{}", rt::sort(&a, true)), "[ 3 2 1]");
 /// ```
 ///
@@ -464,9 +464,9 @@ where
 ///     let n2 = y.re * y.re + y.im * y.im;
 ///     n1.partial_cmp(&n2).unwrap_or(Ordering::Equal)
 /// };
-/// println!("{}", rt::sort_custom(&a, (), by_norm));
+/// println!("{}", rt::sort_custom(&a, None, by_norm));
 /// // [ 1+1i 0+2i 3+0i]
-/// # assert_eq!(format!("{}", rt::sort_custom(&a, (), by_norm)), "[ 1+1i 0+2i 3+0i]");
+/// # assert_eq!(format!("{}", rt::sort_custom(&a, None, by_norm)), "[ 1+1i 0+2i 3+0i]");
 /// ```
 ///
 /// # Overload List
@@ -481,7 +481,7 @@ where
 /// # device.set_default_order(RowMajor);
 /// let a = rt::tensor_from_nested!([5, 1, 4, 2, 3], &device);
 /// let by_mod3 = |x: &i32, y: &i32| (x % 3).cmp(&(y % 3));
-/// println!("{}", rt::sort_custom(&a, (), by_mod3)); // defaults
+/// println!("{}", rt::sort_custom(&a, None, by_mod3)); // defaults
 /// // [ 3 1 4 5 2]
 /// let b = rt::tensor_from_nested!([[3, 1, 2], [6, 4, 5]], &device);
 /// let by_mod2 = |x: &i32, y: &i32| (x % 2).cmp(&(y % 2));
@@ -491,7 +491,7 @@ where
 /// println!("{}", rt::sort_custom(&b, (0, true), by_mod2)); // axis + descending
 /// // [[ 3 1 5]
 /// //  [ 6 4 2]]
-/// # assert_eq!(format!("{}", rt::sort_custom(&a, (), by_mod3)), "[ 3 1 4 5 2]");
+/// # assert_eq!(format!("{}", rt::sort_custom(&a, None, by_mod3)), "[ 3 1 4 5 2]");
 /// # assert_eq!(format!("{}", rt::sort_custom(&b, 0, by_mod2)), "[[ 6 4 2]\n [ 3 1 5]]");
 /// # assert_eq!(format!("{}", rt::sort_custom(&b, (0, true), by_mod2)), "[[ 3 1 5]\n [ 6 4 2]]");
 /// ```
@@ -584,9 +584,9 @@ where
 /// # device.set_default_order(RowMajor);
 /// let a = rt::tensor_from_nested!([3, 1, 2, 0], &device);
 /// let by_mod2 = |x: &i32, y: &i32| (x % 2).cmp(&(y % 2));
-/// println!("{}", rt::argsort_custom(&a, (), by_mod2));
+/// println!("{}", rt::argsort_custom(&a, None, by_mod2));
 /// // [ 2 3 0 1]
-/// # assert_eq!(format!("{}", rt::argsort_custom(&a, (), by_mod2)), "[ 2 3 0 1]");
+/// # assert_eq!(format!("{}", rt::argsort_custom(&a, None, by_mod2)), "[ 2 3 0 1]");
 /// ```
 ///
 /// # Overload List

@@ -287,8 +287,8 @@ mod doc_var_with_args {
         let a: Tensor<f64, _> = rt::tensor_from_nested!([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], &device);
 
         // # Overload List: one call per distinct args form
-        // () / VarArgs::default: reduce all axes, no correction
-        let v = rt::var_with_args(&a, ());
+        // None / VarArgs::default: reduce all axes, no correction
+        let v = rt::var_with_args(&a, None);
         println!("{v}");
         // 2.916666666666666
         assert_eq!(format!("{v}"), "2.916666666666666");
@@ -329,7 +329,7 @@ mod doc_std_with_args {
 
         let a: Tensor<f64, _> = rt::tensor_from_nested!([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], &device);
 
-        let v = rt::std_with_args(&a, ());
+        let v = rt::std_with_args(&a, None);
         println!("{v}");
         // 1.707825127659933
         assert_eq!(format!("{v}"), "1.707825127659933");

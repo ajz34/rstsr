@@ -17,14 +17,14 @@ mod doc_trace {
 
         // trace of a stack: each 2x2 matrix's diagonal is summed
         let a = rt::tensor_from_nested!([[[1, 2], [3, 4]], [[5, 6], [7, 8]]], &device);
-        let t = rt::trace(&a, ());
+        let t = rt::trace(&a, None);
         println!("{t}");
         // [ 5 13]
         assert_eq!(format!("{t}"), "[ 5 13]");
 
         // a two-dimensional input gives a zero-dimensional result
         let m = rt::tensor_from_nested!([[1, 2], [3, 4]], &device);
-        assert_eq!(format!("{}", rt::trace(&m, ())), "5");
+        assert_eq!(format!("{}", rt::trace(&m, None)), "5");
     }
 }
 
@@ -44,9 +44,9 @@ mod doc_trace_overload {
         let a = rt::tensor_from_nested!([[1, 2, 3], [4, 5, 6], [7, 8, 9]], &device);
 
         // () or None: the main diagonal over the device-default axes
-        println!("{}", rt::trace(&a, ()));
+        println!("{}", rt::trace(&a, None));
         // 15
-        assert_eq!(format!("{}", rt::trace(&a, ())), "15");
+        assert_eq!(format!("{}", rt::trace(&a, None)), "15");
 
         // integer: a shifted diagonal, same device-default axes
         println!("{}", rt::trace(&a, 1));

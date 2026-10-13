@@ -6,6 +6,17 @@ use crate::prelude_dev::*;
 
 /// Vector dot product of two arrays, promoting mixed-dtype operands to their common dtype.
 ///
+/// <div class="warning">
+///
+/// **Type Promotion Extension**
+///
+/// This `ext_` variant exists for parity with the Python Array API standard's
+/// type-promotion rules. In ordinary Rust usage, prefer [`vecdot`] (rstsr's
+/// native promotion) instead; reach for `ext_` only when matching Array-API
+/// promotion is required.
+///
+/// </div>
+///
 /// Let $\mathbf{a}$ be a vector in `a` and $\mathbf{b}$ be a corresponding vector in `b`. The dot
 /// product is defined as:
 ///
@@ -20,15 +31,6 @@ use crate::prelude_dev::*;
 /// array-API-fulfilment form, like the `ext_*` element-wise arithmetic functions. The axes and
 /// broadcasting rules are those of [`vecdot`].
 /// This function behaves identically under [`RowMajor`] and [`ColMajor`] device default orders.
-///
-/// <div class="warning">
-///
-/// **Array-API Compliance Form**
-///
-/// This function exists only for array-API compliance, not as the idiomatic rstsr surface. Prefer
-/// [`vecdot`] whenever the operands already share a dtype.
-///
-/// </div>
 ///
 /// # Parameters
 ///

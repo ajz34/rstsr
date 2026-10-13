@@ -63,9 +63,9 @@ mod doc_tensordot_overload {
         assert_eq!(format!("{}", rt::tensordot(&a, &b, 1)), "[[ 19 22]\n [ 43 50]]");
 
         // None or (): the default n = 2 (full contraction)
-        println!("{}", rt::tensordot(&a, &b, ()));
+        println!("{}", rt::tensordot(&a, &b, None));
         // 70
-        assert_eq!(format!("{}", rt::tensordot(&a, &b, ())), "70");
+        assert_eq!(format!("{}", rt::tensordot(&a, &b, None)), "70");
 
         // (axes_a, axes_b): contract different axes of each operand
         println!("{}", rt::tensordot(&a, &b, ([1, 0], [0, 1])));

@@ -52,9 +52,9 @@ mod doc_cross_overload {
         let b = rt::tensor_from_nested!([4, 5, 6], &device);
 
         // () or None: the last axis (Array-API default axis = -1)
-        println!("{}", rt::cross(&a, &b, ()));
+        println!("{}", rt::cross(&a, &b, None));
         // [ -3 6 -3]
-        assert_eq!(format!("{}", rt::cross(&a, &b, ())), "[ -3 6 -3]");
+        assert_eq!(format!("{}", rt::cross(&a, &b, None)), "[ -3 6 -3]");
 
         // integer: an explicit axis shared by both operands
         println!("{}", rt::cross(&a, &b, -1));
