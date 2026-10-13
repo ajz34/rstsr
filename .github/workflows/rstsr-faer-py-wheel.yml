@@ -55,8 +55,7 @@ jobs:
     needs: build
     runs-on: ubuntu-latest # pypa/gh-action-pypi-publish runs on Linux only
     if: >-
-      (github.event_name == 'pull_request'
-        && contains(github.event.pull_request.labels.*.name, 'test-pypi'))
+      github.event_name == 'pull_request'
       || (github.event_name == 'workflow_dispatch'
         && inputs.publish == 'testpypi')
     environment:
