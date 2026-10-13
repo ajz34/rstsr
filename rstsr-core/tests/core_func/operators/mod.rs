@@ -2,6 +2,7 @@
 pub mod test_arithmetic;
 pub mod test_clip;
 pub mod test_comparison;
+pub mod test_tri;
 pub mod test_where;
 
 pub static CATEGORY: &str = "operators";

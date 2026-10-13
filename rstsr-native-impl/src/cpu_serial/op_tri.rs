@@ -224,6 +224,11 @@ pub fn inner_unpack_tril_c_contig<T>(
                     a[i * n + j].write(b[idx_b]);
                     idx_b += 1;
                 }
+                // no symmetry: the packed data says nothing about the strict
+                // upper triangle, so zero it
+                for j in (i + 1)..n {
+                    a[i * n + j].write(T::zero());
+                }
             }
         },
     }
@@ -306,6 +311,11 @@ pub fn inner_unpack_tril_general<T>(
                     a[loc_a_ij].write(b[loc_b]);
                     idx_b += 1;
                 }
+                // no symmetry: zero the strict upper triangle
+                for j in (i + 1)..n {
+                    let loc_a_ij = la.index_uncheck(&[i, j]) as usize;
+                    a[loc_a_ij].write(T::zero());
+                }
             }
         },
     }
@@ -368,6 +378,11 @@ pub fn inner_unpack_triu_c_contig<T>(
         },
         FlagSymm::N => {
             for i in 0..n {
+                // no symmetry: the packed data says nothing about the strict
+                // lower triangle, so zero it
+                for j in 0..i {
+                    a[i * n + j].write(T::zero());
+                }
                 for j in i..n {
                     a[i * n + j].write(b[idx_b]);
                     idx_b += 1;
@@ -447,6 +462,11 @@ pub fn inner_unpack_triu_general<T>(
         },
         FlagSymm::N => {
             for i in 0..n {
+                // no symmetry: zero the strict lower triangle
+                for j in 0..i {
+                    let loc_a_ij = la.index_uncheck(&[i, j]) as usize;
+                    a[loc_a_ij].write(T::zero());
+                }
                 for j in i..n {
                     let loc_b = lb.index_uncheck(&[idx_b]) as usize;
                     let loc_a_ij = la.index_uncheck(&[i, j]) as usize;
