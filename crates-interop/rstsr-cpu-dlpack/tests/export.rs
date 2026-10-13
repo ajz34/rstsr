@@ -1,6 +1,6 @@
 //! Export: field mapping, layout handling, ownership handoff.
 
-use dlpack_ffi::{DLPACK_FLAG_BITMASK_IS_COPIED, DLPACK_FLAG_BITMASK_READ_ONLY};
+use dlpark::DlpackFlags;
 use rstsr_core::prelude::*;
 use rstsr_core::storage::exports::{DataOwned, Storage};
 use rstsr_cpu_dlpack::{
@@ -53,11 +53,11 @@ fn shared_export_is_zero_copy_and_read_only() {
 
     let export = to_dlpack_shared_f(&shared).unwrap();
     let dl = &export.managed().dl_tensor;
-    assert_eq!(export.flags(), DLPACK_FLAG_BITMASK_READ_ONLY as u64);
+    assert_eq!(export.flags(), DlpackFlags::READ_ONLY.bits());
     assert_eq!(export.managed().version.major, 1);
     assert_eq!(export.managed().version.minor, 0);
     assert_eq!(dl.ndim, 1);
-    assert_eq!(dl.dtype.code, 2);
+    assert_eq!(dl.dtype.code.0, 2);
     assert_eq!(dl.dtype.bits, 64);
     assert_eq!(dl.byte_offset, 0);
     assert_eq!(dl.data as *const f64, base); // zero copy
@@ -99,7 +99,7 @@ fn copy_export_gathers_views() {
     let tensor = Tensor::new(storage, Layout::new(vec![2], vec![2], 1).unwrap());
 
     let export = to_dlpack_copy_f(&tensor).unwrap();
-    assert_eq!(export.flags(), DLPACK_FLAG_BITMASK_IS_COPIED as u64);
+    assert_eq!(export.flags(), DlpackFlags::IS_COPIED.bits());
     let dl = &export.managed().dl_tensor;
     assert_eq!(unsafe { *dl.strides }, 1); // compact after the gathering copy
     assert_eq!(read_export(&export), vec![1.0, 3.0]);
@@ -110,7 +110,7 @@ fn owned_export_transfers_and_marks_sole_ownership() {
     let tensor = owned_1d(vec![7.0, 8.0]);
     let base = tensor.raw().as_ptr();
     let export = into_dlpack_f(tensor).unwrap();
-    assert_eq!(export.flags(), DLPACK_FLAG_BITMASK_IS_COPIED as u64);
+    assert_eq!(export.flags(), DlpackFlags::IS_COPIED.bits());
     assert_eq!(export.data_ptr() as *const f64, base);
 
     // consumer side: take the pointer, read through it, call the deleter once
@@ -134,7 +134,7 @@ fn zero_size_export_uses_null_data() {
 fn dropped_export_frees_without_handoff() {
     let tensor = owned_1d(vec![1.0, 2.0, 3.0]);
     let export = into_dlpack_f(tensor).unwrap();
-    assert_eq!(export.flags(), DLPACK_FLAG_BITMASK_IS_COPIED as u64);
+    assert_eq!(export.flags(), DlpackFlags::IS_COPIED.bits());
     drop(export); // must not leak or double free (run under miri to check)
 }
 
@@ -150,7 +150,7 @@ fn shared_view_export_keeps_the_view_layout() {
     // columns 1..3: zero-copy at the view's offset
     let view = shared.i((.., 1..3));
     let export = to_dlpack_shared_view_f(&shared, &view).unwrap();
-    assert_eq!(export.flags(), DLPACK_FLAG_BITMASK_READ_ONLY as u64);
+    assert_eq!(export.flags(), DlpackFlags::READ_ONLY.bits());
     let dl = &export.managed().dl_tensor;
     assert_eq!(dl.ndim, 2);
     assert_eq!(unsafe { *dl.shape }, 3);
@@ -206,7 +206,7 @@ fn tensor_arc_view_export_shares_core_buffer_and_detaches_on_write() {
 
     let view = arc.i((.., 1..3));
     let export = to_dlpack_shared_view(&arc, &view);
-    assert_eq!(export.flags(), DLPACK_FLAG_BITMASK_READ_ONLY as u64);
+    assert_eq!(export.flags(), DlpackFlags::READ_ONLY.bits());
     assert_eq!(export.data_ptr() as *const f64, unsafe { base.add(1) });
     assert_eq!(read_export(&export), vec![1.0, 2.0, 4.0, 5.0]);
 

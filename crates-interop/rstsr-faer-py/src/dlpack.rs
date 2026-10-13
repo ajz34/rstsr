@@ -20,7 +20,7 @@ use rstsr::prelude::*;
 use rstsr_core::operators::exports::OpAssignAPI;
 use rstsr_core::storage::exports::DeviceCreationAnyAPI;
 
-use dlpack_ffi::{DLDataTypeCode, DLManagedTensor, DLManagedTensorVersioned};
+use dlpark::ffi::{DLDataTypeCode, DLManagedTensor, DLManagedTensorVersioned};
 
 use crate::any_tensor::{err_py, lift, type_err, AnyTensor, FTensor, NativeArray};
 
@@ -33,7 +33,7 @@ const NAME_USED_LEGACY: &CStr = c"used_dltensor";
 
 fn export_ptr<T>(t: &FTensor<T>) -> rt::Result<*mut DLManagedTensorVersioned>
 where
-    T: dlpack::DlpackDtype,
+    T: dlpack::DlpackDtype + Send,
     DeviceFaer:
         DeviceAPI<T, Raw = Vec<T>> + DeviceRawAPI<MaybeUninit<T>> + DeviceCreationAnyAPI<T> + OpAssignAPI<T, IxD>,
 {
@@ -101,7 +101,7 @@ enum CapPtr {
 
 fn import_owned<T>(p: CapPtr) -> rt::Result<FTensor<T>>
 where
-    T: dlpack::DlpackDtype,
+    T: dlpack::DlpackDtype + Send,
     DeviceFaer:
         DeviceAPI<T, Raw = Vec<T>> + DeviceRawAPI<MaybeUninit<T>> + DeviceCreationAnyAPI<T> + OpAssignAPI<T, IxD>,
 {
@@ -153,48 +153,30 @@ pub fn dlpack_import(capsule: &Bound<'_, PyCapsule>) -> PyResult<NativeArray> {
     if dtype.lanes != 1 {
         return type_err(format!("from_dlpack: dtype lanes = {} is not supported (only scalar lanes)", dtype.lanes));
     }
-    let code = dtype.code;
+    let code = dtype.code.0;
     let bits = dtype.bits;
-    let k = |c: DLDataTypeCode| c.0 as u8;
+    let k = |c: DLDataTypeCode| c.0;
     let t = if versioned {
         let p = ptr.as_ptr() as *mut DLManagedTensorVersioned;
         match (code, bits) {
-            (c, 8) if c == k(DLDataTypeCode::kDLBool) => {
-                lift(import_owned::<bool>(CapPtr::Versioned(p)), AnyTensor::Bool)
-            },
-            (c, 8) if c == k(DLDataTypeCode::kDLInt) => lift(import_owned::<i8>(CapPtr::Versioned(p)), AnyTensor::I8),
-            (c, 16) if c == k(DLDataTypeCode::kDLInt) => {
-                lift(import_owned::<i16>(CapPtr::Versioned(p)), AnyTensor::I16)
-            },
-            (c, 32) if c == k(DLDataTypeCode::kDLInt) => {
-                lift(import_owned::<i32>(CapPtr::Versioned(p)), AnyTensor::I32)
-            },
-            (c, 64) if c == k(DLDataTypeCode::kDLInt) => {
-                lift(import_owned::<i64>(CapPtr::Versioned(p)), AnyTensor::I64)
-            },
-            (c, 8) if c == k(DLDataTypeCode::kDLUInt) => lift(import_owned::<u8>(CapPtr::Versioned(p)), AnyTensor::U8),
-            (c, 16) if c == k(DLDataTypeCode::kDLUInt) => {
-                lift(import_owned::<u16>(CapPtr::Versioned(p)), AnyTensor::U16)
-            },
-            (c, 32) if c == k(DLDataTypeCode::kDLUInt) => {
-                lift(import_owned::<u32>(CapPtr::Versioned(p)), AnyTensor::U32)
-            },
-            (c, 64) if c == k(DLDataTypeCode::kDLUInt) => {
-                lift(import_owned::<u64>(CapPtr::Versioned(p)), AnyTensor::U64)
-            },
-            (c, 16) if c == k(DLDataTypeCode::kDLFloat) => {
+            (c, 8) if c == k(DLDataTypeCode::BOOL) => lift(import_owned::<bool>(CapPtr::Versioned(p)), AnyTensor::Bool),
+            (c, 8) if c == k(DLDataTypeCode::INT) => lift(import_owned::<i8>(CapPtr::Versioned(p)), AnyTensor::I8),
+            (c, 16) if c == k(DLDataTypeCode::INT) => lift(import_owned::<i16>(CapPtr::Versioned(p)), AnyTensor::I16),
+            (c, 32) if c == k(DLDataTypeCode::INT) => lift(import_owned::<i32>(CapPtr::Versioned(p)), AnyTensor::I32),
+            (c, 64) if c == k(DLDataTypeCode::INT) => lift(import_owned::<i64>(CapPtr::Versioned(p)), AnyTensor::I64),
+            (c, 8) if c == k(DLDataTypeCode::UINT) => lift(import_owned::<u8>(CapPtr::Versioned(p)), AnyTensor::U8),
+            (c, 16) if c == k(DLDataTypeCode::UINT) => lift(import_owned::<u16>(CapPtr::Versioned(p)), AnyTensor::U16),
+            (c, 32) if c == k(DLDataTypeCode::UINT) => lift(import_owned::<u32>(CapPtr::Versioned(p)), AnyTensor::U32),
+            (c, 64) if c == k(DLDataTypeCode::UINT) => lift(import_owned::<u64>(CapPtr::Versioned(p)), AnyTensor::U64),
+            (c, 16) if c == k(DLDataTypeCode::FLOAT) => {
                 return type_err("from_dlpack: float16 is not represented in this shim (G-033)")
             },
-            (c, 32) if c == k(DLDataTypeCode::kDLFloat) => {
-                lift(import_owned::<f32>(CapPtr::Versioned(p)), AnyTensor::F32)
-            },
-            (c, 64) if c == k(DLDataTypeCode::kDLFloat) => {
-                lift(import_owned::<f64>(CapPtr::Versioned(p)), AnyTensor::F64)
-            },
-            (c, 64) if c == k(DLDataTypeCode::kDLComplex) => {
+            (c, 32) if c == k(DLDataTypeCode::FLOAT) => lift(import_owned::<f32>(CapPtr::Versioned(p)), AnyTensor::F32),
+            (c, 64) if c == k(DLDataTypeCode::FLOAT) => lift(import_owned::<f64>(CapPtr::Versioned(p)), AnyTensor::F64),
+            (c, 64) if c == k(DLDataTypeCode::COMPLEX) => {
                 lift(import_owned::<num::Complex<f32>>(CapPtr::Versioned(p)), AnyTensor::C32)
             },
-            (c, 128) if c == k(DLDataTypeCode::kDLComplex) => {
+            (c, 128) if c == k(DLDataTypeCode::COMPLEX) => {
                 lift(import_owned::<num::Complex<f64>>(CapPtr::Versioned(p)), AnyTensor::C64)
             },
             (c, b) => return type_err(format!("from_dlpack: unsupported DLPack dtype (code {c}, bits {b})")),
@@ -202,24 +184,24 @@ pub fn dlpack_import(capsule: &Bound<'_, PyCapsule>) -> PyResult<NativeArray> {
     } else {
         let p = ptr.as_ptr() as *mut DLManagedTensor;
         match (code, bits) {
-            (c, 8) if c == k(DLDataTypeCode::kDLBool) => lift(import_owned::<bool>(CapPtr::Legacy(p)), AnyTensor::Bool),
-            (c, 8) if c == k(DLDataTypeCode::kDLInt) => lift(import_owned::<i8>(CapPtr::Legacy(p)), AnyTensor::I8),
-            (c, 16) if c == k(DLDataTypeCode::kDLInt) => lift(import_owned::<i16>(CapPtr::Legacy(p)), AnyTensor::I16),
-            (c, 32) if c == k(DLDataTypeCode::kDLInt) => lift(import_owned::<i32>(CapPtr::Legacy(p)), AnyTensor::I32),
-            (c, 64) if c == k(DLDataTypeCode::kDLInt) => lift(import_owned::<i64>(CapPtr::Legacy(p)), AnyTensor::I64),
-            (c, 8) if c == k(DLDataTypeCode::kDLUInt) => lift(import_owned::<u8>(CapPtr::Legacy(p)), AnyTensor::U8),
-            (c, 16) if c == k(DLDataTypeCode::kDLUInt) => lift(import_owned::<u16>(CapPtr::Legacy(p)), AnyTensor::U16),
-            (c, 32) if c == k(DLDataTypeCode::kDLUInt) => lift(import_owned::<u32>(CapPtr::Legacy(p)), AnyTensor::U32),
-            (c, 64) if c == k(DLDataTypeCode::kDLUInt) => lift(import_owned::<u64>(CapPtr::Legacy(p)), AnyTensor::U64),
-            (c, 16) if c == k(DLDataTypeCode::kDLFloat) => {
+            (c, 8) if c == k(DLDataTypeCode::BOOL) => lift(import_owned::<bool>(CapPtr::Legacy(p)), AnyTensor::Bool),
+            (c, 8) if c == k(DLDataTypeCode::INT) => lift(import_owned::<i8>(CapPtr::Legacy(p)), AnyTensor::I8),
+            (c, 16) if c == k(DLDataTypeCode::INT) => lift(import_owned::<i16>(CapPtr::Legacy(p)), AnyTensor::I16),
+            (c, 32) if c == k(DLDataTypeCode::INT) => lift(import_owned::<i32>(CapPtr::Legacy(p)), AnyTensor::I32),
+            (c, 64) if c == k(DLDataTypeCode::INT) => lift(import_owned::<i64>(CapPtr::Legacy(p)), AnyTensor::I64),
+            (c, 8) if c == k(DLDataTypeCode::UINT) => lift(import_owned::<u8>(CapPtr::Legacy(p)), AnyTensor::U8),
+            (c, 16) if c == k(DLDataTypeCode::UINT) => lift(import_owned::<u16>(CapPtr::Legacy(p)), AnyTensor::U16),
+            (c, 32) if c == k(DLDataTypeCode::UINT) => lift(import_owned::<u32>(CapPtr::Legacy(p)), AnyTensor::U32),
+            (c, 64) if c == k(DLDataTypeCode::UINT) => lift(import_owned::<u64>(CapPtr::Legacy(p)), AnyTensor::U64),
+            (c, 16) if c == k(DLDataTypeCode::FLOAT) => {
                 return type_err("from_dlpack: float16 is not represented in this shim (G-033)")
             },
-            (c, 32) if c == k(DLDataTypeCode::kDLFloat) => lift(import_owned::<f32>(CapPtr::Legacy(p)), AnyTensor::F32),
-            (c, 64) if c == k(DLDataTypeCode::kDLFloat) => lift(import_owned::<f64>(CapPtr::Legacy(p)), AnyTensor::F64),
-            (c, 64) if c == k(DLDataTypeCode::kDLComplex) => {
+            (c, 32) if c == k(DLDataTypeCode::FLOAT) => lift(import_owned::<f32>(CapPtr::Legacy(p)), AnyTensor::F32),
+            (c, 64) if c == k(DLDataTypeCode::FLOAT) => lift(import_owned::<f64>(CapPtr::Legacy(p)), AnyTensor::F64),
+            (c, 64) if c == k(DLDataTypeCode::COMPLEX) => {
                 lift(import_owned::<num::Complex<f32>>(CapPtr::Legacy(p)), AnyTensor::C32)
             },
-            (c, 128) if c == k(DLDataTypeCode::kDLComplex) => {
+            (c, 128) if c == k(DLDataTypeCode::COMPLEX) => {
                 lift(import_owned::<num::Complex<f64>>(CapPtr::Legacy(p)), AnyTensor::C64)
             },
             (c, b) => return type_err(format!("from_dlpack: unsupported DLPack dtype (code {c}, bits {b})")),

@@ -29,8 +29,13 @@
 //! # Interchange version
 //!
 //! Exports speak the DLPack 1.0 subset (`version = {1, 0}`) although the
-//! `dlpack-ffi` header is 1.3; NumPy 2.5 consumes that subset and itself
+//! `dlpark` header is 1.3; NumPy 2.5 consumes that subset and itself
 //! exports `{1, 0}`. All CPU devices (`Raw = Vec<T>`) are mapped to `kDLCPU`.
+//!
+//! The crate is built on [`dlpark`]: its producer builders, validated
+//! [`TensorRef`](dlpark::TensorRef), owning [`Managed`](dlpark::Managed) handle,
+//! and exactly-once [`AllocationDeleter`](dlpark::AllocationDeleter) replace the
+//! hand-rolled managed-tensor machinery.
 //!
 //! # Example
 //!
@@ -42,7 +47,7 @@
 //! let tensor: Tensor<f64, DeviceCpuSerial, IxD> = rt::arange_f((0.0, 5.0, 1.0, &device))?;
 //! let shared = into_shared_dlpack_f(tensor)?;
 //! let export = to_dlpack_shared(&shared);
-//! assert_eq!(export.flags(), dlpack_ffi::DLPACK_FLAG_BITMASK_READ_ONLY as u64);
+//! assert_eq!(export.flags(), dlpark::DlpackFlags::READ_ONLY.bits());
 //! # Ok::<(), rstsr_common::error::Error>(())
 //! ```
 
@@ -53,7 +58,7 @@ pub mod import;
 pub mod prelude;
 pub mod repr;
 
-pub use dlpack_ffi;
+pub use dlpark;
 /// Re-export of [`rstsr_common::rstsr_raise`], used by this crate's exported macros.
 pub use rstsr_common::rstsr_raise;
 

@@ -1,13 +1,13 @@
 //! The storage representation shared by import and zero-copy export.
 
 use core::mem::ManuallyDrop;
-use core::ptr::NonNull;
 use std::sync::Arc;
 
-use dlpack_ffi::{DLManagedTensor, DLManagedTensorVersioned, DLPackVersion};
+use dlpark::ffi::DLPackVersion;
+use dlpark::AllocationDeleter;
 use rstsr_common::error::Result;
 use rstsr_core::prelude::*;
-use rstsr_core::storage::exports::{DataArc, DataOwned, Storage};
+use rstsr_core::storage::exports::{DataArc, DataForceMutAPI, DataMut, DataOwned, Storage};
 
 /// A tensor buffer **borrowed** through a keep-alive owner.
 ///
@@ -74,9 +74,9 @@ where
 }
 
 // A `DataDlpack` only ever hands out shared access, so it may cross threads
-// exactly when the pointee may be shared and the owner may. Imported tensors
-// keep a raw-pointer owner, which is `!Send`/`!Sync` on purpose: a NumPy
-// deleter is `Py_DECREF` and needs the GIL.
+// exactly when the pointee may be shared and the owner may. The foreign owner
+// is `Send + Sync` (dlpark's deleter contract makes it callable from any
+// thread), so imported tensors are `Send + Sync` too.
 unsafe impl<T, O> Send for DataDlpack<Vec<T>, O>
 where
     T: Send + Sync,
@@ -92,64 +92,47 @@ where
 
 /// Owns a foreign DLPack managed tensor; calls its producer deleter exactly
 /// once, when the last Rust handle of the imported tensor dies.
+///
+/// Ownership is delegated to dlpark's [`AllocationDeleter`]
+/// ([`Managed::into_deleter`](dlpark::Managed::into_deleter)); the imported
+/// tensor's version and flags are captured up front, so the type-erased deleter
+/// is all that survives. A `NULL` producer deleter is a no-op, and the deleter
+/// runs on drop from any thread (DLPack's contract).
 pub struct DlpackForeignOwner {
-    managed: ForeignManaged,
-}
-
-enum ForeignManaged {
-    Versioned(NonNull<DLManagedTensorVersioned>),
-    Legacy(NonNull<DLManagedTensor>),
+    deleter: AllocationDeleter,
+    is_versioned: bool,
+    version: Option<DLPackVersion>,
+    flags: Option<u64>,
 }
 
 impl DlpackForeignOwner {
-    pub(crate) fn new_versioned(ptr: NonNull<DLManagedTensorVersioned>) -> Self {
-        Self { managed: ForeignManaged::Versioned(ptr) }
+    pub(crate) fn new(
+        deleter: AllocationDeleter,
+        is_versioned: bool,
+        version: Option<DLPackVersion>,
+        flags: Option<u64>,
+    ) -> Self {
+        Self { deleter, is_versioned, version, flags }
     }
 
-    pub(crate) fn new_legacy(ptr: NonNull<DLManagedTensor>) -> Self {
-        Self { managed: ForeignManaged::Legacy(ptr) }
+    /// The exactly-once producer deleter.
+    pub fn deleter(&self) -> &AllocationDeleter {
+        &self.deleter
     }
 
     /// Whether the imported tensor came from a versioned (DLPack >= 1.0) producer.
     pub fn is_versioned(&self) -> bool {
-        matches!(self.managed, ForeignManaged::Versioned(_))
+        self.is_versioned
     }
 
     /// DLPack flags of the imported tensor; `None` for legacy producers.
     pub fn flags(&self) -> Option<u64> {
-        match self.managed {
-            ForeignManaged::Versioned(p) => Some(unsafe { p.as_ref().flags }),
-            ForeignManaged::Legacy(_) => None,
-        }
+        self.flags
     }
 
     /// DLPack version of the imported tensor; `None` for legacy producers.
     pub fn version(&self) -> Option<DLPackVersion> {
-        match self.managed {
-            ForeignManaged::Versioned(p) => Some(unsafe { p.as_ref().version }),
-            ForeignManaged::Legacy(_) => None,
-        }
-    }
-}
-
-impl Drop for DlpackForeignOwner {
-    fn drop(&mut self) {
-        // The deleter deletes the argument as well (DLPack contract); a `NULL`
-        // deleter means the producer offers no way to free it -> leak.
-        unsafe {
-            match self.managed {
-                ForeignManaged::Versioned(p) => {
-                    if let Some(deleter) = p.as_ref().deleter {
-                        deleter(p.as_ptr());
-                    }
-                },
-                ForeignManaged::Legacy(p) => {
-                    if let Some(deleter) = p.as_ref().deleter {
-                        deleter(p.as_ptr());
-                    }
-                },
-            }
-        }
+        self.version
     }
 }
 
@@ -182,4 +165,22 @@ where
     let repr = unsafe { DataDlpack::from_parts(span, Arc::clone(&arc)) };
     let storage = Storage::new(repr, device);
     TensorDlpackShared::<T, B, D>::new_f(storage, layout)
+}
+
+/// Enables [`TensorAny::force_mut`] on an imported tensor: an `unsafe` escape hatch that
+/// writes through to the producer's buffer (the caller guarantees unique access).
+impl<T, O> DataForceMutAPI<Vec<T>> for DataDlpack<Vec<T>, O> {
+    /// # Safety
+    ///
+    /// The caller must guarantee unique access to the buffer for the returned handle's
+    /// lifetime (see [`DataForceMutAPI::force_mut`]). For an imported tensor the buffer is
+    /// the producer's, so a write here mutates the producer's memory in place, zero-copy.
+    unsafe fn force_mut(&self) -> DataMut<'_, Vec<T>> {
+        let ptr = self.span.as_ptr() as *mut T;
+        let len = self.span.len();
+        // SAFETY: same fabricated-span contract as `from_parts`: the span covers the owner's
+        // buffer, and the `ManuallyDrop` wrapper keeps it from being freed, resized, or grown.
+        let vec = unsafe { Vec::from_raw_parts(ptr, len, len) };
+        DataMut::ManuallyDropOwned(ManuallyDrop::new(vec))
+    }
 }

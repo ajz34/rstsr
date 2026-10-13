@@ -23,4 +23,4 @@ rstsr = { workspace = true, features = ["default", "linalg", "dlpack"] }
 rstsr-core = { workspace = true }
 rstsr-dtype-traits = { workspace = true }
 rstsr-common = { workspace = true }
-dlpack-ffi = { workspace = true }
+dlpark = { workspace = true }
