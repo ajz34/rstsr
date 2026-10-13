@@ -125,7 +125,7 @@ mod numpy_squeeze {
         // assert_equal(res.ndim, 0)
         let a = rt::tensor_from_nested!([[[1.5]]], &device);
         let res = a.squeeze(None);
-        assert_eq!(res.shape(), &[]);
+        assert!(res.shape().is_empty());
         let expected: Tensor<f64, _> = rt::asarray((1.5, &device));
         assert_equal(res, &expected, None);
         // N/A: assert_equal(type(res), np.ndarray) - every rstsr tensor is a typed tensor
@@ -145,7 +145,7 @@ mod numpy_squeeze {
         // assert_(type(a.squeeze()) is np.ndarray)
         let a = rt::tensor_from_nested!([3], &device);
         let res = a.squeeze(None);
-        assert_eq!(res.shape(), &[]);
+        assert!(res.shape().is_empty());
         assert_eq!(res.to_scalar(), 3);
         // N/A: assert_(type(res) is np.ndarray) - every rstsr tensor is a typed tensor
 
@@ -153,7 +153,7 @@ mod numpy_squeeze {
         // assert_(type(b.squeeze()) is np.ndarray)
         let b: Tensor<i32, _> = rt::asarray((3, &device));
         let res = b.squeeze(None);
-        assert_eq!(res.shape(), &[]);
+        assert!(res.shape().is_empty());
         assert_eq!(res.to_scalar(), 3);
         // N/A: assert_(type(res) is np.ndarray) - every rstsr tensor is a typed tensor
     }

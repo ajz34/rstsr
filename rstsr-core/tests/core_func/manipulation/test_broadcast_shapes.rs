@@ -138,7 +138,7 @@ mod numpy_broadcast_shapes {
 
         // assert_equal(_broadcast_shape(), ())
         let result = rt::broadcast_shapes(&[], RowMajor);
-        assert_eq!(result, vec![]);
+        assert!(result.is_empty());
 
         // assert_equal(_broadcast_shape([1, 2]), (2,)) - This is for arrays, not shapes
         // In broadcast_shapes, this would be broadcast_shapes((2,),) -> (2,)
