@@ -105,6 +105,28 @@ pub trait ArangeAPI<Inp> {
 /// # assert_eq!(a.shape(), &[5]);
 /// ```
 ///
+/// # Overload List
+///
+/// Each form also has a device-carrying counterpart; without `device`, the tensor is created on
+/// [`DeviceCpu::default()`].
+///
+/// - `arange(stop)` / `arange((stop, &device))` — implicit `start = 0`, `step = 1`.
+/// - `arange((start, stop))` / `arange((start, stop, &device))` — implicit `step = 1`.
+/// - `arange((start, stop, step))` / `arange((start, stop, step, &device))` — explicit `step`.
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// println!("{}", rt::arange(5));
+/// // [ 0 1 2 3 4]
+/// println!("{}", rt::arange((2, 10)));
+/// // [ 2 3 4 5 6 7 8 9]
+/// println!("{}", rt::arange((10, 0, -3)));
+/// // [ 10 7 4 1]
+/// # assert_eq!(format!("{}", rt::arange(5)), "[ 0 1 2 3 4]");
+/// # assert_eq!(format!("{}", rt::arange((2, 10))), "[ 2 3 4 5 6 7 8 9]");
+/// # assert_eq!(format!("{}", rt::arange((10, 0, -3))), "[ 10 7 4 1]");
+/// ```
+///
 /// # Notes of API accordance
 ///
 /// - Array-API: `arange(start, /, stop, step=1)` ([`arange`](https://data-apis.org/array-api/2024.12/API_specification/generated/array_api.arange.html))
@@ -294,10 +316,8 @@ pub trait EmptyAPI<Inp> {
 ///
 /// # Parameters
 ///
-/// - `shape`: shape of the new tensor, anything that converts into [`AxesIndex<isize>`][AxesIndex].
-///   - Overloads:
-///     - integer: 1-D shape with a single dimension.
-///     - vector/array/tuple of integers: N-D shape with N dimensions.
+/// - `shape`: shape of the new tensor: a fixed-size array `[usize; N]` (1-D when `N = 1`) or a
+///   `Vec<usize>` ([`IxD`]) for dynamic dimensionality.
 /// - `order`: [`FlagOrder`] ([`RowMajor`] or [`ColMajor`]): contiguity of the new tensor. Defaults
 ///   to the device default order if omitted.
 /// - `layout`: [`Layout<D>`][`Layout`]: exact layout (shape, stride, and offset) of the new tensor.
@@ -341,6 +361,36 @@ pub trait EmptyAPI<Inp> {
 /// // 2-Dim (dyn), contiguous: Ff
 /// // shape: [2, 3], stride: [1, 2], offset: 0
 /// # assert_eq!(format!("{:?}", a.layout()), "2-Dim (dyn), contiguous: Ff\nshape: [2, 3], stride: [1, 2], offset: 0");
+/// ```
+///
+/// # Overload List
+///
+/// - `empty(shape)` / `empty((shape, &device))` — `shape` is a fixed-size array `[usize; N]` or a
+///   `Vec<usize>`; the device default order is used.
+/// - `empty((shape, order))` / `empty((shape, order, &device))` — explicit [`RowMajor`] /
+///   [`ColMajor`] contiguity.
+/// - `empty(layout)` / `empty((layout, &device))` — use the exact [`Layout`] (shape, stride,
+///   offset), bypassing the order.
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let a: Tensor<i32, _> = unsafe { rt::empty(([2, 2], &device)) };
+/// println!("{:?}", a.layout());
+/// // 2-Dim (dyn), contiguous: Cc
+/// // shape: [2, 2], stride: [2, 1], offset: 0
+/// let b: Tensor<i32, _> = unsafe { rt::empty(([2, 3], ColMajor, &device)) };
+/// println!("{:?}", b.layout());
+/// // 2-Dim (dyn), contiguous: Ff
+/// // shape: [2, 3], stride: [1, 2], offset: 0
+/// let c: Tensor<i32, _> = unsafe { rt::empty([2, 3].c()) };
+/// println!("{:?}", c.layout());
+/// // 2-Dim (dyn), contiguous: Cc
+/// // shape: [2, 3], stride: [3, 1], offset: 0
+/// # assert_eq!(format!("{:?}", a.layout()), "2-Dim (dyn), contiguous: Cc\nshape: [2, 2], stride: [2, 1], offset: 0");
+/// # assert_eq!(format!("{:?}", b.layout()), "2-Dim (dyn), contiguous: Ff\nshape: [2, 3], stride: [1, 2], offset: 0");
+/// # assert_eq!(format!("{:?}", c.layout()), "2-Dim (dyn), contiguous: Cc\nshape: [2, 3], stride: [3, 1], offset: 0");
 /// ```
 ///
 /// # Notes of API accordance
@@ -537,6 +587,30 @@ pub trait EmptyLikeAPI<Inp> {
 /// // [[ 0 0 0]
 /// //  [ 0 0 0]]
 /// # assert_eq!(b.shape(), a.shape());
+/// ```
+///
+/// # Overload List
+///
+/// - `empty_like(tensor)` — implicit `order = K` (keeps the input axis order) and the device of
+///   `tensor`.
+/// - `empty_like((tensor, order))` — explicit [`TensorIterOrder`].
+/// - `empty_like((tensor, &device))` — create on another device (with `order = K`).
+/// - `empty_like((tensor, order, &device))`.
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let a = rt::arange((6, &device)).into_shape([2, 3]);
+/// let e = unsafe { rt::empty_like(&a) };
+/// println!("{:?}", e.layout());
+/// // 2-Dim (dyn), contiguous: Cc
+/// // shape: [2, 3], stride: [3, 1], offset: 0
+/// let e = unsafe { rt::empty_like((&a, TensorIterOrder::F)) };
+/// println!("{:?}", e.layout());
+/// // 2-Dim (dyn), contiguous: Ff
+/// // shape: [2, 3], stride: [1, 2], offset: 0
+/// # assert_eq!(format!("{:?}", e.layout()), "2-Dim (dyn), contiguous: Ff\nshape: [2, 3], stride: [1, 2], offset: 0");
 /// ```
 ///
 /// # Notes of API accordance
@@ -770,6 +844,32 @@ pub trait EyeAPI<Inp> {
 /// # assert_eq!(e.shape(), &[3, 5]);
 /// ```
 ///
+/// # Overload List
+///
+/// - `eye(n)` / `eye((n, &device))` — square identity, implicit `n_cols = n_rows` and `k = 0`.
+/// - `eye((n_rows, n_cols, k))` / `eye((n_rows, n_cols, k, &device))` — explicit shape and
+///   diagonal, device default order.
+/// - `eye((n_rows, n_cols, k, order))` / `eye((n_rows, n_cols, k, order, &device))` — explicit
+///   [`RowMajor`] / [`ColMajor`] contiguity.
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// let e: Tensor<i32, _> = rt::eye(3);
+/// println!("{e}");
+/// // [[ 1 0 0]
+/// //  [ 0 1 0]
+/// //  [ 0 0 1]]
+/// # assert_eq!(format!("{e}"), "[[ 1 0 0]\n [ 0 1 0]\n [ 0 0 1]]");
+/// let e: Tensor<i32, _> = rt::eye((3, 5, 1));
+/// println!("{}", e.shape()[1]);
+/// // 5
+/// let e: Tensor<i32, _> = rt::eye((3, 5, 0, ColMajor));
+/// println!("{:?}", e.layout());
+/// // 2-Dim (dyn), contiguous: Ff
+/// // shape: [3, 5], stride: [1, 3], offset: 0
+/// # assert_eq!(format!("{:?}", e.layout()), "2-Dim (dyn), contiguous: Ff\nshape: [3, 5], stride: [1, 3], offset: 0");
+/// ```
+///
 /// # Notes of API accordance
 ///
 /// - Array-API: `eye(n_rows, n_cols, /, *, k=0, dtype=None, device=None)` ([`eye`](https://data-apis.org/array-api/2024.12/API_specification/generated/array_api.eye.html))
@@ -960,10 +1060,8 @@ pub trait FullAPI<Inp> {
 ///
 /// # Parameters
 ///
-/// - `shape`: shape of the new tensor, anything that converts into [`AxesIndex<isize>`][AxesIndex].
-///   - Overloads:
-///     - integer: 1-D shape with a single dimension.
-///     - vector/array/tuple of integers: N-D shape with N dimensions.
+/// - `shape`: shape of the new tensor: a fixed-size array `[usize; N]` (1-D when `N = 1`) or a
+///   `Vec<usize>` ([`IxD`]) for dynamic dimensionality.
 /// - `fill_value`: the value to fill the tensor with.
 /// - `order`: [`FlagOrder`] ([`RowMajor`] or [`ColMajor`]): contiguity of the new tensor. Defaults
 ///   to the device default order if omitted.
@@ -998,6 +1096,36 @@ pub trait FullAPI<Inp> {
 /// // 2-Dim (dyn), contiguous: Ff
 /// // shape: [2, 3], stride: [1, 2], offset: 0
 /// # assert_eq!(format!("{:?}", f.layout()), "2-Dim (dyn), contiguous: Ff\nshape: [2, 3], stride: [1, 2], offset: 0");
+/// ```
+///
+/// # Overload List
+///
+/// - `full((shape, fill_value))` / `full((shape, fill_value, &device))` — `shape` is a fixed-size
+///   array `[usize; N]` or a `Vec<usize>`; the device default order is used.
+/// - `full((shape, fill_value, order))` / `full((shape, fill_value, order, &device))` — explicit
+///   [`RowMajor`] / [`ColMajor`] contiguity.
+/// - `full((layout, fill_value))` / `full((layout, fill_value, &device))` — use the exact
+///   [`Layout`] (shape, stride, offset), bypassing the order.
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let a: Tensor<i32, _> = rt::full(([2, 2], 7, &device));
+/// println!("{a}");
+/// // [[ 7 7]
+/// //  [ 7 7]]
+/// let b: Tensor<i32, _> = rt::full(([2, 3], 7, ColMajor, &device));
+/// println!("{:?}", b.layout());
+/// // 2-Dim (dyn), contiguous: Ff
+/// // shape: [2, 3], stride: [1, 2], offset: 0
+/// let c: Tensor<i32, _> = rt::full(([2, 3].c(), 7, &device));
+/// println!("{:?}", c.layout());
+/// // 2-Dim (dyn), contiguous: Cc
+/// // shape: [2, 3], stride: [3, 1], offset: 0
+/// # assert_eq!(format!("{a}"), "[[ 7 7]\n [ 7 7]]");
+/// # assert_eq!(format!("{:?}", b.layout()), "2-Dim (dyn), contiguous: Ff\nshape: [2, 3], stride: [1, 2], offset: 0");
+/// # assert_eq!(format!("{:?}", c.layout()), "2-Dim (dyn), contiguous: Cc\nshape: [2, 3], stride: [3, 1], offset: 0");
 /// ```
 ///
 /// # Notes of API accordance
@@ -1206,6 +1334,13 @@ where
 ///
 /// # See also
 ///
+/// ## Similar function from other crates/libraries
+///
+/// - Python Array API standard: [`asarray`](https://data-apis.org/array-api/2024.12/API_specification/generated/array_api.asarray.html)
+///   (0-d result)
+/// - NumPy: [`numpy.array`](https://numpy.org/doc/stable/reference/generated/numpy.array.html) (0-d
+///   result)
+///
 /// ## Related functions in RSTSR
 ///
 /// - [`full`]: the same fill with an explicit shape.
@@ -1299,6 +1434,31 @@ pub trait FullLikeAPI<Inp> {
 /// // [[ 7 7]
 /// //  [ 7 7]]
 /// # assert_eq!(f.shape(), a.shape());
+/// ```
+///
+/// # Overload List
+///
+/// - `full_like((tensor, fill_value))` — implicit `order = K` (keeps the input axis order) and the
+///   device of `tensor`.
+/// - `full_like((tensor, fill_value, order))` — explicit [`TensorIterOrder`].
+/// - `full_like((tensor, fill_value, &device))` — create on another device (with `order = K`).
+/// - `full_like((tensor, fill_value, order, &device))`.
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let a = rt::arange((6, &device)).into_shape([2, 3]);
+/// let f = rt::full_like((&a, 9));
+/// println!("{f}");
+/// // [[ 9 9 9]
+/// //  [ 9 9 9]]
+/// # assert_eq!(format!("{f}"), "[[ 9 9 9]\n [ 9 9 9]]");
+/// let f = rt::full_like((&a, 9, TensorIterOrder::F));
+/// println!("{:?}", f.layout());
+/// // 2-Dim (dyn), contiguous: Ff
+/// // shape: [2, 3], stride: [1, 2], offset: 0
+/// # assert_eq!(format!("{:?}", f.layout()), "2-Dim (dyn), contiguous: Ff\nshape: [2, 3], stride: [1, 2], offset: 0");
 /// ```
 ///
 /// # Notes of API accordance
@@ -1424,6 +1584,10 @@ where
     D: DimAPI,
     B: DeviceAPI<T> + DeviceCreationAnyAPI<T>,
 {
+    /// New tensor filled with given value and having the same shape as an input
+    /// tensor.
+    ///
+    /// See also [`full_like`].
     pub fn full_like(&self, fill: T) -> Tensor<T, B, D> {
         full_like((self, fill))
     }
@@ -1509,6 +1673,24 @@ pub trait LinspaceAPI<Inp> {
 /// println!("{y}");
 /// // [ 0 2 4 6 8]
 /// # assert_eq!(y.to_vec(), vec![0.0, 2.0, 4.0, 6.0, 8.0]);
+/// ```
+///
+/// # Overload List
+///
+/// - `linspace((start, stop, num))` / `linspace((start, stop, num, &device))` — implicit `endpoint
+///   = true`.
+/// - `linspace((start, stop, num, endpoint))` / `linspace((start, stop, num, endpoint, &device))` —
+///   explicit `endpoint`.
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// let y: Tensor<f64, _> = rt::linspace((0.0, 1.0, 5));
+/// println!("{y}");
+/// // [ 0 0.25 0.5 0.75 1]
+/// let y: Tensor<f64, _> = rt::linspace((0.0, 10.0, 5, false));
+/// println!("{y}");
+/// // [ 0 2 4 6 8]
+/// # assert_eq!(format!("{y}"), "[ 0 2 4 6 8]");
 /// ```
 ///
 /// # Notes of API accordance
@@ -1661,10 +1843,8 @@ pub trait OnesAPI<Inp> {
 ///
 /// # Parameters
 ///
-/// - `shape`: shape of the new tensor, anything that converts into [`AxesIndex<isize>`][AxesIndex].
-///   - Overloads:
-///     - integer: 1-D shape with a single dimension.
-///     - vector/array/tuple of integers: N-D shape with N dimensions.
+/// - `shape`: shape of the new tensor: a fixed-size array `[usize; N]` (1-D when `N = 1`) or a
+///   `Vec<usize>` ([`IxD`]) for dynamic dimensionality.
 /// - `order`: [`FlagOrder`] ([`RowMajor`] or [`ColMajor`]): contiguity of the new tensor. Defaults
 ///   to the device default order if omitted.
 /// - `layout`: [`Layout<D>`][`Layout`]: exact layout (shape, stride, and offset) of the new tensor.
@@ -1698,6 +1878,36 @@ pub trait OnesAPI<Inp> {
 /// // 2-Dim (dyn), contiguous: Ff
 /// // shape: [2, 3], stride: [1, 2], offset: 0
 /// # assert_eq!(format!("{:?}", o.layout()), "2-Dim (dyn), contiguous: Ff\nshape: [2, 3], stride: [1, 2], offset: 0");
+/// ```
+///
+/// # Overload List
+///
+/// - `ones(shape)` / `ones((shape, &device))` — `shape` is a fixed-size array `[usize; N]` or a
+///   `Vec<usize>`; the device default order is used.
+/// - `ones((shape, order))` / `ones((shape, order, &device))` — explicit [`RowMajor`] /
+///   [`ColMajor`] contiguity.
+/// - `ones(layout)` / `ones((layout, &device))` — use the exact [`Layout`] (shape, stride, offset),
+///   bypassing the order.
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let a: Tensor<i32, _> = rt::ones(([2, 2], &device));
+/// println!("{a}");
+/// // [[ 1 1]
+/// //  [ 1 1]]
+/// let b: Tensor<i32, _> = rt::ones(([2, 3], ColMajor, &device));
+/// println!("{:?}", b.layout());
+/// // 2-Dim (dyn), contiguous: Ff
+/// // shape: [2, 3], stride: [1, 2], offset: 0
+/// let c: Tensor<i32, _> = rt::ones([2, 3].c());
+/// println!("{:?}", c.layout());
+/// // 2-Dim (dyn), contiguous: Cc
+/// // shape: [2, 3], stride: [3, 1], offset: 0
+/// # assert_eq!(format!("{a}"), "[[ 1 1]\n [ 1 1]]");
+/// # assert_eq!(format!("{:?}", b.layout()), "2-Dim (dyn), contiguous: Ff\nshape: [2, 3], stride: [1, 2], offset: 0");
+/// # assert_eq!(format!("{:?}", c.layout()), "2-Dim (dyn), contiguous: Cc\nshape: [2, 3], stride: [3, 1], offset: 0");
 /// ```
 ///
 /// # Notes of API accordance
@@ -1884,6 +2094,31 @@ pub trait OnesLikeAPI<Inp> {
 /// // [[ 1 1]
 /// //  [ 1 1]]
 /// # assert_eq!(o.shape(), a.shape());
+/// ```
+///
+/// # Overload List
+///
+/// - `ones_like(tensor)` — implicit `order = K` (keeps the input axis order) and the device of
+///   `tensor`.
+/// - `ones_like((tensor, order))` — explicit [`TensorIterOrder`].
+/// - `ones_like((tensor, &device))` — create on another device (with `order = K`).
+/// - `ones_like((tensor, order, &device))`.
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let a = rt::arange((6, &device)).into_shape([2, 3]);
+/// let o = rt::ones_like(&a);
+/// println!("{o}");
+/// // [[ 1 1 1]
+/// //  [ 1 1 1]]
+/// # assert_eq!(format!("{o}"), "[[ 1 1 1]\n [ 1 1 1]]");
+/// let o = rt::ones_like((&a, TensorIterOrder::F));
+/// println!("{:?}", o.layout());
+/// // 2-Dim (dyn), contiguous: Ff
+/// // shape: [2, 3], stride: [1, 2], offset: 0
+/// # assert_eq!(format!("{:?}", o.layout()), "2-Dim (dyn), contiguous: Ff\nshape: [2, 3], stride: [1, 2], offset: 0");
 /// ```
 ///
 /// # Notes of API accordance
@@ -2081,10 +2316,8 @@ pub trait UninitAPI<Inp> {
 ///
 /// # Parameters
 ///
-/// - `shape`: shape of the new tensor, anything that converts into [`AxesIndex<isize>`][AxesIndex].
-///   - Overloads:
-///     - integer: 1-D shape with a single dimension.
-///     - vector/array/tuple of integers: N-D shape with N dimensions.
+/// - `shape`: shape of the new tensor: a fixed-size array `[usize; N]` (1-D when `N = 1`) or a
+///   `Vec<usize>` ([`IxD`]) for dynamic dimensionality.
 /// - `order`: [`FlagOrder`] ([`RowMajor`] or [`ColMajor`]): contiguity of the new tensor. Defaults
 ///   to the device default order if omitted.
 /// - `layout`: [`Layout<D>`][`Layout`]: exact layout (shape, stride, and offset) of the new tensor.
@@ -2111,6 +2344,36 @@ pub trait UninitAPI<Inp> {
 /// // [[ 0 1]
 /// //  [ 2 3]]
 /// # assert_eq!(format!("{a}"), "[[ 0 1]\n [ 2 3]]");
+/// ```
+///
+/// # Overload List
+///
+/// - `uninit(shape)` / `uninit((shape, &device))` — `shape` is a fixed-size array `[usize; N]` or a
+///   `Vec<usize>`; the device default order is used.
+/// - `uninit((shape, order))` / `uninit((shape, order, &device))` — explicit [`RowMajor`] /
+///   [`ColMajor`] contiguity.
+/// - `uninit(layout)` / `uninit((layout, &device))` — use the exact [`Layout`] (shape, stride,
+///   offset), bypassing the order.
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let a: Tensor<core::mem::MaybeUninit<i32>, _> = rt::uninit(([2, 2], &device));
+/// println!("{:?}", a.layout());
+/// // 2-Dim (dyn), contiguous: Cc
+/// // shape: [2, 2], stride: [2, 1], offset: 0
+/// let b: Tensor<core::mem::MaybeUninit<i32>, _> = rt::uninit(([2, 3], ColMajor, &device));
+/// println!("{:?}", b.layout());
+/// // 2-Dim (dyn), contiguous: Ff
+/// // shape: [2, 3], stride: [1, 2], offset: 0
+/// let c: Tensor<core::mem::MaybeUninit<i32>, _> = rt::uninit([2, 3].c());
+/// println!("{:?}", c.layout());
+/// // 2-Dim (dyn), contiguous: Cc
+/// // shape: [2, 3], stride: [3, 1], offset: 0
+/// # assert_eq!(format!("{:?}", a.layout()), "2-Dim (dyn), contiguous: Cc\nshape: [2, 2], stride: [2, 1], offset: 0");
+/// # assert_eq!(format!("{:?}", b.layout()), "2-Dim (dyn), contiguous: Ff\nshape: [2, 3], stride: [1, 2], offset: 0");
+/// # assert_eq!(format!("{:?}", c.layout()), "2-Dim (dyn), contiguous: Cc\nshape: [2, 3], stride: [3, 1], offset: 0");
 /// ```
 ///
 /// # Notes of API accordance
@@ -2316,10 +2579,8 @@ pub trait ZerosAPI<Inp> {
 ///
 /// # Parameters
 ///
-/// - `shape`: shape of the new tensor, anything that converts into [`AxesIndex<isize>`][AxesIndex].
-///   - Overloads:
-///     - integer: 1-D shape with a single dimension.
-///     - vector/array/tuple of integers: N-D shape with N dimensions.
+/// - `shape`: shape of the new tensor: a fixed-size array `[usize; N]` (1-D when `N = 1`) or a
+///   `Vec<usize>` ([`IxD`]) for dynamic dimensionality.
 /// - `order`: [`FlagOrder`] ([`RowMajor`] or [`ColMajor`]): contiguity of the new tensor. Defaults
 ///   to the device default order if omitted.
 /// - `layout`: [`Layout<D>`][`Layout`]: exact layout (shape, stride, and offset) of the new tensor.
@@ -2360,6 +2621,36 @@ pub trait ZerosAPI<Inp> {
 /// println!("{:?}", z.layout());
 /// // 2-Dim (dyn), contiguous: Ff
 /// // shape: [2, 3], stride: [1, 2], offset: 0
+/// ```
+///
+/// # Overload List
+///
+/// - `zeros(shape)` / `zeros((shape, &device))` — `shape` is a fixed-size array `[usize; N]` or a
+///   `Vec<usize>`; the device default order is used.
+/// - `zeros((shape, order))` / `zeros((shape, order, &device))` — explicit [`RowMajor`] /
+///   [`ColMajor`] contiguity.
+/// - `zeros(layout)` / `zeros((layout, &device))` — use the exact [`Layout`] (shape, stride,
+///   offset), bypassing the order.
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let a: Tensor<i32, _> = rt::zeros(([2, 2], &device));
+/// println!("{a}");
+/// // [[ 0 0]
+/// //  [ 0 0]]
+/// let b: Tensor<i32, _> = rt::zeros(([2, 3], ColMajor, &device));
+/// println!("{:?}", b.layout());
+/// // 2-Dim (dyn), contiguous: Ff
+/// // shape: [2, 3], stride: [1, 2], offset: 0
+/// let c: Tensor<i32, _> = rt::zeros([2, 3].c());
+/// println!("{:?}", c.layout());
+/// // 2-Dim (dyn), contiguous: Cc
+/// // shape: [2, 3], stride: [3, 1], offset: 0
+/// # assert_eq!(format!("{a}"), "[[ 0 0]\n [ 0 0]]");
+/// # assert_eq!(format!("{:?}", b.layout()), "2-Dim (dyn), contiguous: Ff\nshape: [2, 3], stride: [1, 2], offset: 0");
+/// # assert_eq!(format!("{:?}", c.layout()), "2-Dim (dyn), contiguous: Cc\nshape: [2, 3], stride: [3, 1], offset: 0");
 /// ```
 ///
 /// # Notes of API accordance
@@ -2556,6 +2847,31 @@ pub trait ZerosLikeAPI<Inp> {
 /// // 3-Dim (dyn), contiguous: Cc
 /// // shape: [4, 2, 3], stride: [6, 3, 1], offset: 0
 /// # assert_eq!(z.shape(), a.shape());
+/// ```
+///
+/// # Overload List
+///
+/// - `zeros_like(tensor)` — implicit `order = K` (keeps the input axis order) and the device of
+///   `tensor`.
+/// - `zeros_like((tensor, order))` — explicit [`TensorIterOrder`].
+/// - `zeros_like((tensor, &device))` — create on another device (with `order = K`).
+/// - `zeros_like((tensor, order, &device))`.
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let a = rt::arange((6, &device)).into_shape([2, 3]);
+/// let z = rt::zeros_like(&a);
+/// println!("{:?}", z.layout());
+/// // 2-Dim (dyn), contiguous: Cc
+/// // shape: [2, 3], stride: [3, 1], offset: 0
+/// # assert_eq!(format!("{:?}", z.layout()), "2-Dim (dyn), contiguous: Cc\nshape: [2, 3], stride: [3, 1], offset: 0");
+/// let z = rt::zeros_like((&a, TensorIterOrder::F));
+/// println!("{:?}", z.layout());
+/// // 2-Dim (dyn), contiguous: Ff
+/// // shape: [2, 3], stride: [1, 2], offset: 0
+/// # assert_eq!(format!("{:?}", z.layout()), "2-Dim (dyn), contiguous: Ff\nshape: [2, 3], stride: [1, 2], offset: 0");
 /// ```
 ///
 /// # Notes of API accordance
@@ -2775,6 +3091,32 @@ pub trait TrilAPI<Inp> {
 /// //  [ 4 5 6]
 /// //  [ 7 8 9]]
 /// # assert_eq!(format!("{}", rt::tril((&a, 1))), "[[ 1 2 0]\n [ 4 5 6]\n [ 7 8 9]]");
+/// ```
+///
+/// # Overload List
+///
+/// - `tril(x)` / `tril((x, k))` — `k` is the diagonal index and defaults to `0` when omitted.
+/// - Borrowed input (`&TensorAny` / [`TensorView`]): the data is copied first, then masked; a new
+///   owned [`Tensor`] is returned.
+/// - Owning input ([`Tensor`] / [`TensorMut`]): masked in place and returned — no data is copied.
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let a = rt::arange((1, 10, &device)).into_shape([3, 3]);
+/// println!("{}", rt::tril(&a));
+/// // [[ 1 0 0]
+/// //  [ 4 5 0]
+/// //  [ 7 8 9]]
+/// println!("{}", rt::tril((a, 1)));
+/// // [[ 1 2 0]
+/// //  [ 4 5 6]
+/// //  [ 7 8 9]]
+/// # let a = rt::arange((1, 10, &device)).into_shape([3, 3]);
+/// # assert_eq!(format!("{}", rt::tril(&a)), "[[ 1 0 0]\n [ 4 5 0]\n [ 7 8 9]]");
+/// # let a = rt::arange((1, 10, &device)).into_shape([3, 3]);
+/// # assert_eq!(format!("{}", rt::tril((a, 1))), "[[ 1 2 0]\n [ 4 5 6]\n [ 7 8 9]]");
 /// ```
 ///
 /// # Ownership Semantics between `tril` / `triu` and the input tensor
@@ -3047,6 +3389,32 @@ pub trait TriuAPI<Inp> {
 /// //  [ 0 5 6]
 /// //  [ 0 0 9]]
 /// # assert_eq!(format!("{}", rt::triu((&a, 0))), "[[ 1 2 3]\n [ 0 5 6]\n [ 0 0 9]]");
+/// ```
+///
+/// # Overload List
+///
+/// - `triu(x)` / `triu((x, k))` — `k` is the diagonal index and defaults to `0` when omitted.
+/// - Borrowed input (`&TensorAny` / [`TensorView`]): the data is copied first, then masked; a new
+///   owned [`Tensor`] is returned.
+/// - Owning input ([`Tensor`] / [`TensorMut`]): masked in place and returned — no data is copied.
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let a = rt::arange((1, 10, &device)).into_shape([3, 3]);
+/// println!("{}", rt::triu(&a));
+/// // [[ 1 2 3]
+/// //  [ 0 5 6]
+/// //  [ 0 0 9]]
+/// println!("{}", rt::triu((a, 1)));
+/// // [[ 0 2 3]
+/// //  [ 0 0 6]
+/// //  [ 0 0 0]]
+/// # let a = rt::arange((1, 10, &device)).into_shape([3, 3]);
+/// # assert_eq!(format!("{}", rt::triu(&a)), "[[ 1 2 3]\n [ 0 5 6]\n [ 0 0 9]]");
+/// # let a = rt::arange((1, 10, &device)).into_shape([3, 3]);
+/// # assert_eq!(format!("{}", rt::triu((a, 1))), "[[ 0 2 3]\n [ 0 0 6]\n [ 0 0 0]]");
 /// ```
 ///
 /// # Notes of API accordance
@@ -3342,6 +3710,8 @@ impl_from_nested_array!([[[[[[T; N6]; N5]; N4]; N3]; N2]; N1], Ix6, N1, N2, N3, 
 ///   `()`.
 ///
 /// # See also
+///
+/// ## Similar function from other crates/libraries
 ///
 /// - [`ndarray::array`](https://docs.rs/ndarray/latest/ndarray/macro.array.html) from rust crate
 ///   ndarray.

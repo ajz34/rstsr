@@ -73,6 +73,41 @@ mod doc_squeeze {
     }
 
     #[test]
+    fn overload_list() {
+        crate::specify_test!("overload_list");
+
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        let a: Tensor<f64, _> = rt::zeros(([1, 3, 1, 4], &device));
+
+        // single integer axis (must have size 1)
+        println!("{:?}", a.squeeze(0).shape());
+        // [3, 1, 4]
+        assert_eq!(format!("{:?}", a.squeeze(0).shape()), "[3, 1, 4]");
+
+        // list of axes
+        println!("{:?}", a.squeeze([0, 2]).shape());
+        // [3, 4]
+        assert_eq!(format!("{:?}", a.squeeze([0, 2]).shape()), "[3, 4]");
+
+        // None: squeeze all size-1 axes
+        println!("{:?}", a.squeeze(None).shape());
+        // [3, 4]
+        assert_eq!(format!("{:?}", a.squeeze(None).shape()), "[3, 4]");
+
+        // () empty: squeeze no axes
+        println!("{:?}", a.squeeze(()).shape());
+        // [1, 3, 1, 4]
+        assert_eq!(format!("{:?}", a.squeeze(()).shape()), "[1, 3, 1, 4]");
+
+        // negative index counts from the back
+        println!("{:?}", a.squeeze(-2).shape());
+        // [1, 3, 4]
+        assert_eq!(format!("{:?}", a.squeeze(-2).shape()), "[1, 3, 4]");
+    }
+
+    #[test]
     fn squeeze_roundtrip_with_expand_dims() {
         crate::specify_test!("squeeze_roundtrip_with_expand_dims");
 

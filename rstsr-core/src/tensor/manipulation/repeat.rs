@@ -302,6 +302,14 @@ where
 ///
 /// See [`order_semantics`](crate::order_semantics) for the two device default orders.
 ///
+/// # Overloads Table
+///
+/// Output is [`Tensor<T, B, IxD>`][`Tensor`].
+///
+/// - `repeat(tensor, repeats) -> Tensor<T, B, IxD>` (implicit `axis = None`, flattened)
+/// - `repeat(tensor, (repeats, axis)) -> Tensor<T, B, IxD>` where `axis` is any
+///   `TryInto<AxesIndex<isize>>` form (integer, tuple, list, `None`)
+///
 /// # Parameters
 ///
 /// - `tensor`: [`&TensorAny<R, T, B, D>`](TensorAny)
@@ -392,19 +400,46 @@ where
 /// # assert_eq!(format!("{}", rt::repeat(&a, ([2, 1, 1, 1, 1, 1], None))), "[ 0 0 3 1 4 2 5]");
 /// ```
 ///
+/// # Overload List
+///
+/// The bare `repeats` form flattens the tensor (`axis = None`) and returns a 1-D
+/// tensor; the tuple form selects the axis:
+///
+/// - `repeat(tensor, repeats)` — `repeats` is a single count (`usize`) applied to every element, or
+///   a list of per-element counts (`Vec<usize>` / `&[usize]` / `[usize; N]`); the tensor is
+///   flattened (device default order) and a 1-D tensor is returned.
+/// - `repeat(tensor, (repeats, axis))` — `axis` is an integer (repeat only along that axis, rank
+///   preserved) or `None`/`()` (the flattened form); `repeats` is a single count or a list of
+///   counts.
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let a = rt::arange((3, &device));
+/// println!("{}", rt::repeat(&a, 2));            // scalar count: flattened
+/// // [ 0 0 1 1 2 2]
+/// println!("{}", rt::repeat(&a, [3, 1, 2]));    // per-element counts: flattened
+/// // [ 0 0 0 1 2 2]
+///
+/// let b = rt::arange((6, &device)).into_shape([2, 3]);
+/// println!("{}", rt::repeat(&b, ([2, 1], 0)));  // integer axis
+/// // [[ 0 1 2]
+/// //  [ 0 1 2]
+/// //  [ 3 4 5]]
+/// println!("{}", rt::repeat(&b, (1, None)));    // axis = None: flattened
+/// // [ 0 1 2 3 4 5]
+/// # assert_eq!(format!("{}", rt::repeat(&a, 2)), "[ 0 0 1 1 2 2]");
+/// # assert_eq!(format!("{}", rt::repeat(&a, [3, 1, 2])), "[ 0 0 0 1 2 2]");
+/// # assert_eq!(format!("{}", rt::repeat(&b, ([2, 1], 0))), "[[ 0 1 2]\n [ 0 1 2]\n [ 3 4 5]]");
+/// # assert_eq!(format!("{}", rt::repeat(&b, (1, None))), "[ 0 1 2 3 4 5]");
+/// ```
+///
 /// # Notes of API accordance
 ///
 /// - Array-API: `repeat(x, repeats, /, *, axis=None)` ([`repeat`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.repeat.html))
 /// - NumPy: `numpy.repeat(a, repeats, axis=None)` ([`numpy.repeat`](https://numpy.org/doc/stable/reference/generated/numpy.repeat.html))
 /// - RSTSR: `rt::repeat(tensor, (repeats, axis))`
-///
-/// # Overloads Table
-///
-/// Output is [`Tensor<T, B, IxD>`][`Tensor`].
-///
-/// - `repeat(tensor, repeats) -> Tensor<T, B, IxD>` (implicit `axis = None`, flattened)
-/// - `repeat(tensor, (repeats, axis)) -> Tensor<T, B, IxD>` where `axis` is any
-///   `TryInto<AxesIndex<isize>>` form (integer, tuple, list, `None`)
 ///
 /// RSTSR's behavior matches NumPy and Array-API; `repeats` of an integer
 /// array should be passed as host-side counts (`Vec<usize>`), mirroring
@@ -418,6 +453,11 @@ where
 /// For a fallible version, use [`repeat_f`].
 ///
 /// # See also
+///
+/// ## Similar function from other crates/libraries
+///
+/// - Array-API: [`repeat`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.repeat.html)
+/// - NumPy: [`numpy.repeat`](https://numpy.org/doc/stable/reference/generated/numpy.repeat.html)
 ///
 /// ## Related functions in RSTSR
 ///

@@ -65,4 +65,28 @@ mod doc_expand_dims {
         assert_eq!(y.shape(), &[1, 2, 1]);
         assert_eq!(x.i((None, Ellipsis, None)).shape(), &[1, 2, 1]);
     }
+
+    #[test]
+    fn overload_list() {
+        crate::specify_test!("overload_list");
+
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        // single integer axis: one new size-1 axis
+        let x = rt::arange((3, &device));
+        println!("{:?}", x.expand_dims(0).shape());
+        // [1, 3]
+        assert_eq!(x.expand_dims(0).shape(), &[1, 3]);
+
+        // list of axes: several new size-1 axes (positions refer to the result)
+        println!("{:?}", x.expand_dims([0, 2]).shape());
+        // [1, 3, 1]
+        assert_eq!(x.expand_dims([0, 2]).shape(), &[1, 3, 1]);
+
+        // negative index counts from the back
+        println!("{:?}", x.expand_dims(-1).shape());
+        // [3, 1]
+        assert_eq!(x.expand_dims(-1).shape(), &[3, 1]);
+    }
 }

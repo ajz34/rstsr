@@ -229,3 +229,145 @@ mod doc_argmax_allclose {
         assert!(!rt::allclose(&a, &c, None));
     }
 }
+
+mod doc_allclose {
+    use super::*;
+    static FUNC: &str = "doc_allclose";
+
+    #[test]
+    fn test_doc() {
+        crate::specify_test!("test_doc");
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        let a: Tensor<f64, _> = rt::tensor_from_nested!([1.0, 1.0], &device);
+        let b: Tensor<f64, _> = rt::tensor_from_nested!([1.0, 1.0001], &device);
+
+        // # Overload List: one call per distinct tolerance form
+        // None: default tolerances (rtol = 1.0e-5, atol = 1.0e-8, equal_nan = false)
+        println!("{}", rt::allclose(&a, &b, None));
+        // false
+        assert_eq!(format!("{}", rt::allclose(&a, &b, None)), "false");
+        // bare f64: sets rtol only
+        println!("{}", rt::allclose(&a, &b, 1.0e-3));
+        // true
+        assert_eq!(format!("{}", rt::allclose(&a, &b, 1.0e-3)), "true");
+        // (rtol, atol): sets both tolerances
+        println!("{}", rt::allclose(&a, &b, (1.0e-5, 1.0e-2)));
+        // true
+        assert_eq!(format!("{}", rt::allclose(&a, &b, (1.0e-5, 1.0e-2))), "true");
+
+        // (rtol, atol, equal_nan): sets all three
+        let n1: Tensor<f64, _> = rt::tensor_from_nested!([1.0, f64::NAN], &device);
+        let n2: Tensor<f64, _> = rt::tensor_from_nested!([1.0, f64::NAN], &device);
+        println!("{}", rt::allclose(&n1, &n2, (1.0e-5, 1.0e-8, true)));
+        // true
+        assert_eq!(format!("{}", rt::allclose(&n1, &n2, (1.0e-5, 1.0e-8, true))), "true");
+        assert!(!rt::allclose(&n1, &n2, None));
+
+        // IsCloseArgs struct (same behavior as the 3-tuple)
+        use rstsr_dtype_traits::IsCloseArgs;
+        let args = IsCloseArgs::<f64> { rtol: 1.0e-3, atol: 1.0e-8, equal_nan: false };
+        println!("{}", rt::allclose(&a, &b, args));
+        // true
+        assert!(rt::allclose(&a, &b, IsCloseArgs::<f64> { rtol: 1.0e-3, atol: 1.0e-8, equal_nan: false }));
+    }
+}
+
+mod doc_var_with_args {
+    use super::*;
+    static FUNC: &str = "doc_var_with_args";
+
+    #[test]
+    fn test_doc() {
+        crate::specify_test!("test_doc");
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        let a: Tensor<f64, _> = rt::tensor_from_nested!([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], &device);
+
+        // # Overload List: one call per distinct args form
+        // None / VarArgs::default: reduce all axes, no correction
+        let v = rt::var_with_args(&a, None);
+        println!("{v}");
+        // 2.916666666666666
+        assert_eq!(format!("{v}"), "2.916666666666666");
+        // bool: keepdims shorthand (all axes)
+        let v = rt::var_with_args(&a, true);
+        assert_eq!(format!("{v}"), "[[ 2.916666666666666]]");
+        assert_eq!(v.shape().to_vec(), vec![1, 1]);
+        // integer: a single reduced axis
+        let v = rt::var_with_args(&a, 0);
+        println!("{v}");
+        // [ 2.25 2.25 2.25]
+        assert_eq!(format!("{v}"), "[ 2.25 2.25 2.25]");
+        // axis list: reduce several axes at once
+        let v = rt::var_with_args(&a, [0, 1]);
+        assert_eq!(v.shape().to_vec(), Vec::<usize>::new());
+        assert_eq!(format!("{v}"), "2.916666666666666");
+        // (axes, keepdims): both at once
+        let v = rt::var_with_args(&a, (0, true));
+        assert_eq!(format!("{v}"), "[[ 2.25 2.25 2.25]]");
+        assert_eq!(v.shape().to_vec(), vec![1, 3]);
+        // VarArgs literal: set correction (NumPy ddof) - not reachable through `from`
+        let v = rt::var_with_args(&a, VarArgs { correction: Some(1.0), ..Default::default() });
+        println!("{v}");
+        // 3.499999999999999
+        assert_eq!(format!("{v}"), "3.499999999999999");
+    }
+}
+
+mod doc_std_with_args {
+    use super::*;
+    static FUNC: &str = "doc_std_with_args";
+
+    #[test]
+    fn test_doc() {
+        crate::specify_test!("test_doc");
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        let a: Tensor<f64, _> = rt::tensor_from_nested!([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], &device);
+
+        let v = rt::std_with_args(&a, None);
+        println!("{v}");
+        // 1.707825127659933
+        assert_eq!(format!("{v}"), "1.707825127659933");
+        let v = rt::std_with_args(&a, 0);
+        println!("{v}");
+        // [ 1.5 1.5 1.5]
+        assert_eq!(format!("{v}"), "[ 1.5 1.5 1.5]");
+        let v = rt::std_with_args(&a, VarArgs { correction: Some(1.0), ..Default::default() });
+        println!("{v}");
+        // 1.8708286933869704
+        assert_eq!(format!("{v}"), "1.8708286933869704");
+    }
+}
+
+mod doc_reduction_order {
+    use super::*;
+    static FUNC: &str = "doc_reduction_order";
+
+    #[test]
+    fn test_doc() {
+        crate::specify_test!("test_doc");
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        // module-level row/col notice: `_axes` output keeps the input arrangement
+        let a = rt::arange((24, &device)).into_shape([2, 3, 4]);
+        println!("{:?}", rt::sum_axes(&a, 1).layout());
+        // 2-Dim (dyn), contiguous: Cc
+        // shape: [2, 4], stride: [4, 1], offset: 0
+        let la = format!("{:?}", rt::sum_axes(&a, 1).layout());
+        assert!(la.starts_with("2-Dim (dyn), contiguous: Cc"), "{la}");
+
+        device.set_default_order(ColMajor);
+        let a = rt::arange((24, &device)).into_shape([2, 3, 4]);
+        println!("{:?}", rt::sum_axes(&a, 1).layout());
+        // 2-Dim (dyn), contiguous: Ff
+        // shape: [2, 4], stride: [1, 2], offset: 0
+        let la = format!("{:?}", rt::sum_axes(&a, 1).layout());
+        assert!(la.starts_with("2-Dim (dyn), contiguous: Ff"), "{la}");
+    }
+}

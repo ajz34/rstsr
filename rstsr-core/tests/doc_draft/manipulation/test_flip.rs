@@ -101,4 +101,38 @@ mod doc_flip {
         //   [ 6 7]]]
         assert!(rt::allclose(&b, &a, None));
     }
+
+    #[test]
+    fn overload_list() {
+        crate::specify_test!("overload_list");
+
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        let a = rt::arange((6, &device)).into_shape([2, 3]);
+
+        // integer: flip a single axis
+        println!("{}", a.flip(0));
+        // [[ 3 4 5]
+        //  [ 0 1 2]]
+        assert_eq!(format!("{}", a.flip(0)), "[[ 3 4 5]\n [ 0 1 2]]");
+
+        // list: flip multiple axes
+        println!("{}", a.flip([0, 1]));
+        // [[ 5 4 3]
+        //  [ 2 1 0]]
+        assert_eq!(format!("{}", a.flip([0, 1])), "[[ 5 4 3]\n [ 2 1 0]]");
+
+        // None: flip all axes
+        println!("{}", a.flip(None));
+        // [[ 5 4 3]
+        //  [ 2 1 0]]
+        assert_eq!(format!("{}", a.flip(None)), "[[ 5 4 3]\n [ 2 1 0]]");
+
+        // () empty: flip nothing
+        println!("{}", a.flip(()));
+        // [[ 0 1 2]
+        //  [ 3 4 5]]
+        assert_eq!(format!("{}", a.flip(())), "[[ 0 1 2]\n [ 3 4 5]]");
+    }
 }

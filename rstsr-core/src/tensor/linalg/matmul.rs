@@ -157,9 +157,17 @@ where
 /// is the direct analogue of BLAS `GEMM` with arbitrary strides on the
 /// matrix dimensions.
 ///
-/// This function behaves identically under [`RowMajor`] and [`ColMajor`] device
-/// default orders for the values it writes (the operands' existing layouts are
-/// used as given).
+/// <div class="warning">
+///
+/// **Row/Column Major Notice**
+///
+/// This function behaves differently on default orders ([`RowMajor`] and [`ColMajor`]) of device:
+/// the matrix dimensions are the last two axes under [`RowMajor`] and the first two under
+/// [`ColMajor`], exactly as for [`matmul`].
+///
+/// </div>
+///
+/// See [`order_semantics`](crate::order_semantics) for the two device default orders.
 ///
 /// When `beta` is zero, the previous contents of `c` are not read (the BLAS
 /// `beta = 0` non-read convention). This holds on every device implementation,
@@ -202,6 +210,10 @@ where
 /// For a fallible version, use [`matmul_from_f`].
 ///
 /// # See also
+///
+/// ## Similar function from other crates/libraries
+///
+/// - BLAS: `GEMM` (`C := alpha * A @ B + beta * C`)
 ///
 /// ## Related functions in RSTSR
 ///
@@ -322,9 +334,17 @@ where
 /// and `beta = 0` (the previous contents of `c` are overwritten without being
 /// read — the BLAS `beta = 0` non-read convention).
 ///
-/// This function behaves identically under [`RowMajor`] and [`ColMajor`] device
-/// default orders for the values it writes (the operands' existing layouts are
-/// used as given).
+/// <div class="warning">
+///
+/// **Row/Column Major Notice**
+///
+/// This function behaves differently on default orders ([`RowMajor`] and [`ColMajor`]) of device:
+/// the matrix dimensions are the last two axes under [`RowMajor`] and the first two under
+/// [`ColMajor`], exactly as for [`matmul`].
+///
+/// </div>
+///
+/// See [`order_semantics`](crate::order_semantics) for the two device default orders.
 ///
 /// # Parameters
 ///
@@ -361,6 +381,13 @@ where
 /// For a fallible version, use [`matmul_with_output_f`].
 ///
 /// # See also
+///
+/// ## Similar function from other crates/libraries
+///
+/// - Array-API standard: [`matmul`](https://data-apis.org/array-api/2024.12/API_specification/generated/array_api.matmul.html)
+///   (with an explicit `out`)
+/// - NumPy: [`numpy.matmul`](https://numpy.org/doc/stable/reference/generated/numpy.matmul.html)
+///   (with an explicit `out`)
 ///
 /// ## Related functions in RSTSR
 ///
@@ -600,6 +627,7 @@ where
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::prelude::*;
 
     #[test]
     fn test_matmul() {
@@ -661,5 +689,26 @@ mod test {
             let c_ref = vec![180.0, 201.5, 223.0, 484.5, 556.0, 627.5, 789.0, 910.5, 1032.0, 1093.5, 1265.0, 1436.5];
             assert!(allclose_f64(&c.raw().into(), &c_ref.into()));
         }
+    }
+
+    #[test]
+    fn test_matmul_follows_device_default_order() {
+        // the matrix axes follow the device default order: the last two axes
+        // under row-major, the first two under column-major
+        let mut device = DeviceCpuSerial::default();
+        device.set_default_order(RowMajor);
+        let a_row = rt::tensor_from_nested!([[[1, 2], [3, 4]], [[5, 6], [7, 8]]], &device);
+        let row = rt::matmul(&a_row, &a_row);
+        // batch over axis 0; each 2x2 block squares
+        let expected_row = rt::tensor_from_nested!([[[7, 10], [15, 22]], [[67, 78], [91, 106]]], &device);
+        assert!(rt::allclose(&row, &expected_row, None));
+
+        device.set_default_order(ColMajor);
+        let a_col = rt::tensor_from_nested!([[[1, 2], [3, 4]], [[5, 6], [7, 8]]], &device);
+        let col = rt::matmul(&a_col, &a_col);
+        // batch over axis 2; a different result from the row-major one
+        // (compare raw data: `same_device` treats a differing default order as a
+        // different device, so `allclose` across orders is rejected)
+        assert!(row.raw() != col.raw());
     }
 }

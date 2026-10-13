@@ -114,6 +114,37 @@ use core::mem::transmute;
 /// // 70
 /// ```
 ///
+/// # Overload List
+///
+/// `axes_pair` accepts:
+///
+/// - `None` (or `()`): contract the last axis of both operands (the default; the same as `-1`).
+/// - an integer: contract that axis in both operands; negative values count from the back.
+/// - a pair `(axes_a, axes_b)`: contract `axes_a` of `a` against `axes_b` of `b`, where each side
+///   is an integer or a collection of integers.
+/// - a bare collection (`[axes]`, a slice, a `Vec`): shorthand for `(axes, axes)`, the same axes in
+///   both operands. A 2-tuple is the pair form above, not this one.
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let a = rt::tensor_from_nested!([[1, 2], [3, 4]], &device);
+/// let b = rt::tensor_from_nested!([[5, 6], [7, 8]], &device);
+/// println!("{}", rt::vecdot(&a, &b, None));
+/// // [ 17 53]
+/// println!("{}", rt::vecdot(&a, &b, 0));
+/// // [ 26 44]
+/// println!("{}", rt::vecdot(&a, &b, ([0, 1], [0, 1])));
+/// // 70
+/// println!("{}", rt::vecdot(&a, &b, [0, 1]));
+/// // 70
+/// # assert_eq!(format!("{}", rt::vecdot(&a, &b, None)), "[ 17 53]");
+/// # assert_eq!(format!("{}", rt::vecdot(&a, &b, 0)), "[ 26 44]");
+/// # assert_eq!(format!("{}", rt::vecdot(&a, &b, ([0, 1], [0, 1]))), "70");
+/// # assert_eq!(format!("{}", rt::vecdot(&a, &b, [0, 1])), "70");
+/// ```
+///
 /// # Notes of API accordance
 ///
 /// - Array-API: `vecdot(x1, x2, /, *, axis=-1)` ([`vecdot`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.vecdot.html))
@@ -128,6 +159,11 @@ use core::mem::transmute;
 /// For a fallible version, use [`vecdot_f`].
 ///
 /// # See also
+///
+/// ## Similar function from other crates/libraries
+///
+/// - Array-API standard: [`vecdot`](https://data-apis.org/array-api/2024.12/API_specification/generated/array_api.vecdot.html)
+/// - NumPy: [`numpy.vecdot`](https://numpy.org/doc/stable/reference/generated/numpy.vecdot.html)
 ///
 /// ## Related functions in RSTSR
 ///

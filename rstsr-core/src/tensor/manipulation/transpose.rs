@@ -117,6 +117,38 @@ where
 /// // [5, 3, 4]
 /// ```
 ///
+/// # Overload List
+///
+/// - `transpose(tensor, None)` — reverse the order of all axes (equivalent to [`reverse_axes`]).
+/// - `transpose(tensor, axis)` — a single integer: a one-element permutation (valid for a 1-D
+///   input).
+/// - `transpose(tensor, axes)` — a tuple/list/[`Vec`]/slice of integers, each axis exactly once;
+///   negative values count from the back.
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let a = rt::tensor_from_nested!([[1, 2], [3, 4]], &device);
+/// println!("{}", rt::transpose(&a, None)); // reverse all axes
+/// // [[ 1 3]
+/// //  [ 2 4]]
+///
+/// let v = rt::arange((4, &device));
+/// println!("{:?}", rt::transpose(&v, 0).shape()); // single integer axis
+/// // [4]
+///
+/// let x = rt::arange((24, &device)).into_shape([2, 3, 4]);
+/// println!("{:?}", rt::transpose(&x, [1, 0, 2]).shape()); // explicit permutation
+/// // [3, 2, 4]
+/// println!("{:?}", rt::transpose(&x, [-1, -3, -2]).shape()); // negative indices
+/// // [4, 2, 3]
+/// # assert_eq!(format!("{}", rt::transpose(&a, None)), "[[ 1 3]\n [ 2 4]]");
+/// # assert_eq!(rt::transpose(&v, 0).shape(), &[4]);
+/// # assert_eq!(rt::transpose(&x, [1, 0, 2]).shape(), &[3, 2, 4]);
+/// # assert_eq!(rt::transpose(&x, [-1, -3, -2]).shape(), &[4, 2, 3]);
+/// ```
+///
 /// # Notes of API accordance
 ///
 /// - Array-API: `permute_dims(x, /, axes)` ([`permute_dims`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.permute_dims.html))
@@ -137,6 +169,11 @@ where
 /// For a fallible version, use [`transpose_f`].
 ///
 /// # See also
+///
+/// ## Similar function from other crates/libraries
+///
+/// - Array-API: [`permute_dims`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.permute_dims.html)
+/// - NumPy: [`numpy.transpose`](https://numpy.org/doc/stable/reference/generated/numpy.transpose.html)
 ///
 /// ## Related functions in RSTSR
 ///
@@ -316,6 +353,8 @@ where
 ///
 /// This is by definition equivalent to `transpose(None)` or `tensor.t()`.
 ///
+/// This function behaves identically under [`RowMajor`] and [`ColMajor`] device default orders.
+///
 /// # Parameters
 ///
 /// - `tensor`: [`&TensorAny<R, T, B, D>`](TensorAny)
@@ -388,6 +427,10 @@ where
 /// -2)` (RSTSR) (only swap the last two axes).
 ///
 /// # See also
+///
+/// ## Similar function from other crates/libraries
+///
+/// - NumPy: [`numpy.transpose`](https://numpy.org/doc/stable/reference/generated/numpy.transpose.html)
 ///
 /// ## Related functions in RSTSR
 ///
@@ -470,6 +513,8 @@ where
 /// Returns an array with two axes interchanged. No data is copied; only the
 /// shape and strides are modified.
 ///
+/// This function behaves identically under [`RowMajor`] and [`ColMajor`] device default orders.
+///
 /// # Parameters
 ///
 /// - `tensor`: [`&TensorAny<R, T, B, D>`](TensorAny)
@@ -536,6 +581,26 @@ where
 /// // [2, 2, 2]
 /// ```
 ///
+/// # Overload List
+///
+/// - `swapaxes(tensor, axis1, axis2)` — each axis is an integer (any integer type); negative values
+///   count from the back.
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let x = rt::tensor_from_nested!([[1, 2, 3], [4, 5, 6]], &device);
+/// println!("{}", rt::swapaxes(&x, 0, 1)); // positive axis indices
+/// // [[ 1 4]
+/// //  [ 2 5]
+/// //  [ 3 6]]
+/// println!("{:?}", rt::swapaxes(&x, -1, 0).shape()); // negative indices
+/// // [3, 2]
+/// # assert_eq!(format!("{}", rt::swapaxes(&x, 0, 1)), "[[ 1 4]\n [ 2 5]\n [ 3 6]]");
+/// # assert_eq!(rt::swapaxes(&x, -1, 0).shape(), &[3, 2]);
+/// ```
+///
 /// # Notes of API accordance
 ///
 /// - NumPy: `swapaxes(a, axis1, axis2)` ([`numpy.swapaxes`](https://numpy.org/doc/stable/reference/generated/numpy.swapaxes.html))
@@ -548,6 +613,10 @@ where
 /// For a fallible version, use [`swapaxes_f`].
 ///
 /// # See also
+///
+/// ## Similar function from other crates/libraries
+///
+/// - NumPy: [`numpy.swapaxes`](https://numpy.org/doc/stable/reference/generated/numpy.swapaxes.html)
 ///
 /// ## Related functions in RSTSR
 ///

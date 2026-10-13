@@ -119,13 +119,53 @@ where
 /// // [5, 3, 4]
 /// ```
 ///
+/// # Overload List
+///
+/// `source` and `destination` are both [`AxesIndex<isize>`]-convertible and must have the same
+/// number of elements:
+///
+/// - `moveaxis(tensor, source, destination)` — both a single integer: move one axis.
+/// - `moveaxis(tensor, source, destination)` — both a tuple/list/[`Vec`]/slice of integers: move
+///   several axes at once.
+///
+/// Negative values count from the back.
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let x = rt::arange((6, &device)).into_shape([2, 3]);
+/// println!("{}", rt::moveaxis(&x, 0, 1)); // single integer source/destination
+/// // [[ 0 3]
+/// //  [ 1 4]
+/// //  [ 2 5]]
+///
+/// let y: Tensor<f64, _> = rt::zeros(([3, 4, 5], &device));
+/// println!("{:?}", rt::moveaxis(&y, [0, 1], [-1, -2]).shape()); // list source/destination
+/// // [5, 4, 3]
+/// # assert_eq!(format!("{}", rt::moveaxis(&x, 0, 1)), "[[ 0 3]\n [ 1 4]\n [ 2 5]]");
+/// # assert_eq!(rt::moveaxis(&y, [0, 1], [-1, -2]).shape(), &[5, 4, 3]);
+/// ```
+///
 /// # Notes of API accordance
 ///
 /// - Array-API: `moveaxis(x, source, destination, /)` ([`moveaxis`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.moveaxis.html))
 /// - NumPy: `moveaxis(a, source, destination)` ([`numpy.moveaxis`](https://numpy.org/doc/stable/reference/generated/numpy.moveaxis.html))
 /// - RSTSR: `tensor.moveaxis(source, destination)` or `rt::moveaxis(&tensor, source, destination)`
 ///
+/// # Panics
+///
+/// - Panics if any axis index is out of range.
+/// - Panics if `source` and `destination` do not have the same number of elements.
+///
+/// For a fallible version, use [`moveaxis_f`].
+///
 /// # See also
+///
+/// ## Similar function from other crates/libraries
+///
+/// - Array-API: [`moveaxis`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.moveaxis.html)
+/// - NumPy: [`numpy.moveaxis`](https://numpy.org/doc/stable/reference/generated/numpy.moveaxis.html)
 ///
 /// ## Related functions in RSTSR
 ///

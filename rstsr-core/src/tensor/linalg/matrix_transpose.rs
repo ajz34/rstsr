@@ -23,6 +23,19 @@ where
 /// matrices, leaving other axes unchanged.
 /// This function behaves identically under [`RowMajor`] and [`ColMajor`] device default orders.
 ///
+/// # Parameters
+///
+/// - `tensor`: [`&TensorAny<R, T, B, D>`](TensorAny)
+///
+///   - The input tensor to be transposed.
+///
+/// # Returns
+///
+/// - [`TensorView<'_, T, B, D>`](TensorView)
+///
+///   - A view of the input tensor with the last two axes interchanged.
+///   - No data is copied; only the shape and strides are modified.
+///
 /// # Examples
 ///
 /// For a 2-D array, this is equivalent to the standard matrix transpose:
@@ -53,19 +66,6 @@ where
 /// //   [ 6 8]]]
 /// ```
 ///
-/// # Parameters
-///
-/// - `tensor`: [`&TensorAny<R, T, B, D>`](TensorAny)
-///
-///   - The input tensor to be transposed.
-///
-/// # Returns
-///
-/// - [`TensorView<'_, T, B, D>`](TensorView)
-///
-///   - A view of the input tensor with the last two axes interchanged.
-///   - No data is copied; only the shape and strides are modified.
-///
 /// # Notes of API accordance
 ///
 /// - Array-API: `matrix_transpose(x)` ([`matrix_transpose`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.matrix_transpose.html))
@@ -76,7 +76,18 @@ where
 /// all axes for n-dimensional arrays. This function only swaps the last two axes,
 /// which corresponds to `mT` in NumPy.
 ///
+/// # Panics
+///
+/// - Panics if the input has fewer than two dimensions.
+///
+/// For a fallible version, use [`matrix_transpose_f`].
+///
 /// # See also
+///
+/// ## Similar function from other crates/libraries
+///
+/// - Array-API standard: [`matrix_transpose`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.matrix_transpose.html)
+/// - NumPy: [`numpy.linalg.matrix_transpose`](https://numpy.org/doc/stable/reference/generated/numpy.linalg.matrix_transpose.html)
 ///
 /// ## Related functions in RSTSR
 ///

@@ -388,6 +388,38 @@ where
 /// # assert_eq!(format!("{}", rt::clip(&x, (0, None))), "[[ 0 2]\n [ 4 0]]");
 /// ```
 ///
+/// # Overload List
+///
+/// The bounds `(lo, hi)` are passed as one tuple, and each of the two sides is overloaded:
+///
+/// - a scalar of any [`ClipScalar`] dtype (`bool`, `i8`..`i64`, `u8`..`u64`, `f32`, `f64`),
+///   strongly promoted against `a`;
+/// - a tensor bound ([`&TensorAny`](TensorAny) or [`TensorView`]), broadcast against `a`;
+/// - `None` — no bound on that side; with both sides `None`, the result is a copy of `a`.
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let x = rt::tensor_from_nested!([[-3, 2], [4, -5]], &device);
+/// // a tensor lower bound, a scalar upper bound
+/// let lo = rt::tensor_from_nested!([[-1, 0], [1, -1]], &device);
+/// println!("{}", rt::clip(&x, (&lo, 3)));
+/// // [[ -1 2]
+/// //  [ 3 -1]]
+/// // `None` leaves one side unbounded
+/// println!("{}", rt::clip(&x, (0, None)));
+/// // [[ 0 2]
+/// //  [ 4 0]]
+/// // both sides `None`: an identity copy
+/// println!("{}", rt::clip(&x, (None, None)));
+/// // [[ -3 2]
+/// //  [ 4 -5]]
+/// # assert_eq!(format!("{}", rt::clip(&x, (&lo, 3))), "[[ -1 2]\n [ 3 -1]]");
+/// # assert_eq!(format!("{}", rt::clip(&x, (0, None))), "[[ 0 2]\n [ 4 0]]");
+/// # assert_eq!(format!("{}", rt::clip(&x, (None, None))), "[[ -3 2]\n [ 4 -5]]");
+/// ```
+///
 /// # Notes of API accordance
 ///
 /// - Array-API: `clip(x, /, min=None, max=None)` ([`clip`](https://data-apis.org/array-api/2024.12/API_specification/generated/array_api.clip.html))
@@ -416,7 +448,8 @@ where
 ///
 /// ## Similar function from other crates/libraries
 ///
-/// - NumPy `numpy.clip` and array-api `clip` (see `# Notes of API accordance` above).
+/// - Python Array API standard: [`clip`](https://data-apis.org/array-api/2024.12/API_specification/generated/array_api.clip.html)
+/// - NumPy: [`numpy.clip`](https://numpy.org/doc/stable/reference/generated/numpy.clip.html)
 ///
 /// ## Related functions in RSTSR
 ///

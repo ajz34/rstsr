@@ -306,6 +306,14 @@ where
 ///     - (order: [`TensorOrder`], copy: [`bool`])
 ///     - (order: [`TensorOrder`], copy: [`Option<bool>`])
 ///
+/// # Returns
+///
+/// - [`TensorCow<'a, T, B, IxD>`](TensorCow)
+///
+///   - The reshaped tensor. A view is returned when the new shape is layout-compatible with the
+///     input; otherwise the data is copied into an owned contiguous tensor (in the requested
+///     order).
+///
 /// # Examples
 ///
 /// You can specify the order for reading the tensor by argument `order`.
@@ -392,6 +400,36 @@ where
 /// assert!(a.reshape_with_args_f([24, 9], false).is_err()); // (4, 6, 9) -> (4 * 6, 9)
 /// assert!(a.reshape_with_args_f([-1], false).is_err()); // (4, 6, 9) -> (4 * 6 * 9)
 /// assert!(a.reshape_with_args_f([12, 2, 9], false).is_err()); // (4, 6, 9) -> (4 * [3, 2], 9)
+/// ```
+///
+/// # Overload List
+///
+/// - `reshape_with_args(tensor, shape, args)` — `shape` is a single integer (1-D result), a
+///   tuple/list/[`Vec`]/slice of integers (N-D result), or contains a `-1` entry (infer the
+///   remaining dimension).
+/// - `args`: [`ReshapeArgs`]-convertible — `order: TensorOrder`, `copy` as `bool` / `Option<bool>`,
+///   or a tuple `(order, copy: bool)` / `(order, copy: Option<bool>)`.
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let a = rt::tensor_from_nested!([[0, 1, 2], [3, 4, 5]], &device);
+/// println!("{}", a.reshape_with_args([3, 2], RowMajor)); // order only
+/// // [[ 0 1]
+/// //  [ 2 3]
+/// //  [ 4 5]]
+/// println!("{}", a.reshape_with_args([3, 2], true)); // copy only (always copy)
+/// // [[ 0 1]
+/// //  [ 2 3]
+/// //  [ 4 5]]
+/// println!("{}", a.reshape_with_args([3, 2], (ColMajor, true))); // (order, copy)
+/// // [[ 0 4]
+/// //  [ 3 2]
+/// //  [ 1 5]]
+/// # assert_eq!(format!("{}", a.reshape_with_args([3, 2], RowMajor)), "[[ 0 1]\n [ 2 3]\n [ 4 5]]");
+/// # assert_eq!(format!("{}", a.reshape_with_args([3, 2], true)), "[[ 0 1]\n [ 2 3]\n [ 4 5]]");
+/// # assert_eq!(format!("{}", a.reshape_with_args([3, 2], (ColMajor, true))), "[[ 0 4]\n [ 3 2]\n [ 1 5]]");
 /// ```
 ///
 /// # Notes of API accordance
@@ -627,6 +665,29 @@ where
 /// This function is also different to [`into_shape`], in that it may return a view, if the input
 /// tensor also have the ownership of tensor view, and the layout is compatible.
 ///
+/// # Overload List
+///
+/// - `change_shape(tensor, shape)` — `shape` is a single integer: a 1-D result.
+/// - `change_shape(tensor, shape)` — `shape` is a tuple/list/[`Vec`]/slice of integers: an N-D
+///   result.
+/// - A `-1` entry in the shape infers the remaining dimension.
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let a = rt::arange((6, &device)).change_shape(6); // integer shape: 1-D
+/// println!("{}", a);
+/// // [ 0 1 2 3 4 5]
+/// let b = rt::arange((6, &device)).change_shape([3, -1]);
+/// println!("{}", b);
+/// // [[ 0 1]
+/// //  [ 2 3]
+/// //  [ 4 5]]
+/// # assert_eq!(format!("{}", a), "[ 0 1 2 3 4 5]");
+/// # assert_eq!(format!("{}", b), "[[ 0 1]\n [ 2 3]\n [ 4 5]]");
+/// ```
+///
 /// # See also
 ///
 /// Refer to [`reshape`] for more details and examples.
@@ -712,6 +773,29 @@ where
 /// ```rust
 /// use rstsr::prelude::*;
 /// let a = rt::arange(6).into_shape([2, 3]);
+/// ```
+///
+/// # Overload List
+///
+/// - `into_shape(tensor, shape)` — `shape` is a single integer: a 1-D result.
+/// - `into_shape(tensor, shape)` — `shape` is a tuple/list/[`Vec`]/slice of integers: an N-D
+///   result.
+/// - A `-1` entry in the shape infers the remaining dimension.
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let a = rt::arange((6, &device)).into_shape(6); // integer shape: 1-D
+/// println!("{}", a);
+/// // [ 0 1 2 3 4 5]
+/// let b = rt::arange((6, &device)).into_shape([3, -1]); // list shape with -1 inference
+/// println!("{}", b);
+/// // [[ 0 1]
+/// //  [ 2 3]
+/// //  [ 4 5]]
+/// # assert_eq!(format!("{}", a), "[ 0 1 2 3 4 5]");
+/// # assert_eq!(format!("{}", b), "[[ 0 1]\n [ 2 3]\n [ 4 5]]");
 /// ```
 ///
 /// # Elaborated examples
@@ -872,6 +956,31 @@ where
 /// // [[ 0 1]
 /// //  [ 2 3]
 /// //  [ 4 5]]
+/// ```
+///
+/// # Overload List
+///
+/// - `reshape(tensor, shape)` — `shape` is a single integer: a 1-D result.
+/// - `reshape(tensor, shape)` — `shape` is a tuple/list/[`Vec`]/slice of integers: an N-D result.
+/// - A `-1` entry in the shape infers the remaining dimension.
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let a = rt::arange((6, &device));
+/// println!("{}", a.reshape(6)); // integer shape: 1-D
+/// // [ 0 1 2 3 4 5]
+/// println!("{}", a.reshape([2, 3])); // list shape: 2-D
+/// // [[ 0 1 2]
+/// //  [ 3 4 5]]
+/// println!("{}", a.reshape([3, -1])); // -1 infers the dimension
+/// // [[ 0 1]
+/// //  [ 2 3]
+/// //  [ 4 5]]
+/// # assert_eq!(format!("{}", a.reshape(6)), "[ 0 1 2 3 4 5]");
+/// # assert_eq!(format!("{}", a.reshape([2, 3])), "[[ 0 1 2]\n [ 3 4 5]]");
+/// # assert_eq!(format!("{}", a.reshape([3, -1])), "[[ 0 1]\n [ 2 3]\n [ 4 5]]");
 /// ```
 ///
 /// # Ownership Semantics between [`reshape`], [`into_shape`] and [`change_shape`]

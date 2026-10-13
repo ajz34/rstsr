@@ -19,5 +19,6 @@ mod doc_reduce_all {
         let p3 = rt::reduce_all(&v, || 0.0_f64, |acc, x| acc + x * x * x, |acc1, acc2| acc1 + acc2, |acc| acc.cbrt());
         println!("{p3}");
         assert_eq!(p3, 2.571281590658235);
+        assert_eq!(format!("{p3}"), "2.571281590658235");
     }
 }

@@ -1,4 +1,4 @@
-//! Cast the most contiguous dimension as array.
+//! Pack the most contiguous axis into fixed-size arrays, reducing dimensionality by one.
 
 use crate::prelude_dev::*;
 use core::mem::ManuallyDrop;

@@ -129,6 +129,10 @@ where
     ///
     /// # See also
     ///
+    /// ## Related functions in RSTSR
+    ///
+    /// - [`TensorView::axes_iter`]: axis-wise iteration yielding sub-views.
+    ///
     /// ## Variants of this function
     ///
     /// - [`TensorView::iter_f`]: fallible version.

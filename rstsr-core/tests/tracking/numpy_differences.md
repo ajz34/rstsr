@@ -583,3 +583,20 @@ whether the shared axis exists at all) differs from NumPy there; for equal-rank 
 orders agree. The cases of `TestCross::test_broadcasting_shapes` whose operand axes agree transfer
 unchanged; the mixed-axis cases are not expressible and are not transferred. `np.cross` does not
 conjugate either operand for complex input, and neither does `rt::cross`.
+
+## `matmul` matrix axes follow the device default order
+
+- **numpy:** `numpy.matmul` (always contracts the last two axes; NumPy is row-major only).
+- **rstsr:** `tensor::linalg::matmul::test::test_matmul_follows_device_default_order`
+- **tag:** col-major-transfer
+- **status:** open
+
+For an operand stack, `rt::matmul` picks the two contracted axes from the device default order:
+the **last two** under `RowMajor` (matching NumPy and the array-API `matmul` contract) and the
+**first two** under `ColMajor` (the Fortran/Julia convention). The batch axes are the remaining
+ones, so the same call on the same logical data can contract different axes and produce a
+different result on a column-major device. NumPy parity tests therefore pin
+`device.set_default_order(RowMajor)` first. This mirrors `trace`, whose default axes are also
+device-default-order dependent (next section). For two-dimensional operands the two conventions
+coincide (`rt::matmul` is order-independent for matrices, as its docstring states); only stacked
+inputs with more than two axes are affected.

@@ -6,4 +6,5 @@ pub mod manipulation;
 pub mod math;
 pub mod operators;
 pub mod reduction;
+pub mod sorting;
 pub mod utility;

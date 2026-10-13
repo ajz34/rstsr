@@ -135,6 +135,40 @@ where
 /// //  [ 6 8]]
 /// ```
 ///
+/// # Overload List
+///
+/// `axes` accepts:
+///
+/// - an integer `n`: contract the last `n` axes of `a` with the first `n` axes of `b`, in order
+///   (`n` must be non-negative and at most the smaller dimensionality; `0` is the outer product).
+/// - `None` (or `()`): the default `n = 2`.
+/// - a pair `(axes_a, axes_b)`: contract `axes_a` of `a` against `axes_b` of `b`, each an integer
+///   or a collection of integers; negative axes count from the back.
+/// - a bare collection (`[axes]`, a slice, a `Vec`): shorthand for the *same* axes on both operands
+///   (rstsr extension; a 2-tuple is the pair form above — this differs from NumPy, where
+///   `tensordot(a, b, [0, 1])` is the pair `(0, 1)`).
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let a = rt::tensor_from_nested!([[1, 2], [3, 4]], &device);
+/// let b = rt::tensor_from_nested!([[5, 6], [7, 8]], &device);
+/// println!("{}", rt::tensordot(&a, &b, 1));
+/// // [[ 19 22]
+/// //  [ 43 50]]
+/// println!("{}", rt::tensordot(&a, &b, None));
+/// // 70
+/// println!("{}", rt::tensordot(&a, &b, ([1, 0], [0, 1])));
+/// // 69
+/// println!("{}", rt::tensordot(&a, &b, [0, 1]));
+/// // 70
+/// # assert_eq!(format!("{}", rt::tensordot(&a, &b, 1)), "[[ 19 22]\n [ 43 50]]");
+/// # assert_eq!(format!("{}", rt::tensordot(&a, &b, None)), "70");
+/// # assert_eq!(format!("{}", rt::tensordot(&a, &b, ([1, 0], [0, 1]))), "69");
+/// # assert_eq!(format!("{}", rt::tensordot(&a, &b, [0, 1])), "70");
+/// ```
+///
 /// # Notes of API accordance
 ///
 /// - Array-API: `tensordot(x1, x2, /, *, axes=2)` ([`tensordot`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.tensordot.html))
@@ -153,6 +187,11 @@ where
 /// For a fallible version, use [`tensordot_f`].
 ///
 /// # See also
+///
+/// ## Similar function from other crates/libraries
+///
+/// - Array-API standard: [`tensordot`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.tensordot.html)
+/// - NumPy: [`numpy.tensordot`](https://numpy.org/doc/stable/reference/generated/numpy.tensordot.html)
 ///
 /// ## Related functions in RSTSR
 ///

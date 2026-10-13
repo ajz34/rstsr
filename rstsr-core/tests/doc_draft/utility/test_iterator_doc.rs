@@ -78,6 +78,21 @@ mod doc_axes_iter {
         let cols: Vec<_> = a.view().axes_iter(-1).map(|v| v.to_vec()).collect();
         assert_eq!(cols, vec![vec![0, 3], vec![1, 4], vec![2, 5]]);
 
+        // # Overload List snippet: one call per distinct behavior
+        // single axis
+        println!("{}", a.view().axes_iter(0).next().unwrap());
+        // [ 0 1 2]
+        // several axes: one view per index combination (0-dimensional here)
+        println!("{}", a.view().axes_iter([0, 1]).count());
+        // 6
+        // empty axes: one whole-tensor view
+        println!("{}", a.view().axes_iter(()).next().unwrap());
+        // [[ 0 1 2]
+        //  [ 3 4 5]]
+        assert_eq!(format!("{}", a.view().axes_iter(0).next().unwrap()), "[ 0 1 2]");
+        assert_eq!(a.view().axes_iter([0, 1]).count(), 6);
+        assert_eq!(format!("{}", a.view().axes_iter(()).next().unwrap()), "[[ 0 1 2]\n [ 3 4 5]]");
+
         // axes_iter_mut writes through
         let mut b: Tensor<i32, _> = rt::zeros(([2, 3], &device));
         for mut v in b.view_mut().axes_iter_mut(0) {

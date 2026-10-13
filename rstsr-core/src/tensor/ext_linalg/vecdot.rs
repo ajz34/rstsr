@@ -6,6 +6,17 @@ use crate::prelude_dev::*;
 
 /// Vector dot product of two arrays, promoting mixed-dtype operands to their common dtype.
 ///
+/// <div class="warning">
+///
+/// **Type Promotion Extension**
+///
+/// This `ext_` variant exists for parity with the Python Array API standard's
+/// type-promotion rules. In ordinary Rust usage, prefer [`vecdot`] (rstsr's
+/// native promotion) instead; reach for `ext_` only when matching Array-API
+/// promotion is required.
+///
+/// </div>
+///
 /// Let $\mathbf{a}$ be a vector in `a` and $\mathbf{b}$ be a corresponding vector in `b`. The dot
 /// product is defined as:
 ///
@@ -20,15 +31,6 @@ use crate::prelude_dev::*;
 /// array-API-fulfilment form, like the `ext_*` element-wise arithmetic functions. The axes and
 /// broadcasting rules are those of [`vecdot`].
 /// This function behaves identically under [`RowMajor`] and [`ColMajor`] device default orders.
-///
-/// <div class="warning">
-///
-/// **Array-API Compliance Form**
-///
-/// This function exists only for array-API compliance, not as the idiomatic rstsr surface. Prefer
-/// [`vecdot`] whenever the operands already share a dtype.
-///
-/// </div>
 ///
 /// # Parameters
 ///
@@ -55,6 +57,35 @@ use crate::prelude_dev::*;
 /// println!("{c}");
 /// // 32
 /// # assert_eq!(format!("{c}"), "32");
+/// ```
+///
+/// # Overload List
+///
+/// `axes_pair` accepts the same forms as [`vecdot`]:
+///
+/// - `None` (or `()`): contract the last axis of both operands (the default; the same as `-1`).
+/// - an integer: contract that axis in both operands; negative values count from the back.
+/// - a pair `(axes_a, axes_b)`: contract `axes_a` of `a` against `axes_b` of `b`.
+/// - a bare collection (`[axes]`, a slice, a `Vec`): shorthand for the same axes in both operands.
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let a = rt::tensor_from_nested!([[1u8, 2], [3, 4]], &device);
+/// let b = rt::tensor_from_nested!([[5u16, 6], [7, 8]], &device);
+/// println!("{}", rt::ext_vecdot(&a, &b, None));
+/// // [ 17 53]
+/// println!("{}", rt::ext_vecdot(&a, &b, 0));
+/// // [ 26 44]
+/// println!("{}", rt::ext_vecdot(&a, &b, ([0, 1], [0, 1])));
+/// // 70
+/// println!("{}", rt::ext_vecdot(&a, &b, [0, 1]));
+/// // 70
+/// # assert_eq!(format!("{}", rt::ext_vecdot(&a, &b, None)), "[ 17 53]");
+/// # assert_eq!(format!("{}", rt::ext_vecdot(&a, &b, 0)), "[ 26 44]");
+/// # assert_eq!(format!("{}", rt::ext_vecdot(&a, &b, ([0, 1], [0, 1]))), "70");
+/// # assert_eq!(format!("{}", rt::ext_vecdot(&a, &b, [0, 1])), "70");
 /// ```
 ///
 /// # Notes of API accordance

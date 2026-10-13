@@ -62,8 +62,8 @@ use crate::prelude_dev::*;
 /// let b = rt::tensor_from_nested!([4, 5, 6], &device);
 /// let c = rt::cross(&a, &b, -1);
 /// println!("{c}");
-/// // [-3  6 -3]
-/// # assert_eq!(c.to_vec(), vec![-3, 6, -3]);
+/// // [ -3 6 -3]
+/// # assert_eq!(format!("{c}"), "[ -3 6 -3]");
 /// ```
 ///
 /// The axis may be selected explicitly, and the operands broadcast on the other axes:
@@ -76,6 +76,29 @@ use crate::prelude_dev::*;
 /// let b = rt::tensor_from_nested!([4, 5, 6], &device);
 /// let c = rt::cross(&a, &b, 1);
 /// assert_eq!(c.shape(), &[2, 3]);
+/// ```
+///
+/// # Overload List
+///
+/// `axis` accepts:
+///
+/// - `()` or `None`: the last axis (the Array-API default `axis = -1`).
+/// - an integer: an explicit axis, shared by both operands; negative values count from the back.
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let a = rt::tensor_from_nested!([1, 2, 3], &device);
+/// let b = rt::tensor_from_nested!([4, 5, 6], &device);
+/// println!("{}", rt::cross(&a, &b, None));
+/// // [ -3 6 -3]
+/// let m = rt::tensor_from_nested!([[1, 2, 3], [4, 5, 6]], &device);
+/// println!("{}", rt::cross(&m, &b, 1));
+/// // [[ -3 6 -3]
+/// //  [ 0 0 0]]
+/// # assert_eq!(format!("{}", rt::cross(&a, &b, None)), "[ -3 6 -3]");
+/// # assert_eq!(format!("{}", rt::cross(&m, &b, 1)), "[[ -3 6 -3]\n [ 0 0 0]]");
 /// ```
 ///
 /// # Notes of API accordance

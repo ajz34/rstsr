@@ -89,5 +89,48 @@ mod doc_array_index {
         // [3, 2]
         assert_eq!(rt::array_index(&x_row, ([1, 0], .., 1)).shape(), &[2, 3]);
         assert_eq!(rt::array_index(&x_col, ([1, 0], .., 1)).shape(), &[3, 2]);
+
+        // # Overload List snippet: one call per distinct behavior / accepted kind.
+        // (1) a single per-axis indexer, applied to the first axis; a host list
+        // is ONE index array (row selection), not a tuple of integer indexers
+        let a = rt::arange((12, &device)).into_shape([3, 4]);
+        println!("{}", rt::array_index(&a, [2, 0]));
+        // [[ 8 9 10 11]
+        //  [ 0 1 2 3]]
+        assert_eq!(format!("{}", rt::array_index(&a, [2, 0])), "[[ 8 9 10 11]\n [ 0 1 2 3]]");
+
+        // (2) a tuple of per-axis indexers, zipped together
+        println!("{}", rt::array_index(&a, ([2, 0], [1, 3])));
+        // [ 9 3]
+        assert_eq!(format!("{}", rt::array_index(&a, ([2, 0], [1, 3]))), "[ 9 3]");
+
+        // (3) an explicit `Vec<ArrayIndexer<B>>` list (equivalent to the tuple)
+        let indexers: Vec<ArrayIndexer<DeviceType>> = vec![ArrayIndexer::from([2, 0]), ArrayIndexer::from([1, 3])];
+        println!("{}", rt::array_index(&a, indexers));
+        // [ 9 3]
+        let indexers: Vec<ArrayIndexer<DeviceType>> = vec![ArrayIndexer::from([2, 0]), ArrayIndexer::from([1, 3])];
+        assert_eq!(format!("{}", rt::array_index(&a, indexers)), "[ 9 3]");
+
+        // (4) an `AxesIndex<ArrayIndexer<B>>`: `Val` is one indexer, `Vec` a list
+        println!("{}", rt::array_index(&a, AxesIndex::Val(ArrayIndexer::from([2, 0]))));
+        // [[ 8 9 10 11]
+        //  [ 0 1 2 3]]
+        assert_eq!(
+            format!("{}", rt::array_index(&a, AxesIndex::Val(ArrayIndexer::from([2, 0])))),
+            "[[ 8 9 10 11]\n [ 0 1 2 3]]"
+        );
+        let axes: AxesIndex<ArrayIndexer<DeviceType>> =
+            AxesIndex::Vec(vec![ArrayIndexer::from([2, 0]), ArrayIndexer::from([1, 3])]);
+        println!("{}", rt::array_index(&a, axes));
+        // [ 9 3]
+        let axes: AxesIndex<ArrayIndexer<DeviceType>> =
+            AxesIndex::Vec(vec![ArrayIndexer::from([2, 0]), ArrayIndexer::from([1, 3])]);
+        assert_eq!(format!("{}", rt::array_index(&a, axes)), "[ 9 3]");
+
+        // per-axis indexer kinds not shown above: `None` inserts a new axis;
+        // `Some(n)` is rejected by the fallible form
+        println!("{:?}", rt::array_index(&a, (None::<usize>, 1)).shape());
+        assert_eq!(rt::array_index(&a, (None::<usize>, 1)).shape(), &[1, 4]);
+        assert!(rt::array_index_f(&a, (Some(1_usize),)).is_err());
     }
 }

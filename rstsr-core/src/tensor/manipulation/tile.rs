@@ -86,9 +86,10 @@ where
 ///
 /// The result has dimensionality `max(ndim(x), len(repetitions))`: if
 /// `repetitions` is shorter than `ndim(x)`, ones are prepended to it; if it is
-/// longer, singleton axes are prepended to `x`. This function behaves
-/// identically under [`RowMajor`] and [`ColMajor`] device default orders. (Only
-/// the memory arrangement of the new tensor follows the device default order.)
+/// longer, singleton axes are prepended to `x`. Only the memory arrangement of
+/// the new tensor follows the device default order.
+///
+/// This function behaves identically under [`RowMajor`] and [`ColMajor`] device default orders.
 ///
 /// # Parameters
 ///
@@ -102,6 +103,7 @@ where
 ///   - A single integer tiles along a new last axis (`repetitions = [n]`).
 ///   - A tuple/list gives the repetition count per axis, promoted as described above. Repetitions
 ///     may be zero (empty output axis).
+///   - `None`: empty repetitions (all ones) — returns a copy of the input.
 ///
 /// # Returns
 ///
@@ -153,6 +155,32 @@ where
 /// # assert_eq!(format!("{b}"), "[[ 1 2 1 2]\n [ 3 4 3 4]]");
 /// ```
 ///
+/// # Overload List
+///
+/// `repetitions` accepts three input kinds with distinct results:
+///
+/// - `tile(tensor, n)` — a single integer `n`: tiles along a new last axis (`repetitions = [n]`).
+/// - `tile(tensor, reps)` — a list/tuple of per-axis counts (`Vec<usize>` / `&[usize]` / `[usize;
+///   N]`), rank-promoted as described above.
+/// - `tile(tensor, None)` — empty repetitions (all ones): returns a copy of the input.
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let a = rt::arange((3, &device));
+/// println!("{}", rt::tile(&a, 2));       // integer: a new trailing axis
+/// // [ 0 1 2 0 1 2]
+/// println!("{}", rt::tile(&a, [2, 2]));  // per-axis counts
+/// // [[ 0 1 2 0 1 2]
+/// //  [ 0 1 2 0 1 2]]
+/// println!("{}", rt::tile(&a, None));    // empty repetitions: a copy
+/// // [ 0 1 2]
+/// # assert_eq!(format!("{}", rt::tile(&a, 2)), "[ 0 1 2 0 1 2]");
+/// # assert_eq!(format!("{}", rt::tile(&a, [2, 2])), "[[ 0 1 2 0 1 2]\n [ 0 1 2 0 1 2]]");
+/// # assert_eq!(format!("{}", rt::tile(&a, None)), "[ 0 1 2]");
+/// ```
+///
 /// # Notes of API accordance
 ///
 /// - Array-API: `tile(x, repetitions, /)` ([`tile`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.tile.html))
@@ -167,6 +195,11 @@ where
 /// For a fallible version, use [`tile_f`].
 ///
 /// # See also
+///
+/// ## Similar function from other crates/libraries
+///
+/// - Array-API: [`tile`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.tile.html)
+/// - NumPy: [`numpy.tile`](https://numpy.org/doc/stable/reference/generated/numpy.tile.html)
 ///
 /// ## Related functions in RSTSR
 ///

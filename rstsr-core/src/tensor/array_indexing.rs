@@ -664,6 +664,46 @@ impl Display for DebugShape<'_> {
 /// # assert_eq!(format!("{result}"), "[ 1 11]");
 /// ```
 ///
+/// # Overload List
+///
+/// The `indexer` argument is overloaded:
+///
+/// - `array_index(tensor, indexer)` — a single per-axis indexer, applied to the first axis.
+///   `indexer` is an integer (`isize` / `usize` / `i32` / ...), a range/slice, `None` / `NewAxis`
+///   (a new axis), an integer or boolean tensor/view, or a host list/vector. A host list/vector is
+///   **one** index array on axis 0 (`[2, 0]` selects rows 2 and 0), not a tuple of integer
+///   indexers.
+/// - `array_index(tensor, (i1, .., iN))` — a tuple of up to six per-axis indexers, one per indexed
+///   axis (the preferred form).
+/// - `array_index(tensor, vec![i1, .., iN])` — an explicit `Vec<ArrayIndexer<B>>` list; equivalent
+///   to the tuple form.
+/// - `array_index(tensor, axes_index)` — an [`AxesIndex<ArrayIndexer<B>>`][AxesIndex] (`Val` = one
+///   indexer, `Vec` = a list); [`AxesIndex::None`] is rejected.
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let a = rt::arange((12, &device)).into_shape([3, 4]);
+/// // a single host list is one index array on the first axis
+/// println!("{}", rt::array_index(&a, [2, 0]));
+/// // [[ 8 9 10 11]
+/// //  [ 0 1 2 3]]
+/// // a tuple zips one indexer per axis
+/// println!("{}", rt::array_index(&a, ([2, 0], [1, 3])));
+/// // [ 9 3]
+/// // an explicit `Vec<ArrayIndexer<B>>` list (same as the tuple), or `AxesIndex::Val`/`::Vec`
+/// let idx: Vec<ArrayIndexer<DeviceCpu>> = vec![ArrayIndexer::from([2, 0]), ArrayIndexer::from([1, 3])];
+/// println!("{}", rt::array_index(&a, idx));
+/// // [ 9 3]
+/// # assert_eq!(format!("{}", rt::array_index(&a, [2, 0])), "[[ 8 9 10 11]\n [ 0 1 2 3]]");
+/// # assert_eq!(format!("{}", rt::array_index(&a, ([2, 0], [1, 3]))), "[ 9 3]");
+/// # assert_eq!(
+/// #     format!("{}", rt::array_index(&a, AxesIndex::Val(ArrayIndexer::from([2, 0])))),
+/// #     "[[ 8 9 10 11]\n [ 0 1 2 3]]"
+/// # );
+/// ```
+///
 /// # Elaborated examples
 ///
 /// ## Mixing basic indexers with index arrays
@@ -992,6 +1032,46 @@ where
 /// # assert_eq!(format!("{a}"), "[[ 1.5 1.5]\n [ 0 0]\n [ 1.5 1.5]]");
 /// ```
 ///
+/// # Overload List
+///
+/// The `indexer` argument is overloaded exactly as in [`array_index`]:
+///
+/// - `array_index_assign(tensor, indexer, value)` — a single per-axis indexer, applied to the first
+///   axis: an integer (`isize` / `usize` / `i32` / ...), a range/slice, `None` / `NewAxis`, an
+///   integer or boolean tensor/view, or a host list/vector (a host list is **one** index array on
+///   axis 0).
+/// - `array_index_assign(tensor, (i1, .., iN), value)` — a tuple of up to six per-axis indexers.
+/// - `array_index_assign(tensor, vec![i1, .., iN], value)` — an explicit `Vec<ArrayIndexer<B>>`
+///   list.
+/// - `array_index_assign(tensor, axes_index, value)` — an [`AxesIndex<ArrayIndexer<B>>`][AxesIndex]
+///   (`Val` = one indexer, `Vec` = a list).
+///
+/// The `value` argument takes any tensor (owned or a view/reference); it is broadcast to the shape
+/// of `tensor.array_index(indexer)` and cast to the destination dtype. Scalars are not accepted.
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// // a single host list indexes the first axis; the value holds the matching rows
+/// let mut a = rt::arange((12, &device)).into_shape([3, 4]);
+/// let rows = rt::tensor_from_nested!([[100, 101, 102, 103], [-1, -2, -3, -4]], &device);
+/// a.array_index_assign([2, 0], rows);
+/// println!("{a}");
+/// // [[ -1 -2 -3 -4]
+/// //  [ 4 5 6 7]
+/// //  [ 100 101 102 103]]
+/// // a tuple indexes several axes; the value broadcasts to the selected shape
+/// let mut b: Tensor<i32, _> = rt::zeros(([3, 4], &device));
+/// b.array_index_assign(([0, 2], [1, 3]), rt::tensor_from_nested!([7, 8], &device));
+/// println!("{b}");
+/// // [[ 0 7 0 0]
+/// //  [ 0 0 0 0]
+/// //  [ 0 0 0 8]]
+/// # assert_eq!(format!("{a}"), "[[ -1 -2 -3 -4]\n [ 4 5 6 7]\n [ 100 101 102 103]]");
+/// # assert_eq!(format!("{b}"), "[[ 0 7 0 0]\n [ 0 0 0 0]\n [ 0 0 0 8]]");
+/// ```
+///
 /// # Notes of API accordance
 ///
 /// - Array-API: `x[k1, .., kN] = value` ([`indexing`](https://data-apis.org/array-api/2024.12/API_specification/indexing.html)):
@@ -1011,6 +1091,12 @@ where
 /// For a fallible version, use [`array_index_assign_f`].
 ///
 /// # See also
+///
+/// ## Similar function from other crates/libraries
+///
+/// - NumPy: `x[k1, .., kN] = value` ([`numpy.ndarray.__setitem__`](https://numpy.org/doc/stable/reference/arrays.indexing.html#advanced-indexing))
+/// - Python Array API standard: [`indexing`](https://data-apis.org/array-api/2024.12/API_specification/indexing.html)
+///   (`x[k1, .., kN] = value`)
 ///
 /// ## Related functions in RSTSR
 ///

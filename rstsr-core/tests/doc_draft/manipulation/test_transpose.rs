@@ -58,6 +58,38 @@ mod doc_transpose {
         // [5, 3, 4]
         assert_eq!(result.shape(), &[5, 3, 4]);
     }
+
+    #[test]
+    fn overload_list() {
+        crate::specify_test!("overload_list");
+
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        // `None`: reverse the order of all axes
+        let a = rt::tensor_from_nested!([[1, 2], [3, 4]], &device);
+        println!("{}", rt::transpose(&a, None));
+        // [[ 1 3]
+        //  [ 2 4]]
+        assert_eq!(format!("{}", rt::transpose(&a, None)), "[[ 1 3]\n [ 2 4]]");
+
+        // single integer: a one-element permutation (valid for a 1-D input)
+        let v = rt::arange((4, &device));
+        println!("{:?}", rt::transpose(&v, 0).shape());
+        // [4]
+        assert_eq!(rt::transpose(&v, 0).shape(), &[4]);
+
+        // list of axes: explicit permutation
+        let x = rt::arange((24, &device)).into_shape([2, 3, 4]);
+        println!("{:?}", rt::transpose(&x, [1, 0, 2]).shape());
+        // [3, 2, 4]
+        assert_eq!(rt::transpose(&x, [1, 0, 2]).shape(), &[3, 2, 4]);
+
+        // negative indices count from the back
+        println!("{:?}", rt::transpose(&x, [-1, -3, -2]).shape());
+        // [4, 2, 3]
+        assert_eq!(rt::transpose(&x, [-1, -3, -2]).shape(), &[4, 2, 3]);
+    }
 }
 
 #[cfg(test)]
@@ -103,6 +135,27 @@ mod doc_swapaxes {
         // [2, 2, 2]
         let result2 = x.swapaxes(2, 0);
         assert!(rt::allclose(&result, &result2, None));
+    }
+
+    #[test]
+    fn overload_list() {
+        crate::specify_test!("overload_list");
+
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        // integer axis indices
+        let x = rt::tensor_from_nested!([[1, 2, 3], [4, 5, 6]], &device);
+        println!("{}", rt::swapaxes(&x, 0, 1));
+        // [[ 1 4]
+        //  [ 2 5]
+        //  [ 3 6]]
+        assert_eq!(format!("{}", rt::swapaxes(&x, 0, 1)), "[[ 1 4]\n [ 2 5]\n [ 3 6]]");
+
+        // negative indices count from the back
+        println!("{:?}", rt::swapaxes(&x, -1, 0).shape());
+        // [3, 2]
+        assert_eq!(rt::swapaxes(&x, -1, 0).shape(), &[3, 2]);
     }
 }
 

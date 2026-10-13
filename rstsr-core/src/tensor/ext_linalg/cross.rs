@@ -8,6 +8,17 @@ use crate::tensor::linalg::cross::{cross_axis_in_output, cross_check_axis};
 /// Cross product of 3-element vectors along one axis, promoting mixed-dtype operands to their
 /// common dtype.
 ///
+/// <div class="warning">
+///
+/// **Type Promotion Extension**
+///
+/// This `ext_` variant exists for parity with the Python Array API standard's
+/// type-promotion rules. In ordinary Rust usage, prefer [`cross`] (rstsr's
+/// native promotion) instead; reach for `ext_` only when matching Array-API
+/// promotion is required.
+///
+/// </div>
+///
 /// Let $a$ and $b$ be arrays whose `axis` has length 3. The result has the broadcast shape of `a`
 /// and `b`, and its component $k$ along `axis` is
 ///
@@ -21,15 +32,6 @@ use crate::tensor::linalg::cross::{cross_axis_in_output, cross_check_axis};
 /// array-API-fulfilment form, like the `ext_*` element-wise arithmetic functions. The shape
 /// contract is that of [`cross`]: both operands must have length 3 along `axis`, and the
 /// Row/Column Major Notice of [`cross`] applies to operands of different ranks.
-///
-/// <div class="warning">
-///
-/// **Array-API Compliance Form**
-///
-/// This function exists only for array-API compliance, not as the idiomatic rstsr surface. Prefer
-/// [`cross`] whenever the operands already share a dtype.
-///
-/// </div>
 ///
 /// # Parameters
 ///
@@ -56,6 +58,29 @@ use crate::tensor::linalg::cross::{cross_axis_in_output, cross_check_axis};
 /// let b = rt::tensor_from_nested!([4i16, 5, 6], &device);
 /// let c = rt::ext_cross(&a, &b, -1);
 /// assert_eq!(c.to_vec(), vec![-3i16, 6, -3]);
+/// ```
+///
+/// # Overload List
+///
+/// `axis` accepts the same forms as [`cross`]:
+///
+/// - `()` or `None`: the last axis (the Array-API default `axis = -1`).
+/// - an integer: an explicit axis, shared by both operands.
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let a = rt::tensor_from_nested!([1i8, 2, 3], &device);
+/// let b = rt::tensor_from_nested!([4i16, 5, 6], &device);
+/// println!("{}", rt::ext_cross(&a, &b, None));
+/// // [ -3 6 -3]
+/// let m = rt::tensor_from_nested!([[1i8, 2, 3], [4, 5, 6]], &device);
+/// println!("{}", rt::ext_cross(&m, &b, 1));
+/// // [[ -3 6 -3]
+/// //  [ 0 0 0]]
+/// # assert_eq!(format!("{}", rt::ext_cross(&a, &b, None)), "[ -3 6 -3]");
+/// # assert_eq!(format!("{}", rt::ext_cross(&m, &b, 1)), "[[ -3 6 -3]\n [ 0 0 0]]");
 /// ```
 ///
 /// # Notes of API accordance

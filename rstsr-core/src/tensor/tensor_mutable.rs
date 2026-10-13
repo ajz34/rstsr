@@ -9,7 +9,7 @@ use crate::prelude_dev::*;
 /// It is designed similar to `TensorCow`.
 /// However, if inplace operation is not convenient because of the layout
 /// contiguous not fulfilled, a `ToBeCloned` variant is provided, where an owned
-/// tensor with contiguous layout is generated. This is not the same to
+/// tensor with contiguous layout is generated. This is not the same as
 /// `TensorCow`, where it only involves ownership conversion, but not layout
 /// difference between two tensors. So this is defined as a special type.
 pub enum TensorMutable<'a, T, B, D>

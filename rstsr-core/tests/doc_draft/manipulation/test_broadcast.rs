@@ -268,4 +268,41 @@ mod doc_broadcast {
         assert!(rt::allclose!(&result[0], &expected_a));
         assert!(rt::allclose!(&result[1], &expected_b));
     }
+
+    #[test]
+    fn doc_broadcast_arrays_overload_list() {
+        // # Overload List snippet (plus every Overloads Table form): reference vs owned inputs
+        crate::specify_test!("doc_broadcast_arrays_overload_list");
+
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        let a = rt::asarray((vec![1, 2, 3], &device)).into_shape([3]);
+        let b = rt::asarray((vec![4, 5], &device)).into_shape([2, 1]);
+
+        // reference inputs: [&TensorAny; N], Vec<&TensorAny>, &Vec<&TensorAny> -> views
+        let r1 = rt::broadcast_arrays([&a, &b]);
+        println!("{}", r1[0]);
+        // [[ 1 2 3]
+        //  [ 1 2 3]]
+        assert_eq!(format!("{}", r1[0]), "[[ 1 2 3]\n [ 1 2 3]]");
+        let r2 = rt::broadcast_arrays(vec![&a, &b]);
+        assert_eq!(format!("{}", r2[0]), "[[ 1 2 3]\n [ 1 2 3]]");
+        let refs = vec![&a, &b];
+        let r3 = rt::broadcast_arrays(&refs);
+        assert_eq!(format!("{}", r3[0]), "[[ 1 2 3]\n [ 1 2 3]]");
+
+        // owned inputs: Vec<TensorAny>, [TensorAny; N] -> owned stride-0 tensors
+        let a = rt::asarray((vec![1, 2, 3], &device)).into_shape([3]);
+        let b = rt::asarray((vec![4, 5], &device)).into_shape([2, 1]);
+        let owned = rt::broadcast_arrays(vec![a, b]);
+        println!("{}", owned[1]);
+        // [[ 4 4 4]
+        //  [ 5 5 5]]
+        assert_eq!(format!("{}", owned[1]), "[[ 4 4 4]\n [ 5 5 5]]");
+        let a = rt::asarray((vec![1, 2, 3], &device)).into_shape([3]);
+        let b = rt::asarray((vec![4, 5], &device)).into_shape([2, 1]);
+        let owned_arr = rt::broadcast_arrays([a, b]);
+        assert_eq!(format!("{}", owned_arr[1]), "[[ 4 4 4]\n [ 5 5 5]]");
+    }
 }

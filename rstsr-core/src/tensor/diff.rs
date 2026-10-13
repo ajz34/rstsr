@@ -175,6 +175,34 @@ where
 /// # assert_eq!(d2.reshape([-1]).to_vec(), vec![2, 3]);
 /// ```
 ///
+/// # Overload List
+///
+/// Among the parameters, only `axis` is overloaded (any [`AxisIndex<isize>`](AxisIndex)
+/// conversion); `n`, `prepend` and `append` are plain parameters:
+///
+/// - `axis` (integer, incl. negative): difference along that axis.
+/// - `axis = None` / `()`: the last axis.
+/// - `n`: the number of difference passes.
+/// - `prepend` / `append`: `None`, or a tensor matching `x`'s shape outside `axis` that is
+///   concatenated along it before differencing.
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let x = rt::tensor_from_nested!([1, 4, 9, 16], &device);
+/// println!("{}", rt::diff(&x, 0, 1, None, None)); // explicit axis
+/// // [ 3 5 7]
+/// println!("{}", rt::diff(&x, None, 1, None, None)); // default axis
+/// // [ 3 5 7]
+/// let app = rt::tensor_from_nested!([25], &device);
+/// println!("{}", rt::diff(&x, -1, 2, None, Some(&app))); // second order, with append
+/// // [ 2 2 2]
+/// # assert_eq!(format!("{}", rt::diff(&x, 0, 1, None, None)), "[ 3 5 7]");
+/// # assert_eq!(format!("{}", rt::diff(&x, None, 1, None, None)), "[ 3 5 7]");
+/// # assert_eq!(format!("{}", rt::diff(&x, -1, 2, None, Some(&app))), "[ 2 2 2]");
+/// ```
+///
 /// # Notes of API accordance
 ///
 /// - Array-API: `diff(x, /, *, axis=-1, n=1, prepend=None, append=None)` ([`diff`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.diff.html))
@@ -189,6 +217,11 @@ where
 /// For a fallible version, use [`diff_f`].
 ///
 /// # See also
+///
+/// ## Similar function from other crates/libraries
+///
+/// - Python Array API standard: [`diff`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.diff.html)
+/// - NumPy: [`numpy.diff`](https://numpy.org/doc/stable/reference/generated/numpy.diff.html)
 ///
 /// ## Variants of this function
 ///

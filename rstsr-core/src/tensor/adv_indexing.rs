@@ -106,6 +106,34 @@ where
 /// # assert_eq!(format!("{}", rt::index_select(&a, 0, [-1])), "[[ 8 9 10 11]]");
 /// ```
 ///
+/// # Overload List
+///
+/// - `index_select(&tensor, axis, indices)` — an array, slice, or [`Vec`] of integers: select those
+///   positions.
+/// - `index_select(&tensor, axis, index)` — a single integer: select that one position along
+///   `axis`.
+///
+/// Negative values count from the back.
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let a = rt::arange((12, &device)).into_shape([3, 4]);
+/// println!("{}", rt::index_select(&a, 0, [0, 2]));     // array of indices
+/// // [[ 0 1 2 3]
+/// //  [ 8 9 10 11]]
+/// println!("{}", rt::index_select(&a, 1, vec![3, 1])); // Vec of indices
+/// // [[ 3 1]
+/// //  [ 7 5]
+/// //  [ 11 9]]
+/// println!("{}", rt::index_select(&a, 0, -1));         // single integer
+/// // [[ 8 9 10 11]]
+/// # assert_eq!(format!("{}", rt::index_select(&a, 0, [0, 2])), "[[ 0 1 2 3]\n [ 8 9 10 11]]");
+/// # assert_eq!(format!("{}", rt::index_select(&a, 1, vec![3, 1])), "[[ 3 1]\n [ 7 5]\n [ 11 9]]");
+/// # assert_eq!(format!("{}", rt::index_select(&a, 0, -1)), "[[ 8 9 10 11]]");
+/// ```
+///
 /// # Notes of API accordance
 ///
 /// - PyTorch: `torch.index_select(input, dim, index)` ([`torch.index_select`](https://docs.pytorch.org/docs/stable/generated/torch.index_select.html))
@@ -131,7 +159,7 @@ where
 ///
 /// - [`take`]: the same operation with NumPy's argument order.
 /// - [`bool_select`]: select by boolean mask.
-/// - [`slice`](slice()): basic indexing (views).
+/// - [`Tensor::i`](Tensor::i), [`slice`](slice()): basic indexing (views).
 ///
 /// ## Variants of this function
 ///
@@ -194,6 +222,32 @@ where
 /// // [[ 0 1 2 3]
 /// //  [ 8 9 10 11]]
 /// # assert_eq!(format!("{}", rt::take(&a, [0, 2], 0)), "[[ 0 1 2 3]\n [ 8 9 10 11]]");
+/// ```
+///
+/// # Overload List
+///
+/// - `take(&tensor, indices, axis)` — an array, slice, or [`Vec`] of integers: take those
+///   positions.
+/// - `take(&tensor, index, axis)` — a single integer: take that one position along `axis`.
+///
+/// Negative values count from the back.
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let a = rt::arange((12, &device)).into_shape([3, 4]);
+/// println!("{}", rt::take(&a, [0, 2], 0));      // array of indices
+/// // [[ 0 1 2 3]
+/// //  [ 8 9 10 11]]
+/// println!("{}", rt::take(&a, vec![3, 1], -1)); // Vec of indices, negative axis
+/// // [[ 3 1]
+/// //  [ 7 5]
+/// //  [ 11 9]]
+/// println!("{}", rt::take(&a, -1, 0));          // single integer
+/// // [[ 8 9 10 11]]
+/// # assert_eq!(format!("{}", rt::take(&a, vec![3, 1], -1)), "[[ 3 1]\n [ 7 5]\n [ 11 9]]");
+/// # assert_eq!(format!("{}", rt::take(&a, -1, 0)), "[[ 8 9 10 11]]");
 /// ```
 ///
 /// # Notes of API accordance
@@ -329,7 +383,7 @@ where
 /// - `tensor`: [`&TensorAny<R, T, B, D>`](TensorAny): the input tensor.
 /// - `axis`: the axis to select along; negative values count from the back.
 /// - `mask`: boolean flags, anything that converts into [`AxesIndex<bool>`][AxesIndex] (array,
-///   vector, or slice of `bool`), one entry per position on `axis`.
+///   vector, or slice of `bool`); each `true` entry selects its position on `axis`.
 ///
 /// # Returns
 ///
@@ -349,11 +403,33 @@ where
 /// # assert_eq!(format!("{}", rt::bool_select(&a, 1, [true, false, true, false])), "[[ 0 2]\n [ 4 6]\n [ 8 10]]");
 /// ```
 ///
+/// # Overload List
+///
+/// - `bool_select(&tensor, axis, mask)` — an array, slice, or [`Vec`] of `bool`, one entry per
+///   position on `axis`.
+/// - `bool_select(&tensor, axis, flag)` — a single `bool`: one flag (position `0` when true).
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let a = rt::arange((12, &device)).into_shape([3, 4]);
+/// println!("{}", rt::bool_select(&a, 1, [true, false, true, false])); // array of bool
+/// // [[ 0 2]
+/// //  [ 4 6]
+/// //  [ 8 10]]
+/// let m: Vec<bool> = vec![true, false, false];
+/// println!("{}", rt::bool_select(&a, 0, m)); // Vec of bool
+/// // [[ 0 1 2 3]]
+/// # assert_eq!(format!("{}", rt::bool_select(&a, 0, vec![true, false, false])), "[[ 0 1 2 3]]");
+/// ```
+///
 /// # Notes of API accordance
 ///
 /// - PyTorch: `torch.index_select` applied on a boolean mask's positions ([`torch.masked_select`](https://docs.pytorch.org/docs/stable/generated/torch.masked_select.html)
 ///   flattens instead; rstsr selects along one axis)
-/// - RSTSR: `rt::bool_select(&tensor, axis, mask)`; the mask must match the length of `axis`.
+/// - RSTSR: `rt::bool_select(&tensor, axis, mask)`; each `true` entry of `mask` selects its
+///   position along `axis` (the mask is applied as an index list, so it need not fill the axis).
 ///
 /// # Panics
 ///
@@ -363,6 +439,10 @@ where
 /// For a fallible version, use [`bool_select_f`].
 ///
 /// # See also
+///
+/// ## Similar function from other crates/libraries
+///
+/// - PyTorch: [`torch.masked_select`](https://docs.pytorch.org/docs/stable/generated/torch.masked_select.html)
 ///
 /// ## Related functions in RSTSR
 ///
@@ -551,6 +631,27 @@ where
 /// # assert_eq!(out.reshape([-1]).to_vec(), vec![30, 10, 50, 50]);
 /// ```
 ///
+/// # Overload List
+///
+/// - `take_along_axis(tensor, indices, axis)` — `axis` is an integer (negative values count from
+///   the back).
+/// - `take_along_axis(tensor, indices, None)` (or `()`) — the default: the last axis.
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let a = rt::tensor_from_nested!([[10, 20, 30], [40, 50, 60]], &device);
+/// let idx = rt::tensor_from_nested!([[2, 0], [1, 1]], &device);
+/// println!("{}", rt::take_along_axis(&a, &idx, -1)); // explicit integer axis
+/// // [[ 30 10]
+/// //  [ 50 50]]
+/// println!("{}", rt::take_along_axis(&a, &idx, None)); // default: the last axis
+/// // [[ 30 10]
+/// //  [ 50 50]]
+/// # assert_eq!(format!("{}", rt::take_along_axis(&a, &idx, None)), "[[ 30 10]\n [ 50 50]]");
+/// ```
+///
 /// # Notes of API accordance
 ///
 /// - Array-API: `take_along_axis(x, indices, /, *, axis=-1)` ([`take_along_axis`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.take_along_axis.html))
@@ -569,6 +670,11 @@ where
 /// For a fallible version, use [`take_along_axis_f`].
 ///
 /// # See also
+///
+/// ## Similar function from other crates/libraries
+///
+/// - Python Array API standard: [`take_along_axis`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.take_along_axis.html)
+/// - NumPy: [`numpy.take_along_axis`](https://numpy.org/doc/stable/reference/generated/numpy.take_along_axis.html)
 ///
 /// ## Related functions in RSTSR
 ///
@@ -787,6 +893,12 @@ where
 ///
 /// # See also
 ///
+/// ## Similar function from other crates/libraries
+///
+/// - NumPy: `x[mask]` ([`numpy.ndarray.__getitem__`](https://numpy.org/doc/stable/reference/arrays.indexing.html#boolean-array-indexing))
+/// - Python Array API standard: [`indexing`](https://data-apis.org/array-api/2024.12/API_specification/indexing.html)
+///   (`x[mask]`)
+///
 /// ## Related functions in RSTSR
 ///
 /// - [`bool_select`]: select along one axis by a per-axis mask.
@@ -883,6 +995,12 @@ where
 /// For a fallible version, use [`mask_fill_f`].
 ///
 /// # See also
+///
+/// ## Similar function from other crates/libraries
+///
+/// - NumPy: `x[mask] = value` ([`numpy.ndarray.__setitem__`](https://numpy.org/doc/stable/reference/arrays.indexing.html#boolean-array-indexing))
+/// - Python Array API standard: [`indexing`](https://data-apis.org/array-api/2024.12/API_specification/indexing.html)
+///   (`x[mask] = value`)
 ///
 /// ## Variants of this function
 ///
@@ -1068,6 +1186,28 @@ where
 /// # assert_eq!(a.reshape([-1]).to_vec(), vec![10, 0, 30, 0, 50, 0]);
 /// ```
 ///
+/// # Overload List
+///
+/// - `put_along_axis(&mut tensor, indices, values, axis)` — `axis` is an integer (negative values
+///   count from the back).
+/// - `put_along_axis(&mut tensor, indices, values, None)` (or `()`) — the default: the last axis.
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let idx = rt::tensor_from_nested!([[2isize, 0], [1, 1]], &device);
+/// let vals = rt::tensor_from_nested!([[30, 10], [50, 50]], &device);
+/// let mut a: Tensor<i32, _> = rt::zeros(([2, 3], &device));
+/// rt::put_along_axis(&mut a, &idx, &vals, -1); // explicit integer axis
+/// println!("{a}");
+/// // [[ 10 0 30]
+/// //  [ 0 50 0]]
+/// let mut b: Tensor<i32, _> = rt::zeros(([2, 3], &device));
+/// rt::put_along_axis(&mut b, &idx, &vals, None); // default: the last axis
+/// # assert_eq!(format!("{b}"), "[[ 10 0 30]\n [ 0 50 0]]");
+/// ```
+///
 /// # Notes of API accordance
 ///
 /// - NumPy: `numpy.put_along_axis(arr, indices, values, axis)`
@@ -1082,6 +1222,10 @@ where
 /// For a fallible version, use [`put_along_axis_f`].
 ///
 /// # See also
+///
+/// ## Similar function from other crates/libraries
+///
+/// - NumPy: [`numpy.put_along_axis`](https://numpy.org/doc/stable/reference/generated/numpy.put_along_axis.html)
 ///
 /// ## Related functions in RSTSR
 ///
@@ -1194,6 +1338,36 @@ where
 /// //  [ 0 0]
 /// //  [ 3 4]]
 /// # assert_eq!(a.reshape([-1]).to_vec(), vec![1, 2, 0, 0, 3, 4]);
+/// ```
+///
+/// # Overload List
+///
+/// - `index_put(&mut tensor, axis, indices, value)` — an array, slice, or [`Vec`] of integers:
+///   write at those positions.
+/// - `index_put(&mut tensor, axis, index, value)` — a single integer: write at that one position
+///   along `axis`.
+///
+/// Negative values count from the back.
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let mut a: Tensor<i32, _> = rt::zeros(([3, 2], &device));
+/// let vals = rt::tensor_from_nested!([[1, 2], [3, 4]], &device);
+/// rt::index_put(&mut a, 0, [0, 2], &vals); // array of indices
+/// println!("{a}");
+/// // [[ 1 2]
+/// //  [ 0 0]
+/// //  [ 3 4]]
+///
+/// let mut b: Tensor<i32, _> = rt::arange((6, &device)).into_shape([3, 2]);
+/// rt::index_put(&mut b, 0, -1, &rt::tensor_from_nested!([9, 9], &device)); // single integer
+/// println!("{b}");
+/// // [[ 0 1]
+/// //  [ 2 3]
+/// //  [ 9 9]]
+/// # assert_eq!(format!("{b}"), "[[ 0 1]\n [ 2 3]\n [ 9 9]]");
 /// ```
 ///
 /// # Notes of API accordance
@@ -1320,6 +1494,12 @@ where
 /// For a fallible version, use [`mask_assign_f`].
 ///
 /// # See also
+///
+/// ## Similar function from other crates/libraries
+///
+/// - NumPy: `x[mask] = value` ([`numpy.ndarray.__setitem__`](https://numpy.org/doc/stable/reference/arrays.indexing.html#boolean-array-indexing))
+/// - Python Array API standard: [`indexing`](https://data-apis.org/array-api/2024.12/API_specification/indexing.html)
+///   (`x[mask] = value`)
 ///
 /// ## Related functions in RSTSR
 ///

@@ -87,7 +87,7 @@ where
 /// # let mut device = DeviceCpu::default();
 /// # device.set_default_order(RowMajor);
 /// let a = rt::tensor_from_nested!([[[1, 2], [3, 4]], [[5, 6], [7, 8]]], &device);
-/// let t = rt::trace(&a, ());
+/// let t = rt::trace(&a, None);
 /// println!("{t}");
 /// // [ 5 13]
 /// # let expected = rt::tensor_from_nested!([5, 13], &device);
@@ -101,7 +101,7 @@ where
 /// # let mut device = DeviceCpu::default();
 /// # device.set_default_order(ColMajor);
 /// let a = rt::tensor_from_nested!([[[1, 2], [3, 4]], [[5, 6], [7, 8]]], &device);
-/// let t = rt::trace(&a, ());
+/// let t = rt::trace(&a, None);
 /// println!("{t}");
 /// // [ 8 10]
 /// # let expected = rt::tensor_from_nested!([8, 10], &device);
@@ -120,6 +120,33 @@ where
 /// // [ 5 13]
 /// # let expected = rt::tensor_from_nested!([5, 13], &device);
 /// # assert!(rt::allclose(&t, &expected, None));
+/// ```
+///
+/// # Overload List
+///
+/// `offset` accepts:
+///
+/// - `()` or `None`: the main diagonal, over the device-default axes (the last two under
+///   [`RowMajor`], the first two under [`ColMajor`]).
+/// - an integer: a shifted diagonal, over the same device-default axes.
+/// - a triple `(offset, axis1, axis2)`: an explicit diagonal over the named axes; naming both axes
+///   makes the result order-independent.
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let a = rt::tensor_from_nested!([[1, 2, 3], [4, 5, 6], [7, 8, 9]], &device);
+/// println!("{}", rt::trace(&a, None));
+/// // 15
+/// println!("{}", rt::trace(&a, 1));
+/// // 8
+/// let s = rt::tensor_from_nested!([[[1, 2], [3, 4]], [[5, 6], [7, 8]]], &device);
+/// println!("{}", rt::trace(&s, (0, -2, -1)));
+/// // [ 5 13]
+/// # assert_eq!(format!("{}", rt::trace(&a, None)), "15");
+/// # assert_eq!(format!("{}", rt::trace(&a, 1)), "8");
+/// # assert_eq!(format!("{}", rt::trace(&s, (0, -2, -1))), "[ 5 13]");
 /// ```
 ///
 /// # Notes of API accordance

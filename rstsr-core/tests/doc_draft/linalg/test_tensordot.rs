@@ -39,3 +39,42 @@ mod doc_tensordot {
         assert_eq!(format!("{c}"), "[[ 3 4]\n [ 6 8]]");
     }
 }
+
+// # Overload List snippet: one call per distinct axes behavior
+#[cfg(test)]
+mod doc_tensordot_overload {
+    use super::*;
+    static FUNC: &str = "doc_tensordot_overload";
+
+    #[test]
+    fn test_tensordot() {
+        crate::specify_test!("test_tensordot");
+
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        let a = rt::tensor_from_nested!([[1, 2], [3, 4]], &device);
+        let b = rt::tensor_from_nested!([[5, 6], [7, 8]], &device);
+
+        // integer n = 1: the matrix product
+        println!("{}", rt::tensordot(&a, &b, 1));
+        // [[ 19 22]
+        //  [ 43 50]]
+        assert_eq!(format!("{}", rt::tensordot(&a, &b, 1)), "[[ 19 22]\n [ 43 50]]");
+
+        // None or (): the default n = 2 (full contraction)
+        println!("{}", rt::tensordot(&a, &b, None));
+        // 70
+        assert_eq!(format!("{}", rt::tensordot(&a, &b, None)), "70");
+
+        // (axes_a, axes_b): contract different axes of each operand
+        println!("{}", rt::tensordot(&a, &b, ([1, 0], [0, 1])));
+        // 69
+        assert_eq!(format!("{}", rt::tensordot(&a, &b, ([1, 0], [0, 1]))), "69");
+
+        // bare collection: shorthand for the same axes in both operands
+        println!("{}", rt::tensordot(&a, &b, [0, 1]));
+        // 70
+        assert_eq!(format!("{}", rt::tensordot(&a, &b, [0, 1])), "70");
+    }
+}

@@ -186,23 +186,23 @@ where
         self.axes_iter_with_order_f(axes, order).rstsr_unwrap()
     }
 
-    /// Iterate over views of a tensor view along the given axis.
+    /// Iterate over views of a tensor view along one or more axes.
     ///
-    /// Each step yields a view of dimensionality N-1 (the iterated axis is
-    /// removed), sharing the original data. The number of steps equals the
-    /// length of `axes`; traversal follows the iterated axis's own (K) order,
-    /// which for the usual layouts matches the device default order (see
-    /// [`order_semantics`](crate::order_semantics)).
+    /// Each step yields a view of dimensionality N-1 (the iterated axes are removed), sharing the
+    /// original data. The number of steps is the product of the lengths of the iterated axes;
+    /// traversal follows the iterated axes' own (K) order (see
+    /// [`order_semantics`](crate::order_semantics)), and the yielded views (like the returned
+    /// iterator) borrow the data owner through the view, so they may outlive the view value itself.
     ///
-    /// This method is defined on views only. For owned, arc or cow tensors,
-    /// take a view first, e.g. `a.view().axes_iter(0)`; the returned iterator
-    /// (and the views it yields) borrow the data owner through the view and
-    /// may outlive the view value itself.
+    /// This method is defined on views only. For owned, arc or cow tensors, take a view first, e.g.
+    /// `a.view().axes_iter(0)`.
+    ///
+    /// This function behaves identically under [`RowMajor`] and [`ColMajor`] device default orders.
     ///
     /// # Parameters
     ///
-    /// - `axes`: the axis to iterate along; negative values count from the back. Anything that
-    ///   converts into [`AxesIndex<isize>`][AxesIndex].
+    /// - `axes`: the axis or axes to iterate along; negative values count from the back. Anything
+    ///   that converts into [`AxesIndex<isize>`][AxesIndex].
     ///
     /// # Examples
     ///
@@ -226,22 +226,53 @@ where
     /// # assert_eq!(rows, vec![vec![0, 1, 2], vec![3, 4, 5]]);
     /// ```
     ///
+    /// # Overload List
+    ///
+    /// `axes` accepts three input kinds with distinct results:
+    ///
+    /// - a single axis index (integer, e.g. `0` or `-1`) — iterates along that axis, yielding one
+    ///   (N-1)-dimensional view per index.
+    /// - a sequence of axes (tuple / `[int; N]` / `&[int]` / `Vec<int>`) — iterates over their
+    ///   Cartesian product, yielding one view per index combination (all listed axes removed).
+    /// - an empty sequence (`()` or an empty list) — yields exactly one whole-tensor view.
+    ///
+    /// ```rust
+    /// # use rstsr::prelude::*;
+    /// # let mut device = DeviceCpu::default();
+    /// # device.set_default_order(RowMajor);
+    /// let a = rt::arange((6, &device)).into_shape([2, 3]);
+    /// println!("{}", a.view().axes_iter(0).next().unwrap());  // single axis
+    /// // [ 0 1 2]
+    /// println!("{}", a.view().axes_iter([0, 1]).count());    // several axes
+    /// // 6
+    /// println!("{}", a.view().axes_iter(()).next().unwrap()); // empty axes
+    /// // [[ 0 1 2]
+    /// //  [ 3 4 5]]
+    /// # assert_eq!(format!("{}", a.view().axes_iter(0).next().unwrap()), "[ 0 1 2]");
+    /// # assert_eq!(a.view().axes_iter([0, 1]).count(), 6);
+    /// # assert_eq!(format!("{}", a.view().axes_iter(()).next().unwrap()), "[[ 0 1 2]\n [ 3 4 5]]");
+    /// ```
+    ///
     /// # Panics
     ///
-    /// - Panics if `axes` is out of range, or if the view is ManuallyDrop-backed (see
-    ///   [`TensorView::axes_iter_f`]).
+    /// - Panics if any axis is out of range or repeated, if `axes` is `None`, or if the view is
+    ///   ManuallyDrop-backed (see [`TensorView::axes_iter_f`]).
     ///
     /// For a fallible version, use [`TensorView::axes_iter_f`].
     ///
     /// # See also
     ///
+    /// ## Related functions in RSTSR
+    ///
+    /// - [`TensorView::iter`]: element-wise iteration over references.
+    ///
     /// ## Variants of this function
     ///
     /// - [`TensorView::axes_iter_f`]: fallible version.
-    /// - [`TensorView::axes_iter_with_order`]: explicit traversal order.
+    /// - [`TensorView::axes_iter_with_order`] / [`TensorView::axes_iter_with_order_f`]: explicit
+    ///   traversal order.
     /// - [`TensorMut::axes_iter_mut`]: mutable views.
-    /// - [`TensorView::indexed_axes_iter`]: iteration with the axis position.
-    /// - [`TensorView::iter`]: element-wise iteration.
+    /// - [`TensorView::indexed_axes_iter`]: iteration with the axis positions.
     pub fn axes_iter<I>(&self, axes: I) -> IterAxesView<'a, T, B>
     where
         I: TryInto<AxesIndex<isize>, Error: Into<Error>>,
@@ -877,6 +908,10 @@ where
     /// Mutable iteration over (position, view) pairs along the given axis of
     /// a mutable tensor view; see [`TensorView::indexed_axes_iter`] for the
     /// view-only policy.
+    ///
+    /// # See also
+    ///
+    /// [`TensorView::axes_iter`].
     pub fn indexed_axes_iter_mut<I>(self, axes: I) -> IndexedIterAxesMut<'a, T, B>
     where
         I: TryInto<AxesIndex<isize>, Error: Into<Error>>,

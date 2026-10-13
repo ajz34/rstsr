@@ -7,6 +7,17 @@ use crate::tensor::linalg::tensordot::{resolve_tensordot_axes, split_tensordot_f
 
 /// Tensor contraction over specified axes, promoting mixed-dtype operands to their common dtype.
 ///
+/// <div class="warning">
+///
+/// **Type Promotion Extension**
+///
+/// This `ext_` variant exists for parity with the Python Array API standard's
+/// type-promotion rules. In ordinary Rust usage, prefer [`tensordot`] (rstsr's
+/// native promotion) instead; reach for `ext_` only when matching Array-API
+/// promotion is required.
+///
+/// </div>
+///
 /// Contracts the axes of `a` given by `axes` with the corresponding axes of `b`; the result holds
 /// the non-contracted axes of `a` (in order) followed by the non-contracted axes of `b` (in
 /// order). No conjugation is applied, unlike [`ext_vecdot`]. The operands may have different
@@ -16,15 +27,6 @@ use crate::tensor::linalg::tensordot::{resolve_tensordot_axes, split_tensordot_f
 /// [`tensordot`] instead requires the operands to share one dtype; this function is the
 /// array-API-fulfilment form. The axes and shape rules are those of [`tensordot`].
 /// This function behaves identically under [`RowMajor`] and [`ColMajor`] device default orders.
-///
-/// <div class="warning">
-///
-/// **Array-API Compliance Form**
-///
-/// This function exists only for array-API compliance, not as the idiomatic rstsr surface. Prefer
-/// [`tensordot`] whenever the operands already share a dtype.
-///
-/// </div>
 ///
 /// <div class="warning">
 ///
@@ -63,6 +65,37 @@ use crate::tensor::linalg::tensordot::{resolve_tensordot_axes, split_tensordot_f
 /// // [[ 19 22]
 /// //  [ 43 50]]
 /// # assert_eq!(format!("{c}"), "[[ 19 22]\n [ 43 50]]");
+/// ```
+///
+/// # Overload List
+///
+/// `axes` accepts the same forms as [`tensordot`]:
+///
+/// - an integer `n`: contract the last `n` axes of `a` with the first `n` axes of `b`.
+/// - `None` (or `()`): the default `n = 2`.
+/// - a pair `(axes_a, axes_b)`: contract `axes_a` of `a` against `axes_b` of `b`.
+/// - a bare collection (`[axes]`, a slice, a `Vec`): shorthand for the same axes on both operands
+///   (rstsr extension).
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let a = rt::tensor_from_nested!([[1u8, 2], [3, 4]], &device);
+/// let b = rt::tensor_from_nested!([[5u16, 6], [7, 8]], &device);
+/// println!("{}", rt::ext_tensordot(&a, &b, 1));
+/// // [[ 19 22]
+/// //  [ 43 50]]
+/// println!("{}", rt::ext_tensordot(&a, &b, None));
+/// // 70
+/// println!("{}", rt::ext_tensordot(&a, &b, ([1, 0], [0, 1])));
+/// // 69
+/// println!("{}", rt::ext_tensordot(&a, &b, [0, 1]));
+/// // 70
+/// # assert_eq!(format!("{}", rt::ext_tensordot(&a, &b, 1)), "[[ 19 22]\n [ 43 50]]");
+/// # assert_eq!(format!("{}", rt::ext_tensordot(&a, &b, None)), "70");
+/// # assert_eq!(format!("{}", rt::ext_tensordot(&a, &b, ([1, 0], [0, 1]))), "69");
+/// # assert_eq!(format!("{}", rt::ext_tensordot(&a, &b, [0, 1])), "70");
 /// ```
 ///
 /// # Notes of API accordance

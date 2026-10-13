@@ -162,12 +162,37 @@ where
 /// //   [ 6 7]]]
 /// ```
 ///
-/// # Panics
+/// # Overload List
 ///
-/// - If some index in `axes` is greater than the number of axes in the original tensor.
-/// - If `axes` has duplicated values.
+/// - `flip(tensor, axis)` — a single integer: flip that axis.
+/// - `flip(tensor, axes)` — a tuple/list/[`Vec`]/slice of integers: flip each listed axis.
+/// - `flip(tensor, None)` — flip all axes.
+/// - `flip(tensor, ())` — flip no axes (returns a view of the input; `()` is an empty axis list).
 ///
-/// For a fallible version, use [`flip_f`].
+/// Negative axis values count from the back.
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let a = rt::arange((6, &device)).into_shape([2, 3]);
+/// println!("{}", a.flip(0)); // single axis
+/// // [[ 3 4 5]
+/// //  [ 0 1 2]]
+/// println!("{}", a.flip([0, 1])); // multiple axes
+/// // [[ 5 4 3]
+/// //  [ 2 1 0]]
+/// println!("{}", a.flip(None)); // all axes
+/// // [[ 5 4 3]
+/// //  [ 2 1 0]]
+/// println!("{}", a.flip(())); // no axes
+/// // [[ 0 1 2]
+/// //  [ 3 4 5]]
+/// # assert_eq!(format!("{}", a.flip(0)), "[[ 3 4 5]\n [ 0 1 2]]");
+/// # assert_eq!(format!("{}", a.flip([0, 1])), "[[ 5 4 3]\n [ 2 1 0]]");
+/// # assert_eq!(format!("{}", a.flip(None)), "[[ 5 4 3]\n [ 2 1 0]]");
+/// # assert_eq!(format!("{}", a.flip(())), "[[ 0 1 2]\n [ 3 4 5]]");
+/// ```
 ///
 /// # Notes of API accordance
 ///
@@ -179,7 +204,19 @@ where
 /// - `a.flip(None)` flips all axes
 /// - `a.flip(())` flips no axes (returns a view of the original tensor)
 ///
+/// # Panics
+///
+/// - Panics if some index in `axes` is greater than the number of axes in the original tensor.
+/// - Panics if `axes` has duplicated values.
+///
+/// For a fallible version, use [`flip_f`].
+///
 /// # See also
+///
+/// ## Similar function from other crates/libraries
+///
+/// - Array-API: [`flip`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.flip.html)
+/// - NumPy: [`numpy.flip`](https://numpy.org/doc/stable/reference/generated/numpy.flip.html)
 ///
 /// ## Related functions in RSTSR
 ///
