@@ -430,6 +430,99 @@ mod doc_diagonal {
     }
 }
 
+mod doc_slice_overloads {
+    use super::*;
+    static FUNC: &str = "doc_slice_overloads";
+
+    #[test]
+    fn test_doc() {
+        crate::specify_test!("test_doc");
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        // # Overload List snippet: one call per distinct index behavior
+        let a = rt::arange((10, &device));
+        // integer: selects one position and drops the axis
+        println!("{}", a.i(2));
+        // 2
+        assert_eq!(format!("{}", a.i(2)), "2");
+        // range: narrows the axis
+        println!("{}", a.i(1..4));
+        // [ 1 2 3]
+        assert_eq!(format!("{}", a.i(1..4)), "[ 1 2 3]");
+        // stepped slice: narrows with a stride
+        println!("{}", a.i(slice!(1, 7, 2)));
+        // [ 1 3 5]
+        assert_eq!(format!("{}", a.i(slice!(1, 7, 2))), "[ 1 3 5]");
+
+        let m = rt::arange((12, &device)).into_shape([3, 4]);
+        // tuple: one indexer per axis
+        println!("{}", m.i((1..3, ..)));
+        // [[ 4 5 6 7]
+        //  [ 8 9 10 11]]
+        assert_eq!(format!("{}", m.i((1..3, ..))), "[[ 4 5 6 7]\n [ 8 9 10 11]]");
+
+        let b = rt::arange((24, &device)).into_shape([2, 3, 4]);
+        // None: inserts an axis of size one
+        println!("{:?}", b.i((None, 1)).shape());
+        // [1, 3, 4]
+        assert_eq!(b.i((None, 1)).shape(), &[1, 3, 4]);
+        // Ellipsis: as many whole axes as needed
+        println!("{:?}", b.i((Ellipsis, 2)).shape());
+        // [2, 3]
+        assert_eq!(b.i((Ellipsis, 2)).shape(), &[2, 3]);
+
+        // s! macro: runtime values and mixed indexer types
+        println!("{}", m.i(s![1, 2]));
+        // 6
+        assert_eq!(m.i(s![1, 2]).to_scalar(), 6);
+        // array / Vec of one homogeneous indexer type
+        let idx: Vec<isize> = vec![1, -1, 2];
+        println!("{}", b.i(idx.clone()));
+        // 22
+        assert_eq!(b.i(idx).to_scalar(), 22);
+        let arr = [1_usize, 2];
+        assert_eq!(m.i(arr).to_scalar(), 6);
+    }
+}
+
+mod doc_diagonal_overloads {
+    use super::*;
+    static FUNC: &str = "doc_diagonal_overloads";
+
+    #[test]
+    fn test_doc() {
+        crate::specify_test!("test_doc");
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        // main diagonal: () (or None)
+        let a = rt::arange((9, &device)).into_shape([3, 3]);
+        println!("{}", a.diagonal(()));
+        // [ 0 4 8]
+        assert_eq!(format!("{}", a.diagonal(())), "[ 0 4 8]");
+        assert_eq!(format!("{}", a.diagonal(None)), "[ 0 4 8]");
+
+        // single integer: the offset, default axes
+        println!("{}", a.diagonal(1));
+        // [ 1 5]
+        assert_eq!(format!("{}", a.diagonal(1)), "[ 1 5]");
+        assert_eq!(format!("{}", a.diagonal(-1)), "[ 3 7]");
+
+        // tuple (offset, axis1, axis2)
+        let b = rt::arange((24, &device)).into_shape([2, 3, 4]);
+        println!("{}", b.diagonal((0, 0, 1)));
+        // [[ 0 16]
+        //  [ 1 17]
+        //  [ 2 18]
+        //  [ 3 19]]
+        println!("{:?}", b.diagonal((0, 0, 1)).shape());
+        // [4, 2]
+        assert_eq!(format!("{}", b.diagonal((0, 0, 1))), "[[ 0 16]\n [ 1 17]\n [ 2 18]\n [ 3 19]]");
+        assert_eq!(b.diagonal((0, 0, 1)).shape(), &[4, 2]);
+    }
+}
+
 mod doc_adv_indexing {
     use super::*;
     static FUNC: &str = "doc_adv_indexing";

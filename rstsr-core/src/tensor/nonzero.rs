@@ -130,6 +130,15 @@ where
 ///
 /// # See also
 ///
+/// ## Similar function from other crates/libraries
+///
+/// - Python Array API standard: [`nonzero`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.nonzero.html)
+/// - NumPy: [`numpy.nonzero`](https://numpy.org/doc/stable/reference/generated/numpy.nonzero.html)
+///
+/// ## Related functions in RSTSR
+///
+/// - [`count_nonzero`]: the number of nonzero elements.
+///
 /// ## Variants of this function
 ///
 /// - [`nonzero_f`]: fallible version.

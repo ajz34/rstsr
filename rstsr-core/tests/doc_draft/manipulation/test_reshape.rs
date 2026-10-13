@@ -295,4 +295,89 @@ mod doc_reshape {
         // layout-compatible, but input tensor is not compact (216 < 288)
         assert_ne!(a_ptr, b_ptr);
     }
+
+    #[test]
+    fn overload_list() {
+        crate::specify_test!("overload_list");
+
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        // shape = single integer: 1-D result
+        let a = rt::arange((6, &device));
+        println!("{}", a.reshape(6));
+        // [ 0 1 2 3 4 5]
+        assert_eq!(format!("{}", a.reshape(6)), "[ 0 1 2 3 4 5]");
+
+        // shape = list: N-D result
+        println!("{}", a.reshape([2, 3]));
+        // [[ 0 1 2]
+        //  [ 3 4 5]]
+        assert_eq!(format!("{}", a.reshape([2, 3])), "[[ 0 1 2]\n [ 3 4 5]]");
+
+        // a -1 entry infers the remaining dimension
+        println!("{}", a.reshape([3, -1]));
+        // [[ 0 1]
+        //  [ 2 3]
+        //  [ 4 5]]
+        assert_eq!(format!("{}", a.reshape([3, -1])), "[[ 0 1]\n [ 2 3]\n [ 4 5]]");
+
+        // into_shape consumes the tensor; integer and list shapes
+        let b = rt::arange((6, &device)).into_shape(6);
+        println!("{}", b);
+        // [ 0 1 2 3 4 5]
+        assert_eq!(format!("{}", b), "[ 0 1 2 3 4 5]");
+        let b = rt::arange((6, &device)).into_shape([3, -1]);
+        println!("{}", b);
+        // [[ 0 1]
+        //  [ 2 3]
+        //  [ 4 5]]
+        assert_eq!(format!("{}", b), "[[ 0 1]\n [ 2 3]\n [ 4 5]]");
+
+        // reshape_with_args: every `args` overload
+        let c = rt::tensor_from_nested!([[0, 1, 2], [3, 4, 5]], &device);
+
+        // args = bool (copy): true forces a copy, result is owned
+        let d = c.reshape_with_args([3, 2], true);
+        println!("{:?}", d.is_owned());
+        // true
+        assert!(d.is_owned());
+        assert_eq!(format!("{}", d), "[[ 0 1]\n [ 2 3]\n [ 4 5]]");
+
+        // args = Option<bool> (copy): false forbids a copy (merging dims is viewable)
+        let d = c.reshape_with_args([6], Some(false));
+        println!("{}", d);
+        // [ 0 1 2 3 4 5]
+        assert_eq!(format!("{}", d), "[ 0 1 2 3 4 5]");
+
+        // args = TensorOrder (reading order)
+        let d = c.reshape_with_args([3, 2], ColMajor);
+        println!("{}", d);
+        // [[ 0 4]
+        //  [ 3 2]
+        //  [ 1 5]]
+        assert_eq!(format!("{}", d), "[[ 0 4]\n [ 3 2]\n [ 1 5]]");
+
+        // args = (order, copy: bool)
+        let d = c.reshape_with_args([3, 2], (RowMajor, true));
+        println!("{}", d);
+        // [[ 0 1]
+        //  [ 2 3]
+        //  [ 4 5]]
+        assert_eq!(format!("{}", d), "[[ 0 1]\n [ 2 3]\n [ 4 5]]");
+
+        // args = (order, copy: Option<bool>)
+        let d = c.reshape_with_args([6], (ColMajor, Some(true)));
+        println!("{}", d);
+        // [ 0 3 1 4 2 5]
+        assert_eq!(format!("{}", d), "[ 0 3 1 4 2 5]");
+
+        // change_shape consumes the tensor and returns a Cow
+        let e = rt::arange((6, &device)).change_shape([3, -1]);
+        println!("{}", e);
+        // [[ 0 1]
+        //  [ 2 3]
+        //  [ 4 5]]
+        assert_eq!(format!("{}", e), "[[ 0 1]\n [ 2 3]\n [ 4 5]]");
+    }
 }

@@ -492,6 +492,10 @@ where
     ///
     /// - [`Tensor::into_vec`]: consuming form returning `Vec<T>`.
     /// - [`asarray`](crate::tensor::asarray::asarray()): the inverse direction (buffer to tensor).
+    ///
+    /// ## Variants of this function
+    ///
+    /// - [`TensorAny::to_raw_f`]: fallible version.
     pub fn to_vec(&self) -> <B as DeviceRawAPI<T>>::Raw {
         self.to_raw_f().rstsr_unwrap()
     }
@@ -576,6 +580,10 @@ where
     ///
     /// - [`TensorAny::to_vec`]: borrowing form.
     /// - [`Tensor::into_raw`]: keep the device-specific raw buffer type.
+    ///
+    /// ## Variants of this function
+    ///
+    /// - [`Tensor::into_vec_f`]: fallible version.
     pub fn into_vec(self) -> Vec<T> {
         self.into_vec_f().rstsr_unwrap()
     }
@@ -639,6 +647,10 @@ where
     ///
     /// - [`Index`] operator `[]`: scalar access by index (boundary-checked).
     /// - [`TensorAny::to_vec`]: extract all elements of a 1-D tensor.
+    ///
+    /// ## Variants of this function
+    ///
+    /// - [`TensorAny::to_scalar_f`]: fallible version.
     pub fn to_scalar(&self) -> T {
         self.to_scalar_f().rstsr_unwrap()
     }

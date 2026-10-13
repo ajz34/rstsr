@@ -73,8 +73,8 @@ where
 ///
 /// </div>
 ///
-///
 /// See [`order_semantics`](crate::order_semantics) for the two device default orders.
+///
 /// <div class="warning">
 ///
 /// **Different Signature Convention to [`reshape`]**
@@ -83,6 +83,7 @@ where
 /// function returns a view instead of copy-on-write tensor.
 ///
 /// </div>
+///
 /// # Parameters
 ///
 /// - `tensor`: [`&TensorAny<R, T, B, D>`](TensorAny)
@@ -142,6 +143,28 @@ where
 /// assert!(a.to_compatible_shape_f([4 * 6, 9], RowMajor).is_err());
 /// ```
 ///
+/// # Overload List
+///
+/// Both `shape` and `order` accept several input kinds:
+///
+/// - `shape`: a single integer — a 1-D shape; or a list/tuple of integers (`[2, 2, 6]` / `(2, 2,
+///   6)`) — an N-D shape. Negative values count dimensions from the back.
+/// - `order`: a [`FlagOrder`] ([`RowMajor`] / [`ColMajor`]) or `None` — the device default order
+///   (no order argument applied).
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let a = rt::arange((6, &device));
+/// println!("{:?}", a.to_compatible_shape([2, 3], RowMajor).shape()); // list shape, explicit order
+/// // [2, 3]
+/// println!("{:?}", a.to_compatible_shape(6, None).shape()); // integer shape, order = None (device default)
+/// // [6]
+/// # assert_eq!(a.to_compatible_shape([2, 3], RowMajor).shape(), &[2, 3]);
+/// # assert_eq!(a.to_compatible_shape(6, None).shape(), &[6]);
+/// ```
+///
 /// # Notes of API accordance
 ///
 /// - Array-API: `reshape(x, /, shape, *, copy=None)` ([`reshape`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.reshape.html))
@@ -161,6 +184,11 @@ where
 /// For a fallible version, use [`to_compatible_shape_f`].
 ///
 /// # See also
+///
+/// ## Similar function from other crates/libraries
+///
+/// - Array-API: [`reshape`](https://data-apis.org/array-api/2024.12/API_specification/generated/array_api.reshape.html)
+/// - NumPy: [`numpy.reshape`](https://numpy.org/doc/stable/reference/generated/numpy.reshape.html)
 ///
 /// ## Related functions in RSTSR
 ///

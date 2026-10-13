@@ -161,6 +161,58 @@ println!("{}", m.i((.., slice!(None, None, 2))));
 //  [ 8 10]]
 ```
 
+# Overload List
+
+The `index` argument accepts anything convertible into
+[`AxesIndex<Indexer>`]; the accepted forms are:
+
+- a single per-axis indexer, applied to the first axis: an integer (selects one
+  position, dropping the axis), a Rust range (`1..4`) or a stepped [`slice!`]
+  (narrows the axis), `None`/[`NewAxis`] (inserts a size-1 axis), or
+  [`Ellipsis`] (as many whole axes as needed);
+- a tuple of 1 to 10 per-axis indexers, one per axis, mixing any of the above
+  (trailing axes are taken whole);
+- the [`s!`] macro, producing `&[Indexer]` (runtime values and mixed indexer
+  types);
+- an array or `Vec` of one homogeneous indexer type (useful when the number of
+  indexers is known only at runtime).
+
+```rust
+# use rstsr::prelude::*;
+# let mut device = DeviceCpu::default();
+# device.set_default_order(RowMajor);
+let a = rt::arange((10, &device));
+println!("{}", a.i(2));               // integer: axis dropped
+// 2
+println!("{}", a.i(1..4));            // range: axis narrowed
+// [ 1 2 3]
+println!("{}", a.i(slice!(1, 7, 2))); // stepped slice
+// [ 1 3 5]
+
+let m = rt::arange((12, &device)).into_shape([3, 4]);
+println!("{}", m.i((1..3, ..)));      // tuple of indexers
+// [[ 4 5 6 7]
+//  [ 8 9 10 11]]
+println!("{}", m.i(s![1, 2]));        // s! macro
+// 6
+
+let b = rt::arange((24, &device)).into_shape([2, 3, 4]);
+println!("{:?}", b.i((None, 1)).shape());     // None: new axis
+// [1, 3, 4]
+println!("{:?}", b.i((Ellipsis, 2)).shape()); // Ellipsis
+// [2, 3]
+let idx: Vec<isize> = vec![1, -1, 2];
+println!("{}", b.i(idx.clone()));     // Vec of indexers (consumed by value)
+// 22
+# assert_eq!(format!("{}", a.i(2)), "2");
+# assert_eq!(format!("{}", a.i(1..4)), "[ 1 2 3]");
+# assert_eq!(format!("{}", a.i(slice!(1, 7, 2))), "[ 1 3 5]");
+# assert_eq!(m.i(s![1, 2]).to_scalar(), 6);
+# assert_eq!(b.i((None, 1)).shape(), &[1, 3, 4]);
+# assert_eq!(b.i((Ellipsis, 2)).shape(), &[2, 3]);
+# assert_eq!(b.i(idx).to_scalar(), 22);
+```
+
 # Elaborated examples
 
 ## Ranges: open ends, negative bounds, clamping

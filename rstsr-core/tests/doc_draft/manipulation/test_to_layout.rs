@@ -51,6 +51,7 @@ mod doc_to_layout {
         let a = rt::arange((12, &device)).into_shape([3, 4]);
         println!("a shape: {:?}", a.shape());
         // a shape: [3, 4]
+        assert_eq!(format!("a shape: {:?}", a.shape()), "a shape: [3, 4]");
 
         // Flatten to 1D
         let layout_1d = [12].c();
@@ -58,6 +59,7 @@ mod doc_to_layout {
         println!("b shape: {:?}", b.shape());
         // b shape: [12]
         assert_eq!(b.shape(), &[12]);
+        assert_eq!(format!("b shape: {:?}", b.shape()), "b shape: [12]");
 
         // Reshape to different 2D
         let layout_2d = [2, 6].c();
@@ -65,6 +67,7 @@ mod doc_to_layout {
         println!("c shape: {:?}", c.shape());
         // c shape: [2, 6]
         assert_eq!(c.shape(), &[2, 6]);
+        assert_eq!(format!("c shape: {:?}", c.shape()), "c shape: [2, 6]");
     }
 
     #[test]
@@ -79,6 +82,7 @@ mod doc_to_layout {
         println!("{a}");
         // [[ 0 1 2]
         //  [ 3 4 5]]
+        assert_eq!(format!("{a}"), "[[ 0 1 2]\n [ 3 4 5]]");
 
         // Create F-contiguous layout which effectively transposes the data
         let layout_f = [2, 3].f();
@@ -94,6 +98,7 @@ mod doc_to_layout {
         //  [ 1 4]
         //  [ 2 5]]
         assert_eq!(c.shape(), &[3, 2]);
+        assert_eq!(format!("{c}"), "[[ 0 3]\n [ 1 4]\n [ 2 5]]");
 
         let expected = rt::tensor_from_nested!([[0, 3], [1, 4], [2, 5]], &device);
         assert!(rt::allclose(&c, &expected, None));

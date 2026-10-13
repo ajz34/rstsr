@@ -36,4 +36,25 @@ mod doc_into_compatible_shape {
         // layout incompatible
         assert!(a.to_compatible_shape_f([4 * 6, 9], RowMajor).is_err());
     }
+
+    #[test]
+    fn overload_list() {
+        // # Overload List snippet: shape (integer vs list) and order (explicit vs None)
+        crate::specify_test!("overload_list");
+
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        let a = rt::arange((6, &device));
+        println!("{:?}", a.to_compatible_shape([2, 3], RowMajor).shape()); // list shape, explicit
+                                                                           // order
+                                                                           // [2, 3]
+        assert_eq!(a.to_compatible_shape([2, 3], RowMajor).shape(), &[2, 3]);
+        assert_eq!(format!("{:?}", a.to_compatible_shape([2, 3], RowMajor).shape()), "[2, 3]");
+
+        println!("{:?}", a.to_compatible_shape(6, None).shape()); // integer shape, order = None
+                                                                  // [6]
+        assert_eq!(a.to_compatible_shape(6, None).shape(), &[6]);
+        assert_eq!(format!("{:?}", a.to_compatible_shape(6, None).shape()), "[6]");
+    }
 }

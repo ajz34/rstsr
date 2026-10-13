@@ -42,17 +42,21 @@
 //!
 //! </div>
 //!
-//! The note above applies to the arg* families and `_axes` result layouts
-//! only: value aggregations (`sum`, `mean`, `max`, ...) produce the same
-//! values under both orders, and `_axes` / cumulative outputs keep the
-//! input's axis arrangement ([`TensorIterOrder::K`]) regardless of the
-//! device default order. The arg* functions are order-independent: ties resolve to the first
-//! occurrence in row-major order, and the all-element forms return a
-//! row-major flat index even on a [`ColMajor`] device. The
-//! `nanargmin`/`nanargmax` families follow NumPy's `nanarg*`: NaN elements
-//! are skipped wherever they appear, and an all-NaN input raises
-//! `InvalidValue` ("All-NaN slice encountered"); use these for inputs that
-//! may contain NaN. See [`order_semantics`](crate::order_semantics).
+//! The note above concerns the **memory arrangement** of the freshly allocated
+//! outputs only: they keep the input's axis arrangement
+//! ([`TensorIterOrder::K`]), so the same tensor created under the two device
+//! default orders yields outputs with matching layouts (C-contiguous under
+//! [`RowMajor`], F-contiguous under [`ColMajor`]). The values themselves do not
+//! depend on the order: value aggregations (`sum`, `mean`, `max`, ...) are
+//! identical, and the arg* families are order-independent (ties resolve to the
+//! first occurrence in row-major order, and the all-element forms return a
+//! row-major flat index even on a [`ColMajor`] device). Reductions over
+//! `axis = None` (the whole-array forms) visit the elements in the flattened
+//! order of the input. The `nanargmin`/`nanargmax` families follow NumPy's
+//! `nanarg*`: NaN elements are skipped wherever they appear, and an all-NaN
+//! input raises `InvalidValue` ("All-NaN slice encountered"); use these for
+//! inputs that may contain NaN. See
+//! [`order_semantics`](crate::order_semantics).
 //!
 //! # Examples
 //!
@@ -103,6 +107,26 @@
 //! // [ 6 15]
 //! # assert_eq!(format!("{}", rt::sum_with_args(&a, ([0], true))), "[[ 5 7 9]]");
 //! # assert_eq!(a.sum_with_dtype::<f64>(1)[[1]], 15.0);
+//! ```
+//!
+//! Reducing a tensor is order-independent in value; a newly allocated result
+//! keeps the input's axis arrangement, so it inherits the input's memory order
+//! (C-contiguous under [`RowMajor`], F-contiguous under [`ColMajor`]):
+//!
+//! ```rust
+//! # use rstsr::prelude::*;
+//! # let mut device = DeviceCpu::default();
+//! # device.set_default_order(RowMajor);
+//! let a = rt::arange((24, &device)).into_shape([2, 3, 4]);
+//! println!("{:?}", rt::sum_axes(&a, 1).layout());
+//! // 2-Dim (dyn), contiguous: Cc
+//! // shape: [2, 4], stride: [4, 1], offset: 0
+//!
+//! # device.set_default_order(ColMajor);
+//! let a = rt::arange((24, &device)).into_shape([2, 3, 4]);
+//! println!("{:?}", rt::sum_axes(&a, 1).layout());
+//! // 2-Dim (dyn), contiguous: Ff
+//! // shape: [2, 4], stride: [1, 2], offset: 0
 //! ```
 
 use crate::prelude_dev::*;
@@ -1008,8 +1032,116 @@ where
 
 /// Variance with [`VarArgs`] (axes, keepdims, correction).
 ///
-/// The correction rescales the population variance by `M / (M - correction)`
-/// on the (output-sized) result; no input-sized intermediate is created.
+/// The population variance is `mean((x - mean(x))²)` over the reduced axes;
+/// `correction` (Array-API) / `ddof` (NumPy) rescales it to `M / (M -
+/// correction)` times the population value, computed once on the
+/// (output-sized) result; if `M - correction <= 0` the result is NaN. No
+/// input-sized intermediate is created.
+///
+/// This function behaves identically under [`RowMajor`] and [`ColMajor`] device default orders.
+///
+/// # Parameters
+///
+/// - `tensor`: [`&TensorAny<R, T, B, D>`](TensorAny), the input.
+/// - `args`: [`VarArgs`] grouping `axes`, `keepdims`, and `correction`.
+///
+///   - Overloads: `()` (default: reduce all axes), a `bool` (`keepdims`), an integer or integer
+///     list (the reduced axes), or an `(axes, keepdims)` pair. `correction` has no shorthand - set
+///     it with a [`VarArgs`] literal.
+///
+/// # Returns
+///
+/// A new owned tensor `Tensor<B::TOut, B, IxD>`; the input is not consumed and no view of it is
+/// kept.
+///
+/// # Examples
+///
+/// Reducing all axes, and along one axis:
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let a = rt::tensor_from_nested!([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], &device);
+/// println!("{}", rt::var_with_args(&a, ()));
+/// // 2.916666666666666
+/// println!("{}", rt::var_with_args(&a, 0));
+/// // [ 2.25 2.25 2.25]
+/// # assert_eq!(format!("{}", rt::var_with_args(&a, ())), "2.916666666666666");
+/// # assert_eq!(format!("{}", rt::var_with_args(&a, 0)), "[ 2.25 2.25 2.25]");
+/// ```
+///
+/// # Overload List
+///
+/// `args` accepts the following (all of them `Into<VarArgs>`):
+///
+/// - `()` (or [`VarArgs::default`]) — reduce all axes, `keepdims = false`, no correction.
+/// - a `bool` — `keepdims` shorthand (all axes).
+/// - an integer (`isize` / `i32` / `i64` / `usize`) — the single reduced axis.
+/// - a list (`Vec<isize>` / `[isize; N]`, and their `i32`/`i64`/`u32`/`u64`/`usize` variants) — the
+///   reduced axes.
+/// - a pair `(axes, keepdims)` — `axes` an integer, a list, or an [`AxesIndex`].
+/// - a [`VarArgs`] literal — the only way to set `correction`.
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let a = rt::tensor_from_nested!([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], &device);
+/// // () default: the whole reduction, no correction
+/// println!("{}", rt::var_with_args(&a, ()));
+/// // 2.916666666666666
+/// // bool: keepdims
+/// println!("{}", rt::var_with_args(&a, true));
+/// // [[ 2.916666666666666]]
+/// // integer: one axis
+/// println!("{}", rt::var_with_args(&a, 0));
+/// // [ 2.25 2.25 2.25]
+/// // correction (NumPy ddof = 1): Bessel-corrected
+/// let args = VarArgs { correction: Some(1.0), ..Default::default() };
+/// println!("{}", rt::var_with_args(&a, args));
+/// // 3.499999999999999
+/// # assert_eq!(format!("{}", rt::var_with_args(&a, ())), "2.916666666666666");
+/// # assert_eq!(format!("{}", rt::var_with_args(&a, true)), "[[ 2.916666666666666]]");
+/// # assert_eq!(format!("{}", rt::var_with_args(&a, 0)), "[ 2.25 2.25 2.25]");
+/// # let args = VarArgs { correction: Some(1.0), ..Default::default() };
+/// # assert_eq!(format!("{}", rt::var_with_args(&a, args)), "3.499999999999999");
+/// ```
+///
+/// # Notes of API accordance
+///
+/// - Array-API: `var(x, /, *, axis=None, correction=0.0, keepdims=False)` ([`var`](https://data-apis.org/array-api/2024.12/API_specification/generated/array_api.var.html))
+/// - NumPy: `numpy.var(a, axis=None, dtype=None, out=None, ddof=0, keepdims=<no value>, *, where=..., mean=..., correction=...)` ([`numpy.var`](https://numpy.org/doc/stable/reference/generated/numpy.var.html))
+/// - RSTSR: `rt::var_with_args(&tensor, args)` or `tensor.var_with_args(args)`
+///
+/// RSTSR groups `axis`, `keepdims`, and `correction` (NumPy `ddof`) into [`VarArgs`]; `correction`
+/// has no shorthand overload. There is no `dtype` / `out` / `where` parameter.
+///
+/// # Panics
+///
+/// - Panics if an axis is out of range.
+///
+/// For a fallible version, use [`var_with_args_f`].
+///
+/// # See also
+///
+/// ## Similar function from other crates/libraries
+///
+/// - NumPy: [`numpy.var`](https://numpy.org/doc/stable/reference/generated/numpy.var.html)
+/// - Array-API: [`var`](https://data-apis.org/array-api/2024.12/API_specification/generated/array_api.var.html)
+///
+/// ## Related functions in RSTSR
+///
+/// - [`var`]: the plain form (`var_all` / `var_axes` in the macro-generated family).
+/// - [`var_with_dtype`]: accumulate in an explicit output dtype.
+/// - [`std_with_args`]: the square-root counterpart.
+///
+/// ## Variants of this function
+///
+/// - [`var_with_args_f`]: fallible version.
+/// - [`var_with_dtype`] / [`var_with_dtype_f`]: explicit dtype.
+/// - Associated methods on `TensorAny`: [`TensorAny::var_with_args`],
+///   [`TensorAny::var_with_args_f`].
 pub fn var_with_args<T, B, D>(
     tensor: impl TensorViewAPI<Type = T, Backend = B, Dim = D>,
     args: impl Into<VarArgs>,
@@ -1062,6 +1194,111 @@ where
 }
 
 /// Standard deviation with [`VarArgs`] (axes, keepdims, correction).
+///
+/// The square root of [`var_with_args`]; the same [`VarArgs`] overloads apply
+/// and `correction` is the Array-API / NumPy `ddof` rescale (`M / (M -
+/// correction)`, then `sqrt`), computed once on the (output-sized) result.
+///
+/// This function behaves identically under [`RowMajor`] and [`ColMajor`] device default orders.
+///
+/// # Parameters
+///
+/// - `tensor`: [`&TensorAny<R, T, B, D>`](TensorAny), the input.
+/// - `args`: [`VarArgs`] grouping `axes`, `keepdims`, and `correction`.
+///
+///   - Overloads: `()` (default: reduce all axes), a `bool` (`keepdims`), an integer or integer
+///     list (the reduced axes), or an `(axes, keepdims)` pair. `correction` has no shorthand - set
+///     it with a [`VarArgs`] literal.
+///
+/// # Returns
+///
+/// A new owned tensor `Tensor<B::TOut, B, IxD>`; the input is not consumed and no view of it is
+/// kept.
+///
+/// # Examples
+///
+/// Reducing all axes, and along one axis:
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let a = rt::tensor_from_nested!([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], &device);
+/// println!("{}", rt::std_with_args(&a, ()));
+/// // 1.707825127659933
+/// println!("{}", rt::std_with_args(&a, 0));
+/// // [ 1.5 1.5 1.5]
+/// # assert_eq!(format!("{}", rt::std_with_args(&a, ())), "1.707825127659933");
+/// # assert_eq!(format!("{}", rt::std_with_args(&a, 0)), "[ 1.5 1.5 1.5]");
+/// ```
+///
+/// # Overload List
+///
+/// `args` accepts the following (all of them `Into<VarArgs>`):
+///
+/// - `()` (or [`VarArgs::default`]) — reduce all axes, `keepdims = false`, no correction.
+/// - a `bool` — `keepdims` shorthand (all axes).
+/// - an integer (`isize` / `i32` / `i64` / `usize`) — the single reduced axis.
+/// - a list (`Vec<isize>` / `[isize; N]`, and their `i32`/`i64`/`u32`/`u64`/`usize` variants) — the
+///   reduced axes.
+/// - a pair `(axes, keepdims)` — `axes` an integer, a list, or an [`AxesIndex`].
+/// - a [`VarArgs`] literal — the only way to set `correction`.
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let a = rt::tensor_from_nested!([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], &device);
+/// // () default: the whole reduction, no correction
+/// println!("{}", rt::std_with_args(&a, ()));
+/// // 1.707825127659933
+/// // integer: one axis
+/// println!("{}", rt::std_with_args(&a, 0));
+/// // [ 1.5 1.5 1.5]
+/// // correction (NumPy ddof = 1): Bessel-corrected
+/// let args = VarArgs { correction: Some(1.0), ..Default::default() };
+/// println!("{}", rt::std_with_args(&a, args));
+/// // 1.8708286933869704
+/// # assert_eq!(format!("{}", rt::std_with_args(&a, ())), "1.707825127659933");
+/// # assert_eq!(format!("{}", rt::std_with_args(&a, 0)), "[ 1.5 1.5 1.5]");
+/// # let args = VarArgs { correction: Some(1.0), ..Default::default() };
+/// # assert_eq!(format!("{}", rt::std_with_args(&a, args)), "1.8708286933869704");
+/// ```
+///
+/// # Notes of API accordance
+///
+/// - Array-API: `std(x, /, *, axis=None, correction=0.0, keepdims=False)` ([`std`](https://data-apis.org/array-api/2024.12/API_specification/generated/array_api.std.html))
+/// - NumPy: `numpy.std(a, axis=None, dtype=None, out=None, ddof=0, keepdims=<no value>, *, where=..., mean=..., correction=...)` ([`numpy.std`](https://numpy.org/doc/stable/reference/generated/numpy.std.html))
+/// - RSTSR: `rt::std_with_args(&tensor, args)` or `tensor.std_with_args(args)`
+///
+/// RSTSR groups `axis`, `keepdims`, and `correction` (NumPy `ddof`) into [`VarArgs`]; `correction`
+/// has no shorthand overload. There is no `dtype` / `out` / `where` parameter.
+///
+/// # Panics
+///
+/// - Panics if an axis is out of range.
+///
+/// For a fallible version, use [`std_with_args_f`].
+///
+/// # See also
+///
+/// ## Similar function from other crates/libraries
+///
+/// - NumPy: [`numpy.std`](https://numpy.org/doc/stable/reference/generated/numpy.std.html)
+/// - Array-API: [`std`](https://data-apis.org/array-api/2024.12/API_specification/generated/array_api.std.html)
+///
+/// ## Related functions in RSTSR
+///
+/// - [`std`]: the plain form (`std_all` / `std_axes` in the macro-generated family).
+/// - [`std_with_dtype`]: accumulate in an explicit output dtype.
+/// - [`var_with_args`]: the squared counterpart.
+///
+/// ## Variants of this function
+///
+/// - [`std_with_args_f`]: fallible version.
+/// - [`std_with_dtype`] / [`std_with_dtype_f`]: explicit dtype.
+/// - Associated methods on `TensorAny`: [`TensorAny::std_with_args`],
+///   [`TensorAny::std_with_args_f`].
 pub fn std_with_args<T, B, D>(
     tensor: impl TensorViewAPI<Type = T, Backend = B, Dim = D>,
     args: impl Into<VarArgs>,
@@ -1539,6 +1776,44 @@ where
 /// # assert_eq!(format!("{}", b.cumulative_sum_with_dtype::<f64>(0)), "[[ 1 2 3]\n [ 5 7 9]]");
 /// ```
 ///
+/// # Overload List
+///
+/// `args` accepts any of the following (all of them `Into<CumulativeArgs>`):
+///
+/// - `()` (or [`CumulativeArgs::default`]) — the default: `axis = None` (the only axis of a 1-D
+///   input), `include_initial = false`.
+/// - a `bool` — sets `include_initial` (with `axis = None`).
+/// - an integer (`isize` / `i32` / `i64` / `usize`) — the scan `axis`; `include_initial = false`.
+/// - an `Option<isize>` — `None` or the axis.
+/// - a pair `(axis, include_initial)` — both at once; `axis` is an integer or an `Option<isize>`.
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let a = rt::tensor_from_nested!([1, 2, 3], &device);
+/// // default: axis = None on a 1-D input
+/// println!("{}", rt::cumulative_sum(&a, ()));
+/// // [ 1 3 6]
+/// // bool: prepend the initial value 0
+/// println!("{}", rt::cumulative_sum(&a, true));
+/// // [ 0 1 3 6]
+/// let b = rt::tensor_from_nested!([[1, 2, 3], [4, 5, 6]], &device);
+/// // integer: the scan axis
+/// println!("{}", rt::cumulative_sum(&b, 1));
+/// // [[ 1 3 6]
+/// //  [ 4 9 15]]
+/// // (axis, include_initial): both at once
+/// println!("{}", rt::cumulative_sum(&b, (0, true)));
+/// // [[ 0 0 0]
+/// //  [ 1 2 3]
+/// //  [ 5 7 9]]
+/// # assert_eq!(format!("{}", rt::cumulative_sum(&a, ())), "[ 1 3 6]");
+/// # assert_eq!(format!("{}", rt::cumulative_sum(&a, true)), "[ 0 1 3 6]");
+/// # assert_eq!(format!("{}", rt::cumulative_sum(&b, 1)), "[[ 1 3 6]\n [ 4 9 15]]");
+/// # assert_eq!(format!("{}", rt::cumulative_sum(&b, (0, true))), "[[ 0 0 0]\n [ 1 2 3]\n [ 5 7 9]]");
+/// ```
+///
 /// # Notes of API accordance
 ///
 /// - Array-API: `cumulative_sum(x, /, *, axis=None, dtype=None, include_initial=False)` ([`cumulative_sum`](https://data-apis.org/array-api/2024.12/API_specification/generated/array_api.cumulative_sum.html))
@@ -1666,6 +1941,44 @@ where
 /// //  [ 4 10 18]]
 /// # assert_eq!(format!("{}", rt::cumulative_prod(&b, -1)), "[[ 1 2 6]\n [ 4 20 120]]");
 /// # assert_eq!(format!("{}", b.cumulative_prod_with_dtype::<f64>(0)), "[[ 1 2 3]\n [ 4 10 18]]");
+/// ```
+///
+/// # Overload List
+///
+/// `args` accepts any of the following (all of them `Into<CumulativeArgs>`):
+///
+/// - `()` (or [`CumulativeArgs::default`]) — the default: `axis = None` (the only axis of a 1-D
+///   input), `include_initial = false`.
+/// - a `bool` — sets `include_initial` (with `axis = None`).
+/// - an integer (`isize` / `i32` / `i64` / `usize`) — the scan `axis`; `include_initial = false`.
+/// - an `Option<isize>` — `None` or the axis.
+/// - a pair `(axis, include_initial)` — both at once; `axis` is an integer or an `Option<isize>`.
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let a = rt::tensor_from_nested!([1, 2, 3], &device);
+/// // default: axis = None on a 1-D input
+/// println!("{}", rt::cumulative_prod(&a, ()));
+/// // [ 1 2 6]
+/// // bool: prepend the initial value 1
+/// println!("{}", rt::cumulative_prod(&a, true));
+/// // [ 1 1 2 6]
+/// let b = rt::tensor_from_nested!([[1, 2, 3], [4, 5, 6]], &device);
+/// // integer: the scan axis
+/// println!("{}", rt::cumulative_prod(&b, 1));
+/// // [[ 1 2 6]
+/// //  [ 4 20 120]]
+/// // (axis, include_initial): both at once
+/// println!("{}", rt::cumulative_prod(&b, (0, true)));
+/// // [[ 1 1 1]
+/// //  [ 1 2 3]
+/// //  [ 4 10 18]]
+/// # assert_eq!(format!("{}", rt::cumulative_prod(&a, ())), "[ 1 2 6]");
+/// # assert_eq!(format!("{}", rt::cumulative_prod(&a, true)), "[ 1 1 2 6]");
+/// # assert_eq!(format!("{}", rt::cumulative_prod(&b, 1)), "[[ 1 2 6]\n [ 4 20 120]]");
+/// # assert_eq!(format!("{}", rt::cumulative_prod(&b, (0, true))), "[[ 1 1 1]\n [ 1 2 3]\n [ 4 10 18]]");
 /// ```
 ///
 /// # Notes of API accordance
@@ -2236,6 +2549,9 @@ where
 /// - `isclose_args`: tolerances; anything that converts into [`IsCloseArgs`] — pass `None` for the
 ///   defaults.
 ///
+///   - Overloads: `None` (defaults); an [`IsCloseArgs`] value; a bare `f64` or `Option<f64>` (sets
+///     `rtol`); a tuple `(rtol,)` / `(rtol, atol)` / `(rtol, atol, equal_nan)`.
+///
 /// # Returns
 ///
 /// - `bool`: `true` if every element pair is close.
@@ -2257,11 +2573,55 @@ where
 /// # assert!(!rt::allclose(&a, &c, None));
 /// ```
 ///
+/// # Overload List
+///
+/// `isclose_args` accepts the following (all of them `Into<IsCloseArgs<TE>>`):
+///
+/// - `None` — the default tolerances (`rtol = 1.0e-5`, `atol = 1.0e-8`, `equal_nan = false`).
+/// - an [`IsCloseArgs`] value — the full argument struct (also built via `IsCloseArgsBuilder`).
+/// - a bare `TE` / `f64`, or an `Option<TE>` — sets `rtol` only (`Some(rtol)`, or `None` for the
+///   default `rtol`); `atol` and `equal_nan` stay at their defaults.
+/// - a tuple `(rtol,)` / `(rtol, atol)` / `(rtol, atol, equal_nan)` — sets the tolerances listed,
+///   leaving the rest at their defaults.
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let a = rt::tensor_from_nested!([1.0, 1.0], &device);
+/// let b = rt::tensor_from_nested!([1.0, 1.0001], &device);
+/// // None: default tolerances are too tight for this pair
+/// println!("{}", rt::allclose(&a, &b, None));
+/// // false
+/// // a bare f64 sets rtol only
+/// println!("{}", rt::allclose(&a, &b, 1.0e-3));
+/// // true
+/// // (rtol, atol) sets both tolerances
+/// println!("{}", rt::allclose(&a, &b, (1.0e-5, 1.0e-2)));
+/// // true
+/// // (rtol, atol, equal_nan) also controls NaN handling
+/// let n1 = rt::tensor_from_nested!([1.0, f64::NAN], &device);
+/// let n2 = rt::tensor_from_nested!([1.0, f64::NAN], &device);
+/// println!("{}", rt::allclose(&n1, &n2, (1.0e-5, 1.0e-8, true)));
+/// // true
+/// # assert_eq!(format!("{}", rt::allclose(&a, &b, None)), "false");
+/// # assert_eq!(format!("{}", rt::allclose(&a, &b, 1.0e-3)), "true");
+/// # assert_eq!(format!("{}", rt::allclose(&a, &b, (1.0e-5, 1.0e-2))), "true");
+/// # assert_eq!(format!("{}", rt::allclose(&n1, &n2, (1.0e-5, 1.0e-8, true))), "true");
+/// ```
+///
 /// # Notes of API accordance
 ///
 /// - NumPy: `numpy.allclose(a, b, rtol=1e-05, atol=1e-08, equal_nan=False)` ([`numpy.allclose`](https://numpy.org/doc/stable/reference/generated/numpy.allclose.html))
 /// - RSTSR: `rt::allclose(&a, &b, None)`; tolerances are grouped into [`IsCloseArgs`]. The macro
 ///   form `allclose!(&a, &b)` is also available.
+///
+/// # Panics
+///
+/// - Panics if the two tensors live on different devices, or if their shapes cannot be broadcast
+///   against each other.
+///
+/// For a fallible version, use [`allclose_f`].
 ///
 /// # See also
 ///

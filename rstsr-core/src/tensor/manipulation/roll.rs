@@ -352,6 +352,14 @@ where
 ///
 /// See [`order_semantics`](crate::order_semantics) for the two device default orders.
 ///
+/// # Overloads Table
+///
+/// Output is [`Tensor<T, B, D>`][`Tensor`] (same shape as the input).
+///
+/// - `roll(tensor, shift) -> Tensor<T, B, D>` (implicit `axis = None`, flattened)
+/// - `roll(tensor, (shift, axis)) -> Tensor<T, B, D>` where `shift` and `axis` are any
+///   `TryInto<AxesIndex<isize>>` forms (integer, tuple, list, `None`)
+///
 /// # Parameters
 ///
 /// - `tensor`: [`&TensorAny<R, T, B, D>`](TensorAny)
@@ -450,13 +458,40 @@ where
 /// # assert_eq!(format!("{}", rt::roll(&a, (1, None))), "[[ 5 3 4]\n [ 0 1 2]]");
 /// ```
 ///
-/// # Overloads Table
+/// # Overload List
 ///
-/// Output is [`Tensor<T, B, D>`][`Tensor`] (same shape as the input).
+/// The bare `shift` form flattens the tensor (`axis = None`) and rolls it; the
+/// tuple form selects the axis:
 ///
-/// - `roll(tensor, shift) -> Tensor<T, B, D>` (implicit `axis = None`, flattened)
-/// - `roll(tensor, (shift, axis)) -> Tensor<T, B, D>` where `shift` and `axis` are any
-///   `TryInto<AxesIndex<isize>>` forms (integer, tuple, list, `None`)
+/// - `roll(tensor, shift)` — `shift` is an integer, a tuple/list of integers, or `None`; the tensor
+///   is flattened (device default order), rolled, and restored to its shape.
+/// - `roll(tensor, (shift, axis))` — `axis` is an integer, a tuple/list of axes, or `None`; `shift`
+///   is an integer or a tuple/list broadcastable to `axis`.
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let a = rt::arange((6, &device));
+/// println!("{}", rt::roll(&a, 2));         // bare integer shift: flattened
+/// // [ 4 5 0 1 2 3]
+/// println!("{}", rt::roll(&a, (2, None))); // tuple form, axis = None: flattened
+/// // [ 4 5 0 1 2 3]
+///
+/// let b = rt::arange((9, &device)).into_shape([3, 3]);
+/// println!("{}", rt::roll(&b, (1, 0)));    // integer axis
+/// // [[ 6 7 8]
+/// //  [ 0 1 2]
+/// //  [ 3 4 5]]
+/// println!("{}", rt::roll(&b, ((1, 1), (0, 1)))); // tuple shift with tuple axis
+/// // [[ 8 6 7]
+/// //  [ 2 0 1]
+/// //  [ 5 3 4]]
+/// # assert_eq!(format!("{}", rt::roll(&a, 2)), "[ 4 5 0 1 2 3]");
+/// # assert_eq!(format!("{}", rt::roll(&a, (2, None))), "[ 4 5 0 1 2 3]");
+/// # assert_eq!(format!("{}", rt::roll(&b, (1, 0))), "[[ 6 7 8]\n [ 0 1 2]\n [ 3 4 5]]");
+/// # assert_eq!(format!("{}", rt::roll(&b, ((1, 1), (0, 1)))), "[[ 8 6 7]\n [ 2 0 1]\n [ 5 3 4]]");
+/// ```
 ///
 /// # Notes of API accordance
 ///
@@ -476,6 +511,11 @@ where
 /// For a fallible version, use [`roll_f`].
 ///
 /// # See also
+///
+/// ## Similar function from other crates/libraries
+///
+/// - Array-API: [`roll`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.roll.html)
+/// - NumPy: [`numpy.roll`](https://numpy.org/doc/stable/reference/generated/numpy.roll.html)
 ///
 /// ## Related functions in RSTSR
 ///

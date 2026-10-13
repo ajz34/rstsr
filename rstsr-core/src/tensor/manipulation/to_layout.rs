@@ -51,22 +51,24 @@ where
 ///
 /// The layout can differ from the original in shape, strides, or even dimensionality,
 /// as long as the total number of elements remains the same.
+///
 /// This function behaves identically under [`RowMajor`] and [`ColMajor`] device default orders.
 ///
 /// # Parameters
 ///
-/// - `tensor`: A reference to the input tensor.
-/// - `layout`: The target [`Layout`] for the output tensor.
+/// - `tensor`: [`&TensorAny<R, T, B, D>`](TensorAny)
+///
+///   - The input tensor.
+///
+/// - `layout`: [`Layout<D2>`](Layout)
+///
+///   - The target layout for the output tensor (shape, strides, offset, and dimensionality).
 ///
 /// # Returns
 ///
-/// A [`TensorCow`] containing either a view (if no copy needed) or an owned tensor with the
-/// specified layout.
+/// - [`TensorCow<'_, T, B, D2>`](TensorCow)
 ///
-/// # Panics
-///
-/// Panics if the layout size doesn't match the tensor size.
-/// Use [`to_layout_f`] for the fallible version.
+///   - A view (if no copy is needed) or an owned tensor with the specified layout.
 ///
 /// # Examples
 ///
@@ -107,9 +109,19 @@ where
 /// assert_eq!(c.shape(), &[2, 6]);
 /// ```
 ///
+/// # Panics
+///
+/// - Panics if the layout size does not match the tensor size.
+///
+/// For a fallible version, use [`to_layout_f`].
+///
 /// # See also
 ///
-/// ## Similar functions in RSTSR
+/// ## Similar function from other crates/libraries
+///
+/// - ndarray: [`ArrayBase::as_standard_layout`](https://docs.rs/ndarray/latest/ndarray/struct.ArrayBase.html#method.as_standard_layout)
+///
+/// ## Related functions in RSTSR
 ///
 /// - [`reshape`]: Change the shape of a tensor (inputs shape instead of layout).
 /// - [`to_contig`]: Convert tensor to C or F contiguous layout.

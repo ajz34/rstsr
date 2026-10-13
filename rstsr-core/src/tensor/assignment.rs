@@ -84,6 +84,10 @@ where
 ///
 /// # See also
 ///
+/// ## Similar function from other crates/libraries
+///
+/// - NumPy: [`numpy.indexing`](https://numpy.org/doc/stable/user/basics.indexing.html)
+///
 /// ## Related functions in RSTSR
 ///
 /// - [`fill`]: set every element to a scalar.
@@ -219,6 +223,10 @@ where
 /// For a fallible version, use [`fill_f`].
 ///
 /// # See also
+///
+/// ## Similar function from other crates/libraries
+///
+/// - NumPy: [`ndarray.fill`](https://numpy.org/doc/stable/reference/generated/numpy.ndarray.fill.html)
 ///
 /// ## Related functions in RSTSR
 ///

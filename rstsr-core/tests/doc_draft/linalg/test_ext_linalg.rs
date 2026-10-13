@@ -118,12 +118,115 @@ mod doc_ext_cross {
         let b = rt::tensor_from_nested!([4i16, 5, 6], &device);
         let c = rt::ext_cross(&a, &b, -1);
         println!("{c}");
-        // [-3  6 -3]
+        // [ -3 6 -3]
         // i8 x i16 -> i16
+        assert_eq!(format!("{c}"), "[ -3 6 -3]");
         assert_eq!(c.to_vec(), vec![-3i16, 6, -3]);
 
         // the same-dtype form agrees when the operands already share a dtype
         let a2 = rt::tensor_from_nested!([1i16, 2, 3], &device);
         assert_eq!(c.to_vec(), rt::cross(&a2, &b, -1).to_vec());
+    }
+}
+
+// # Overload List snippets for the promoting forms: one call per distinct behavior
+#[cfg(test)]
+mod doc_ext_vecdot_overload {
+    use super::*;
+    static FUNC: &str = "doc_ext_vecdot_overload";
+
+    #[test]
+    fn test_doc() {
+        crate::specify_test!("test_doc");
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        let a = rt::tensor_from_nested!([[1u8, 2], [3, 4]], &device);
+        let b = rt::tensor_from_nested!([[5u16, 6], [7, 8]], &device);
+
+        // None (or ()): the default, contracting the last axis
+        println!("{}", rt::ext_vecdot(&a, &b, None));
+        // [ 17 53]
+        assert_eq!(format!("{}", rt::ext_vecdot(&a, &b, None)), "[ 17 53]");
+
+        // integer: contract that axis in both operands
+        println!("{}", rt::ext_vecdot(&a, &b, 0));
+        // [ 26 44]
+        assert_eq!(format!("{}", rt::ext_vecdot(&a, &b, 0)), "[ 26 44]");
+
+        // (axes_a, axes_b): contract different axes of each operand
+        println!("{}", rt::ext_vecdot(&a, &b, ([0, 1], [0, 1])));
+        // 70
+        assert_eq!(format!("{}", rt::ext_vecdot(&a, &b, ([0, 1], [0, 1]))), "70");
+
+        // bare collection: shorthand for the same axes in both operands
+        println!("{}", rt::ext_vecdot(&a, &b, [0, 1]));
+        // 70
+        assert_eq!(format!("{}", rt::ext_vecdot(&a, &b, [0, 1])), "70");
+    }
+}
+
+#[cfg(test)]
+mod doc_ext_cross_overload {
+    use super::*;
+    static FUNC: &str = "doc_ext_cross_overload";
+
+    #[test]
+    fn test_doc() {
+        crate::specify_test!("test_doc");
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        let a = rt::tensor_from_nested!([1i8, 2, 3], &device);
+        let b = rt::tensor_from_nested!([4i16, 5, 6], &device);
+
+        // () or None: the last axis (Array-API default axis = -1)
+        println!("{}", rt::ext_cross(&a, &b, ()));
+        // [ -3 6 -3]
+        assert_eq!(format!("{}", rt::ext_cross(&a, &b, ())), "[ -3 6 -3]");
+
+        // integer: an explicit axis shared by both operands
+        let m = rt::tensor_from_nested!([[1i8, 2, 3], [4, 5, 6]], &device);
+        println!("{}", rt::ext_cross(&m, &b, 1));
+        // [[ -3 6 -3]
+        //  [ 0 0 0]]
+        assert_eq!(format!("{}", rt::ext_cross(&m, &b, 1)), "[[ -3 6 -3]\n [ 0 0 0]]");
+    }
+}
+
+#[cfg(test)]
+mod doc_ext_tensordot_overload {
+    use super::*;
+    static FUNC: &str = "doc_ext_tensordot_overload";
+
+    #[test]
+    fn test_doc() {
+        crate::specify_test!("test_doc");
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        let a = rt::tensor_from_nested!([[1u8, 2], [3, 4]], &device);
+        let b = rt::tensor_from_nested!([[5u16, 6], [7, 8]], &device);
+
+        // integer n = 1: the matrix product
+        println!("{}", rt::ext_tensordot(&a, &b, 1));
+        // [[ 19 22]
+        //  [ 43 50]]
+        assert_eq!(format!("{}", rt::ext_tensordot(&a, &b, 1)), "[[ 19 22]\n [ 43 50]]");
+
+        // None or (): the default n = 2 (full contraction)
+        println!("{}", rt::ext_tensordot(&a, &b, ()));
+        // 70
+        assert_eq!(format!("{}", rt::ext_tensordot(&a, &b, ())), "70");
+
+        // (axes_a, axes_b): contract different axes of each operand
+        println!("{}", rt::ext_tensordot(&a, &b, ([1, 0], [0, 1])));
+        // 69
+        assert_eq!(format!("{}", rt::ext_tensordot(&a, &b, ([1, 0], [0, 1]))), "69");
+
+        // bare collection: shorthand for the same axes in both operands
+        println!("{}", rt::ext_tensordot(&a, &b, [0, 1]));
+        // 70
+        assert_eq!(format!("{}", rt::ext_tensordot(&a, &b, [0, 1])), "70");
     }
 }

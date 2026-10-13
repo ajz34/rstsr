@@ -381,8 +381,6 @@ where
         self.map_f(move |x| f(x.clone()))
     }
 
-    /// Call `f` by value on each element and create a new tensor with the new
-    /// values.
     /// Map a function over every element by value, producing a new tensor;
     /// see [`TensorAny::map`].
     ///
@@ -437,8 +435,6 @@ where
         device.op_muta_func(self_raw_mut, &la, &mut f_inner)
     }
 
-    /// Modify the tensor in place by calling `f` by mutable reference on each
-    /// element.
     /// Modify the tensor in place by mapping a function over every element;
     /// see [`TensorAny::map`].
     ///
@@ -478,8 +474,6 @@ where
         self.mapi_f(move |x| *x = f(x.clone()))
     }
 
-    /// Modify the tensor in place by calling `f` by value on each
-    /// element.
     /// Modify the tensor in place by mapping a by-value function over every
     /// element; see [`TensorAny::map`] and [`TensorAny::mapi`].
     ///

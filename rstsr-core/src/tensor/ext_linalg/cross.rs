@@ -58,6 +58,29 @@ use crate::tensor::linalg::cross::{cross_axis_in_output, cross_check_axis};
 /// assert_eq!(c.to_vec(), vec![-3i16, 6, -3]);
 /// ```
 ///
+/// # Overload List
+///
+/// `axis` accepts the same forms as [`cross`]:
+///
+/// - `()` or `None`: the last axis (the Array-API default `axis = -1`).
+/// - an integer: an explicit axis, shared by both operands.
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let a = rt::tensor_from_nested!([1i8, 2, 3], &device);
+/// let b = rt::tensor_from_nested!([4i16, 5, 6], &device);
+/// println!("{}", rt::ext_cross(&a, &b, ()));
+/// // [ -3 6 -3]
+/// let m = rt::tensor_from_nested!([[1i8, 2, 3], [4, 5, 6]], &device);
+/// println!("{}", rt::ext_cross(&m, &b, 1));
+/// // [[ -3 6 -3]
+/// //  [ 0 0 0]]
+/// # assert_eq!(format!("{}", rt::ext_cross(&a, &b, ())), "[ -3 6 -3]");
+/// # assert_eq!(format!("{}", rt::ext_cross(&m, &b, 1)), "[[ -3 6 -3]\n [ 0 0 0]]");
+/// ```
+///
 /// # Notes of API accordance
 ///
 /// - Array-API: `linalg.cross(x1, x2, /, *, axis=-1)` ([`linalg.cross`](https://data-apis.org/array-api/2024.12/extensions/generated/array_api.linalg.cross.html))

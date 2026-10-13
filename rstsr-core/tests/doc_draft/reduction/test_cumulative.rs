@@ -4,6 +4,29 @@ use rstsr::prelude::*;
 use super::CATEGORY;
 use crate::TESTCFG;
 
+mod doc_cumulative_args {
+    use super::*;
+    static FUNC: &str = "doc_cumulative_args";
+
+    #[test]
+    fn test_doc() {
+        crate::specify_test!("test_doc");
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        // twin of the CumulativeArgs docstring example
+        let a = rt::tensor_from_nested!([1, 2, 3], &device);
+        let s = rt::cumulative_sum(&a, ());
+        assert_eq!(s.to_vec(), vec![1, 3, 6]);
+        let s = rt::cumulative_sum(&a, true);
+        assert_eq!(s.to_vec(), vec![0, 1, 3, 6]);
+        let b = rt::tensor_from_nested!([[1, 2, 3], [4, 5, 6]], &device);
+        let s = rt::cumulative_sum(&b, (1, true));
+        assert_eq!(s.shape().to_vec(), vec![2, 4]);
+        assert_eq!(s[[1, 3]], 15);
+    }
+}
+
 mod doc_cumulative_sum {
     use super::*;
     static FUNC: &str = "doc_cumulative_sum";
@@ -29,6 +52,14 @@ mod doc_cumulative_sum {
         // accumulate in f64 to avoid overflow of narrow integer dtypes
         println!("{}", b.cumulative_sum_with_dtype::<f64>(0));
         assert_eq!(format!("{}", b.cumulative_sum_with_dtype::<f64>(0)), "[[ 1 2 3]\n [ 5 7 9]]");
+
+        // # Overload List: one call per distinct args form
+        // (axis, include_initial): both at once
+        println!("{}", rt::cumulative_sum(&b, (0, true)));
+        assert_eq!(format!("{}", rt::cumulative_sum(&b, (0, true))), "[[ 0 0 0]\n [ 1 2 3]\n [ 5 7 9]]");
+        // Option<isize>: Some(axis) behaves as the bare axis, None as the default
+        println!("{}", rt::cumulative_sum(&b, Some(0)));
+        assert_eq!(format!("{}", rt::cumulative_sum(&b, Some(0))), "[[ 1 2 3]\n [ 5 7 9]]");
     }
 }
 
@@ -57,5 +88,13 @@ mod doc_cumulative_prod {
         // accumulate in f64 to avoid overflow of narrow integer dtypes
         println!("{}", b.cumulative_prod_with_dtype::<f64>(0));
         assert_eq!(format!("{}", b.cumulative_prod_with_dtype::<f64>(0)), "[[ 1 2 3]\n [ 4 10 18]]");
+
+        // # Overload List: one call per distinct args form
+        // (axis, include_initial): both at once
+        println!("{}", rt::cumulative_prod(&b, (0, true)));
+        assert_eq!(format!("{}", rt::cumulative_prod(&b, (0, true))), "[[ 1 1 1]\n [ 1 2 3]\n [ 4 10 18]]");
+        // Option<isize>: Some(axis) behaves as the bare axis
+        println!("{}", rt::cumulative_prod(&b, Some(0)));
+        assert_eq!(format!("{}", rt::cumulative_prod(&b, Some(0))), "[[ 1 2 3]\n [ 4 10 18]]");
     }
 }

@@ -278,9 +278,41 @@ where
 /// # assert_eq!(format!("{}", rt::r#where(&cond, &rt::arange(4.0).reshape([2, 2]), 0.0)), "[[ 0 0]\n [ 0 3]]");
 /// ```
 ///
+/// # Overload List
+///
+/// The condition is always a boolean tensor; `x` and `y` are each overloaded:
+///
+/// - a tensor operand, as a reference ([`&TensorAny`](TensorAny)) or a [`TensorView`] passed by
+///   value;
+/// - a scalar operand (`T`), strongly promoted against the other operand.
+///
+/// At least one of `x` and `y` must be a tensor — both-scalar is not accepted (with no tensor
+/// operand there is no shape or dtype to promote against).
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let cond = rt::tensor_from_nested!([true, false, true], &device);
+/// let x = rt::tensor_from_nested!([1, 2, 3], &device);
+/// let y = rt::tensor_from_nested!([10, 20, 30], &device);
+/// // both operands are tensors (here: views passed by value)
+/// println!("{}", rt::r#where(&cond, x.view(), y.view()));
+/// // [ 1 20 3]
+/// // `x` tensor, `y` scalar
+/// println!("{}", rt::r#where(&cond, &x, 10));
+/// // [ 1 10 3]
+/// // `x` scalar, `y` tensor
+/// println!("{}", rt::r#where(&cond, 1, &y));
+/// // [ 1 20 1]
+/// # assert_eq!(format!("{}", rt::r#where(&cond, x.view(), y.view())), "[ 1 20 3]");
+/// # assert_eq!(format!("{}", rt::r#where(&cond, &x, 10)), "[ 1 10 3]");
+/// # assert_eq!(format!("{}", rt::r#where(&cond, 1, &y)), "[ 1 20 1]");
+/// ```
+///
 /// # Elaborated examples
 ///
-/// ## Difference between RowMajor and ColMajor
+/// ## Difference between [`RowMajor`] and [`ColMajor`]
 ///
 /// A 1-D condition of length 2 against `(2, 3)` operands is rejected under
 /// [`RowMajor`] (trailing-axis alignment, NumPy-like: `2` vs `3` do not
@@ -336,7 +368,8 @@ where
 ///
 /// ## Similar function from other crates/libraries
 ///
-/// - NumPy `numpy.where` and array-api `where` (see `# Notes of API accordance` above).
+/// - Python Array API standard: [`where`](https://data-apis.org/array-api/2024.12/API_specification/generated/array_api.where.html)
+/// - NumPy: [`numpy.where`](https://numpy.org/doc/stable/reference/generated/numpy.where.html)
 ///
 /// ## Related functions in RSTSR
 ///

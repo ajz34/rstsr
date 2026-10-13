@@ -181,6 +181,36 @@ where
 /// assert_eq!(b.shape(), &[1, 3, 1, 4, 1]);
 /// ```
 ///
+/// # Overload List
+///
+/// - `squeeze(tensor, axis)` — a single integer: remove that size-1 axis.
+/// - `squeeze(tensor, axes)` — a tuple/list/[`Vec`]/slice of integers: remove each listed size-1
+///   axis.
+/// - `squeeze(tensor, None)` — remove all size-1 axes.
+/// - `squeeze(tensor, ())` — remove no axes (returns a view of the input; `()` is an empty axis
+///   list).
+///
+/// Each listed axis must have size 1; negative values count from the back.
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let a: Tensor<f64, _> = rt::zeros(([1, 3, 1, 4], &device));
+/// println!("{:?}", a.squeeze(0).shape()); // single integer axis
+/// // [3, 1, 4]
+/// println!("{:?}", a.squeeze([0, 2]).shape()); // list of axes
+/// // [3, 4]
+/// println!("{:?}", a.squeeze(None).shape()); // all size-1 axes
+/// // [3, 4]
+/// println!("{:?}", a.squeeze(()).shape()); // no axes
+/// // [1, 3, 1, 4]
+/// # assert_eq!(format!("{:?}", a.squeeze(0).shape()), "[3, 1, 4]");
+/// # assert_eq!(format!("{:?}", a.squeeze([0, 2]).shape()), "[3, 4]");
+/// # assert_eq!(format!("{:?}", a.squeeze(None).shape()), "[3, 4]");
+/// # assert_eq!(format!("{:?}", a.squeeze(()).shape()), "[1, 3, 1, 4]");
+/// ```
+///
 /// # Notes of API accordance
 ///
 /// - Array-API: `squeeze(x, /, axis)` ([`squeeze`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.squeeze.html))
@@ -197,7 +227,14 @@ where
 /// - If an axis is out of bounds.
 /// - If `axes` has duplicated values.
 ///
+/// For a fallible version, use [`squeeze_f`].
+///
 /// # See also
+///
+/// ## Similar function from other crates/libraries
+///
+/// - Array-API: [`squeeze`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.squeeze.html)
+/// - NumPy: [`numpy.squeeze`](https://numpy.org/doc/stable/reference/generated/numpy.squeeze.html)
 ///
 /// ## Related functions in RSTSR
 ///

@@ -39,6 +39,33 @@ mod doc_moveaxis {
     }
 
     #[test]
+    fn overload_list() {
+        crate::specify_test!("overload_list");
+
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        // single integer source and destination: move one axis
+        let x = rt::arange((6, &device)).into_shape([2, 3]);
+        println!("{}", rt::moveaxis(&x, 0, 1));
+        // [[ 0 3]
+        //  [ 1 4]
+        //  [ 2 5]]
+        assert_eq!(format!("{}", rt::moveaxis(&x, 0, 1)), "[[ 0 3]\n [ 1 4]\n [ 2 5]]");
+
+        // list source and destination: move several axes
+        let y: Tensor<f64, _> = rt::zeros(([3, 4, 5], &device));
+        println!("{:?}", rt::moveaxis(&y, [0, 1], [-1, -2]).shape());
+        // [5, 4, 3]
+        assert_eq!(rt::moveaxis(&y, [0, 1], [-1, -2]).shape(), &[5, 4, 3]);
+
+        // negative indices count from the back
+        println!("{:?}", rt::moveaxis(&y, -1, 0).shape());
+        // [5, 3, 4]
+        assert_eq!(rt::moveaxis(&y, -1, 0).shape(), &[5, 3, 4]);
+    }
+
+    #[test]
     fn test_data_integrity() {
         // Test that moveaxis preserves data correctly
         crate::specify_test!("test_data_integrity");

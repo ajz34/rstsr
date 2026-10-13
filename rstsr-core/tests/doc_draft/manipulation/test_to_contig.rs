@@ -24,6 +24,10 @@ mod doc_to_contig {
         // shape: [3, 2], stride: [4, 2], offset: 0
         assert_eq!(sliced.shape(), &[3, 2]);
         assert_eq!(sliced.stride(), &[4, 2]);
+        assert_eq!(
+            format!("{:?}", sliced.layout()),
+            "2-Dim (dyn), contiguous: Custom\nshape: [3, 2], stride: [4, 2], offset: 0"
+        );
 
         // Convert to C-contiguous
         let contig = sliced.to_contig(RowMajor);
@@ -34,6 +38,10 @@ mod doc_to_contig {
         println!("Contiguous stride: {:?}", contig.stride());
         assert_eq!(contig.shape(), &[3, 2]);
         assert_eq!(contig.stride(), &[2, 1]);
+        assert_eq!(
+            format!("{:?}", contig.layout()),
+            "2-Dim (dyn), contiguous: Cc\nshape: [3, 2], stride: [2, 1], offset: 0"
+        );
         assert!(contig.c_contig());
     }
 
@@ -79,6 +87,10 @@ mod doc_to_contig {
         // 2-Dim (dyn), contiguous: CcFf
         // shape: [3, 1], stride: [1, 3], offset: 0
         assert!(a.c_contig());
+        assert_eq!(
+            format!("{:?}", a.layout()),
+            "2-Dim (dyn), contiguous: CcFf\nshape: [3, 1], stride: [1, 3], offset: 0"
+        );
 
         // to_contig returns a view (no copy); strides are reset to [1, 1]
         let b = a.to_contig(RowMajor);
@@ -88,6 +100,10 @@ mod doc_to_contig {
         assert!(!b.is_owned());
         assert!(b.c_contig());
         assert_eq!(b.stride(), &[1, 1]);
+        assert_eq!(
+            format!("{:?}", b.layout()),
+            "2-Dim (dyn), contiguous: CcFf\nshape: [3, 1], stride: [1, 1], offset: 0"
+        );
         assert_eq!(format!("{b}"), "[[ 0]\n [ 5]\n [ 10]]");
     }
 }

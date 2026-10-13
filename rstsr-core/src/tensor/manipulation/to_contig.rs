@@ -52,16 +52,26 @@ where
 /// flags ([`TensorBase::c_contig`] / [`TensorBase::f_contig`]), so a
 /// padded-singleton tensor is returned as a view; the singleton-axis strides of
 /// a viewed result are reset, making the layout the usual contiguous one.
+///
 /// This function behaves identically under [`RowMajor`] and [`ColMajor`] device default orders.
 ///
 /// # Parameters
 ///
-/// - `tensor`: A reference to the input tensor.
-/// - `order`: The memory layout order ([`RowMajor`] or [`ColMajor`]).
+/// - `tensor`: [`&TensorAny<R, T, B, D>`](TensorAny)
+///
+///   - The input tensor.
+///
+/// - `order`: [`FlagOrder`]
+///
+///   - The target memory layout order ([`RowMajor`] for C-contiguous, [`ColMajor`] for
+///     F-contiguous).
 ///
 /// # Returns
 ///
-/// A [`TensorCow`] containing either a view or an owned tensor with contiguous layout.
+/// - [`TensorCow<'_, T, B, D>`](TensorCow)
+///
+///   - A view if the input is already contiguous in the requested order; otherwise a newly
+///     allocated contiguous copy.
 ///
 /// # Examples
 ///
@@ -114,7 +124,12 @@ where
 ///
 /// # See also
 ///
-/// ## Similar functions in RSTSR
+/// ## Similar function from other crates/libraries
+///
+/// - NumPy: [`numpy.ascontiguousarray`](https://numpy.org/doc/stable/reference/generated/numpy.ascontiguousarray.html)
+///   / [`numpy.asfortranarray`](https://numpy.org/doc/stable/reference/generated/numpy.asfortranarray.html)
+///
+/// ## Related functions in RSTSR
 ///
 /// - [`reshape`]: Change the shape of a tensor without changing its data layout (returns
 ///   copy-on-write tensor, view or necessarily clone). Reshape function inputs shape instead of
@@ -303,15 +318,23 @@ where
 /// If it is, a view is returned without copying data. Otherwise, data is copied to
 /// a new contiguous layout.
 ///
+/// This function behaves identically under [`RowMajor`] and [`ColMajor`] device default orders.
+///
 /// # Parameters
 ///
-/// - `tensor`: A reference to the input tensor.
-/// - `order`: The memory layout order ([`RowMajor`] or [`ColMajor`]).
+/// - `tensor`: [`&TensorAny<R, T, B, D>`](TensorAny)
+///
+///   - The input tensor.
+///
+/// - `order`: [`FlagOrder`]
+///
+///   - The memory layout order ([`RowMajor`] or [`ColMajor`]).
 ///
 /// # Returns
 ///
-/// A [`TensorCow`] containing either a view (if already contiguous) or an owned tensor
-/// (if data was copied).
+/// - [`TensorCow<'_, T, B, D>`](TensorCow)
+///
+///   - A view (if already contiguous) or an owned tensor (if data was copied).
 ///
 /// # Examples
 ///
@@ -330,9 +353,21 @@ where
 /// assert!(result.is_owned());
 /// ```
 ///
+/// # Panics
+///
+/// - Panics if the internal copy path fails (e.g. an overflowing element count or a device
+///   allocation error).
+///
+/// For a fallible version, use [`to_prefer_f`].
+///
 /// # See also
 ///
-/// ## Similar functions in RSTSR
+/// ## Similar function from other crates/libraries
+///
+/// - NumPy: [`numpy.ascontiguousarray`](https://numpy.org/doc/stable/reference/generated/numpy.ascontiguousarray.html)
+///   / [`numpy.asfortranarray`](https://numpy.org/doc/stable/reference/generated/numpy.asfortranarray.html)
+///
+/// ## Related functions in RSTSR
 ///
 /// - [`reshape`]: Change the shape of a tensor without changing its data layout (returns
 ///   copy-on-write tensor, view or necessarily clone). Reshape function inputs shape instead of

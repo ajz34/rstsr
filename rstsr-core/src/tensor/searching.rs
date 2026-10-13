@@ -119,6 +119,37 @@ where
 /// # assert_eq!(format!("{}", rt::searchsorted(&x1, &v, "right")), "[ 2]");
 /// ```
 ///
+/// # Overload List
+///
+/// `args` accepts any [`SearchSortedArgs`] conversion:
+///
+/// - `()` / `None`: defaults (`side = "left"`, no sorter).
+/// - `"left"` / `"right"` (`&str`, `String`) or [`SearchSide`]: the insertion side.
+/// - `Vec<usize>` (or `&Vec<usize>`): the `sorter` permutation of `x1`.
+/// - `(side, sorter)`: both, with `side` a [`SearchSide`] or `&str`.
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let x1 = rt::tensor_from_nested!([10, 20, 30], &device);
+/// let v = rt::tensor_from_nested!([20], &device);
+/// println!("{}", rt::searchsorted(&x1, &v, ())); // defaults
+/// // [ 1]
+/// println!("{}", rt::searchsorted(&x1, &v, SearchSide::Right)); // enum side
+/// // [ 2]
+///
+/// // sorter: permutation sorting x1 ascending ([2, 1, 3] -> [1, 2, 3])
+/// let u1 = rt::tensor_from_nested!([2, 1, 3], &device);
+/// let w = rt::tensor_from_nested!([3], &device);
+/// println!("{}", rt::searchsorted(&u1, &w, vec![1usize, 0, 2])); // sorter only
+/// // [ 2]
+/// println!("{}", rt::searchsorted(&u1, &w, (SearchSide::Left, vec![1usize, 0, 2]))); // side + sorter
+/// // [ 2]
+/// # assert_eq!(format!("{}", rt::searchsorted(&x1, &v, SearchSide::Right)), "[ 2]");
+/// # assert_eq!(format!("{}", rt::searchsorted(&u1, &w, vec![1usize, 0, 2])), "[ 2]");
+/// ```
+///
 /// # Notes of API accordance
 ///
 /// - Array-API: `searchsorted(x1, x2, /, *, side='left', sorter=None)` ([`searchsorted`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.searchsorted.html))
@@ -136,6 +167,11 @@ where
 /// For a fallible version, use [`searchsorted_f`].
 ///
 /// # See also
+///
+/// ## Similar function from other crates/libraries
+///
+/// - Python Array API standard: [`searchsorted`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.searchsorted.html)
+/// - NumPy: [`numpy.searchsorted`](https://numpy.org/doc/stable/reference/generated/numpy.searchsorted.html)
 ///
 /// ## Related functions in RSTSR
 ///

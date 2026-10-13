@@ -52,13 +52,6 @@ where
 ///   - If you want to convert the tensor itself (taking the ownership instead of returning view),
 ///     use [`into_expand_dims`] instead.
 ///
-/// # Panics
-///
-/// - If `axis` is greater than the number of axes in the original tensor.
-/// - If expanded axis has duplicated values.
-///
-/// For a fallible version, use [`expand_dims_f`].
-///
 /// # Examples
 ///
 /// Expand dims at axis 0, which is equivalent to `x.i(None)`:
@@ -127,13 +120,47 @@ where
 /// assert_eq!(x.i((None, Ellipsis, None)).shape(), &[1, 2, 1]);
 /// ```
 ///
+/// # Overload List
+///
+/// - `expand_dims(tensor, axis)` — a single integer: insert one size-1 axis at that position.
+/// - `expand_dims(tensor, axes)` — a tuple/list/[`Vec`]/slice of integers: insert several size-1
+///   axes; positions refer to the result axes. Negative values count from the back.
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let x = rt::arange((3, &device));
+/// println!("{:?}", x.expand_dims(0).shape()); // single integer axis
+/// // [1, 3]
+/// println!("{:?}", x.expand_dims([0, 2]).shape()); // list of axes
+/// // [1, 3, 1]
+/// println!("{:?}", x.expand_dims(-1).shape()); // negative index counts from the back
+/// // [3, 1]
+/// # assert_eq!(x.expand_dims(0).shape(), &[1, 3]);
+/// # assert_eq!(x.expand_dims([0, 2]).shape(), &[1, 3, 1]);
+/// # assert_eq!(x.expand_dims(-1).shape(), &[3, 1]);
+/// ```
+///
 /// # Notes of API accordance
 ///
 /// - Array-API: `expand_dims(x, /, axis)` ([`expand_dims` in Array-API](https://data-apis.org/array-api/latest/API_specification/generated/array_api.expand_dims.html))
 /// - NumPy: `expand_dims(a, axis)` ([`numpy.expand_dims`](https://numpy.org/doc/stable/reference/generated/numpy.expand_dims.html))
 /// - RSTSR: `rt::expand_dims(tensor, axes)`
 ///
+/// # Panics
+///
+/// - Panics if `axis` is greater than the number of axes in the original tensor.
+/// - Panics if the expanded axes contain duplicated values.
+///
+/// For a fallible version, use [`expand_dims_f`].
+///
 /// # See also
+///
+/// ## Similar function from other crates/libraries
+///
+/// - Array-API: [`expand_dims`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.expand_dims.html)
+/// - NumPy: [`numpy.expand_dims`](https://numpy.org/doc/stable/reference/generated/numpy.expand_dims.html)
 ///
 /// ## Related functions in RSTSR
 ///

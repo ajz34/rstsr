@@ -67,6 +67,7 @@ where
     }
 }
 
+/// API trait for changing the device of a tensor; mirrors [`TensorDeviceChangeAPI`].
 #[allow(clippy::type_complexity)]
 pub trait TensorChangeFromDevice<'l, BOut>
 where

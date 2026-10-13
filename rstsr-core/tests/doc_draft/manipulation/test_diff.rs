@@ -36,5 +36,25 @@ mod doc_diff {
         assert_eq!(format!("{result}"), "[[ 0 1]\n [ 2 1]]");
         let target = rt::tensor_from_nested!([[0, 1], [2, 1]], &device);
         assert!(rt::allclose(&result, &target, None));
+
+        // # Overload List: one call per distinct axis behavior
+        let y = rt::tensor_from_nested!([1, 4, 9, 16], &device);
+        // default axis (-1)
+        println!("{}", rt::diff(&y, -1, 1, None, None));
+        // [ 3 5 7]
+        assert_eq!(format!("{}", rt::diff(&y, -1, 1, None, None)), "[ 3 5 7]");
+        // explicit axis
+        println!("{}", rt::diff(&y, 0, 1, None, None));
+        // [ 3 5 7]
+        assert_eq!(format!("{}", rt::diff(&y, 0, 1, None, None)), "[ 3 5 7]");
+        // None == last axis
+        println!("{}", rt::diff(&y, None, 1, None, None));
+        // [ 3 5 7]
+        assert_eq!(format!("{}", rt::diff(&y, None, 1, None, None)), "[ 3 5 7]");
+        let app = rt::tensor_from_nested!([25], &device);
+        // second order, with append
+        println!("{}", rt::diff(&y, -1, 2, None, Some(&app)));
+        // [ 2 2 2]
+        assert_eq!(format!("{}", rt::diff(&y, -1, 2, None, Some(&app))), "[ 2 2 2]");
     }
 }

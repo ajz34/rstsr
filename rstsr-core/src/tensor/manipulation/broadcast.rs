@@ -16,8 +16,8 @@ use crate::prelude_dev::*;
 ///
 /// </div>
 ///
-///
 /// See [`order_semantics`](crate::order_semantics) for the two device default orders.
+///
 /// # Parameters
 ///
 /// - `shapes`: A slice of shapes, where each shape is [`IxD`] (`Vec<usize>`).
@@ -88,14 +88,19 @@ use crate::prelude_dev::*;
 ///
 /// # See also
 ///
-/// ## Variants of this function
+/// ## Similar function from other crates/libraries
 ///
-/// - [`broadcast_shapes_f`]: Fallible version, actual implementation.
+/// - Array-API: [`broadcast_shapes`](https://data-apis.org/array-api/2024.12/API_specification/generated/array_api.broadcast_shapes.html)
+/// - NumPy: [`numpy.broadcast_shapes`](https://numpy.org/doc/stable/reference/generated/numpy.broadcast_shapes.html)
 ///
 /// ## Related functions in RSTSR
 ///
 /// - [`broadcast_arrays`]: Broadcasts any number of arrays against each other.
 /// - [`broadcast_to`]: Broadcasts an array to a specified shape.
+///
+/// ## Variants of this function
+///
+/// - [`broadcast_shapes_f`]: Fallible version, actual implementation.
 pub fn broadcast_shapes(shapes: &[IxD], order: FlagOrder) -> IxD {
     broadcast_shapes_f(shapes, order).rstsr_unwrap()
 }
@@ -135,8 +140,8 @@ pub fn broadcast_shapes_f(shapes: &[IxD], order: FlagOrder) -> Result<IxD> {
 ///
 /// </div>
 ///
-///
 /// See [`order_semantics`](crate::order_semantics) for the two device default orders.
+///
 /// # Overloads Table
 ///
 /// Reference-input forms output views sharing the inputs' memory,
@@ -243,6 +248,41 @@ pub fn broadcast_shapes_f(shapes: &[IxD], order: FlagOrder) -> Result<IxD> {
 /// let result = rt::broadcast_arrays_f(vec![a, b]);
 /// ```
 ///
+/// # Overload List
+///
+/// The input kind decides the output ownership:
+///
+/// - `broadcast_arrays(tensors)` with references (`Vec<&TensorAny>`, `&Vec<&TensorAny>` or
+///   `[&TensorAny; N]`): returns `Vec<TensorView<'_, T, B, IxD>>`, stride-0 views over the inputs'
+///   memory (no data copied).
+/// - `broadcast_arrays(tensors)` with owned tensors (`Vec<TensorAny>` or `[TensorAny; N]`): returns
+///   `Vec<TensorAny<R, T, B, IxD>>`, owned stride-0 tensors aliasing the inputs' own storages.
+///
+/// All forms accept only dynamic-shape ([`IxD`]) tensors.
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// // reference inputs -> views (no copy)
+/// let a = rt::asarray((vec![1, 2, 3], &device)).into_shape([3]);
+/// let b = rt::asarray((vec![4, 5], &device)).into_shape([2, 1]);
+/// let views = rt::broadcast_arrays([&a, &b]);
+/// println!("{}", views[0]);
+/// // [[ 1 2 3]
+/// //  [ 1 2 3]]
+///
+/// // owned inputs -> owned stride-0 tensors
+/// let a = rt::asarray((vec![1, 2, 3], &device)).into_shape([3]);
+/// let b = rt::asarray((vec![4, 5], &device)).into_shape([2, 1]);
+/// let owned = rt::broadcast_arrays(vec![a, b]);
+/// println!("{}", owned[1]);
+/// // [[ 4 4 4]
+/// //  [ 5 5 5]]
+/// # assert_eq!(format!("{}", views[0]), "[[ 1 2 3]\n [ 1 2 3]]");
+/// # assert_eq!(format!("{}", owned[1]), "[[ 4 4 4]\n [ 5 5 5]]");
+/// ```
+///
 /// # Notes of API accordance
 ///
 /// - Array-API: `broadcast_arrays(*arrays)` ([`broadcast_arrays`](https://data-apis.org/array-api/2024.12/API_specification/generated/array_api.broadcast_arrays.html))
@@ -256,6 +296,11 @@ pub fn broadcast_shapes_f(shapes: &[IxD], order: FlagOrder) -> Result<IxD> {
 /// For a fallible version, use [`broadcast_arrays_f`].
 ///
 /// # See also
+///
+/// ## Similar function from other crates/libraries
+///
+/// - Array-API: [`broadcast_arrays`](https://data-apis.org/array-api/2024.12/API_specification/generated/array_api.broadcast_arrays.html)
+/// - NumPy: [`numpy.broadcast_arrays`](https://numpy.org/doc/stable/reference/generated/numpy.broadcast_arrays.html)
 ///
 /// ## Related functions in RSTSR
 ///
@@ -427,8 +472,8 @@ where
 ///
 /// </div>
 ///
-///
 /// See [`order_semantics`](crate::order_semantics) for the two device default orders.
+///
 /// # Parameters
 ///
 /// - `tensor`: [`&TensorAny<R, T, B, D>`](TensorAny)
@@ -499,48 +544,6 @@ where
 /// // [[ 1 1]
 /// //  [ 2 2]
 /// //  [ 3 3]]
-/// ```
-///
-/// # Tips on common compilation errors
-///
-/// You may encounter compilation errors related to shape types like:
-///
-/// ```compile_fail
-/// # use rstsr::prelude::*;
-/// # let mut device = DeviceCpu::default();
-/// # device.set_default_order(RowMajor);
-/// let input_array: Tensor<i32, _> = rt::asarray((0, &device));
-/// let result = rt::broadcast_to(&input_array, [3]);
-/// ```
-///
-/// ```text
-///  33 |         let result = rt::broadcast_to(&input_array, [3]);
-///     |                      ---------------- ^^^^^^^^^^^^ expected `[usize; 1]`, found `Vec<usize>`
-///     |                      |
-///     |                      required by a bound introduced by this call
-///     |
-///     = note: expected array `[usize; 1]`
-///               found struct `std::vec::Vec<usize>`
-/// note: required by a bound in `rstsr_core::prelude_dev::to_broadcast`
-///    --> rstsr-core/src/tensor/manipulation/broadcast.rs:427:31
-///     |
-/// 425 | pub fn to_broadcast<R, T, B, D, D2>(tensor: &TensorAny<R, T, B, D>, shape: D2) -> TensorView<'_, T, B, D2>
-///     |        ------------ required by a bound in this function
-/// 426 | where
-/// 427 |     D: DimAPI + DimMaxAPI<D2, Max = D2>,
-///     |                               ^^^^^^^^ required by this bound in `to_broadcast`
-/// ```
-///
-/// To resolve this, you are suggested to use [`IxD`] (`Vec<usize>`) to specify the shape, instead
-/// of [`Ix<N>`] (`[usize; N]`), unless you are an advanced API caller to handle static-shape
-/// tensors.
-///
-/// ```rust
-/// # use rstsr::prelude::*;
-/// # let mut device = DeviceCpu::default();
-/// # device.set_default_order(RowMajor);
-/// let input_array: Tensor<i32, _> = rt::asarray((0, &device));
-/// let result = rt::broadcast_to(&input_array, vec![3]);
 /// ```
 ///
 /// # Elaborated examples
@@ -675,6 +678,48 @@ where
 /// assert_eq!(result.shape(), &[5, 3, 15]);
 /// ```
 ///
+/// # Tips on common compilation errors
+///
+/// You may encounter compilation errors related to shape types like:
+///
+/// ```compile_fail
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let input_array: Tensor<i32, _> = rt::asarray((0, &device));
+/// let result = rt::broadcast_to(&input_array, [3]);
+/// ```
+///
+/// ```text
+///  33 |         let result = rt::broadcast_to(&input_array, [3]);
+///     |                      ---------------- ^^^^^^^^^^^^ expected `[usize; 1]`, found `Vec<usize>`
+///     |                      |
+///     |                      required by a bound introduced by this call
+///     |
+///     = note: expected array `[usize; 1]`
+///               found struct `std::vec::Vec<usize>`
+/// note: required by a bound in `rstsr_core::prelude_dev::to_broadcast`
+///    --> rstsr-core/src/tensor/manipulation/broadcast.rs:427:31
+///     |
+/// 425 | pub fn to_broadcast<R, T, B, D, D2>(tensor: &TensorAny<R, T, B, D>, shape: D2) -> TensorView<'_, T, B, D2>
+///     |        ------------ required by a bound in this function
+/// 426 | where
+/// 427 |     D: DimAPI + DimMaxAPI<D2, Max = D2>,
+///     |                               ^^^^^^^^ required by this bound in `to_broadcast`
+/// ```
+///
+/// To resolve this, you are suggested to use [`IxD`] (`Vec<usize>`) to specify the shape, instead
+/// of [`Ix<N>`] (`[usize; N]`), unless you are an advanced API caller to handle static-shape
+/// tensors.
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let input_array: Tensor<i32, _> = rt::asarray((0, &device));
+/// let result = rt::broadcast_to(&input_array, vec![3]);
+/// ```
+///
 /// # Notes of API accordance
 ///
 /// - Array-API: `broadcast_to(x, /, shape)` ([`broadcast_to`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.broadcast_to.html))
@@ -690,8 +735,10 @@ where
 ///
 /// # See also
 ///
-/// ## Detailed broadcasting rules
+/// ## Similar function from other crates/libraries
 ///
+/// - NumPy: [`numpy.broadcast_to`](https://numpy.org/doc/stable/reference/generated/numpy.broadcast_to.html)
+/// - ndarray: [`ArrayBase::broadcast`](https://docs.rs/ndarray/latest/ndarray/struct.ArrayBase.html#method.broadcast)
 /// - Array-API: [Broadcasting rules](https://data-apis.org/array-api/latest/API_specification/broadcasting.html)
 /// - NumPy: [Broadcasting](https://numpy.org/doc/stable/user/basics.broadcasting.html)
 ///

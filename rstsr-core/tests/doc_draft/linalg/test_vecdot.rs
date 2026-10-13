@@ -21,6 +21,7 @@ mod doc_vecdot {
         let result = rt::vecdot(&a, &b, None);
         println!("{result}");
         // 32
+        assert_eq!(format!("{result}"), "32");
         assert_eq!(result.to_scalar(), 32);
 
         // 2-dim dot product
@@ -29,6 +30,7 @@ mod doc_vecdot {
         let result = rt::vecdot(&a, &b, None);
         println!("{result}");
         // [ 17 53]
+        assert_eq!(format!("{result}"), "[ 17 53]");
         let expected = rt::tensor_from_nested!([17, 53], &device);
         assert!(rt::allclose(&result, &expected, None));
 
@@ -38,6 +40,7 @@ mod doc_vecdot {
         let result = rt::vecdot(&a, &b, None);
         println!("{result}");
         // [ 3 8 10]
+        assert_eq!(format!("{result}"), "[ 3 8 10]");
         let expected = rt::tensor_from_nested!([3., 8., 10.], &device);
         assert!(rt::allclose(&result, &expected, None));
 
@@ -50,6 +53,7 @@ mod doc_vecdot {
         let result = rt::vecdot(&a, &b, None);
         println!("{result}");
         // 14+5i
+        assert_eq!(format!("{result}"), "14+5i");
         assert_eq!(result.to_scalar(), c64(14., 5.));
 
         // same axes in both inputs ([0, 1] is shorthand for ([0, 1], [0, 1]))
@@ -59,6 +63,45 @@ mod doc_vecdot {
         assert!(rt::allclose(&result, rt::vecdot(&a, &b, ([0, 1], [0, 1])), None));
         println!("{result}");
         // 70
+        assert_eq!(format!("{result}"), "70");
         assert_eq!(result.to_scalar(), 70);
+    }
+}
+
+// # Overload List snippet: one call per distinct axes_pair behavior
+#[cfg(test)]
+mod doc_vecdot_overload {
+    use super::*;
+    static FUNC: &str = "doc_vecdot_overload";
+
+    #[test]
+    fn test_vecdot() {
+        crate::specify_test!("test_vecdot");
+
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        let a = rt::tensor_from_nested!([[1, 2], [3, 4]], &device);
+        let b = rt::tensor_from_nested!([[5, 6], [7, 8]], &device);
+
+        // None (or ()): the default, contracting the last axis
+        println!("{}", rt::vecdot(&a, &b, None));
+        // [ 17 53]
+        assert_eq!(format!("{}", rt::vecdot(&a, &b, None)), "[ 17 53]");
+
+        // integer: contract that axis in both operands
+        println!("{}", rt::vecdot(&a, &b, 0));
+        // [ 26 44]
+        assert_eq!(format!("{}", rt::vecdot(&a, &b, 0)), "[ 26 44]");
+
+        // (axes_a, axes_b): contract different axes of each operand
+        println!("{}", rt::vecdot(&a, &b, ([0, 1], [0, 1])));
+        // 70
+        assert_eq!(format!("{}", rt::vecdot(&a, &b, ([0, 1], [0, 1]))), "70");
+
+        // bare collection: shorthand for the same axes in both operands
+        println!("{}", rt::vecdot(&a, &b, [0, 1]));
+        // 70
+        assert_eq!(format!("{}", rt::vecdot(&a, &b, [0, 1])), "70");
     }
 }

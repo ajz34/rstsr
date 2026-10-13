@@ -30,6 +30,14 @@ mod doc_arange {
         assert_eq!(format!("{}", rt::arange((2, 10, &device))), "[ 2 3 4 5 6 7 8 9]");
         assert_eq!(format!("{}", rt::arange((10, 0, -3, &device))), "[ 10 7 4 1]");
         assert_eq!(format!("{}", rt::arange(5)), "[ 0 1 2 3 4]");
+
+        // # Overload List snippet: one call per distinct behavior (device-less forms)
+        println!("{}", rt::arange((2, 10)));
+        // [ 2 3 4 5 6 7 8 9]
+        assert_eq!(format!("{}", rt::arange((2, 10))), "[ 2 3 4 5 6 7 8 9]");
+        println!("{}", rt::arange((10, 0, -3)));
+        // [ 10 7 4 1]
+        assert_eq!(format!("{}", rt::arange((10, 0, -3))), "[ 10 7 4 1]");
     }
 }
 
@@ -54,6 +62,16 @@ mod doc_linspace {
         println!("{y}");
         // [ 0 2 4 6 8]
         assert_eq!(y.to_vec(), vec![0.0, 2.0, 4.0, 6.0, 8.0]);
+        assert_eq!(format!("{y}"), "[ 0 2 4 6 8]");
+
+        // # Overload List snippet: implicit endpoint, then explicit endpoint (device-less forms)
+        let y: Tensor<f64, _> = rt::linspace((0.0, 1.0, 5));
+        println!("{y}");
+        // [ 0 0.25 0.5 0.75 1]
+        assert_eq!(format!("{y}"), "[ 0 0.25 0.5 0.75 1]");
+        let y: Tensor<f64, _> = rt::linspace((0.0, 10.0, 5, false));
+        println!("{y}");
+        // [ 0 2 4 6 8]
         assert_eq!(format!("{y}"), "[ 0 2 4 6 8]");
     }
 }
@@ -103,6 +121,111 @@ mod doc_zeros_ones_full {
             format!("{:?}", zf.layout()),
             "2-Dim (dyn), contiguous: Ff\nshape: [2, 3], stride: [1, 2], offset: 0"
         );
+
+        // # Overload List snippet: shape / shape + order / layout, per family member
+        let z_shape: Tensor<i32, _> = rt::zeros(([2, 2], &device));
+        println!("{z_shape}");
+        // [[ 0 0]
+        //  [ 0 0]]
+        assert_eq!(format!("{z_shape}"), "[[ 0 0]\n [ 0 0]]");
+        let z_order: Tensor<i32, _> = rt::zeros(([2, 3], ColMajor, &device));
+        println!("{:?}", z_order.layout());
+        // 2-Dim (dyn), contiguous: Ff
+        // shape: [2, 3], stride: [1, 2], offset: 0
+        assert_eq!(
+            format!("{:?}", z_order.layout()),
+            "2-Dim (dyn), contiguous: Ff\nshape: [2, 3], stride: [1, 2], offset: 0"
+        );
+        let z_layout: Tensor<i32, _> = rt::zeros(([2, 3].c(), &device));
+        println!("{:?}", z_layout.layout());
+        // 2-Dim (dyn), contiguous: Cc
+        // shape: [2, 3], stride: [3, 1], offset: 0
+        assert_eq!(
+            format!("{:?}", z_layout.layout()),
+            "2-Dim (dyn), contiguous: Cc\nshape: [2, 3], stride: [3, 1], offset: 0"
+        );
+        // device-less forms create the tensor on DeviceCpu
+        let z_cpu: Tensor<i32, _> = rt::zeros([2, 2]);
+        println!("{z_cpu}");
+        // [[ 0 0]
+        //  [ 0 0]]
+        assert_eq!(format!("{z_cpu}"), "[[ 0 0]\n [ 0 0]]");
+        let z_cpu_order: Tensor<i32, _> = rt::zeros(([2, 2], RowMajor));
+        println!("{:?}", z_cpu_order.layout());
+        // 2-Dim (dyn), contiguous: Cc
+        // shape: [2, 2], stride: [2, 1], offset: 0
+        assert_eq!(
+            format!("{:?}", z_cpu_order.layout()),
+            "2-Dim (dyn), contiguous: Cc\nshape: [2, 2], stride: [2, 1], offset: 0"
+        );
+        let z_cpu_layout: Tensor<i32, _> = rt::zeros([2, 3].c());
+        println!("{:?}", z_cpu_layout.layout());
+        // 2-Dim (dyn), contiguous: Cc
+        // shape: [2, 3], stride: [3, 1], offset: 0
+        assert_eq!(
+            format!("{:?}", z_cpu_layout.layout()),
+            "2-Dim (dyn), contiguous: Cc\nshape: [2, 3], stride: [3, 1], offset: 0"
+        );
+
+        let o_order: Tensor<i32, _> = rt::ones(([2, 3], ColMajor, &device));
+        println!("{:?}", o_order.layout());
+        // 2-Dim (dyn), contiguous: Ff
+        // shape: [2, 3], stride: [1, 2], offset: 0
+        assert_eq!(
+            format!("{:?}", o_order.layout()),
+            "2-Dim (dyn), contiguous: Ff\nshape: [2, 3], stride: [1, 2], offset: 0"
+        );
+        let o_layout: Tensor<i32, _> = rt::ones(([2, 3].c(), &device));
+        println!("{:?}", o_layout.layout());
+        // 2-Dim (dyn), contiguous: Cc
+        // shape: [2, 3], stride: [3, 1], offset: 0
+        assert_eq!(
+            format!("{:?}", o_layout.layout()),
+            "2-Dim (dyn), contiguous: Cc\nshape: [2, 3], stride: [3, 1], offset: 0"
+        );
+        let o_cpu: Tensor<i32, _> = rt::ones([2, 2]);
+        println!("{o_cpu}");
+        // [[ 1 1]
+        //  [ 1 1]]
+        assert_eq!(format!("{o_cpu}"), "[[ 1 1]\n [ 1 1]]");
+        let o_cpu_order: Tensor<i32, _> = rt::ones(([2, 2], RowMajor));
+        println!("{}", o_cpu_order.shape()[0]);
+        // 2
+        assert_eq!(o_cpu_order.shape(), &[2, 2]);
+        let o_cpu_layout: Tensor<i32, _> = rt::ones([2, 3].c());
+        println!("{}", o_cpu_layout.shape()[1]);
+        // 3
+        assert_eq!(o_cpu_layout.shape(), &[2, 3]);
+
+        let f_order: Tensor<i32, _> = rt::full(([2, 3], 7, ColMajor, &device));
+        println!("{:?}", f_order.layout());
+        // 2-Dim (dyn), contiguous: Ff
+        // shape: [2, 3], stride: [1, 2], offset: 0
+        assert_eq!(
+            format!("{:?}", f_order.layout()),
+            "2-Dim (dyn), contiguous: Ff\nshape: [2, 3], stride: [1, 2], offset: 0"
+        );
+        let f_layout: Tensor<i32, _> = rt::full(([2, 3].c(), 7, &device));
+        println!("{:?}", f_layout.layout());
+        // 2-Dim (dyn), contiguous: Cc
+        // shape: [2, 3], stride: [3, 1], offset: 0
+        assert_eq!(
+            format!("{:?}", f_layout.layout()),
+            "2-Dim (dyn), contiguous: Cc\nshape: [2, 3], stride: [3, 1], offset: 0"
+        );
+        let f_cpu: Tensor<i32, _> = rt::full(([2, 2], 7));
+        println!("{f_cpu}");
+        // [[ 7 7]
+        //  [ 7 7]]
+        assert_eq!(format!("{f_cpu}"), "[[ 7 7]\n [ 7 7]]");
+        let f_cpu_order: Tensor<i32, _> = rt::full(([2, 2], 7, RowMajor));
+        println!("{}", f_cpu_order.shape()[0]);
+        // 2
+        assert_eq!(f_cpu_order.shape(), &[2, 2]);
+        let f_cpu_layout: Tensor<i32, _> = rt::full(([2, 3].c(), 7));
+        println!("{}", f_cpu_layout.shape()[1]);
+        // 3
+        assert_eq!(f_cpu_layout.shape(), &[2, 3]);
     }
 }
 
@@ -156,6 +279,34 @@ mod doc_eye {
             &e,
             rt::tensor_from_nested!([[1, 0, 0, 0, 0], [0, 1, 0, 0, 0], [0, 0, 1, 0, 0]], &device_c),
             None,
+        );
+
+        // # Overload List snippet: square `n`, shape + k, explicit order
+        let e: Tensor<i32, _> = rt::eye(3);
+        println!("{e}");
+        // [[ 1 0 0]
+        //  [ 0 1 0]
+        //  [ 0 0 1]]
+        assert_eq!(format!("{e}"), "[[ 1 0 0]\n [ 0 1 0]\n [ 0 0 1]]");
+        let e: Tensor<i32, _> = rt::eye((3, 5, 1));
+        println!("{}", e.shape()[1]);
+        // 5
+        assert_eq!(e.shape(), &[3, 5]);
+        let e: Tensor<i32, _> = rt::eye((3, 5, 0, ColMajor));
+        println!("{:?}", e.layout());
+        // 2-Dim (dyn), contiguous: Ff
+        // shape: [3, 5], stride: [1, 3], offset: 0
+        assert_eq!(
+            format!("{:?}", e.layout()),
+            "2-Dim (dyn), contiguous: Ff\nshape: [3, 5], stride: [1, 3], offset: 0"
+        );
+        let e: Tensor<i32, _> = rt::eye((3, 5, 0, ColMajor, &device));
+        println!("{:?}", e.layout());
+        // 2-Dim (dyn), contiguous: Ff
+        // shape: [3, 5], stride: [1, 3], offset: 0
+        assert_eq!(
+            format!("{:?}", e.layout()),
+            "2-Dim (dyn), contiguous: Ff\nshape: [3, 5], stride: [1, 3], offset: 0"
         );
     }
 }
@@ -229,6 +380,57 @@ mod doc_tril_triu {
             rt::tensor_from_nested!([[0, 0, 0], [4, 0, 0], [7, 8, 0]], &device_c),
             None,
         );
+
+        // # Overload List snippet: borrowed (copy) vs owned (in place); `k` defaults to 0
+        let a = rt::arange((1, 10, &device)).into_shape([3, 3]);
+        // borrowed input: a new owned tensor, `a` unchanged
+        println!("{}", rt::tril(&a));
+        // [[ 1 0 0]
+        //  [ 4 5 0]
+        //  [ 7 8 9]]
+        assert_eq!(format!("{}", rt::tril(&a)), "[[ 1 0 0]\n [ 4 5 0]\n [ 7 8 9]]");
+        // owned input: masked in place
+        println!("{}", rt::tril((a.clone(), 1)));
+        // [[ 1 2 0]
+        //  [ 4 5 6]
+        //  [ 7 8 9]]
+        assert_eq!(format!("{}", rt::tril((a.clone(), 1))), "[[ 1 2 0]\n [ 4 5 6]\n [ 7 8 9]]");
+
+        // Overloads Table coverage: every ownership form
+        println!("{}", rt::tril((a.view(), 1)));
+        // [[ 1 2 0]
+        //  [ 4 5 6]
+        //  [ 7 8 9]]
+        assert_eq!(format!("{}", rt::tril((a.view(), 1))), "[[ 1 2 0]\n [ 4 5 6]\n [ 7 8 9]]");
+        assert_eq!(format!("{}", rt::tril(a.view())), "[[ 1 0 0]\n [ 4 5 0]\n [ 7 8 9]]");
+        assert_eq!(format!("{}", rt::tril(a.clone())), "[[ 1 0 0]\n [ 4 5 0]\n [ 7 8 9]]");
+        let mut m = a.clone();
+        let mv = rt::tril(m.view_mut());
+        assert_eq!(format!("{mv}"), "[[ 1 0 0]\n [ 4 5 0]\n [ 7 8 9]]");
+        let mut m2 = a.clone();
+        let mv2 = rt::tril((m2.view_mut(), 1));
+        assert_eq!(format!("{mv2}"), "[[ 1 2 0]\n [ 4 5 6]\n [ 7 8 9]]");
+
+        // triu: same overload set
+        println!("{}", rt::triu(&a));
+        // [[ 1 2 3]
+        //  [ 0 5 6]
+        //  [ 0 0 9]]
+        assert_eq!(format!("{}", rt::triu(&a)), "[[ 1 2 3]\n [ 0 5 6]\n [ 0 0 9]]");
+        println!("{}", rt::triu((a.clone(), 1)));
+        // [[ 0 2 3]
+        //  [ 0 0 6]
+        //  [ 0 0 0]]
+        assert_eq!(format!("{}", rt::triu((a.clone(), 1))), "[[ 0 2 3]\n [ 0 0 6]\n [ 0 0 0]]");
+        assert_eq!(format!("{}", rt::triu((a.view(), 1))), "[[ 0 2 3]\n [ 0 0 6]\n [ 0 0 0]]");
+        assert_eq!(format!("{}", rt::triu(a.view())), "[[ 1 2 3]\n [ 0 5 6]\n [ 0 0 9]]");
+        assert_eq!(format!("{}", rt::triu(a.clone())), "[[ 1 2 3]\n [ 0 5 6]\n [ 0 0 9]]");
+        let mut m = a.clone();
+        let mv = rt::triu(m.view_mut());
+        assert_eq!(format!("{mv}"), "[[ 1 2 3]\n [ 0 5 6]\n [ 0 0 9]]");
+        let mut m2 = a.clone();
+        let mv2 = rt::triu((m2.view_mut(), 1));
+        assert_eq!(format!("{mv2}"), "[[ 0 2 3]\n [ 0 0 6]\n [ 0 0 0]]");
     }
 }
 
@@ -260,6 +462,57 @@ mod doc_empty_uninit {
         // [[ 0 1]
         //  [ 2 3]]
         assert_eq!(format!("{a}"), "[[ 0 1]\n [ 2 3]]");
+
+        // # Overload List snippet: shape / shape + order / layout forms
+        let a: Tensor<i32, _> = unsafe { rt::empty([2, 2]) };
+        println!("{:?}", a.layout());
+        // 2-Dim (dyn), contiguous: Cc
+        // shape: [2, 2], stride: [2, 1], offset: 0
+        assert_eq!(
+            format!("{:?}", a.layout()),
+            "2-Dim (dyn), contiguous: Cc\nshape: [2, 2], stride: [2, 1], offset: 0"
+        );
+        let a: Tensor<i32, _> = unsafe { rt::empty(([2, 3], ColMajor, &device)) };
+        println!("{:?}", a.layout());
+        // 2-Dim (dyn), contiguous: Ff
+        // shape: [2, 3], stride: [1, 2], offset: 0
+        assert_eq!(
+            format!("{:?}", a.layout()),
+            "2-Dim (dyn), contiguous: Ff\nshape: [2, 3], stride: [1, 2], offset: 0"
+        );
+        let a: Tensor<i32, _> = unsafe { rt::empty([2, 3].c()) };
+        println!("{:?}", a.layout());
+        // 2-Dim (dyn), contiguous: Cc
+        // shape: [2, 3], stride: [3, 1], offset: 0
+        assert_eq!(
+            format!("{:?}", a.layout()),
+            "2-Dim (dyn), contiguous: Cc\nshape: [2, 3], stride: [3, 1], offset: 0"
+        );
+
+        let u: Tensor<core::mem::MaybeUninit<i32>, _> = rt::uninit([2, 2]);
+        println!("{:?}", u.layout());
+        // 2-Dim (dyn), contiguous: Cc
+        // shape: [2, 2], stride: [2, 1], offset: 0
+        assert_eq!(
+            format!("{:?}", u.layout()),
+            "2-Dim (dyn), contiguous: Cc\nshape: [2, 2], stride: [2, 1], offset: 0"
+        );
+        let u: Tensor<core::mem::MaybeUninit<i32>, _> = rt::uninit(([2, 3], ColMajor, &device));
+        println!("{:?}", u.layout());
+        // 2-Dim (dyn), contiguous: Ff
+        // shape: [2, 3], stride: [1, 2], offset: 0
+        assert_eq!(
+            format!("{:?}", u.layout()),
+            "2-Dim (dyn), contiguous: Ff\nshape: [2, 3], stride: [1, 2], offset: 0"
+        );
+        let u: Tensor<core::mem::MaybeUninit<i32>, _> = rt::uninit([2, 3].c());
+        println!("{:?}", u.layout());
+        // 2-Dim (dyn), contiguous: Cc
+        // shape: [2, 3], stride: [3, 1], offset: 0
+        assert_eq!(
+            format!("{:?}", u.layout()),
+            "2-Dim (dyn), contiguous: Cc\nshape: [2, 3], stride: [3, 1], offset: 0"
+        );
     }
 }
 
@@ -295,6 +548,111 @@ mod doc_like_family {
             format!("{:?}", z.layout()),
             "3-Dim (dyn), contiguous: Cc\nshape: [4, 2, 3], stride: [6, 3, 1], offset: 0"
         );
+
+        // # Overload List snippet: bare (K), explicit order, explicit device
+        let a2 = rt::arange((6, &device)).into_shape([2, 3]);
+        let z = rt::zeros_like(&a2);
+        println!("{:?}", z.layout());
+        // 2-Dim (dyn), contiguous: Cc
+        // shape: [2, 3], stride: [3, 1], offset: 0
+        assert_eq!(
+            format!("{:?}", z.layout()),
+            "2-Dim (dyn), contiguous: Cc\nshape: [2, 3], stride: [3, 1], offset: 0"
+        );
+        let z = rt::zeros_like((&a2, TensorIterOrder::F));
+        println!("{:?}", z.layout());
+        // 2-Dim (dyn), contiguous: Ff
+        // shape: [2, 3], stride: [1, 2], offset: 0
+        assert_eq!(
+            format!("{:?}", z.layout()),
+            "2-Dim (dyn), contiguous: Ff\nshape: [2, 3], stride: [1, 2], offset: 0"
+        );
+        let z = rt::zeros_like((&a2, &device));
+        println!("{}", z.shape()[1]);
+        // 3
+        assert_eq!(z.shape(), &[2, 3]);
+        let z = rt::zeros_like((&a2, TensorIterOrder::C, &device));
+        println!("{:?}", z.layout());
+        // 2-Dim (dyn), contiguous: Cc
+        // shape: [2, 3], stride: [3, 1], offset: 0
+        assert_eq!(
+            format!("{:?}", z.layout()),
+            "2-Dim (dyn), contiguous: Cc\nshape: [2, 3], stride: [3, 1], offset: 0"
+        );
+
+        // Overloads Table coverage: every form of each `*_like` function
+        let o = rt::ones_like(&a2);
+        println!("{o}");
+        // [[ 1 1 1]
+        //  [ 1 1 1]]
+        assert_eq!(format!("{o}"), "[[ 1 1 1]\n [ 1 1 1]]");
+        let o = rt::ones_like((&a2, TensorIterOrder::F));
+        println!("{:?}", o.layout());
+        // 2-Dim (dyn), contiguous: Ff
+        // shape: [2, 3], stride: [1, 2], offset: 0
+        assert_eq!(
+            format!("{:?}", o.layout()),
+            "2-Dim (dyn), contiguous: Ff\nshape: [2, 3], stride: [1, 2], offset: 0"
+        );
+        let o = rt::ones_like((&a2, &device));
+        println!("{}", o.shape()[0]);
+        // 2
+        assert_eq!(o.shape(), &[2, 3]);
+        let o = rt::ones_like((&a2, TensorIterOrder::C, &device));
+        println!("{}", o.shape()[1]);
+        // 3
+        assert_eq!(o.shape(), &[2, 3]);
+
+        let f = rt::full_like((&a2, 9));
+        println!("{f}");
+        // [[ 9 9 9]
+        //  [ 9 9 9]]
+        assert_eq!(format!("{f}"), "[[ 9 9 9]\n [ 9 9 9]]");
+        let f = rt::full_like((&a2, 9, TensorIterOrder::F));
+        println!("{:?}", f.layout());
+        // 2-Dim (dyn), contiguous: Ff
+        // shape: [2, 3], stride: [1, 2], offset: 0
+        assert_eq!(
+            format!("{:?}", f.layout()),
+            "2-Dim (dyn), contiguous: Ff\nshape: [2, 3], stride: [1, 2], offset: 0"
+        );
+        let f = rt::full_like((&a2, 9, &device));
+        println!("{}", f.shape()[0]);
+        // 2
+        assert_eq!(f.shape(), &[2, 3]);
+        let f = rt::full_like((&a2, 9, TensorIterOrder::C, &device));
+        println!("{}", f.shape()[1]);
+        // 3
+        assert_eq!(f.shape(), &[2, 3]);
+
+        let mut e = unsafe { rt::empty_like(&a2) };
+        e.fill(0);
+        println!("{:?}", e.layout());
+        // 2-Dim (dyn), contiguous: Cc
+        // shape: [2, 3], stride: [3, 1], offset: 0
+        assert_eq!(
+            format!("{:?}", e.layout()),
+            "2-Dim (dyn), contiguous: Cc\nshape: [2, 3], stride: [3, 1], offset: 0"
+        );
+        let mut e = unsafe { rt::empty_like((&a2, TensorIterOrder::F)) };
+        e.fill(0);
+        println!("{:?}", e.layout());
+        // 2-Dim (dyn), contiguous: Ff
+        // shape: [2, 3], stride: [1, 2], offset: 0
+        assert_eq!(
+            format!("{:?}", e.layout()),
+            "2-Dim (dyn), contiguous: Ff\nshape: [2, 3], stride: [1, 2], offset: 0"
+        );
+        let mut e = unsafe { rt::empty_like((&a2, &device)) };
+        e.fill(0);
+        println!("{}", e.shape()[0]);
+        // 2
+        assert_eq!(e.shape(), &[2, 3]);
+        let mut e = unsafe { rt::empty_like((&a2, TensorIterOrder::C, &device)) };
+        e.fill(0);
+        println!("{}", e.shape()[1]);
+        // 3
+        assert_eq!(e.shape(), &[2, 3]);
     }
 }
 

@@ -295,6 +295,17 @@ where
 ///
 /// # See also
 ///
+/// ## Similar function from other crates/libraries
+///
+/// - Python Array API standard: [`unique_values`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.unique_values.html)
+/// - NumPy: [`numpy.unique`](https://numpy.org/doc/stable/reference/generated/numpy.unique.html)
+///
+/// ## Related functions in RSTSR
+///
+/// - [`unique_counts`], [`unique_inverse`], [`unique_all`]: the same ordering with auxiliary
+///   fields.
+/// - [`isin`]: element membership against another tensor.
+///
 /// ## Variants of this function
 ///
 /// - [`unique_values_f`]: fallible version.
@@ -421,6 +432,17 @@ where
 ///
 /// # See also
 ///
+/// ## Similar function from other crates/libraries
+///
+/// - Python Array API standard: [`unique_counts`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.unique_counts.html)
+/// - NumPy: [`numpy.unique`](https://numpy.org/doc/stable/reference/generated/numpy.unique.html)
+///   (`return_counts=True`)
+///
+/// ## Related functions in RSTSR
+///
+/// - [`unique_values`]: the values alone.
+/// - [`unique_inverse`], [`unique_all`]: other auxiliary fields.
+///
 /// ## Variants of this function
 ///
 /// - [`unique_counts_f`]: fallible version.
@@ -544,6 +566,17 @@ where
 /// - RSTSR: `rt::unique_inverse(tensor)`
 ///
 /// # See also
+///
+/// ## Similar function from other crates/libraries
+///
+/// - Python Array API standard: [`unique_inverse`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.unique_inverse.html)
+/// - NumPy: [`numpy.unique`](https://numpy.org/doc/stable/reference/generated/numpy.unique.html)
+///   (`return_inverse=True`)
+///
+/// ## Related functions in RSTSR
+///
+/// - [`unique_values`]: the values alone.
+/// - [`unique_counts`], [`unique_all`]: other auxiliary fields.
 ///
 /// ## Variants of this function
 ///
@@ -684,6 +717,17 @@ where
 ///
 /// # See also
 ///
+/// ## Similar function from other crates/libraries
+///
+/// - Python Array API standard: [`unique_all`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.unique_all.html)
+/// - NumPy: [`numpy.unique`](https://numpy.org/doc/stable/reference/generated/numpy.unique.html)
+///   (`return_index=True, return_inverse=True, return_counts=True`)
+///
+/// ## Related functions in RSTSR
+///
+/// - [`unique_values`]: the values alone.
+/// - [`unique_counts`], [`unique_inverse`]: other auxiliary fields.
+///
 /// ## Variants of this function
 ///
 /// - [`unique_all_f`]: fallible version.
@@ -806,7 +850,23 @@ where
 /// `test_elements`, the array-api standard does not (rstsr follows the
 /// standard).
 ///
+/// # Panics
+///
+/// - Panics if `x1` and `x2` are on different devices.
+///
+/// For a fallible version, use [`isin_f`].
+///
 /// # See also
+///
+/// ## Similar function from other crates/libraries
+///
+/// - Python Array API standard: [`isin`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.isin.html)
+/// - NumPy: [`numpy.isin`](https://numpy.org/doc/stable/reference/generated/numpy.isin.html)
+///
+/// ## Related functions in RSTSR
+///
+/// - [`unique_values`]: the distinct values of a tensor.
+/// - [`searchsorted`]: positional lookup instead of membership.
 ///
 /// ## Variants of this function
 ///

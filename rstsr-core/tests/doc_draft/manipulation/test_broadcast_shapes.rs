@@ -39,6 +39,7 @@ mod doc_broadcast_shapes {
         println!("{:?}", result);
         // [5, 6, 7, 8]
         assert_eq!(result, vec![5, 6, 7, 8]);
+        assert_eq!(format!("{result:?}"), "[5, 6, 7, 8]");
     }
 
     #[test]
@@ -51,5 +52,6 @@ mod doc_broadcast_shapes {
         println!("{:?}", result);
         // [3, 2]
         assert_eq!(result, vec![3, 2]);
+        assert_eq!(format!("{result:?}"), "[3, 2]");
     }
 }

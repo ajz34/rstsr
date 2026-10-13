@@ -20,6 +20,8 @@ where
 /// This function converts the dimensionality of a tensor's layout to a target dimension type.
 /// No data is copied; only the layout representation is modified.
 ///
+/// This function behaves identically under [`RowMajor`] and [`ColMajor`] device default orders.
+///
 /// # Parameters
 ///
 /// - `tensor`: [`&TensorAny<R, T, B, D>`](TensorAny)
@@ -29,8 +31,8 @@ where
 /// - generic parameter `D2`: [`DimAPI`]
 ///
 ///   - Target dimension type.
-///   - [`IxD`] or [`IxDyn`] (equilvalent to [`Vec<usize>`]) can be used for dynamic dimension.
-///   - [`Ix<N>`] (given `const N: usize`, equilvalent to [`[usize; N]`](https://doc.rust-lang.org/core/primitive.array.html))
+///   - [`IxD`] or [`IxDyn`] (equivalent to [`Vec<usize>`]) can be used for dynamic dimension.
+///   - [`Ix<N>`] (given `const N: usize`, equivalent to [`[usize; N]`](https://doc.rust-lang.org/core/primitive.array.html))
 ///     can be used for static dimension.
 ///   - Dynamic dimensionality is usually more preferred for general use cases, while static
 ///     dimensionality is more suitable for performance-critical code, especially frequent indexing
@@ -47,55 +49,55 @@ where
 ///
 /// # Examples
 ///
-/// In most cases, RSTSR will generate dynamic dimension ([`IxD`]) in most cases, including indexing
-/// [`slice`](slice()), reshaping [`reshape`], creation [`asarray`].
+/// In most cases RSTSR produces dynamic dimensions ([`IxD`]): indexing
+/// ([`slice`](slice())), reshaping ([`reshape`]), and creation ([`asarray`]). `const_ndim`
+/// reports whether a dimension is static or dynamic.
 ///
-/// You can debug print tensor or it's layout to verify the dimensionality, or call `const_ndim` to
-/// check whether the dimension is static or dynamic.
+/// Convert to a static dimension with the associated method, then back to a dynamic one with
+/// [`to_dyn`]:
 ///
 /// ```rust
-/// use rstsr::prelude::*;
-/// let a = rt::arange(6).into_shape([2, 3]); // shape: (2, 3), IxD
-/// println!("a: {:?}", a);
-/// // `None` here indicates dynamic dimension
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let a = rt::arange((6, &device)).into_shape([2, 3]); // shape: (2, 3), IxD
+/// // `const_ndim()` returns `None` for a dynamic dimension
 /// assert_eq!(a.shape().const_ndim(), None);
-/// ```
 ///
-/// You can convert the dimension to static dimension by associate method:
-///
-/// ```rust
-/// # use rstsr::prelude::*;
-/// # let a = rt::arange(6).into_shape([2, 3]); // shape: (2, 3), IxD
 /// let b = a.to_dim::<Ix2>(); // shape: (2, 3), Ix2
-/// assert_eq!(b.shape().const_ndim(), Some(2));
-/// ```
+/// println!("{b}");
+/// // [[ 0 1 2]
+/// //  [ 3 4 5]]
+/// # assert_eq!(b.shape().const_ndim(), Some(2));
 ///
-/// You can use `.to_dim::<IxD>()` or `.to_dyn()` to convert back to dynamic dimension:
-///
-/// ```rust
-/// # use rstsr::prelude::*;
-/// # let a = rt::arange(6).into_shape([2, 3]); // shape: (2, 3), IxD
-/// # let b = a.to_dim::<Ix2>(); // shape: (2, 3), Ix2
 /// let c = b.to_dyn(); // shape: (2, 3), IxD
-/// assert_eq!(c.shape().const_ndim(), None);
+/// # assert_eq!(c.shape().const_ndim(), None);
 /// ```
 ///
 /// # Panics
 ///
-/// - The shape of the tensor is not compatible with the target dimension type.
+/// - Panics if the shape of the tensor is not compatible with the target dimension type.
 ///
 /// ```rust,should_panic
-/// use rstsr::prelude::*;
-/// let a = rt::arange(6).into_shape([2, 3]); // shape: (2, 3), IxD
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// let a = rt::arange((6, &device)).into_shape([2, 3]); // shape: (2, 3), IxD
 /// let b = a.to_dim::<Ix3>(); // shape: (2, 3), Ix3, panics
 /// ```
 ///
+/// For a fallible version, use [`to_dim_f`].
+///
 /// # See also
 ///
-/// ## Similar functions from other crates/libraries
+/// ## Similar function from other crates/libraries
 ///
 /// - ndarray: [`into_dimensionality`](https://docs.rs/ndarray/latest/ndarray/struct.ArrayBase.html#method.into_dimensionality)
 /// - ndarray: [`into_dyn`](https://docs.rs/ndarray/latest/ndarray/struct.ArrayBase.html#method.into_dyn)
+///
+/// ## Related functions in RSTSR
+///
+/// - [`reshape`]: returns a dynamic-dimension ([`IxD`]) tensor.
+/// - [`into_compatible_shape`]: returns a dynamic-dimension ([`IxD`]) tensor.
 ///
 /// ## Variants of this function
 ///

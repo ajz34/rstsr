@@ -14,6 +14,9 @@ where
     D::SmallerOne: DimAPI,
     B: DeviceAPI<T> + OpPackTriAPI<T> + DeviceCreationAnyAPI<T>,
 {
+    /// Packs a triangle of the trailing square matrices into vectors (fallible).
+    ///
+    /// See also [`pack_tri`](TensorAny::pack_tri).
     pub fn pack_tri_f(&self, uplo: FlagUpLo) -> Result<Tensor<T, B, D::SmallerOne>> {
         // layouts manipulation
         let lb = self.layout().to_dim::<IxD>()?;
@@ -75,22 +78,117 @@ where
         Tensor::new_f(storage_a, la.into_dim()?)
     }
 
+    /// Packs a triangle of the trailing square matrices into vectors.
+    ///
+    /// The last two dimensions must be square (`n x n`); the triangle selected by `uplo` is
+    /// written into a length-`n * (n + 1) / 2` vector, its entries visited in the device default
+    /// order.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Row/Column Major Notice**
+    ///
+    /// This function behaves differently on default orders ([`RowMajor`] and [`ColMajor`]) of
+    /// device.
+    ///
+    /// </div>
+    ///
+    /// The square block is the **trailing** two dimensions under [`RowMajor`] and the **leading**
+    /// two under [`ColMajor`], and the packed vector is appended as a new **last** axis under
+    /// [`RowMajor`] but prepended as a new **first** axis under [`ColMajor`]. For a 2-D input both
+    /// orders give the same length-`n(n+1)/2` vector. See
+    /// [`order_semantics`](crate::order_semantics).
+    ///
+    /// # Parameters
+    ///
+    /// - `uplo`: [`FlagUpLo`] — [`FlagUpLo::L`] packs the lower triangle, [`FlagUpLo::U`] the
+    ///   upper.
+    ///
+    /// # Returns
+    ///
+    /// - [`Tensor<T, B, D::SmallerOne>`][Tensor] — a new owned tensor: the input shape with its
+    ///   square block replaced by the packed vector.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// # use rstsr::prelude::*;
+    /// # let mut device = DeviceCpu::default();
+    /// # device.set_default_order(RowMajor);
+    /// let a = rt::tensor_from_nested!([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0]], &device);
+    /// println!("{}", a.pack_tri(FlagUpLo::L));
+    /// // [ 1 4 5 7 8 9]
+    /// # assert_eq!(format!("{}", a.pack_tri(FlagUpLo::L)), "[ 1 4 5 7 8 9]");
+    /// ```
+    ///
+    /// # Elaborated examples
+    ///
+    /// ## Difference between [`RowMajor`] and [`ColMajor`]
+    ///
+    /// For an input of rank at least three the packed axis is appended (row-major) or prepended
+    /// (column-major):
+    ///
+    /// ```rust
+    /// # use rstsr::prelude::*;
+    /// # let mut device = DeviceCpu::default();
+    /// # device.set_default_order(RowMajor);
+    /// let a = rt::tensor_from_nested!([[[1.0, 2.0], [3.0, 4.0]], [[5.0, 6.0], [7.0, 8.0]]], &device);
+    /// println!("{:?}", a.pack_tril().shape());
+    /// // [2, 3]
+    ///
+    /// device.set_default_order(ColMajor);
+    /// let a = rt::tensor_from_nested!([[[1.0, 2.0], [3.0, 4.0]], [[5.0, 6.0], [7.0, 8.0]]], &device);
+    /// println!("{:?}", a.pack_tril().shape());
+    /// // [3, 2]
+    /// # assert_eq!(rt::tensor_from_nested!([[[1.0, 2.0], [3.0, 4.0]], [[5.0, 6.0], [7.0, 8.0]]], &device).pack_tril().shape(), &[3, 2]);
+    /// ```
+    ///
+    /// # Panics
+    ///
+    /// - Panics if the last two dimensions (row-major) or first two dimensions (column-major) are
+    ///   not equal.
+    ///
+    /// For a fallible version, use [`pack_tri_f`](TensorAny::pack_tri_f).
+    ///
+    /// # See also
+    ///
+    /// ## Related functions in RSTSR
+    ///
+    /// - [`unpack_tri`](TensorAny::unpack_tri): the inverse operation.
+    ///
+    /// ## Variants of this function
+    ///
+    /// - [`pack_tri_f`](TensorAny::pack_tri_f): fallible version.
+    /// - [`pack_tril`](TensorAny::pack_tril) / [`pack_triu`](TensorAny::pack_triu): the lower- and
+    ///   upper-triangle convenience forms.
     pub fn pack_tri(&self, uplo: FlagUpLo) -> Tensor<T, B, D::SmallerOne> {
         self.pack_tri_f(uplo).rstsr_unwrap()
     }
 
+    /// Packs the lower triangle of the trailing square matrices into vectors.
+    ///
+    /// See also [`pack_tri`](TensorAny::pack_tri).
     pub fn pack_tril_f(&self) -> Result<Tensor<T, B, D::SmallerOne>> {
         self.pack_tri_f(FlagUpLo::L)
     }
 
+    /// Packs the lower triangle of the trailing square matrices into vectors.
+    ///
+    /// See also [`pack_tri`](TensorAny::pack_tri).
     pub fn pack_tril(&self) -> Tensor<T, B, D::SmallerOne> {
         self.pack_tril_f().rstsr_unwrap()
     }
 
+    /// Packs the upper triangle of the trailing square matrices into vectors.
+    ///
+    /// See also [`pack_tri`](TensorAny::pack_tri).
     pub fn pack_triu_f(&self) -> Result<Tensor<T, B, D::SmallerOne>> {
         self.pack_tri_f(FlagUpLo::U)
     }
 
+    /// Packs the upper triangle of the trailing square matrices into vectors.
+    ///
+    /// See also [`pack_tri`](TensorAny::pack_tri).
     pub fn pack_triu(&self) -> Tensor<T, B, D::SmallerOne> {
         self.pack_triu_f().rstsr_unwrap()
     }
@@ -107,6 +205,9 @@ where
     D::LargerOne: DimAPI,
     B: DeviceAPI<T> + OpUnpackTriAPI<T> + DeviceCreationAnyAPI<T>,
 {
+    /// Unpacks packed triangular vectors back into square matrices (fallible).
+    ///
+    /// See also [`unpack_tri`](TensorAny::unpack_tri).
     pub fn unpack_tri_f(&self, uplo: FlagUpLo, symm: FlagSymm) -> Result<Tensor<T, B, D::LargerOne>> {
         // layouts manipulation
         let lb = self.layout().to_dim::<IxD>()?;
@@ -167,22 +268,100 @@ where
         Tensor::new_f(storage_a, la.into_dim()?)
     }
 
+    /// Unpacks packed triangular vectors back into square matrices.
+    ///
+    /// The input carries vectors of length `n * (n + 1) / 2`; each is expanded back into an
+    /// `n x n` matrix by writing the vector into the triangle selected by `uplo` and filling the
+    /// other triangle according to `symm`.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Row/Column Major Notice**
+    ///
+    /// This function behaves differently on default orders ([`RowMajor`] and [`ColMajor`]) of
+    /// device.
+    ///
+    /// </div>
+    ///
+    /// The packed vector is the **last** dimension under [`RowMajor`] and the **first** under
+    /// [`ColMajor`], and the restored `n x n` block is inserted at the back (row-major) or at the
+    /// front (column-major). For a 1-D input both orders give the same `n x n` matrix. See
+    /// [`order_semantics`](crate::order_semantics).
+    ///
+    /// # Parameters
+    ///
+    /// - `uplo`: [`FlagUpLo`] — the triangle the vector is written into ([`FlagUpLo::L`] or
+    ///   [`FlagUpLo::U`]).
+    /// - `symm`: [`FlagSymm`] — how the opposite triangle is derived from the packed one: `Sy`
+    ///   mirrors it (symmetric), `He` mirrors its complex conjugate (Hermitian), `Ay` negates it
+    ///   and zeroes the diagonal (anti-symmetric), `Ah` negates the conjugate and zeroes the
+    ///   diagonal (anti-Hermitian); `N` writes the triangle selected by `uplo` only.
+    ///
+    /// # Returns
+    ///
+    /// - [`Tensor<T, B, D::LargerOne>`][Tensor] — a new owned tensor: the input shape with its
+    ///   packed vector replaced by the `n x n` matrix.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// # use rstsr::prelude::*;
+    /// # let mut device = DeviceCpu::default();
+    /// # device.set_default_order(RowMajor);
+    /// let packed = rt::tensor_from_nested!([1.0, 4.0, 5.0, 7.0, 8.0, 9.0], &device);
+    /// println!("{}", packed.unpack_tri(FlagUpLo::L, FlagSymm::Sy));
+    /// // [[ 1 4 7]
+    /// //  [ 4 5 8]
+    /// //  [ 7 8 9]]
+    /// # assert_eq!(format!("{}", packed.unpack_tri(FlagUpLo::L, FlagSymm::Sy)), "[[ 1 4 7]\n [ 4 5 8]\n [ 7 8 9]]");
+    /// ```
+    ///
+    /// # Panics
+    ///
+    /// - Panics if the last dimension (row-major) or first dimension (column-major) is not a
+    ///   triangular number of the form `n * (n + 1) / 2`.
+    ///
+    /// For a fallible version, use [`unpack_tri_f`](TensorAny::unpack_tri_f).
+    ///
+    /// # See also
+    ///
+    /// ## Related functions in RSTSR
+    ///
+    /// - [`pack_tri`](TensorAny::pack_tri): the inverse operation.
+    ///
+    /// ## Variants of this function
+    ///
+    /// - [`unpack_tri_f`](TensorAny::unpack_tri_f): fallible version.
+    /// - [`unpack_tril`](TensorAny::unpack_tril) / [`unpack_triu`](TensorAny::unpack_triu): the
+    ///   lower- and upper-triangle convenience forms.
     pub fn unpack_tri(&self, uplo: FlagUpLo, symm: FlagSymm) -> Tensor<T, B, D::LargerOne> {
         self.unpack_tri_f(uplo, symm).rstsr_unwrap()
     }
 
+    /// Unpacks packed lower-triangular vectors back into square matrices.
+    ///
+    /// See also [`unpack_tri`](TensorAny::unpack_tri).
     pub fn unpack_tril(&self, symm: FlagSymm) -> Tensor<T, B, D::LargerOne> {
         self.unpack_tri_f(FlagUpLo::L, symm).rstsr_unwrap()
     }
 
+    /// Unpacks packed upper-triangular vectors back into square matrices.
+    ///
+    /// See also [`unpack_tri`](TensorAny::unpack_tri).
     pub fn unpack_triu(&self, symm: FlagSymm) -> Tensor<T, B, D::LargerOne> {
         self.unpack_tri_f(FlagUpLo::U, symm).rstsr_unwrap()
     }
 
+    /// Unpacks packed lower-triangular vectors back into square matrices (fallible).
+    ///
+    /// See also [`unpack_tri`](TensorAny::unpack_tri).
     pub fn unpack_tril_f(&self, symm: FlagSymm) -> Result<Tensor<T, B, D::LargerOne>> {
         self.unpack_tri_f(FlagUpLo::L, symm)
     }
 
+    /// Unpacks packed upper-triangular vectors back into square matrices (fallible).
+    ///
+    /// See also [`unpack_tri`](TensorAny::unpack_tri).
     pub fn unpack_triu_f(&self, symm: FlagSymm) -> Result<Tensor<T, B, D::LargerOne>> {
         self.unpack_tri_f(FlagUpLo::U, symm)
     }

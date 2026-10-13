@@ -16,20 +16,20 @@ mod doc_into_dim {
         device.set_default_order(RowMajor);
 
         let a = rt::arange((6, &device)).into_shape([2, 3]); // shape: (2, 3), IxD
-
-        // you can debug print tensor or it's layout to verify this
-        println!("a: {:?}", a);
-        // you can also call `const_ndim` to verify the dimension type
-        // `None` here indicates dynamic dimension
+                                                             // `const_ndim()` returns `None` for a
+                                                             // dynamic dimension
         assert_eq!(a.shape().const_ndim(), None);
 
+        // `to_dim::<Ix2>()`: static dimension
         let b = a.to_dim::<Ix2>(); // shape: (2, 3), Ix2
-        println!("b: {:?}", b);
+        println!("{b}");
+        // [[ 0 1 2]
+        //  [ 3 4 5]]
         assert_eq!(b.shape().const_ndim(), Some(2));
+        assert_eq!(format!("{b}"), "[[ 0 1 2]\n [ 3 4 5]]");
 
-        // use `.to_dim::<IxD>()` or `.to_dyn()` to convert back to dynamic dimension
+        // `.to_dyn()`: back to the dynamic dimension
         let c = b.to_dyn(); // shape: (2, 3), IxD
-        println!("c: {:?}", c);
         assert_eq!(c.shape().const_ndim(), None);
     }
 

@@ -31,9 +31,7 @@ pub trait DiagAPI<Inp> {
 /// - If the input is a 1-D tensor, return a new two-dimensional tensor with the input on its k-th
 ///   diagonal (the rest is filled with `T::default()`).
 ///
-/// This function behaves identically under [`RowMajor`] and [`ColMajor`] device
-/// default orders. (A constructed diagonal matrix is contiguous in the device
-/// default order; its logical content does not depend on the order.)
+/// This function behaves identically under [`RowMajor`] and [`ColMajor`] device default orders.
 ///
 /// # Overloads Table
 ///
@@ -81,6 +79,36 @@ pub trait DiagAPI<Inp> {
 /// //  [ 0 0 0 0]
 /// //  [ 0 1 0 0]
 /// //  [ 0 0 2 0]]
+/// # assert_eq!(format!("{}", rt::diag((&v, -1))), "[[ 0 0 0 0]\n [ 0 0 0 0]\n [ 0 1 0 0]\n [ 0 0 2 0]]");
+/// ```
+///
+/// # Overload List
+///
+/// The input's dimensionality selects the behavior (extract vs construct); `offset` defaults to
+/// `0`:
+///
+/// - `diag(tensor)` — a 2-D input extracts the main diagonal; a 1-D input constructs a diagonal
+///   matrix.
+/// - `diag((tensor, offset))` — a tuple adding the `isize` `offset` (`0` the main diagonal,
+///   positive above it, negative below it).
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let a = rt::arange((9, &device)).into_shape([3, 3]);
+/// println!("{}", rt::diag(&a)); // 2-D input: extract
+/// // [ 0 4 8]
+/// println!("{}", rt::diag((&a, 1)));
+/// // [ 1 5]
+/// let v = rt::arange((3, &device));
+/// println!("{}", rt::diag((&v, -1))); // 1-D input: construct
+/// // [[ 0 0 0 0]
+/// //  [ 0 0 0 0]
+/// //  [ 0 1 0 0]
+/// //  [ 0 0 2 0]]
+/// # assert_eq!(format!("{}", rt::diag(&a)), "[ 0 4 8]");
+/// # assert_eq!(format!("{}", rt::diag((&a, 1))), "[ 1 5]");
 /// # assert_eq!(format!("{}", rt::diag((&v, -1))), "[[ 0 0 0 0]\n [ 0 0 0 0]\n [ 0 1 0 0]\n [ 0 0 2 0]]");
 /// ```
 ///
@@ -217,9 +245,7 @@ pub trait MeshgridAPI<Inp> {
 ///   For consumed owned inputs (`Vec<Tensor>`, ...), the grids are owned tensors whose stride-0
 ///   layouts alias the inputs' own storage.
 ///
-/// This function behaves identically under [`RowMajor`] and [`ColMajor`] device
-/// default orders. (Only the memory arrangement of copied grids follows the
-/// device default order.)
+/// This function behaves identically under [`RowMajor`] and [`ColMajor`] device default orders.
 ///
 /// # Overloads Table
 ///
@@ -234,13 +260,19 @@ pub trait MeshgridAPI<Inp> {
 /// - `meshgrid((tensors, indexing: &str, copy: bool)) -> Vec<TensorCow<'a, T, B, IxD>>`
 ///
 /// Also, overloads of `&Vec<...>` and `[&TensorAny; N]` behave the same.
-/// Consumed owned inputs output `Vec<Tensor<T, B, IxD>>` instead:
+/// Consumed owned inputs (`Vec<Tensor<T, B, D>>` and `[Tensor<T, B, D>; N]`) output
+/// `Vec<Tensor<T, B, IxD>>` instead (the inputs' storages are reused):
 ///
+/// - `meshgrid(tensors: Vec<Tensor<T, B, D>>) -> Vec<Tensor<T, B, IxD>>` (implicit `"xy"`, `copy =
+///   true`)
+/// - `meshgrid((tensors, indexing: &str)) -> Vec<Tensor<T, B, IxD>>` (implicit `copy = true`)
+/// - `meshgrid((tensors, copy: bool)) -> Vec<Tensor<T, B, IxD>>` (implicit `"xy"`)
 /// - `meshgrid((tensors: Vec<Tensor<T, B, D>>, indexing: &str, copy: bool)) -> Vec<Tensor<T, B,
-///   IxD>>`
+///   IxD>>` (three-tuple overload; `copy = false` yields stride-0 owned grids)
+/// - `meshgrid((tensors: [Tensor<T, B, D>; N], indexing: &str, copy: bool)) -> Vec<Tensor<T, B,
+///   IxD>>` (same semantics as the `Vec<Tensor>` three-tuple form)
 ///
-/// and `[Tensor; N]` forms of the same shapes; `&Vec<TensorAny<R, T, B, D>>` forms are also
-/// accepted and return owned grids.
+/// `&Vec<TensorAny<R, T, B, D>>` forms are also accepted and return owned grids.
 ///
 /// # Parameters
 ///
@@ -293,6 +325,47 @@ pub trait MeshgridAPI<Inp> {
 /// // 2-Dim (dyn), contiguous: Custom
 /// // shape: [3, 2], stride: [1, 0], offset: 0
 /// # assert!(grids.iter().all(|grid| !grid.is_owned()));
+/// ```
+///
+/// # Overload List
+///
+/// Reference inputs (`Vec<&TensorAny>`, `&Vec<&TensorAny>`, `[&TensorAny; N]`) return
+/// `Vec<TensorCow>`; owned inputs (`Vec<TensorAny>`, `&Vec<TensorAny>`, `[TensorAny; N]`) return
+/// `Vec<Tensor>`. Both `indexing` and `copy` default:
+///
+/// - `meshgrid(tensors)` — implicit `indexing = "xy"`, `copy = true`.
+/// - `meshgrid((tensors, indexing))` — `indexing` is `&str` (`"ij"` or `"xy"`), `copy = true`.
+/// - `meshgrid((tensors, copy))` — `copy: bool`, `indexing = "xy"`.
+/// - `meshgrid((tensors, indexing, copy))` — the full form, for owned `Vec<Tensor<T, B, D>>` and
+///   `[Tensor<T, B, D>; N]` inputs as well as reference inputs; `copy = false` yields broadcast
+///   views for reference inputs and stride-0 owned grids for owned inputs.
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let x = rt::arange((3, &device));
+/// let y = rt::arange((2, &device));
+/// let g = rt::meshgrid(([&x, &y], "ij"));  // indexing = "ij"
+/// println!("{}", g[0]);
+/// // [[ 0 0]
+/// //  [ 1 1]
+/// //  [ 2 2]]
+/// let g = rt::meshgrid(([&x, &y], false)); // copy = false: views
+/// println!("{:?}", g[0].layout());
+/// // 2-Dim (dyn), contiguous: Custom
+/// // shape: [2, 3], stride: [0, 1], offset: 0
+/// let g = rt::meshgrid(vec![rt::arange((3, &device)), rt::arange((2, &device))]); // owned inputs
+/// println!("{}", g[0]);
+/// // [[ 0 1 2]
+/// //  [ 0 1 2]]
+/// let g = rt::meshgrid((vec![rt::arange((3, &device)), rt::arange((2, &device))], "ij", false));
+/// println!("{:?}", g[0].layout()); // owned, copy = false: stride-0 owned grids
+/// // 2-Dim (dyn), contiguous: Custom
+/// // shape: [3, 2], stride: [1, 0], offset: 0
+/// # assert_eq!(format!("{}", rt::meshgrid(([&x, &y], "ij"))[0]), "[[ 0 0]\n [ 1 1]\n [ 2 2]]");
+/// # assert_eq!(format!("{}", rt::meshgrid(vec![rt::arange((3, &device)), rt::arange((2, &device))])[0]), "[[ 0 1 2]\n [ 0 1 2]]");
+/// # assert_eq!(format!("{}", rt::meshgrid((vec![rt::arange((3, &device)), rt::arange((2, &device))], "ij", false))[0]), "[[ 0 0]\n [ 1 1]\n [ 2 2]]");
 /// ```
 ///
 /// # Notes of API accordance
@@ -624,9 +697,7 @@ pub trait ConcatAPI<Inp> {
 /// live on the same device. The result is an owned tensor, contiguous in the
 /// device default order.
 ///
-/// This function behaves identically under [`RowMajor`] and [`ColMajor`] device
-/// default orders. (Only the memory arrangement of the new tensor follows the
-/// device default order.)
+/// This function behaves identically under [`RowMajor`] and [`ColMajor`] device default orders.
 ///
 /// # Overloads Table
 ///
@@ -672,6 +743,32 @@ pub trait ConcatAPI<Inp> {
 /// println!("{}", rt::concat(([a, b], 1)));
 /// // [[ 0 1 2 9 9]
 /// //  [ 3 4 5 9 9]]
+/// ```
+///
+/// # Overload List
+///
+/// `tensors` accepts owned (`Vec<TensorAny>` / `[TensorAny; N]`) and reference (`Vec<&TensorAny>`
+/// / `&Vec<&TensorAny>` / `[&TensorAny; N]`) forms, all behaving the same:
+///
+/// - `concat(tensors)` — implicit `axis = 0`.
+/// - `concat((tensors, axis))` — `axis` is `isize`, `usize`, or `i32`; negative values count from
+///   the back.
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let a = rt::arange((3, &device));
+/// let b = rt::arange((3, 6, &device));
+/// println!("{}", rt::concat([&a, &b])); // implicit axis = 0
+/// // [ 0 1 2 3 4 5]
+/// let m = rt::arange((6, &device)).into_shape([2, 3]);
+/// let n = rt::full(([2, 2], 9, &device));
+/// println!("{}", rt::concat(([&m, &n], 1))); // explicit axis = 1
+/// // [[ 0 1 2 9 9]
+/// //  [ 3 4 5 9 9]]
+/// # assert_eq!(format!("{}", rt::concat([&a, &b])), "[ 0 1 2 3 4 5]");
+/// # assert_eq!(format!("{}", rt::concat(([&m, &n], 1))), "[[ 0 1 2 9 9]\n [ 3 4 5 9 9]]");
 /// ```
 ///
 /// # Notes of API accordance
@@ -892,9 +989,7 @@ pub trait HStackAPI<Inp> {
 /// Equivalent to NumPy `hstack`: each input is promoted with [`atleast_1d`] (0-D ->
 /// 1-D), then concatenated along axis 0 for 1-D inputs, or along axis 1 otherwise.
 ///
-/// This function behaves identically under [`RowMajor`] and [`ColMajor`] device
-/// default orders. (Only the memory arrangement of the new tensor follows the
-/// device default order.)
+/// This function behaves identically under [`RowMajor`] and [`ColMajor`] device default orders.
 ///
 /// # Overloads Table
 ///
@@ -936,6 +1031,30 @@ pub trait HStackAPI<Inp> {
 /// // [[ 0 1 9]
 /// //  [ 2 3 9]]
 /// # assert_eq!(format!("{}", rt::hstack([&a, &b])), "[[ 0 1 9]\n [ 2 3 9]]");
+/// ```
+///
+/// # Overload List
+///
+/// `tensors` accepts owned (`Vec<TensorAny>` / `[TensorAny; N]`) and reference (`Vec<&TensorAny>`
+/// / `&Vec<&TensorAny>` / `[&TensorAny; N]`) forms, all behaving the same:
+///
+/// - `hstack(tensors)` — joins along axis 0 for 1-D inputs, else along axis 1.
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let a = rt::arange((3, &device));
+/// let b = rt::arange((3, 6, &device));
+/// println!("{}", rt::hstack([&a, &b])); // 1-D inputs: axis 0
+/// // [ 0 1 2 3 4 5]
+/// let m = rt::arange((4, &device)).into_shape([2, 2]);
+/// let n = rt::full(([2, 1], 9, &device));
+/// println!("{}", rt::hstack([&m, &n])); // 2-D inputs: axis 1
+/// // [[ 0 1 9]
+/// //  [ 2 3 9]]
+/// # assert_eq!(format!("{}", rt::hstack([&a, &b])), "[ 0 1 2 3 4 5]");
+/// # assert_eq!(format!("{}", rt::hstack([&m, &n])), "[[ 0 1 9]\n [ 2 3 9]]");
 /// ```
 ///
 /// # Notes of API accordance
@@ -1040,9 +1159,7 @@ pub trait VStackAPI<Inp> {
 /// `(1, 1)`, 1-D `(N,)` -> `(1, N)`) and concatenated along axis 0, so the result is
 /// always at least 2-D.
 ///
-/// This function behaves identically under [`RowMajor`] and [`ColMajor`] device
-/// default orders. (Only the memory arrangement of the new tensor follows the
-/// device default order.)
+/// This function behaves identically under [`RowMajor`] and [`ColMajor`] device default orders.
 ///
 /// # Overloads Table
 ///
@@ -1071,6 +1188,33 @@ pub trait VStackAPI<Inp> {
 /// // [[ 0 1 2]
 /// //  [ 3 4 5]]
 /// # assert_eq!(format!("{}", rt::vstack([&a, &b])), "[[ 0 1 2]\n [ 3 4 5]]");
+/// ```
+///
+/// # Overload List
+///
+/// `tensors` accepts owned (`Vec<TensorAny>` / `[TensorAny; N]`) and reference (`Vec<&TensorAny>`
+/// / `&Vec<&TensorAny>` / `[&TensorAny; N]`) forms, all behaving the same:
+///
+/// - `vstack(tensors)` — promotes each input with [`atleast_2d`] and joins along axis 0.
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let a = rt::arange((3, &device));
+/// let b = rt::arange((3, 6, &device));
+/// println!("{}", rt::vstack([&a, &b])); // 1-D inputs -> rows
+/// // [[ 0 1 2]
+/// //  [ 3 4 5]]
+/// let m = rt::arange((4, &device)).into_shape([2, 2]);
+/// let n = rt::full(([2, 2], 9, &device));
+/// println!("{}", rt::vstack([&m, &n])); // 2-D inputs: axis 0
+/// // [[ 0 1]
+/// //  [ 2 3]
+/// //  [ 9 9]
+/// //  [ 9 9]]
+/// # assert_eq!(format!("{}", rt::vstack([&a, &b])), "[[ 0 1 2]\n [ 3 4 5]]");
+/// # assert_eq!(format!("{}", rt::vstack([&m, &n])), "[[ 0 1]\n [ 2 3]\n [ 9 9]\n [ 9 9]]");
 /// ```
 ///
 /// # Notes of API accordance
@@ -1172,9 +1316,7 @@ pub trait StackAPI<Inp> {
 /// input, then the results are concatenated along that axis. 0-D inputs are supported
 /// (they stack into a 1-D tensor). All inputs must have the same shape and device.
 ///
-/// This function behaves identically under [`RowMajor`] and [`ColMajor`] device
-/// default orders. (Only the memory arrangement of the new tensor follows the
-/// device default order.)
+/// This function behaves identically under [`RowMajor`] and [`ColMajor`] device default orders.
 ///
 /// # Overloads Table
 ///
@@ -1206,6 +1348,35 @@ pub trait StackAPI<Inp> {
 /// // [[ 0 1 2 3]
 /// //  [ 9 9 9 9]]
 /// # assert_eq!(format!("{}", rt::stack([&a, &b])), "[[ 0 1 2 3]\n [ 9 9 9 9]]");
+/// ```
+///
+/// # Overload List
+///
+/// `tensors` accepts owned (`Vec<TensorAny>` / `[TensorAny; N]`) and reference (`Vec<&TensorAny>`
+/// / `&Vec<&TensorAny>` / `[&TensorAny; N]`) forms, all behaving the same:
+///
+/// - `stack(tensors)` — implicit `axis = 0`.
+/// - `stack((tensors, axis))` — `axis` is `isize`, `usize`, or `i32`; the valid range is `0..=ndim`
+///   (the new axis is inserted, not replaced).
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let a = rt::arange((4, &device));
+/// let b = rt::full(([4], 9, &device));
+/// println!("{}", rt::stack([&a, &b])); // implicit axis = 0
+/// // [[ 0 1 2 3]
+/// //  [ 9 9 9 9]]
+/// let c = rt::arange((4, &device));
+/// let d = rt::full(([4], 9, &device));
+/// println!("{}", rt::stack(([&c, &d], 1))); // explicit axis = 1
+/// // [[ 0 9]
+/// //  [ 1 9]
+/// //  [ 2 9]
+/// //  [ 3 9]]
+/// # assert_eq!(format!("{}", rt::stack([&a, &b])), "[[ 0 1 2 3]\n [ 9 9 9 9]]");
+/// # assert_eq!(format!("{}", rt::stack(([&c, &d], 1))), "[[ 0 9]\n [ 1 9]\n [ 2 9]\n [ 3 9]]");
 /// ```
 ///
 /// # Notes of API accordance
@@ -1421,6 +1592,31 @@ pub trait UnstackAPI<Inp> {
 /// println!("{}", v[1]);
 /// // [ 3 4 5]
 /// # assert_eq!(format!("{}", v[1]), "[ 3 4 5]");
+/// ```
+///
+/// # Overload List
+///
+/// - `unstack(tensor)` — implicit `axis = 0`; `tensor` is a [`TensorAny`] reference or a
+///   [`TensorView`] (both yield views).
+/// - `unstack((tensor, axis))` — `axis` is an `isize`; negative values count from the back.
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let a = rt::arange((6, &device)).into_shape([2, 3]);
+/// let v = rt::unstack(&a); // implicit axis = 0
+/// println!("{}", v.len());
+/// // 2
+/// println!("{}", v[1]);
+/// // [ 3 4 5]
+/// let w = rt::unstack((&a, 1)); // explicit axis = 1
+/// println!("{}", w.len());
+/// // 3
+/// # assert_eq!(v.len(), 2);
+/// # assert_eq!(format!("{}", v[1]), "[ 3 4 5]");
+/// # assert_eq!(w.len(), 3);
+/// # assert_eq!(format!("{}", w[0]), "[ 0 3]");
 /// ```
 ///
 /// # Notes of API accordance
@@ -1678,6 +1874,26 @@ where
 /// # assert_eq!(format!("{}", rt::atleast_1d(&a)), "[ 0 1 2]");
 /// ```
 ///
+/// # Overload List
+///
+/// - `atleast_1d(tensor)` — `tensor` is any [`TensorAny`]: a 0-D input is promoted to `(1,)`,
+///   tensors with `ndim >= 1` are returned unchanged (as a view). The ownership-consuming
+///   [`into_atleast_1d`] forms behave the same for any [`TensorBase`] input.
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let s = rt::full(([], 5, &device));
+/// println!("{}", rt::atleast_1d(&s)); // 0-D -> (1,)
+/// // [ 5]
+/// let a = rt::arange((3, &device));
+/// println!("{}", rt::atleast_1d(&a)); // ndim >= 1: unchanged
+/// // [ 0 1 2]
+/// # assert_eq!(format!("{}", rt::atleast_1d(&s)), "[ 5]");
+/// # assert_eq!(format!("{}", rt::atleast_1d(&a)), "[ 0 1 2]");
+/// ```
+///
 /// # Notes of API accordance
 ///
 /// - NumPy: `numpy.atleast_1d(x)` ([`numpy.atleast_1d`](https://numpy.org/doc/stable/reference/generated/numpy.atleast_1d.html))
@@ -1704,8 +1920,6 @@ where
 ///
 /// - [`atleast_1d_f`]: fallible version.
 /// - [`into_atleast_1d`] / [`into_atleast_1d_f`]: ownership-consuming forms.
-/// - [`TensorAny::atleast_1d`] / [`TensorBase::into_atleast_1d`]: associated method forms (each
-///   with a `_f` twin).
 /// - Associated methods on [`TensorAny`]: [`TensorAny::atleast_1d`] / [`TensorAny::atleast_1d_f`].
 pub fn atleast_1d<R, T, B, D>(tensor: &TensorAny<R, T, B, D>) -> TensorView<'_, T, B, IxD>
 where
@@ -1763,6 +1977,32 @@ where
 /// println!("{}", rt::atleast_2d(&a));
 /// // [[ 0 1 2]]
 /// # assert_eq!(format!("{}", rt::atleast_2d(&a)), "[[ 0 1 2]]");
+/// ```
+///
+/// # Overload List
+///
+/// - `atleast_2d(tensor)` — `tensor` is any [`TensorAny`]: a 0-D input is promoted to `(1, 1)`, a
+///   1-D `(N,)` input to `(1, N)`, and tensors with `ndim >= 2` are returned unchanged (as a view).
+///   The ownership-consuming [`into_atleast_2d`] forms behave the same for any [`TensorBase`]
+///   input.
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let s = rt::full(([], 5, &device));
+/// println!("{}", rt::atleast_2d(&s)); // 0-D -> (1, 1)
+/// // [[ 5]]
+/// let a = rt::arange((3, &device));
+/// println!("{}", rt::atleast_2d(&a)); // 1-D (N,) -> (1, N)
+/// // [[ 0 1 2]]
+/// let m = rt::arange((4, &device)).into_shape([2, 2]);
+/// println!("{}", rt::atleast_2d(&m)); // ndim >= 2: unchanged
+/// // [[ 0 1]
+/// //  [ 2 3]]
+/// # assert_eq!(format!("{}", rt::atleast_2d(&s)), "[[ 5]]");
+/// # assert_eq!(format!("{}", rt::atleast_2d(&a)), "[[ 0 1 2]]");
+/// # assert_eq!(format!("{}", rt::atleast_2d(&m)), "[[ 0 1]\n [ 2 3]]");
 /// ```
 ///
 /// # Notes of API accordance
@@ -1850,6 +2090,37 @@ where
 /// //   [ 1]
 /// //   [ 2]]]
 /// # assert_eq!(format!("{}", rt::atleast_3d(&a)), "[[[ 0]\n  [ 1]\n  [ 2]]]");
+/// ```
+///
+/// # Overload List
+///
+/// - `atleast_3d(tensor)` — `tensor` is any [`TensorAny`]: a 0-D input is promoted to `(1, 1, 1)`,
+///   a 1-D `(N,)` input to `(1, N, 1)`, and a 2-D `(M, N)` input to `(M, N, 1)`; tensors with `ndim
+///   >= 3` are returned unchanged (as a view). The ownership-consuming [`into_atleast_3d`] forms
+///   behave the same for any [`TensorBase`] input.
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let s = rt::full(([], 5, &device));
+/// println!("{}", rt::atleast_3d(&s)); // 0-D -> (1, 1, 1)
+/// // [[[ 5]]]
+/// let a = rt::arange((3, &device));
+/// println!("{}", rt::atleast_3d(&a)); // 1-D (N,) -> (1, N, 1)
+/// // [[[ 0]
+/// //   [ 1]
+/// //   [ 2]]]
+/// let m = rt::arange((4, &device)).into_shape([2, 2]);
+/// println!("{}", rt::atleast_3d(&m)); // 2-D (M, N) -> (M, N, 1)
+/// // [[[ 0]
+/// //   [ 1]]
+/// //
+/// //  [[ 2]
+/// //   [ 3]]]
+/// # assert_eq!(format!("{}", rt::atleast_3d(&s)), "[[[ 5]]]");
+/// # assert_eq!(format!("{}", rt::atleast_3d(&a)), "[[[ 0]\n  [ 1]\n  [ 2]]]");
+/// # assert_eq!(format!("{}", rt::atleast_3d(&m)), "[[[ 0]\n  [ 1]]\n\n [[ 2]\n  [ 3]]]");
 /// ```
 ///
 /// # Notes of API accordance

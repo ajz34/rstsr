@@ -248,6 +248,28 @@ mod doc_where {
         println!("{r}");
         assert_eq!(r.shape(), &[2, 3]);
         assert_eq!(format!("{r}"), "[[ 0 1 2]\n [ -3 -4 -5]]");
+
+        // # Overload List snippet: one call per distinct `x`/`y` kind.
+        device.set_default_order(RowMajor);
+        let cond = rt::tensor_from_nested!([true, false, true], &device);
+        let x = rt::tensor_from_nested!([1, 2, 3], &device);
+        let y = rt::tensor_from_nested!([10, 20, 30], &device);
+        // both tensors (references)
+        println!("{}", rt::r#where(&cond, &x, &y));
+        // [ 1 20 3]
+        assert_eq!(format!("{}", rt::r#where(&cond, &x, &y)), "[ 1 20 3]");
+        // tensor views passed by value
+        println!("{}", rt::r#where(&cond, x.view(), y.view()));
+        // [ 1 20 3]
+        assert_eq!(format!("{}", rt::r#where(&cond, x.view(), y.view())), "[ 1 20 3]");
+        // `x` tensor, `y` scalar
+        println!("{}", rt::r#where(&cond, &x, 10));
+        // [ 1 10 3]
+        assert_eq!(format!("{}", rt::r#where(&cond, &x, 10)), "[ 1 10 3]");
+        // `x` scalar, `y` tensor
+        println!("{}", rt::r#where(&cond, 1, &y));
+        // [ 1 20 1]
+        assert_eq!(format!("{}", rt::r#where(&cond, 1, &y)), "[ 1 20 1]");
     }
 }
 
@@ -278,5 +300,29 @@ mod doc_clip {
         // [[ 0 2]
         //  [ 4 0]]
         assert_eq!(format!("{}", rt::clip(&x, (0, None))), "[[ 0 2]\n [ 4 0]]");
+
+        // # Overload List snippet: one call per distinct bound kind.
+        // scalar bound on both sides
+        let x = rt::tensor_from_nested!([-3, -1, 0, 2, 5], &device);
+        println!("{}", rt::clip(&x, (0, 3)));
+        // [ 0 0 0 2 3]
+        assert_eq!(format!("{}", rt::clip(&x, (0, 3))), "[ 0 0 0 2 3]");
+        // tensor bound (broadcast) on one side, scalar on the other
+        let x2 = rt::tensor_from_nested!([[-3, 2], [4, -5]], &device);
+        let lo = rt::tensor_from_nested!([[-1, 0], [1, -1]], &device);
+        println!("{}", rt::clip(&x2, (&lo, 3)));
+        // [[ -1 2]
+        //  [ 3 -1]]
+        assert_eq!(format!("{}", rt::clip(&x2, (&lo, 3))), "[[ -1 2]\n [ 3 -1]]");
+        // None disables one side
+        println!("{}", rt::clip(&x2, (0, None)));
+        // [[ 0 2]
+        //  [ 4 0]]
+        assert_eq!(format!("{}", rt::clip(&x2, (0, None))), "[[ 0 2]\n [ 4 0]]");
+        // both None: an identity copy of the input
+        println!("{}", rt::clip(&x2, (None, None)));
+        // [[ -3 2]
+        //  [ 4 -5]]
+        assert_eq!(format!("{}", rt::clip(&x2, (None, None))), "[[ -3 2]\n [ 4 -5]]");
     }
 }

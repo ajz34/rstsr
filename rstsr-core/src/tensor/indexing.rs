@@ -111,6 +111,8 @@ where
 
     /// Basic slicing (alias of [`TensorAny::slice`]).
     ///
+    /// This is the recommended way to perform basic slicing.
+    ///
     /// See also [`slice`](slice()).
     pub fn i<I>(&self, index: I) -> TensorView<'_, T, B, IxD>
     where
@@ -362,6 +364,34 @@ where
 /// //  [ 0 2 0]
 /// //  [ 0 0 2]]
 /// # assert_eq!(format!("{c}"), "[[ 2 0 0]\n [ 0 2 0]\n [ 0 0 2]]");
+/// ```
+///
+/// # Overload List
+///
+/// The `diagonal_args` argument accepts:
+///
+/// - `()` or `None`: the main diagonal (offset `0`, axes `0` and `1`);
+/// - a single integer: the diagonal offset with the default axes (`1` the superdiagonal, `-1` the
+///   subdiagonal);
+/// - a tuple `(offset, axis1, axis2)` of integers (any mix of `isize`/`usize`/`i32`/`i64`): the
+///   offset and the two axes defining the diagonals.
+///
+/// ```rust
+/// # use rstsr::prelude::*;
+/// # let mut device = DeviceCpu::default();
+/// # device.set_default_order(RowMajor);
+/// let a = rt::arange((9, &device)).into_shape([3, 3]);
+/// println!("{}", a.diagonal(())); // main diagonal
+/// // [ 0 4 8]
+/// println!("{}", a.diagonal(1));  // offset = 1, default axes
+/// // [ 1 5]
+///
+/// let b = rt::arange((24, &device)).into_shape([2, 3, 4]);
+/// println!("{:?}", b.diagonal((0, 0, 1)).shape()); // (offset, axis1, axis2)
+/// // [4, 2]
+/// # assert_eq!(format!("{}", a.diagonal(())), "[ 0 4 8]");
+/// # assert_eq!(format!("{}", a.diagonal(1)), "[ 1 5]");
+/// # assert_eq!(b.diagonal((0, 0, 1)).shape(), &[4, 2]);
 /// ```
 ///
 /// # Notes of API accordance

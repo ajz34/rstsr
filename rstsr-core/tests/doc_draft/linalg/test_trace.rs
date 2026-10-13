@@ -27,3 +27,36 @@ mod doc_trace {
         assert_eq!(format!("{}", rt::trace(&m, ())), "5");
     }
 }
+
+// # Overload List snippet: one call per distinct offset behavior
+#[cfg(test)]
+mod doc_trace_overload {
+    use super::*;
+    static FUNC: &str = "doc_trace_overload";
+
+    #[test]
+    fn test_trace() {
+        crate::specify_test!("test_trace");
+
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        let a = rt::tensor_from_nested!([[1, 2, 3], [4, 5, 6], [7, 8, 9]], &device);
+
+        // () or None: the main diagonal over the device-default axes
+        println!("{}", rt::trace(&a, ()));
+        // 15
+        assert_eq!(format!("{}", rt::trace(&a, ())), "15");
+
+        // integer: a shifted diagonal, same device-default axes
+        println!("{}", rt::trace(&a, 1));
+        // 8
+        assert_eq!(format!("{}", rt::trace(&a, 1)), "8");
+
+        // (offset, axis1, axis2): an explicit diagonal over named axes
+        let s = rt::tensor_from_nested!([[[1, 2], [3, 4]], [[5, 6], [7, 8]]], &device);
+        println!("{}", rt::trace(&s, (0, -2, -1)));
+        // [ 5 13]
+        assert_eq!(format!("{}", rt::trace(&s, (0, -2, -1))), "[ 5 13]");
+    }
+}
