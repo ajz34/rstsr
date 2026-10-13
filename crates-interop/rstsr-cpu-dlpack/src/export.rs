@@ -20,11 +20,11 @@ use crate::repr::{DataDlpack, TensorDlpackShared};
 
 /// Owned guard around an exported `DLManagedTensorVersioned`.
 ///
-/// It keeps the buffer alive until [`DlpackExport::into_raw`] hands the
-/// pointer to a consumer. Dropping the guard without handing off frees
-/// everything; after a handoff the consumer must call the `deleter` stored in
-/// the struct exactly once. The deleter is dlpark's, installed by the
-/// managed-tensor allocation that backs this export.
+/// It keeps the buffer alive until [`DlpackExport::into_raw`] (or
+/// [`DlpackExport::into_managed`]) hands the tensor to a consumer. Dropping the
+/// guard without handing off frees everything; after a handoff the consumer must
+/// call the `deleter` stored in the struct exactly once. The deleter is
+/// dlpark's, installed by the managed-tensor allocation that backs this export.
 pub struct DlpackExport {
     managed: Managed<DLManagedTensorVersioned>,
 }
@@ -49,6 +49,12 @@ impl DlpackExport {
     /// Hand the pointer to a foreign consumer, transferring ownership.
     pub fn into_raw(self) -> *mut DLManagedTensorVersioned {
         self.managed.into_raw()
+    }
+
+    /// Hand the managed tensor to a consumer that speaks the dlpark API (e.g. its pyo3
+    /// capsule conversion), transferring ownership.
+    pub fn into_managed(self) -> Managed<DLManagedTensorVersioned> {
+        self.managed
     }
 }
 

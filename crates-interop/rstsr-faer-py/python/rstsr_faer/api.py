@@ -835,17 +835,14 @@ def arange(start, /, stop=None, step=1, *, dtype=None, device=None):
     return _wrap(_arange(start, stop, step, dtype, _DEVICE))
 
 
-def from_dlpack(obj, /, *, device=None, copy=False):
+def from_dlpack(obj, /, *, device=None, copy=None):
     _check_device(device)
-    get = getattr(obj, "__dlpack__", None)
-    if get is None:
+    if not hasattr(obj, "__dlpack__"):
         raise TypeError(f"from_dlpack: object of type {type(obj).__name__} has no __dlpack__ method")
-    try:
-        capsule = get(max_version=(1, 0))
-    except TypeError:
-        capsule = get()
-    # Import always gathers into a fresh owned tensor (copy-only; registered).
-    return _wrap(_pkg.dlpack_import(capsule))
+    # The Rust side runs the DLPack protocol (dlpark): device discovery, legacy or
+    # versioned negotiation, and the single-use capsule handshake. Import always
+    # gathers into a fresh owned tensor, so `copy` is not honored (registered).
+    return _wrap(_pkg.dlpack_import(obj))
 
 
 def _norm_shape(shape, /):
