@@ -1,0 +1,35 @@
+name: rstsr facade tests
+
+on:
+  push:
+    branches:
+    - main
+  pull_request:
+
+jobs:
+  cheatsheet:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    # core page examples under default features; the linalg target is named
+    # explicitly because `--test "*"` would *require* its `linalg` feature.
+    - name: facade integration tests (core cheat sheet)
+      run: cargo test -p rstsr --test cheatsheet_core --release
+    # linalg page examples: defaults enable `faer`, which turns on the
+    # `rstsr-linalg-traits/faer` DeviceFaer implementations; do NOT use
+    # `--all-features` (it would pull in openblas/dlpack/tblis).
+    - name: facade integration tests (+ linalg)
+      run: cargo test -p rstsr --test "*" --release --features linalg
+
+  cheatsheet-python:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: conda-incubator/setup-miniconda@v2
+    # the parity script is print-only: this gates that it still runs against
+    # current NumPy/SciPy, not numerical equality.
+    - name: cheat-sheet parity script runs
+      run: |
+        conda init; source $HOME/.bashrc; conda activate
+        conda install -y numpy scipy
+        python rstsr/tests/cheatsheet/parity.py

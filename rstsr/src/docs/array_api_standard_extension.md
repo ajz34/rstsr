@@ -1,3 +1,43 @@
+## Linear Algebra (extensions)
+
+| status | implementation | Python API | description |
+|-|-|-|-|
+| Y | `rt::linalg::cholesky` | [`cholesky`](https://data-apis.org/array-api/latest/extensions/generated/array_api.linalg.cholesky.html) | Returns the lower (upper) Cholesky decomposition of a complex Hermitian or real symmetric positive-definite matrix `x`. |
+| Y | `rt::cross` | [`cross`](https://data-apis.org/array-api/latest/extensions/generated/array_api.linalg.cross.html) | Returns the cross product of 3-element vectors. |
+| Y | `rt::linalg::det` | [`det`](https://data-apis.org/array-api/latest/extensions/generated/array_api.linalg.det.html) | Returns the determinant of a square matrix (or a stack of square matrices) `x`. |
+| Y | `rt::diagonal` | [`diagonal`](https://data-apis.org/array-api/latest/extensions/generated/array_api.linalg.diagonal.html) | Returns the specified diagonals of a matrix (or a stack of matrices) `x`. |
+| Y | `rt::linalg::eigh` | [`eigh`](https://data-apis.org/array-api/latest/extensions/generated/array_api.linalg.eigh.html) | Returns an eigenvalue decomposition of a complex Hermitian or real symmetric matrix (or a stack of matrices) `x`. |
+| Y | `rt::linalg::eigvalsh` | [`eigvalsh`](https://data-apis.org/array-api/latest/extensions/generated/array_api.linalg.eigvalsh.html) | Returns the eigenvalues of a complex Hermitian or real symmetric matrix (or a stack of matrices) `x`. |
+| Y | `rt::linalg::inv` | [`inv`](https://data-apis.org/array-api/latest/extensions/generated/array_api.linalg.inv.html) | Returns the multiplicative inverse of a square matrix (or a stack of square matrices) `x`. |
+| Y | `rt::matmul` | [`matmul`](https://data-apis.org/array-api/latest/extensions/generated/array_api.linalg.matmul.html) | Computes the matrix product. |
+| Y | `rt::linalg::matrix_norm` | [`matrix_norm`](https://data-apis.org/array-api/latest/extensions/generated/array_api.linalg.matrix_norm.html) | Computes the matrix norm of a matrix (or a stack of matrices) `x`. |
+| Y | `rt::linalg::matrix_power` | [`matrix_power`](https://data-apis.org/array-api/latest/extensions/generated/array_api.linalg.matrix_power.html) | Raises a square matrix (or a stack of square matrices) `x` to an integer power `n`. |
+| Y | `rt::linalg::matrix_rank` | [`matrix_rank`](https://data-apis.org/array-api/latest/extensions/generated/array_api.linalg.matrix_rank.html) | Returns the rank (i.e., number of non-zero singular values) of a matrix (or a stack of matrices). |
+| Y | `rt::matrix_transpose` | [`matrix_transpose`](https://data-apis.org/array-api/latest/extensions/generated/array_api.linalg.matrix_transpose.html) | Transposes a matrix (or a stack of matrices) x. |
+| Y | `rt::outer` | [`outer`](https://data-apis.org/array-api/latest/extensions/generated/array_api.linalg.outer.html) | Returns the outer product of two vectors `x1` and `x2`. |
+| Y | `rt::linalg::pinv` | [`pinv`](https://data-apis.org/array-api/latest/extensions/generated/array_api.linalg.pinv.html) | Returns the (Moore-Penrose) pseudo-inverse of a matrix (or a stack of matrices) `x`. |
+| Y | `rt::linalg::qr` | [`qr`](https://data-apis.org/array-api/latest/extensions/generated/array_api.linalg.qr.html) | Returns the QR decomposition of a full column rank matrix (or a stack of matrices). |
+| Y | `rt::linalg::slogdet` | [`slogdet`](https://data-apis.org/array-api/latest/extensions/generated/array_api.linalg.slogdet.html) | Returns the sign and the natural logarithm of the absolute value of the determinant of a square matrix (or a stack of square matrices) `x`. |
+| Y | `rt::linalg::solve_general` | [`solve`](https://data-apis.org/array-api/latest/extensions/generated/array_api.linalg.solve.html) | Returns the solution of a square system of linear equations with a unique solution. |
+| Y | `rt::linalg::svd` | [`svd`](https://data-apis.org/array-api/latest/extensions/generated/array_api.linalg.svd.html) | Returns a singular value decomposition (SVD) of a matrix (or a stack of matrices) `x`. |
+| Y | `rt::linalg::svdvals` | [`svdvals`](https://data-apis.org/array-api/latest/extensions/generated/array_api.linalg.svdvals.html) | Returns the singular values of a matrix (or a stack of matrices) `x`. |
+| Y | `rt::tensordot` | [`tensordot`](https://data-apis.org/array-api/latest/extensions/generated/array_api.linalg.tensordot.html) | Returns a tensor contraction of x1 and x2 over specific axes. |
+| Y | `rt::trace` | [`trace`](https://data-apis.org/array-api/latest/extensions/generated/array_api.linalg.trace.html) | Returns the sum along the specified diagonals of a matrix (or a stack of matrices) `x`. |
+| Y | `rt::vecdot` | [`vecdot`](https://data-apis.org/array-api/latest/extensions/generated/array_api.linalg.vecdot.html) | Computes the (vector) dot product of two arrays. |
+| Y | `rt::linalg::vector_norm` | [`vector_norm`](https://data-apis.org/array-api/latest/extensions/generated/array_api.linalg.vector_norm.html) | Computes the vector norm of a vector (or batch of vectors) `x`. |
+| Y | `rt::linalg::eig` | [`eig`](https://data-apis.org/array-api/latest/extensions/generated/array_api.linalg.eig.html) | Returns eigenvalues and eigenvectors of a real or complex matrix (or stack of matrices) `x`. (optional extension) |
+| Y | `rt::linalg::eigvals` | [`eigvals`](https://data-apis.org/array-api/latest/extensions/generated/array_api.linalg.eigvals.html) | Returns the eigenvalues of a real or complex matrix (or a stack of matrices) `x`. (optional extension) |
+
+**Notes**
+
+- `solve` is fulfilled by `rt::linalg::solve_general` (general square `A`), which
+  matches the Array API `solve`. `rt::linalg::solve_symmetric` and
+  `rt::linalg::solve_triangular` additionally exploit matrix structure and can be
+  faster; `solve_symmetric` is implemented by the BLAS devices only.
+- `eigh` / `eig` / `eigvalsh` fulfill the standard (non-generalized) form; the
+  generalized eigenvalue problem is an RSTSR extension via `eigh((a, b, uplo, type))`.
+- The `rt::linalg::*` functions require the `linalg` cargo feature.
+
 ## Fast Fourier Transform (extensions)
 
 | status | implementation | Python API | description |
@@ -16,33 +56,3 @@
 |   |   | [`rfftfreq`](https://data-apis.org/array-api/latest/extensions/generated/array_api.fft.rfftfreq.html) | Computes the discrete Fourier transform sample frequencies (for `rfft` and `irfft`). |
 |   |   | [`fftshift`](https://data-apis.org/array-api/latest/extensions/generated/array_api.fft.fftshift.html) | Shifts the zero-frequency component to the center of the spectrum. |
 |   |   | [`ifftshift`](https://data-apis.org/array-api/latest/extensions/generated/array_api.fft.ifftshift.html) | Inverse of `fftshift`. |
-
-## Linear Algebra (extensions)
-
-| status | implementation | Python API | description |
-|-|-|-|-|
-|   |   | [`cholesky`](https://data-apis.org/array-api/latest/extensions/generated/array_api.linalg.cholesky.html) | Returns the lower (upper) Cholesky decomposition of a complex Hermitian or real symmetric positive-definite matrix `x`. |
-|   |   | [`cross`](https://data-apis.org/array-api/latest/extensions/generated/array_api.linalg.cross.html) | Returns the cross product of 3-element vectors. |
-|   |   | [`det`](https://data-apis.org/array-api/latest/extensions/generated/array_api.linalg.det.html) | Returns the determinant of a square matrix (or a stack of square matrices) `x`. |
-|   |   | [`diagonal`](https://data-apis.org/array-api/latest/extensions/generated/array_api.linalg.diagonal.html) | Returns the specified diagonals of a matrix (or a stack of matrices) `x`. |
-|   |   | [`eigh`](https://data-apis.org/array-api/latest/extensions/generated/array_api.linalg.eigh.html) | Returns an eigenvalue decomposition of a complex Hermitian or real symmetric matrix (or a stack of matrices) `x`. |
-|   |   | [`eigvalsh`](https://data-apis.org/array-api/latest/extensions/generated/array_api.linalg.eigvalsh.html) | Returns the eigenvalues of a complex Hermitian or real symmetric matrix (or a stack of matrices) `x`. |
-|   |   | [`inv`](https://data-apis.org/array-api/latest/extensions/generated/array_api.linalg.inv.html) | Returns the multiplicative inverse of a square matrix (or a stack of square matrices) `x`. |
-|   |   | [`matmul`](https://data-apis.org/array-api/latest/extensions/generated/array_api.linalg.matmul.html) | Computes the matrix product. |
-|   |   | [`matrix_norm`](https://data-apis.org/array-api/latest/extensions/generated/array_api.linalg.matrix_norm.html) | Computes the matrix norm of a matrix (or a stack of matrices) `x`. |
-|   |   | [`matrix_power`](https://data-apis.org/array-api/latest/extensions/generated/array_api.linalg.matrix_power.html) | Raises a square matrix (or a stack of square matrices) `x` to an integer power `n`. |
-|   |   | [`matrix_rank`](https://data-apis.org/array-api/latest/extensions/generated/array_api.linalg.matrix_rank.html) | Returns the rank (i.e., number of non-zero singular values) of a matrix (or a stack of matrices). |
-|   |   | [`matrix_transpose`](https://data-apis.org/array-api/latest/extensions/generated/array_api.linalg.matrix_transpose.html) | Transposes a matrix (or a stack of matrices) x. |
-|   |   | [`outer`](https://data-apis.org/array-api/latest/extensions/generated/array_api.linalg.outer.html) | Returns the outer product of two vectors `x1` and `x2`. |
-|   |   | [`pinv`](https://data-apis.org/array-api/latest/extensions/generated/array_api.linalg.pinv.html) | Returns the (Moore-Penrose) pseudo-inverse of a matrix (or a stack of matrices) `x`. |
-|   |   | [`qr`](https://data-apis.org/array-api/latest/extensions/generated/array_api.linalg.qr.html) | Returns the QR decomposition of a full column rank matrix (or a stack of matrices). |
-|   |   | [`slogdet`](https://data-apis.org/array-api/latest/extensions/generated/array_api.linalg.slogdet.html) | Returns the sign and the natural logarithm of the absolute value of the determinant of a square matrix (or a stack of square matrices) `x`. |
-|   |   | [`solve`](https://data-apis.org/array-api/latest/extensions/generated/array_api.linalg.solve.html) | Returns the solution of a square system of linear equations with a unique solution. |
-|   |   | [`svd`](https://data-apis.org/array-api/latest/extensions/generated/array_api.linalg.svd.html) | Returns a singular value decomposition (SVD) of a matrix (or a stack of matrices) `x`. |
-|   |   | [`svdvals`](https://data-apis.org/array-api/latest/extensions/generated/array_api.linalg.svdvals.html) | Returns the singular values of a matrix (or a stack of matrices) `x`. |
-|   |   | [`tensordot`](https://data-apis.org/array-api/latest/extensions/generated/array_api.linalg.tensordot.html) | Returns a tensor contraction of x1 and x2 over specific axes. |
-|   |   | [`trace`](https://data-apis.org/array-api/latest/extensions/generated/array_api.linalg.trace.html) | Returns the sum along the specified diagonals of a matrix (or a stack of matrices) `x`. |
-|   |   | [`vecdot`](https://data-apis.org/array-api/latest/extensions/generated/array_api.linalg.vecdot.html) | Computes the (vector) dot product of two arrays. |
-|   |   | [`vector_norm`](https://data-apis.org/array-api/latest/extensions/generated/array_api.linalg.vector_norm.html) | Computes the vector norm of a vector (or batch of vectors) `x`. |
-|   |   | [`eig`](https://data-apis.org/array-api/latest/extensions/generated/array_api.linalg.eig.html) | Returns eigenvalues and eigenvectors of a real or complex matrix (or stack of matrices) `x`. (optional extension) |
-|   |   | [`eigvals`](https://data-apis.org/array-api/latest/extensions/generated/array_api.linalg.eigvals.html) | Returns the eigenvalues of a real or complex matrix (or a stack of matrices) `x`. (optional extension) |

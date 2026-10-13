@@ -1,4 +1,4 @@
-# Array API standard Fullfillment
+# Array API standard Fulfillment
 
 For column status:
 - Y: Implemented in rstsr (may not be fully functional like numpy or Python array API specification, but should be enough);
@@ -80,7 +80,7 @@ To use remainder (modular) function correctly, one may use [`rt::rem`] (as funct
 | Y | `<<=` [`ShlAssign`] | `__ilshift__` | `x1 <<= x2` |
 | Y | `>>=` [`ShrAssign`] | `__irshift__` | `x1 >>= x2` |
 
-### Comparsion Operators
+### Comparison Operators
 
 | status | implementation | Python API | description |
 |-|-|-|-|
@@ -155,8 +155,8 @@ The reference implementation (as in [`DeviceCpuSerial`] and [`DeviceFaer`]), fol
 
 | status | implementation | Python API | description |
 |-|-|-|-|
-| T | Rust type cast [`as`](https://doc.rust-lang.org/reference/expressions/operator-expr.html#type-cast-expressions)<br>[`DTypeCastAPI::into_cast`]<br>[`num::ToPrimitive`] | [`astype`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.astype.html) | Copies an array to a specified data type irrespective of Type Promotion Rules rules. |
-| T | [`DTypePromoteAPI::CAN_CAST_SELF`]<br>[`DTypePromoteAPI::CAN_CAST_OTHER`]<br>operator trait definition | [`can_cast`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.can_cast.html) | Determines if one data type can be cast to another data type according Type Promotion Rules rules. |
+| T | Rust type cast [`as`](https://doc.rust-lang.org/reference/expressions/operator-expr.html#type-cast-expressions)<br>[`DTypeCastAPI::into_cast`]<br>[`num::ToPrimitive`] | [`astype`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.astype.html) | Copies an array to a specified data type irrespective of Type Promotion Rules. |
+| T | [`DTypePromoteAPI::CAN_CAST_SELF`]<br>[`DTypePromoteAPI::CAN_CAST_OTHER`]<br>operator trait definition | [`can_cast`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.can_cast.html) | Determines if one data type can be cast to another data type according to Type Promotion Rules. |
 | T | [`num::Float`] | [`finfo`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.finfo.html) | Machine limits for floating-point data types. |
 | T | [`num::Integer`] | [`iinfo`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.iinfo.html) | Machine limits for integer data types. |
 | T | [`core::any::TypeId`] | [`isdtype`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.isdtype.html) | Returns a boolean indicating whether a provided dtype is of a specified data type "kind". |

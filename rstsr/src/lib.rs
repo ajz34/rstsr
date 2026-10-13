@@ -1,10 +1,33 @@
 #![doc = include_str!("../notes_to_api_doc.md")]
 #![doc = include_str!("../readme.md")]
+// the crate-root table of contents links the `cheatsheet::linalg` subpage,
+// which does not exist without the `linalg` feature
+#![cfg_attr(not(feature = "linalg"), allow(rustdoc::broken_intra_doc_links))]
 #![cfg_attr(not(test), no_std)]
 pub mod prelude;
 
 #[allow(unused_imports)]
 use crate as rstsr;
+
+pub mod cheatsheet {
+    #![doc = include_str!("docs/cheatsheet.md")]
+    #![allow(unused_imports)]
+    // the core page links to the linalg subpage, which is absent without `linalg`
+    #![cfg_attr(not(feature = "linalg"), allow(rustdoc::broken_intra_doc_links))]
+
+    use crate::prelude::*;
+    use rt::*;
+
+    #[cfg(feature = "linalg")]
+    pub mod linalg {
+        #![doc = include_str!("docs/cheatsheet_linalg.md")]
+        #![allow(unused_imports)]
+
+        use crate::prelude::*;
+        use rt::linalg::*;
+        use rt::*;
+    }
+}
 
 pub mod api_specification {
     #![doc = include_str!("docs/api_specification.md")]
@@ -13,7 +36,12 @@ pub mod api_specification {
     use crate::prelude::*;
     use rt::*;
     extern crate alloc;
+    use rstsr_dtype_traits::*;
 }
+
+// re-export the order-semantics page so the shared spec pages' `crate::order_semantics`
+// links resolve in this crate too (they are symlinked from rstsr-core)
+pub use rstsr_core::order_semantics;
 
 pub mod array_api_standard {
     #![doc = include_str!("docs/array_api_standard.md")]
