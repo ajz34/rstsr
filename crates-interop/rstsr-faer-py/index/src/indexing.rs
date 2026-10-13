@@ -25,8 +25,9 @@ use rstsr_core::operators::assignment::OpAssignAPI;
 use rstsr_core::operators::searching::OpNonzeroAPI;
 use rstsr_core::storage::exports::{DeviceCreationAnyAPI, DeviceRawAPI};
 
-use crate::any_tensor::{dispatch_t, err_py, lift, parse_leaf, type_err, AnyTensor, FTensor, NativeArray, PyScalar};
-use crate::creation::{dim_from, ScalarCastTarget};
+use rstsr_faer_py_core::dim_from;
+use rstsr_faer_py_core::{dispatch_t, err_py, lift, parse_leaf, type_err, AnyTensor, FTensor, NativeArray, PyScalar};
+use rstsr_faer_py_create::ScalarCastTarget;
 
 /* #region key parsing */
 
@@ -174,9 +175,16 @@ where
     view.assign_f(src.view())
 }
 
-impl NativeArray {
+/// Item-assignment helpers for `NativeArray`. An inherent impl is not allowed
+/// on a foreign type, so they ride a local extension trait.
+pub trait SetitemExt {
+    fn setitem_basic_arr(&mut self, key: &Bound<'_, PyTuple>, value: &NativeArray) -> PyResult<()>;
+    fn setitem_basic_scalar(&mut self, key: &Bound<'_, PyTuple>, value: PyScalar) -> PyResult<()>;
+}
+
+impl SetitemExt for NativeArray {
     /// Basic-key assignment; `value` is an array of the same dtype.
-    pub fn setitem_basic_arr(&mut self, key: &Bound<'_, PyTuple>, value: &NativeArray) -> PyResult<()> {
+    fn setitem_basic_arr(&mut self, key: &Bound<'_, PyTuple>, value: &NativeArray) -> PyResult<()> {
         let items = parse_key(key)?;
         let idx = to_indexers(&items)?;
         macro_rules! arms {
@@ -194,7 +202,7 @@ impl NativeArray {
     }
 
     /// Basic-key assignment with a Python scalar value.
-    pub fn setitem_basic_scalar(&mut self, key: &Bound<'_, PyTuple>, value: PyScalar) -> PyResult<()> {
+    fn setitem_basic_scalar(&mut self, key: &Bound<'_, PyTuple>, value: PyScalar) -> PyResult<()> {
         let items = parse_key(key)?;
         let idx = to_indexers(&items)?;
         match &mut self.t {

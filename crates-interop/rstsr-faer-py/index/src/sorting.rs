@@ -12,8 +12,8 @@ use rstsr::prelude::*;
 use rstsr_core::operators::sorting::{OpArgSortAPI, OpSortAPI};
 use rstsr_core::storage::exports::DeviceCreationAnyAPI;
 
-use crate::any_tensor::{dispatch_t, lift, AnyTensor, FTensor, NativeArray};
-use crate::ops::idx_lift;
+use rstsr_faer_py_core::idx_lift;
+use rstsr_faer_py_core::{dispatch_t, lift, AnyTensor, FTensor, NativeArray};
 
 fn op_sort<T>(t: &FTensor<T>, args: SortArgs) -> rt::Result<FTensor<T>>
 where

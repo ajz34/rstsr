@@ -1,0 +1,32 @@
+[package]
+name = "rstsr-faer-py"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+license.workspace = true
+readme = "readme.md"
+description = "Python array-API binding of rstsr (faer device); validation instrument for the Python array API standard"
+# Validation instrument only — never published as a Rust crate (see readme.md).
+publish = false
+
+[lib]
+name = "rstsr_faer"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.29", features = ["extension-module", "abi3-py310", "py-clone"] }
+rstsr-faer-py-core = { workspace = true }
+rstsr-faer-py-create = { workspace = true }
+rstsr-faer-py-index = { workspace = true }
+rstsr-faer-py-linalg = { workspace = true }
+rstsr-faer-py-ops-unary = { workspace = true }
+rstsr-faer-py-ops-binary = { workspace = true }
+rstsr-faer-py-ops-binary-float = { workspace = true }
+rstsr-faer-py-ops-bitwise = { workspace = true }
+rstsr-faer-py-ops-arith = { workspace = true }
+rstsr-faer-py-ops-compare-eq = { workspace = true }
+rstsr-faer-py-ops-compare-ord = { workspace = true }
+rstsr-faer-py-ops-reduce = { workspace = true }

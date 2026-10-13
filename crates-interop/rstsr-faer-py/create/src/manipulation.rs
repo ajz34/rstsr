@@ -20,7 +20,7 @@ use rstsr_core::operators::assignment::{OpAssignAPI, OpAssignArbitaryAPI};
 use rstsr_core::operators::ops::OpSubAPI;
 use rstsr_core::storage::exports::{DeviceCreationAnyAPI, DeviceRawAPI};
 
-use crate::any_tensor::{
+use rstsr_faer_py_core::{
     device_faer, dispatch_name, dispatch_name_many, dispatch_t, err_py, lift, lift_vec, liftp, type_err, AnyTensor,
     AnyTensorRef, FTensor, NativeArray,
 };

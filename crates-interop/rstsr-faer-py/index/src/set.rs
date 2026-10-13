@@ -14,8 +14,8 @@ use rstsr::prelude::*;
 use rstsr_core::operators::set::{OpIsinAPI, OpUniqueAPI};
 use rstsr_core::storage::exports::{DeviceCreationAnyAPI, DeviceRawAPI};
 
-use crate::any_tensor::{err_py, lift, type_err, AnyTensor, FTensor, NativeArray};
-use crate::ops::idx_lift_tensor;
+use rstsr_faer_py_core::idx_lift_tensor;
+use rstsr_faer_py_core::{err_py, lift, type_err, AnyTensor, FTensor, NativeArray};
 
 fn op_unique_values<T>(t: &FTensor<T>) -> rt::Result<FTensor<T>>
 where

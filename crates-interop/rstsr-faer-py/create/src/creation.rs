@@ -13,15 +13,12 @@ use rstsr::prelude::*;
 use rstsr_core::operators::assignment::OpAssignAPI;
 use rstsr_core::storage::exports::{DeviceCreationComplexFloatAPI, DeviceCreationNumAPI, DeviceCreationTriAPI};
 
-use crate::any_tensor::{
+use rstsr_faer_py_core::dim_from;
+use rstsr_faer_py_core::Dtype;
+use rstsr_faer_py_core::{
     device_faer, dispatch_name, dispatch_name_numeric, dispatch_name_real, dispatch_t_numeric_same, err_py, lift,
     liftp, parse_leaf, type_err, AnyTensor, FTensor, NativeArray, PyScalar,
 };
-use crate::dtype::Dtype;
-
-pub fn dim_from(shape: &[usize]) -> IxD {
-    IxD::try_from(shape.to_vec()).expect("shape -> IxD")
-}
 
 /// Element cast matrix for astype/asarray(dtype=...). rstsr 0.9.0 has no
 /// tensor-level dtype conversion and its element-level DTypeCastAPI covers
@@ -250,7 +247,7 @@ cast_row_from_c32!(f64);
 /// funnel here; lossy casts allowed, matching numpy's asarray-with-dtype
 /// behavior). Complex leaves are rejected for real targets at runtime — the
 /// standard provides no complex->real scalar conversion.
-pub(crate) trait ScalarCastTarget: Sized {
+pub trait ScalarCastTarget: Sized {
     fn from_scalar(s: PyScalar) -> PyResult<Self>;
 }
 
@@ -363,7 +360,7 @@ pub fn asarray_from_flat<'py>(
     flat: &Bound<'py, PyList>,
     shape: Vec<usize>,
     dtype: Option<&Bound<'py, Dtype>>,
-    #[allow(unused_variables)] device: &Bound<'py, crate::device::Device>,
+    #[allow(unused_variables)] device: &Bound<'py, rstsr_faer_py_core::device::Device>,
 ) -> PyResult<NativeArray> {
     let expected: usize = shape.iter().product();
     if flat.len() != expected {
@@ -409,7 +406,7 @@ fn filled_bool(shape: &[usize], filler: &Filler) -> PyResult<AnyTensor> {
 pub fn zeros<'py>(
     shape: Vec<usize>,
     dtype: &Bound<'py, Dtype>,
-    #[allow(unused_variables)] device: &Bound<'py, crate::device::Device>,
+    #[allow(unused_variables)] device: &Bound<'py, rstsr_faer_py_core::device::Device>,
 ) -> PyResult<NativeArray> {
     let t = if dtype.borrow().name == "bool" {
         filled_bool(&shape, &Filler::Zeros)?
@@ -423,7 +420,7 @@ pub fn zeros<'py>(
 pub fn ones<'py>(
     shape: Vec<usize>,
     dtype: &Bound<'py, Dtype>,
-    #[allow(unused_variables)] device: &Bound<'py, crate::device::Device>,
+    #[allow(unused_variables)] device: &Bound<'py, rstsr_faer_py_core::device::Device>,
 ) -> PyResult<NativeArray> {
     let t = if dtype.borrow().name == "bool" {
         filled_bool(&shape, &Filler::Ones)?
@@ -437,7 +434,7 @@ pub fn ones<'py>(
 pub fn empty<'py>(
     shape: Vec<usize>,
     dtype: &Bound<'py, Dtype>,
-    #[allow(unused_variables)] device: &Bound<'py, crate::device::Device>,
+    #[allow(unused_variables)] device: &Bound<'py, rstsr_faer_py_core::device::Device>,
 ) -> PyResult<NativeArray> {
     let t = if dtype.borrow().name == "bool" {
         filled_bool(&shape, &Filler::Empty)?
@@ -452,7 +449,7 @@ pub fn full<'py>(
     shape: Vec<usize>,
     fill_value: &Bound<'py, PyAny>,
     dtype: &Bound<'py, Dtype>,
-    #[allow(unused_variables)] device: &Bound<'py, crate::device::Device>,
+    #[allow(unused_variables)] device: &Bound<'py, rstsr_faer_py_core::device::Device>,
 ) -> PyResult<NativeArray> {
     let s = parse_leaf(fill_value)?;
     let filler = Filler::Full(s);
@@ -472,7 +469,7 @@ pub fn arange<'py>(
     stop: Option<&Bound<'py, PyAny>>,
     step: Option<&Bound<'py, PyAny>>,
     dtype: Option<&Bound<'py, Dtype>>,
-    #[allow(unused_variables)] device: &Bound<'py, crate::device::Device>,
+    #[allow(unused_variables)] device: &Bound<'py, rstsr_faer_py_core::device::Device>,
 ) -> PyResult<NativeArray> {
     let s0 = parse_leaf(start)?;
     let s1 = stop.map(parse_leaf).transpose()?;

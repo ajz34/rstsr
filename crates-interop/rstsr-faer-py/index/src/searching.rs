@@ -16,8 +16,8 @@ use rstsr_core::operators::searching::{OpNonzeroAPI, OpSearchSortedAPI};
 use rstsr_core::storage::exports::DeviceCreationAnyAPI;
 use rstsr_dtype_traits::{ExtSortCmp, ExtZero};
 
-use crate::any_tensor::{err_py, AnyTensor, FTensor, NativeArray};
-use crate::ops::idx_lift_tensor;
+use rstsr_faer_py_core::idx_lift_tensor;
+use rstsr_faer_py_core::{err_py, AnyTensor, FTensor, NativeArray};
 
 fn op_searchsorted<T>(
     x1: &FTensor<T>,
@@ -53,7 +53,7 @@ pub fn searchsorted(
             match (&x1.t, &x2.t) {
                 $((AnyTensor::$dv(a), AnyTensor::$dv(b)) =>
                     idx_lift_tensor_of(op_searchsorted(a, b, side_right, sorter.clone())),)*
-                _ => crate::any_tensor::type_err(
+                _ => rstsr_faer_py_core::type_err(
                     "searchsorted: x1 and x2 must share one dtype (mixed dtypes need promotion, \
                      rstsr gap G-009); cast first",
                 ),

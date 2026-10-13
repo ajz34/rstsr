@@ -33,11 +33,11 @@ use rstsr_core::operators::reduction::OpSumAPI;
 use rstsr_core::storage::exports::{DeviceCreationAnyAPI, DeviceRawAPI};
 use rstsr_dtype_traits::{DTypePromoteAPI, ExtNum};
 
-use crate::any_tensor::{
+use rstsr_faer_py_core::idx_lift;
+use rstsr_faer_py_core::{
     any_of, dispatch_bin_promote, dispatch_bin_promote_arith, dispatch_t_numeric_same, err_py, lift, type_err,
     AnyTensor, AnyTensorRef, FTensor, IntoAnyTensor, NativeArray,
 };
-use crate::ops::idx_lift;
 
 /// `rt::Result<FTensor<R>>` -> erased handle, by the result's own dtype, so a
 /// real-valued eigenvalue/singular-value output lands in the right variant.
