@@ -9,10 +9,10 @@ namespace `rstsr_faer.api` on top of `DeviceFaer`, so the data-apis
 
 - **Rust users**: use [`rstsr`] (or `rstsr-core`) directly — this crate adds
   nothing for Rust.
-- **Python users**: do not depend on this package. It is not distributed (no
-  PyPI wheel; `publish = false` keeps it off crates.io as well), and its
-  surface tracks what the conformance suite grades, not what a Python tensor
-  library should offer.
+- **Python users**: do not depend on this package. It is distributed (as the
+  `rstsr-faer-py` crate on crates.io and a wheel on PyPI), but its surface
+  tracks what the conformance suite grades, not what a Python tensor library
+  should offer.
 - The crate is a pure **wrapper**: marshalling, validation and rstsr calls
   only, with no numeric algorithms in either layer. A capability rstsr lacks
   becomes a rust-side fix request recorded in the grading task's gap register,

@@ -1,0 +1,77 @@
+name: rstsr-faer-py wheel
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Where to upload the built wheel
+        type: choice
+        options: [none, testpypi]
+        default: none
+  # TEMPORARY — this PR only; remove before merge so main stays dispatch-only.
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # One target for the first test; the full platform matrix (macOS,
+        # Windows, aarch64) is added next as separate parallel entries.
+        include:
+          - target: x86_64-unknown-linux-gnu
+            manylinux: auto
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build wheel
+        uses: PyO3/maturin-action@v1
+        with:
+          working-directory: crates-interop/rstsr-faer-py
+          target: ${{ matrix.target }}
+          manylinux: ${{ matrix.manylinux }}
+          command: build
+          args: --release --out dist
+          rust-toolchain: nightly
+          docker-options: -e CARGO_BUILD_JOBS -e CARGO_PROFILE_RELEASE_DEBUG
+        env:
+          # Capped so the release cdylib link stays inside the runner's memory.
+          CARGO_BUILD_JOBS: 4
+          CARGO_PROFILE_RELEASE_DEBUG: "0"
+
+      - name: Upload wheel artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheel-${{ matrix.target }}
+          path: crates-interop/rstsr-faer-py/dist/*.whl
+
+  publish-testpypi:
+    name: publish to TestPyPI
+    needs: build
+    runs-on: ubuntu-latest # pypa/gh-action-pypi-publish runs on Linux only
+    if: >-
+      (github.event_name == 'pull_request'
+        && contains(github.event.pull_request.labels.*.name, 'test-pypi'))
+      || (github.event_name == 'workflow_dispatch'
+        && inputs.publish == 'testpypi')
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/p/rstsr-faer-py
+    permissions:
+      id-token: write # OIDC trusted publishing, no stored secret
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          packages-dir: dist
+          skip-existing: true # forgiving while iterating on one version

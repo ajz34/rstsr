@@ -8,4 +8,9 @@ the Python side; Python only shuffles handles and mirrors signatures.
 from . import rstsr_faer as _native
 from . import api
 
-__version__ = "0.9.0"
+try:
+    from importlib.metadata import version as _dist_version
+
+    __version__ = _dist_version("rstsr-faer-py")
+except Exception:  # not installed (running from the source tree)
+    __version__ = "0.0.0"
