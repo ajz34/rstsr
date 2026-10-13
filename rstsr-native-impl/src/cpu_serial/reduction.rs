@@ -375,7 +375,8 @@ where
     // SAFETY: all `out` elements were written by the reduction above.
     let mut out = unsafe { transmute::<Vec<MaybeUninit<TO>>, Vec<TO>>(out) };
 
-    // handle tensor iter order
+    // handle tensor iter order (the layout must track the rearranged data)
+    let mut lo = lo;
     if TensorIterOrder::default() != TensorIterOrder::K {
         let lo_default = layout_for_array_copy(&lm, TensorIterOrder::default())?;
         if lo_default != lo {
@@ -385,6 +386,7 @@ where
             })?;
             // SAFETY: `op_muta_refb_func` above wrote every element of `out_default`.
             out = unsafe { transmute::<Vec<MaybeUninit<TO>>, Vec<TO>>(out_default) };
+            lo = lo_default;
         }
     }
 

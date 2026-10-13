@@ -295,7 +295,8 @@ where
     /// - `symm`: [`FlagSymm`] — how the opposite triangle is derived from the packed one: `Sy`
     ///   mirrors it (symmetric), `He` mirrors its complex conjugate (Hermitian), `Ay` negates it
     ///   and zeroes the diagonal (anti-symmetric), `Ah` negates the conjugate and zeroes the
-    ///   diagonal (anti-Hermitian); `N` writes the triangle selected by `uplo` only.
+    ///   diagonal (anti-Hermitian); `N` zero-fills the opposite triangle (no symmetry implied by
+    ///   the packed data).
     ///
     /// # Returns
     ///
@@ -314,6 +315,21 @@ where
     /// //  [ 4 5 8]
     /// //  [ 7 8 9]]
     /// # assert_eq!(format!("{}", packed.unpack_tri(FlagUpLo::L, FlagSymm::Sy)), "[[ 1 4 7]\n [ 4 5 8]\n [ 7 8 9]]");
+    /// ```
+    ///
+    /// With `N`, no symmetry is assumed: the packed triangle is written as-is and the opposite
+    /// triangle is zero-filled.
+    ///
+    /// ```rust
+    /// # use rstsr::prelude::*;
+    /// # let mut device = DeviceCpu::default();
+    /// # device.set_default_order(RowMajor);
+    /// let packed = rt::tensor_from_nested!([1.0, 4.0, 5.0, 7.0, 8.0, 9.0], &device);
+    /// println!("{}", packed.unpack_tri(FlagUpLo::L, FlagSymm::N));
+    /// // [[ 1 0 0]
+    /// //  [ 4 5 0]
+    /// //  [ 7 8 9]]
+    /// # assert_eq!(format!("{}", packed.unpack_tri(FlagUpLo::L, FlagSymm::N)), "[[ 1 0 0]\n [ 4 5 0]\n [ 7 8 9]]");
     /// ```
     ///
     /// # Panics
