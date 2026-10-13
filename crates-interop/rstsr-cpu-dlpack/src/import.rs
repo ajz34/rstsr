@@ -3,7 +3,8 @@
 use core::mem::ManuallyDrop;
 use core::ptr::NonNull;
 
-use dlpack_ffi::{DLManagedTensor, DLManagedTensorVersioned, DLTensor};
+use dlpark::ffi::{DLManagedTensor, DLManagedTensorVersioned};
+use dlpark::{Managed, TensorRef};
 use rstsr_common::error::Result;
 use rstsr_core::prelude::*;
 use rstsr_core::storage::exports::Storage;
@@ -25,63 +26,39 @@ struct ImportPlan {
     span_len: usize,
 }
 
-/// # Safety
+/// Validate a borrowed descriptor and plan the repr span.
 ///
-/// `dl` must be a `DLTensor` whose `shape`/`strides` pointers are valid for
-/// `ndim` entries, as required by the DLPack producer contract.
-unsafe fn plan_import<T: DlpackDtype>(dl: &DLTensor) -> Result<ImportPlan> {
-    check_cpu_device(dl.device)?;
-    T::from_dltype(dl.dtype)?;
+/// Reads through dlpark's [`TensorRef`] (which checks rank, shape values, and
+/// element/byte counts); the caller must have established that the descriptor
+/// and its shape/strides storage are readable (the DLPack producer contract).
+/// Nothing is owned or freed here, so a rejected import leaves the foreign
+/// tensor untouched.
+fn plan_import<T: DlpackDtype>(tref: &TensorRef<'_>) -> Result<ImportPlan> {
+    check_cpu_device(tref.device())?;
+    T::from_dltype(tref.dtype())?;
 
-    if !(0..=MAX_NDIM).contains(&dl.ndim) {
-        return rstsr_raise!(InvalidValue, "DLPack ndim {} is outside the accepted range 0..={MAX_NDIM}", dl.ndim);
-    }
-    let ndim = dl.ndim as usize;
-    if ndim > 0 && dl.shape.is_null() {
-        return rstsr_raise!(InvalidValue, "DLPack shape pointer is NULL for a tensor with ndim > 0");
+    let ndim = tref.ndim();
+    if ndim > MAX_NDIM as usize {
+        return rstsr_raise!(InvalidValue, "DLPack ndim {ndim} is outside the accepted range 0..={MAX_NDIM}");
     }
 
     let mut shape: Vec<usize> = Vec::with_capacity(ndim);
-    let mut numel: usize = 1;
-    if ndim > 0 {
-        let dims = unsafe { core::slice::from_raw_parts(dl.shape, ndim) };
-        for &dim in dims {
-            if dim < 0 {
-                return rstsr_raise!(InvalidValue, "negative DLPack shape entry {dim}");
-            }
-            let dim = usize::try_from(dim)
-                .map_err(|_| rstsr_error!(ValueOutOfRange, "shape entry {dim} does not fit into usize"))?;
-            shape.push(dim);
-            numel = numel
-                .checked_mul(dim)
-                .ok_or_else(|| rstsr_error!(ValueOutOfRange, "DLPack shape product overflows usize"))?;
-        }
+    for &dim in tref.shape() {
+        shape.push(
+            usize::try_from(dim)
+                .map_err(|_| rstsr_error!(ValueOutOfRange, "shape entry {dim} does not fit into usize"))?,
+        );
     }
+    let numel = tref.num_elements();
 
+    // A NULL strides pointer means compact row-major (pre-1.2 producers); dlpark computes it.
+    let strides_cow = tref.strides_or_compact().map_err(|err| rstsr_error!(InvalidValue, "DLPack strides: {err}"))?;
     let mut strides: Vec<isize> = Vec::with_capacity(ndim);
-    if ndim > 0 {
-        if dl.strides.is_null() {
-            // Pre-1.2 producers: NULL means compact row-major.
-            let mut acc: isize = 1;
-            let mut compact = vec![0isize; ndim];
-            for i in (0..ndim).rev() {
-                compact[i] = acc;
-                let dim = isize::try_from(shape[i])
-                    .map_err(|_| rstsr_error!(ValueOutOfRange, "shape entry does not fit into isize"))?;
-                acc = acc
-                    .checked_mul(dim)
-                    .ok_or_else(|| rstsr_error!(ValueOutOfRange, "compact row-major strides overflow isize"))?;
-            }
-            strides = compact;
-        } else {
-            let raw = unsafe { core::slice::from_raw_parts(dl.strides, ndim) };
-            for &stride in raw {
-                strides.push(
-                    isize::try_from(stride)
-                        .map_err(|_| rstsr_error!(ValueOutOfRange, "stride {stride} does not fit into isize"))?,
-                );
-            }
-        }
+    for &stride in strides_cow.iter() {
+        strides.push(
+            isize::try_from(stride)
+                .map_err(|_| rstsr_error!(ValueOutOfRange, "stride {stride} does not fit into isize"))?,
+        );
     }
 
     if numel == 0 {
@@ -95,13 +72,14 @@ unsafe fn plan_import<T: DlpackDtype>(dl: &DLTensor) -> Result<ImportPlan> {
             span_len: 0,
         });
     }
-    if dl.data.is_null() {
+    let data = tref.data_ptr();
+    if data.is_null() {
         return rstsr_raise!(InvalidValue, "DLPack data pointer is NULL for a non-empty tensor");
     }
 
-    let byte_offset = usize::try_from(dl.byte_offset)
+    let byte_offset = usize::try_from(tref.byte_offset())
         .map_err(|_| rstsr_error!(ValueOutOfRange, "byte_offset does not fit into usize"))?;
-    let start_addr = (dl.data as usize)
+    let start_addr = (data as usize)
         .checked_add(byte_offset)
         .ok_or_else(|| rstsr_error!(ValueOutOfRange, "data + byte_offset overflows usize"))?;
     if start_addr % core::mem::align_of::<T>() != 0 {
@@ -113,7 +91,7 @@ unsafe fn plan_import<T: DlpackDtype>(dl: &DLTensor) -> Result<ImportPlan> {
     }
     // Advance the pointer itself rather than rebuilding it from `start_addr`, so the span keeps
     // the producer pointer's provenance; the checked address guarantees this cannot wrap.
-    let start = dl.data.cast::<u8>().wrapping_add(byte_offset).cast::<T>();
+    let start = data.cast::<u8>().wrapping_add(byte_offset).cast::<T>();
 
     // Index-space bounds; `min <= 0 <= max` by construction of the sums.
     let mut min: i128 = 0;
@@ -179,8 +157,7 @@ fn validate_bool_payload<T: DlpackDtype>(plan: &ImportPlan) -> Result<()> {
     Ok(())
 }
 
-/// Validate the plan as a rstsr layout **before** ownership is transferred, so
-/// that a rejected import leaves the foreign tensor untouched.
+/// Validate the plan as a rstsr layout.
 fn plan_layout<D>(plan: &ImportPlan) -> Result<Layout<D>>
 where
     D: DimAPI,
@@ -242,11 +219,23 @@ where
             managed.version.minor
         );
     }
-    let dl_tensor = managed.dl_tensor;
-    // SAFETY: caller contract on the embedded DLTensor.
-    let plan = unsafe { plan_import::<T>(&dl_tensor)? };
+    let plan = {
+        // SAFETY: caller contract on the embedded DLTensor. Validation is read-only, so a
+        // rejected import leaves the foreign tensor under the caller's control (not freed).
+        let tref = unsafe { TensorRef::from_raw(&managed.dl_tensor) }
+            .map_err(|err| rstsr_error!(InvalidValue, "DLPack tensor: {err}"))?;
+        plan_import::<T>(&tref)?
+    };
     let layout = plan_layout::<D>(&plan)?;
-    Ok(build_import::<T, B, D>(plan, layout, DlpackForeignOwner::new_versioned(ptr)))
+    // Ownership moves into the owner only after every check succeeded.
+    // SAFETY: the pointer is non-null and its declared major version is 1, compatible with the
+    // bundled header, so `from_raw` cannot fail here.
+    let owned = unsafe { Managed::<DLManagedTensorVersioned>::from_raw(ptr.as_ptr()) }
+        .expect("pointer and version were validated above");
+    let version = Some(owned.version());
+    let flags = Some(owned.flags().bits());
+    let owner = DlpackForeignOwner::new(owned.into_deleter(), true, version, flags);
+    Ok(build_import::<T, B, D>(plan, layout, owner))
 }
 
 /// Import a legacy `DLManagedTensor` (deprecated, pre-1.0 struct).
@@ -267,9 +256,15 @@ where
     let ptr = NonNull::new(ptr).ok_or_else(|| rstsr_error!(InvalidValue, "NULL DLManagedTensor pointer"))?;
     // SAFETY: caller contract.
     let managed = unsafe { ptr.as_ref() };
-    let dl_tensor = managed.dl_tensor;
-    // SAFETY: caller contract on the embedded DLTensor.
-    let plan = unsafe { plan_import::<T>(&dl_tensor)? };
+    let plan = {
+        // SAFETY: caller contract on the embedded DLTensor.
+        let tref = unsafe { TensorRef::from_raw(&managed.dl_tensor) }
+            .map_err(|err| rstsr_error!(InvalidValue, "DLPack tensor: {err}"))?;
+        plan_import::<T>(&tref)?
+    };
     let layout = plan_layout::<D>(&plan)?;
-    Ok(build_import::<T, B, D>(plan, layout, DlpackForeignOwner::new_legacy(ptr)))
+    // SAFETY: the pointer is non-null, so `from_raw` cannot fail here.
+    let owned = unsafe { Managed::<DLManagedTensor>::from_raw(ptr.as_ptr()) }.expect("pointer was validated above");
+    let owner = DlpackForeignOwner::new(owned.into_deleter(), false, None, None);
+    Ok(build_import::<T, B, D>(plan, layout, owner))
 }

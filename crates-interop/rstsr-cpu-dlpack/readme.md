@@ -9,6 +9,10 @@ The crate is pure Rust (no Python bindings): it works with raw
 DLPack consumer — another Rust crate, C, Julia — not only NumPy. Python
 exchange is a thin host-side capsule holder over this crate.
 
+The DLPack machinery is delegated to [`dlpark`](https://crates.io/crates/dlpark)
+(pure Rust): its producer builders, validated `TensorRef`, owning `Managed`
+handle, and exactly-once `AllocationDeleter` back the export and import paths.
+
 - **export**: owned tensors (ownership transfer), shared tensors and their
   basic-indexed views (zero-copy, read-only; `TensorDlpackShared` or core
   `TensorArc` bases), and a copy fallback for other views.

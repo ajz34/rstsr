@@ -1,6 +1,6 @@
 //! Device mapping between rstsr devices and DLPack device descriptors.
 
-use dlpack_ffi::{DLDevice, DLDeviceType};
+use dlpark::ffi::{DLDevice, DLDeviceType};
 use rstsr_common::error::Result;
 use rstsr_core::prelude::*;
 
@@ -20,13 +20,13 @@ where
     B: DeviceAPI<T, Raw = Vec<T>>,
 {
     fn to_dlpack_device(&self) -> DLDevice {
-        DLDevice { device_type: DLDeviceType::kDLCPU, device_id: 0 }
+        DLDevice::CPU
     }
 }
 
 /// Check that a DLPack device descriptor denotes plain CPU memory.
 pub(crate) fn check_cpu_device(device: DLDevice) -> Result<()> {
-    if device.device_type != DLDeviceType::kDLCPU {
+    if device.device_type != DLDeviceType::CPU {
         return rstsr_raise!(
             UnImplemented,
             "DLPack device type {} is not supported by rstsr-cpu-dlpack (only kDLCPU)",

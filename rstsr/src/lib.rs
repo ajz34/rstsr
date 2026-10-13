@@ -79,7 +79,7 @@ fn test_dlpack_prelude() {
     let tensor: Tensor<f64, DeviceCpuSerial, IxD> = rt::arange_f((0.0, 5.0, 1.0, &device)).unwrap();
     let shared = rt::dlpack::into_shared_dlpack_f(tensor).unwrap();
     let export: dlpack::DlpackExport = rt::dlpack::to_dlpack_shared(&shared);
-    assert_eq!(export.flags(), rstsr_cpu_dlpack::dlpack_ffi::DLPACK_FLAG_BITMASK_READ_ONLY as u64);
+    assert_eq!(export.flags(), rstsr_cpu_dlpack::dlpark::DlpackFlags::READ_ONLY.bits());
 
     // a second function of the namespace, pinned by signature
     let _: fn(Tensor<f64, DeviceCpuSerial, IxD>) -> rt::dlpack::DlpackExport = rt::dlpack::into_dlpack;

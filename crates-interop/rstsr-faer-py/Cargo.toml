@@ -23,4 +23,6 @@ rstsr = { workspace = true, features = ["default", "linalg", "dlpack"] }
 rstsr-core = { workspace = true }
 rstsr-dtype-traits = { workspace = true }
 rstsr-common = { workspace = true }
-dlpack-ffi = { workspace = true }
+# The `pyo3` feature brings dlpark's Python protocol layer (capsule handshake,
+# `__dlpack_device__` discovery, legacy/versioned negotiation, DLPack 1.3 C Exchange).
+dlpark = { workspace = true, features = ["pyo3"] }

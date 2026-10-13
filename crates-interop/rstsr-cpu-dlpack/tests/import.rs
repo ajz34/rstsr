@@ -5,10 +5,11 @@ use std::ptr;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
-use dlpack_ffi::{
-    DLDataType, DLDevice, DLDeviceType, DLManagedTensor, DLManagedTensorVersioned, DLPackVersion, DLTensor,
-    DLPACK_FLAG_BITMASK_READ_ONLY,
+use dlpark::ffi::{
+    DLDataType, DLDataTypeCode, DLDevice, DLDeviceType, DLManagedTensor, DLManagedTensorVersioned, DLPackVersion,
+    DLTensor,
 };
+use dlpark::DlpackFlags;
 use rstsr_core::prelude::*;
 use rstsr_cpu_dlpack::dtype::CODE_BOOL;
 use rstsr_cpu_dlpack::{from_dlpack_legacy_f, from_dlpack_versioned_f, DlpackDtype, TensorDlpack};
@@ -49,7 +50,7 @@ struct Recipe {
     dtype: DLDataType,
     device: DLDevice,
     version: DLPackVersion,
-    flags: u64,
+    flags: DlpackFlags,
 }
 
 impl Recipe {
@@ -63,9 +64,9 @@ impl Recipe {
             shape,
             strides: None,
             dtype: f64::DLTYPE,
-            device: DLDevice { device_type: DLDeviceType::kDLCPU, device_id: 0 },
+            device: DLDevice { device_type: DLDeviceType::CPU, device_id: 0 },
             version: DLPackVersion { major: 1, minor: 0 },
-            flags: 0,
+            flags: DlpackFlags::empty(),
         }
     }
 }
@@ -285,10 +286,10 @@ fn scalar_and_empty_imports() {
 fn versioned_flags_are_recorded() {
     let calls = Arc::new(AtomicUsize::new(0));
     let mut recipe = Recipe::contiguous(vec![2]);
-    recipe.flags = DLPACK_FLAG_BITMASK_READ_ONLY as u64;
+    recipe.flags = DlpackFlags::READ_ONLY;
     let ptr = make_versioned(recipe, &calls);
     let tensor = import(ptr).unwrap();
-    assert_eq!(tensor.storage().data().owner().flags(), Some(DLPACK_FLAG_BITMASK_READ_ONLY as u64));
+    assert_eq!(tensor.storage().data().owner().flags(), Some(DlpackFlags::READ_ONLY.bits()));
     let version = tensor.storage().data().owner().version().unwrap();
     assert_eq!((version.major, version.minor), (1, 0));
     drop(tensor);
@@ -316,22 +317,22 @@ fn assert_rejected(recipe: Recipe) {
 fn error_matrix() {
     // wrong dtype for the requested Rust type
     let mut recipe = Recipe::contiguous(vec![2]);
-    recipe.dtype = DLDataType { code: 2, bits: 32, lanes: 1 };
+    recipe.dtype = DLDataType { code: DLDataTypeCode::FLOAT, bits: 32, lanes: 1 };
     assert_rejected(recipe);
 
     // vector lanes
     let mut recipe = Recipe::contiguous(vec![2]);
-    recipe.dtype = DLDataType { code: 2, bits: 64, lanes: 2 };
+    recipe.dtype = DLDataType { code: DLDataTypeCode::FLOAT, bits: 64, lanes: 2 };
     assert_rejected(recipe);
 
     // sub-byte float dtype
     let mut recipe = Recipe::contiguous(vec![2]);
-    recipe.dtype = DLDataType { code: 10, bits: 8, lanes: 1 };
+    recipe.dtype = DLDataType { code: DLDataTypeCode(10), bits: 8, lanes: 1 };
     assert_rejected(recipe);
 
     // non-CPU device
     let mut recipe = Recipe::contiguous(vec![2]);
-    recipe.device = DLDevice { device_type: DLDeviceType::kDLCUDA, device_id: 0 };
+    recipe.device = DLDevice { device_type: DLDeviceType::CUDA, device_id: 0 };
     assert_rejected(recipe);
 
     // unsupported major version
@@ -407,7 +408,7 @@ fn make_versioned_bool(
     let owner = Box::new(OwnerBytes { calls: Arc::clone(calls), _data: data, _shape: shape, _strides: strides });
     let dl_tensor = DLTensor {
         data: owner._data.as_ptr() as *mut c_void,
-        device: DLDevice { device_type: DLDeviceType::kDLCPU, device_id: 0 },
+        device: DLDevice { device_type: DLDeviceType::CPU, device_id: 0 },
         ndim: owner._shape.len() as i32,
         dtype: DLDataType { code: CODE_BOOL, bits: 8, lanes: 1 },
         shape: owner._shape.as_ptr() as *mut i64,
@@ -418,7 +419,7 @@ fn make_versioned_bool(
         version: DLPackVersion { major: 1, minor: 0 },
         manager_ctx: Box::into_raw(owner) as *mut c_void,
         deleter: Some(deleter_bytes),
-        flags: 0,
+        flags: DlpackFlags::empty(),
         dl_tensor,
     });
     Box::into_raw(managed)
