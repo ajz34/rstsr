@@ -3,6 +3,9 @@
 #![cfg_attr(not(test), no_std)]
 pub mod prelude;
 
+// re-exported so the crate-level doc pages can link `crate::order_semantics`
+pub use rstsr_core::order_semantics;
+
 #[allow(unused_imports)]
 use crate as rstsr;
 
@@ -11,6 +14,7 @@ pub mod api_specification {
     #![allow(unused_imports)]
 
     use crate::prelude::*;
+    use rstsr_dtype_traits::*;
     use rt::*;
     extern crate alloc;
 }
