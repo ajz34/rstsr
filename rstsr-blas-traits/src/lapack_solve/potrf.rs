@@ -33,7 +33,7 @@ where
             ColMajor => Upper,
         });
         let mut a = overwritable_convert(a)?;
-        let order = if a.f_prefer() && !a.c_prefer() { ColMajor } else { RowMajor };
+        let order = get_output_order(&[], &[(a.c_prefer(), a.f_prefer())], device.default_order());
 
         // perform check
         rstsr_assert_eq!(a.view().nrow(), a.view().ncol(), InvalidLayout, "Lapack POTRF: A must be square")?;
@@ -44,10 +44,7 @@ where
 
         // run driver
         let info = unsafe { B::driver_potrf(order, uplo, n, ptr_a, lda) };
-        let info = info as i32;
-        if info != 0 {
-            rstsr_errcode!(info, "Lapack POTRF")?;
-        }
+        map_lapack_info(info, "Lapack POTRF")?;
 
         Ok(a)
     }

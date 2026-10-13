@@ -62,3 +62,13 @@ where
     }
     Some((grown as usize).max(1))
 }
+
+/// Integer counterpart of [`lwork_from_query`] for queries that return
+/// `blas_int` directly (e.g. the liwork slot of the double-query routines):
+/// negative or `MAX(1, ·)`-clamped, range-checked, no float handling.
+pub fn liwork_from_query(iwork_query: blas_int) -> Option<usize> {
+    if iwork_query < 0 {
+        return None;
+    }
+    usize::try_from(iwork_query).ok().map(|v| v.max(1))
+}

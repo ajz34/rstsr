@@ -46,7 +46,7 @@ where
             ColMajor => Upper,
         });
         let mut a = overwritable_convert(a)?;
-        let order = if a.f_prefer() && !a.c_prefer() { ColMajor } else { RowMajor };
+        let order = get_output_order(&[], &[(a.c_prefer(), a.f_prefer())], device.default_order());
 
         let [n, m] = *a.view().shape();
         rstsr_assert_eq!(n, m, InvalidLayout)?;
@@ -58,10 +58,7 @@ where
 
         // run driver
         let info = unsafe { B::driver_syev(order, jobz, uplo, n, ptr_a, lda, ptr_w) };
-        let info = info as i32;
-        if info != 0 {
-            rstsr_errcode!(info, "Lapack SYEV")?;
-        }
+        map_lapack_info(info, "Lapack SYEV")?;
 
         Ok((w, a.clone_to_mut()))
     }

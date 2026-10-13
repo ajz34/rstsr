@@ -39,7 +39,7 @@ where
 
         let device = a.device().clone();
         let mut b = overwritable_convert(b)?;
-        let order = if b.f_prefer() && !b.c_prefer() { ColMajor } else { RowMajor };
+        let order = get_output_order(&[], &[(b.c_prefer(), b.f_prefer())], device.default_order());
         let mut a = overwritable_convert_with_order(a, order)?;
 
         let [n, nrhs] = *b.view().shape();
@@ -53,10 +53,7 @@ where
 
         // run driver
         let info = unsafe { B::driver_gesv(order, n, nrhs, ptr_a, lda, ptr_ipiv, ptr_b, ldb) };
-        let info = info as i32;
-        if info != 0 {
-            rstsr_errcode!(info, "Lapack GESV")?;
-        }
+        map_lapack_info(info, "Lapack GESV")?;
 
         // rust is 0-indexed
         ipiv -= 1;

@@ -3,85 +3,139 @@ use crate::DeviceBLAS;
 use num::Complex;
 use rstsr_blas_traits::prelude::*;
 use rstsr_common::prelude_dev::*;
+
 use rstsr_native_impl::prelude_dev::*;
+
 use std::slice::from_raw_parts_mut;
 
 #[duplicate_item(
-    T     func_   ;
-   [f32] [spotrf_];
-   [f64] [dpotrf_];
+    T     fn_work      func_    ;
+   [f32] [spotrf_work] [spotrf_];
+   [f64] [dpotrf_work] [dpotrf_];
 )]
-impl POTRFDriverAPI<T> for DeviceBLAS {
-    unsafe fn driver_potrf(order: FlagOrder, uplo: FlagUpLo, n: usize, a: *mut T, lda: usize) -> blas_int {
-        use lapack_ffi::lapack::func_;
+pub unsafe fn fn_work(
+    order: FlagOrder,
+    uplo: FlagUpLo,
+    n: usize,
+    a: *mut T,
+    lda: usize,
+    info: *mut blas_int,
+) -> blas_int {
+    use lapack_ffi::lapack::func_;
 
-        let mut info = 0;
-
-        if order == ColMajor {
-            // Call LAPACK function and adjust info
-            func_(&uplo.into(), &(n as _), a, &(lda as _), &mut info);
-            if info != 0 {
-                return info;
-            }
-        } else {
+    match order {
+        ColMajor => {
+            func_(&uplo.into(), &(n as _), a, &(lda as _), info);
+            *info
+        },
+        RowMajor => {
             let lda_t = n.max(1);
-            // Transpose input matrices
-            let mut a_t: Vec<T> = match uninitialized_vec(n * n) {
+            // Check leading dimension(s); Fortran (reference-LAPACK) argument indices
+            if lda < n {
+                *info = -4;
+                return *info;
+            }
+            // Allocate memory for temporary array(s)
+            let mut a_t: Vec<T> = match uninitialized_vec(lda_t * n.max(1)) {
                 Ok(a_t) => a_t,
                 Err(_) => return -1011,
             };
             let a_slice = from_raw_parts_mut(a, n * lda);
             let la = Layout::new_unchecked([n, n], [lda as isize, 1], 0);
             let la_t = Layout::new_unchecked([n, n], [1, lda_t as isize], 0);
-            orderchange_out_r2c_ix2_cpu_serial(&mut a_t, &la_t, a_slice, &la).unwrap();
+            // Transpose input matrices
+            if orderchange_out_r2c_ix2_cpu_serial(&mut a_t, &la_t, a_slice, &la).is_err() {
+                return -1011;
+            }
             // Call LAPACK function and adjust info
-            func_(&uplo.into(), &(n as _), a_t.as_mut_ptr(), &(lda_t as _), &mut info);
-            if info != 0 {
-                return info;
+            func_(&uplo.into(), &(n as _), a_t.as_mut_ptr(), &(lda_t as _), info);
+            if *info != 0 {
+                return *info;
             }
             // Transpose output matrices
-            orderchange_out_c2r_ix2_cpu_serial(a_slice, &la, &a_t, &la_t).unwrap();
-        }
-        return info;
+            if orderchange_out_c2r_ix2_cpu_serial(a_slice, &la, &a_t, &la_t).is_err() {
+                return -1011;
+            }
+            *info
+        },
     }
 }
 
 #[duplicate_item(
-    T              func_   ;
-   [Complex<f32>] [cpotrf_];
-   [Complex<f64>] [zpotrf_];
+    T     fn_work      func_    ;
+   [f32] [spotrf_work] [spotrf_];
+   [f64] [dpotrf_work] [dpotrf_];
 )]
 impl POTRFDriverAPI<T> for DeviceBLAS {
     unsafe fn driver_potrf(order: FlagOrder, uplo: FlagUpLo, n: usize, a: *mut T, lda: usize) -> blas_int {
-        use lapack_ffi::lapack::func_;
+        // no workspace; the LAPACKE high tier is a forward
+        let mut info: blas_int = 0;
+        fn_work(order, uplo, n, a, lda, &mut info)
+    }
+}
 
-        let mut info = 0;
+#[duplicate_item(
+    T              fn_work      func_    ;
+   [Complex<f32>] [cpotrf_work] [cpotrf_];
+   [Complex<f64>] [zpotrf_work] [zpotrf_];
+)]
+pub unsafe fn fn_work(
+    order: FlagOrder,
+    uplo: FlagUpLo,
+    n: usize,
+    a: *mut T,
+    lda: usize,
+    info: *mut blas_int,
+) -> blas_int {
+    use lapack_ffi::lapack::func_;
 
-        if order == ColMajor {
-            // Call LAPACK function and adjust info
-            func_(&uplo.into(), &(n as _), a as *mut _, &(lda as _), &mut info);
-            if info != 0 {
-                return info;
-            }
-        } else {
+    match order {
+        ColMajor => {
+            func_(&uplo.into(), &(n as _), a as *mut _, &(lda as _), info);
+            *info
+        },
+        RowMajor => {
             let lda_t = n.max(1);
-            // Transpose input matrices
-            let mut a_t: Vec<T> = match uninitialized_vec(n * n) {
+            // Check leading dimension(s); Fortran (reference-LAPACK) argument indices
+            if lda < n {
+                *info = -4;
+                return *info;
+            }
+            // Allocate memory for temporary array(s)
+            let mut a_t: Vec<T> = match uninitialized_vec(lda_t * n.max(1)) {
                 Ok(a_t) => a_t,
                 Err(_) => return -1011,
             };
             let a_slice = from_raw_parts_mut(a, n * lda);
             let la = Layout::new_unchecked([n, n], [lda as isize, 1], 0);
             let la_t = Layout::new_unchecked([n, n], [1, lda_t as isize], 0);
-            orderchange_out_r2c_ix2_cpu_serial(&mut a_t, &la_t, a_slice, &la).unwrap();
+            // Transpose input matrices
+            if orderchange_out_r2c_ix2_cpu_serial(&mut a_t, &la_t, a_slice, &la).is_err() {
+                return -1011;
+            }
             // Call LAPACK function and adjust info
-            func_(&uplo.into(), &(n as _), a_t.as_mut_ptr() as *mut _, &(lda_t as _), &mut info);
-            if info != 0 {
-                return info;
+            func_(&uplo.into(), &(n as _), a_t.as_mut_ptr() as *mut _, &(lda_t as _), info);
+            if *info != 0 {
+                return *info;
             }
             // Transpose output matrices
-            orderchange_out_c2r_ix2_cpu_serial(a_slice, &la, &a_t, &la_t).unwrap();
-        }
-        return info;
+            if orderchange_out_c2r_ix2_cpu_serial(a_slice, &la, &a_t, &la_t).is_err() {
+                return -1011;
+            }
+            *info
+        },
+    }
+}
+
+#[duplicate_item(
+    T              fn_work      func_    ;
+   [Complex<f32>] [cpotrf_work] [cpotrf_];
+   [Complex<f64>] [zpotrf_work] [zpotrf_];
+)]
+impl POTRFDriverAPI<T> for DeviceBLAS {
+    unsafe fn driver_potrf(order: FlagOrder, uplo: FlagUpLo, n: usize, a: *mut T, lda: usize) -> blas_int {
+        // no workspace; the LAPACKE high tier is a forward
+        let mut info: blas_int = 0;
+        fn_work(order, uplo, n, a, lda, &mut info)
     }
 }
