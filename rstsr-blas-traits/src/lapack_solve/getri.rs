@@ -25,8 +25,9 @@ where
     pub fn internal_run(self) -> Result<TensorMutable2<'a, T, B>> {
         let Self { a, ipiv } = self;
 
-        let mut a = overwritable_convert(a)?;
-        let order = if a.f_prefer() && !a.c_prefer() { ColMajor } else { RowMajor };
+        let device = a.device().clone();
+        let order = get_output_order(&[], &[(a.c_prefer(), a.f_prefer())], device.default_order());
+        let mut a = overwritable_convert_with_order(a, order)?;
         let mut ipiv = ipiv.into_contig_f(ColMajor)?;
 
         // rust is 0-indexed
@@ -43,10 +44,7 @@ where
 
         // run driver
         let info = unsafe { B::driver_getri(order, n, ptr_a, lda, ptr_ipiv) };
-        let info = info as i32;
-        if info != 0 {
-            rstsr_errcode!(info, "Lapack GETRI")?;
-        }
+        map_lapack_info(info, "Lapack GETRI")?;
 
         Ok(a.clone_to_mut())
     }

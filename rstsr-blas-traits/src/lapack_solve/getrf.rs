@@ -33,7 +33,7 @@ where
 
         let device = a.device().clone();
         let mut a = overwritable_convert(a)?;
-        let order = if a.f_prefer() && !a.c_prefer() { ColMajor } else { RowMajor };
+        let order = get_output_order(&[], &[(a.c_prefer(), a.f_prefer())], device.default_order());
 
         let [m, n] = *a.view().shape();
         let lda = a.view().ld(order).unwrap();
@@ -43,10 +43,7 @@ where
 
         // run driver
         let info = unsafe { B::driver_getrf(order, m, n, ptr_a, lda, ptr_ipiv) };
-        let info = info as i32;
-        if info != 0 {
-            rstsr_errcode!(info, "Lapack GETRF")?;
-        }
+        map_lapack_info(info, "Lapack GETRF")?;
 
         // rust is 0-indexed
         ipiv -= 1;
