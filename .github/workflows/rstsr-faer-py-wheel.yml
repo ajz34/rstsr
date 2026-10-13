@@ -29,6 +29,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Free disk space and add swap
+        run: |
+          # The final rstsr-faer-py cdylib needs more RAM than the runner has;
+          # give the in-container build swap to fall back on (runner SSD is
+          # only ~14G, so keep the swapfile small).
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          sudo fallocate -l 8G /swapfile
+          sudo chmod 600 /swapfile
+          sudo mkswap /swapfile
+          sudo swapon /swapfile
+          free -h
+
       - name: Build wheel
         uses: PyO3/maturin-action@v1
         with:
@@ -40,8 +52,8 @@ jobs:
           rust-toolchain: nightly
           docker-options: -e CARGO_BUILD_JOBS -e CARGO_PROFILE_RELEASE_DEBUG
         env:
-          # Capped so the release cdylib link stays inside the runner's memory.
-          CARGO_BUILD_JOBS: 4
+          # Fewer parallel jobs leave more memory headroom for the final link.
+          CARGO_BUILD_JOBS: 2
           CARGO_PROFILE_RELEASE_DEBUG: "0"
 
       - name: Upload wheel artifact
