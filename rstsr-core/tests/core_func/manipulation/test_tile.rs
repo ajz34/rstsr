@@ -205,7 +205,7 @@ mod device_order {
 
         let a = rt::full(([], 5, &device));
         let out = a.tile(None);
-        assert_eq!(out.shape(), &[]);
+        assert!(out.shape().is_empty());
         assert_equal(out, &a, None);
     }
 }
