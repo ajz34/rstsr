@@ -238,7 +238,7 @@ mod custom_roll {
 
         let a = rt::full(([], 9, &device));
         let out = a.roll((3, None));
-        assert_eq!(out.shape(), &[]);
+        assert!(out.shape().is_empty());
         assert_equal(out, &a, None);
     }
 

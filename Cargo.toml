@@ -53,7 +53,7 @@ rstsr-cpu-dlpack = { path = "./crates-interop/rstsr-cpu-dlpack", default-feature
 # develop dependencies that should not publish
 rstsr-test-manifest = { path = "./rstsr-test-manifest", default-features = false }
 # ffi dependencies
-dlpack-ffi = { version = "1.3" }
+dlpark = { version = "0.9", default-features = false }
 rstsr-cblas-base = { version = "0.1" }
 rstsr-openblas-ffi = { version = "0.6", default-features = false, features = ["blas", "cblas", "lapack"] }
 rstsr-mkl-ffi = { version = "0.3", default-features = false, features = ["blas", "cblas", "lapack"] }
