@@ -2,6 +2,11 @@
 //! (`rstsr/src/docs/cheatsheet.md`). Every row of that page has a matching
 //! example id here; keep the two in sync (skill `api-cheatsheet-conventions`).
 
+// `*&mut view += x` is the sanctioned in-place-view idiom (the cheat-sheet row
+// `a[2:] += b`); clippy's rewrite would not compile, so allow the lint here as
+// rstsr-core does crate-wide.
+#![allow(clippy::deref_addrof)]
+
 use rstsr::prelude::*;
 
 fn device() -> DeviceFaer {
