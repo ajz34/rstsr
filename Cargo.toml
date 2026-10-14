@@ -16,7 +16,22 @@ members = [
     "crates-device/rstsr-kml",
     "crates-plugin/rstsr-tblis",
     "crates-interop/rstsr-cpu-dlpack",
-    "crates-interop/rstsr-faer-py",
+    # The rstsr-faer-py family is grouped under one directory; each crate is a
+    # separate compilation unit so that no single rustc monomorphizes the whole
+    # dtype-dispatch surface at once (that needed ~45 GB before the split).
+    "crates-interop/rstsr-faer-py/binding",
+    "crates-interop/rstsr-faer-py/core",
+    "crates-interop/rstsr-faer-py/create",
+    "crates-interop/rstsr-faer-py/index",
+    "crates-interop/rstsr-faer-py/linalg",
+    "crates-interop/rstsr-faer-py/ops-unary",
+    "crates-interop/rstsr-faer-py/ops-binary",
+    "crates-interop/rstsr-faer-py/ops-binary-float",
+    "crates-interop/rstsr-faer-py/ops-bitwise",
+    "crates-interop/rstsr-faer-py/ops-arith",
+    "crates-interop/rstsr-faer-py/ops-compare-eq",
+    "crates-interop/rstsr-faer-py/ops-compare-ord",
+    "crates-interop/rstsr-faer-py/ops-reduce",
 ]
 
 [workspace.package]
@@ -50,6 +65,18 @@ rstsr-kml = { path = "./crates-device/rstsr-kml", default-features = false, vers
 rstsr-tblis = { path = "./crates-plugin/rstsr-tblis", default-features = false, version = "0.10.0-alpha.2" }
 # members (interop)
 rstsr-cpu-dlpack = { path = "./crates-interop/rstsr-cpu-dlpack", default-features = false, version = "0.10.0-alpha.2" }
+rstsr-faer-py-core = { path = "./crates-interop/rstsr-faer-py/core", version = "0.10.0-alpha.2" }
+rstsr-faer-py-create = { path = "./crates-interop/rstsr-faer-py/create", version = "0.10.0-alpha.2" }
+rstsr-faer-py-index = { path = "./crates-interop/rstsr-faer-py/index", version = "0.10.0-alpha.2" }
+rstsr-faer-py-linalg = { path = "./crates-interop/rstsr-faer-py/linalg", version = "0.10.0-alpha.2" }
+rstsr-faer-py-ops-unary = { path = "./crates-interop/rstsr-faer-py/ops-unary", version = "0.10.0-alpha.2" }
+rstsr-faer-py-ops-binary = { path = "./crates-interop/rstsr-faer-py/ops-binary", version = "0.10.0-alpha.2" }
+rstsr-faer-py-ops-binary-float = { path = "./crates-interop/rstsr-faer-py/ops-binary-float", version = "0.10.0-alpha.2" }
+rstsr-faer-py-ops-bitwise = { path = "./crates-interop/rstsr-faer-py/ops-bitwise", version = "0.10.0-alpha.2" }
+rstsr-faer-py-ops-arith = { path = "./crates-interop/rstsr-faer-py/ops-arith", version = "0.10.0-alpha.2" }
+rstsr-faer-py-ops-compare-eq = { path = "./crates-interop/rstsr-faer-py/ops-compare-eq", version = "0.10.0-alpha.2" }
+rstsr-faer-py-ops-compare-ord = { path = "./crates-interop/rstsr-faer-py/ops-compare-ord", version = "0.10.0-alpha.2" }
+rstsr-faer-py-ops-reduce = { path = "./crates-interop/rstsr-faer-py/ops-reduce", version = "0.10.0-alpha.2" }
 # develop dependencies that should not publish
 rstsr-test-manifest = { path = "./rstsr-test-manifest", default-features = false }
 # ffi dependencies

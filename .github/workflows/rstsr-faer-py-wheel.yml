@@ -1,0 +1,87 @@
+name: rstsr-faer-py wheel
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Where to upload the built wheel
+        type: choice
+        options: [none, testpypi]
+        default: none
+  # TEMPORARY — this PR only; remove before merge so main stays dispatch-only.
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # One target for the first test; the full platform matrix (macOS,
+        # Windows, aarch64) is added next as separate parallel entries.
+        include:
+          - target: x86_64-unknown-linux-gnu
+            manylinux: auto
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Free disk space
+        run: |
+          # Free the pre-installed toolchains this build does not use, so the
+          # release build (all crates plus the linked cdylib) has room. The
+          # crate split keeps peak build RAM around 6 GB, so no swap is needed.
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL || true
+          df -h /
+
+      - name: Build wheel
+        uses: PyO3/maturin-action@v1
+        with:
+          working-directory: crates-interop/rstsr-faer-py/binding
+          target: ${{ matrix.target }}
+          manylinux: ${{ matrix.manylinux }}
+          command: build
+          args: --release --out dist
+          rust-toolchain: nightly
+          docker-options: -e CARGO_BUILD_JOBS
+        env:
+          # Two jobs: the dtype-dispatch surface is split across crates, so a
+          # single rustc peaks at ~4 GB and the whole build stays far inside
+          # the runner's RAM. The default release profile (opt-level 3,
+          # codegen-units 16) is kept — it measured the same as opt-level 2,
+          # and the peak is monomorphization-bound, not profile-bound.
+          CARGO_BUILD_JOBS: 2
+
+      - name: Upload wheel artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheel-${{ matrix.target }}
+          path: crates-interop/rstsr-faer-py/binding/dist/*.whl
+
+  publish-testpypi:
+    name: publish to TestPyPI
+    needs: build
+    runs-on: ubuntu-latest # pypa/gh-action-pypi-publish runs on Linux only
+    if: >-
+      github.event_name == 'pull_request'
+      || (github.event_name == 'workflow_dispatch'
+        && inputs.publish == 'testpypi')
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/p/rstsr-faer-py
+    permissions:
+      id-token: write # OIDC trusted publishing, no stored secret
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          packages-dir: dist
+          skip-existing: true # forgiving while iterating on one version
