@@ -46,16 +46,14 @@ jobs:
           command: build
           args: --release --out dist
           rust-toolchain: nightly
-          docker-options: >-
-            -e CARGO_BUILD_JOBS -e CARGO_PROFILE_RELEASE_DEBUG
-            -e CARGO_PROFILE_RELEASE_OPT_LEVEL -e CARGO_PROFILE_RELEASE_CODEGEN_UNITS
+          docker-options: -e CARGO_BUILD_JOBS
         env:
-          # opt-level 2 + one job: the dtype-dispatch surface is split across
-          # crates, and a single rustc now stays well inside the runner's RAM.
+          # Two jobs: the dtype-dispatch surface is split across crates, so a
+          # single rustc peaks at ~4 GB and the whole build stays far inside
+          # the runner's RAM. The default release profile (opt-level 3,
+          # codegen-units 16) is kept — it measured the same as opt-level 2,
+          # and the peak is monomorphization-bound, not profile-bound.
           CARGO_BUILD_JOBS: 2
-          CARGO_PROFILE_RELEASE_DEBUG: "0"
-          CARGO_PROFILE_RELEASE_OPT_LEVEL: "2"
-          CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "256"
 
       - name: Upload wheel artifact
         uses: actions/upload-artifact@v4
