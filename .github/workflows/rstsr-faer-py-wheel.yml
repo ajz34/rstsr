@@ -8,8 +8,6 @@ on:
         type: choice
         options: [none, testpypi]
         default: none
-  # TEMPORARY — this PR only; remove before merge so main stays dispatch-only.
-  pull_request:
 
 permissions:
   contents: read
@@ -65,10 +63,7 @@ jobs:
     name: publish to TestPyPI
     needs: build
     runs-on: ubuntu-latest # pypa/gh-action-pypi-publish runs on Linux only
-    if: >-
-      github.event_name == 'pull_request'
-      || (github.event_name == 'workflow_dispatch'
-        && inputs.publish == 'testpypi')
+    if: github.event_name == 'workflow_dispatch' && inputs.publish == 'testpypi'
     environment:
       name: testpypi
       url: https://test.pypi.org/p/rstsr-faer-py
