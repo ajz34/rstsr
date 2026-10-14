@@ -187,6 +187,97 @@ impl<T> From<PinvResult<T>> for (T, usize) {
     }
 }
 
+/// Relative tolerance for [`pinv`](crate::traits_def::pinv): singular values at
+/// or below `atol + rtol * s_max` are set to zero.
+///
+/// A scalar carries no device; an array does — so the two cannot share one
+/// representation, and the array's device is checked against the input's before
+/// the pseudoinverse is computed. `None` selects the default `max(M, N) * eps`.
+///
+/// **Order notice.** The input's two matrix axes are its *leading* axes under a
+/// row-major device but its *trailing* axes under a column-major one; the batch
+/// is whatever remains, and an [`Array`](PinvRtol::Array) tolerance is broadcast
+/// against the batch in that same device order. On a row-major device this is
+/// NumPy's trailing alignment against `shape(x)[:-2]`; on a column-major device
+/// the matrix axes are the right-most and the tolerance aligns from the opposite
+/// end.
+///
+/// `TR` is the input's real scalar type (`T::Real`) and `B` its device. `From`
+/// converts the scalar, array, `()`, and `None` forms, so `pinv((x, 1e-8))` (an
+/// `f64` input), `pinv((x, rtol_array))`, and `pinv((x, None))` all resolve. A
+/// scalar is taken as the input's own real type — with an `f32` input write
+/// `1e-8_f32` (a bare `1e-8` is `f64` and does not convert).
+pub enum PinvRtol<TR, B>
+where
+    B: DeviceRawAPI<TR>,
+{
+    /// The default tolerance `max(M, N) * eps`.
+    None,
+    /// One tolerance for every matrix — a scalar of the input's real type.
+    Float(TR),
+    /// One tolerance per matrix, broadcast against the batch in device order.
+    Array(Tensor<TR, B, IxD>),
+}
+
+// not derived: `#[derive(Default)]` would add spurious `TR: Default, B: Default` bounds
+#[allow(clippy::derivable_impls)]
+impl<TR, B> Default for PinvRtol<TR, B>
+where
+    B: DeviceRawAPI<TR>,
+{
+    fn default() -> Self {
+        Self::None
+    }
+}
+
+impl<TR, B> From<Tensor<TR, B, IxD>> for PinvRtol<TR, B>
+where
+    B: DeviceRawAPI<TR>,
+{
+    fn from(rtol: Tensor<TR, B, IxD>) -> Self {
+        Self::Array(rtol)
+    }
+}
+
+// the scalar overload is written per real type, not as a generic `From<TR>`:
+// a generic impl would overlap `From<()>`/`From<Option<()>>` at `TR = ()`
+impl<B> From<f32> for PinvRtol<f32, B>
+where
+    B: DeviceRawAPI<f32>,
+{
+    fn from(rtol: f32) -> Self {
+        Self::Float(rtol)
+    }
+}
+
+impl<B> From<f64> for PinvRtol<f64, B>
+where
+    B: DeviceRawAPI<f64>,
+{
+    fn from(rtol: f64) -> Self {
+        Self::Float(rtol)
+    }
+}
+
+impl<TR, B> From<()> for PinvRtol<TR, B>
+where
+    B: DeviceRawAPI<TR>,
+{
+    fn from(_: ()) -> Self {
+        Self::None
+    }
+}
+
+impl<TR, B> From<Option<()>> for PinvRtol<TR, B>
+where
+    B: DeviceRawAPI<TR>,
+{
+    /// `None` is equivalent to `()`: both request the default tolerance.
+    fn from(_: Option<()>) -> Self {
+        Self::None
+    }
+}
+
 /* #endregion */
 
 /* #region slogdet */

@@ -45,7 +45,7 @@ where
 ///
 /// PySCF `pyscf.lib.misc.fingerprint`
 /// <https://github.com/pyscf/pyscf/blob/6f6d3741bf42543e02ccaa1d4ef43d9bf83b3dda/pyscf/lib/misc.py#L1249-L1253>
-pub fn fingerprint<R, T, B, D>(a: &TensorAny<R, T, B, D>) -> T
+pub fn fingerprint<'a, R, T, B, D>(a: &'a TensorAny<R, T, B, D>) -> T
 where
     T: ComplexFloat,
     D: DimAPI,
@@ -58,9 +58,8 @@ where
         + OpAssignArbitaryAPI<T, IxD, D>
         + OpAssignArbitaryAPI<T, D, D>
         + DeviceMatMulAPI<T, T, T, IxD, IxD, IxD>,
-    R: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
+    R: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw> + DataIntoCowAPI<'a>,
     <B as DeviceRawAPI<T>>::Raw: Clone,
-    for<'a> R: DataIntoCowAPI<'a>,
 {
     let range = linspace((T::zero(), T::from(a.size()).unwrap(), a.size(), false, a.device()));
     let val = a.to_contig(RowMajor).reshape(-1) % range.cos();

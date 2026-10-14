@@ -171,6 +171,63 @@ mod test {
     }
 
     #[test]
+    fn test_pinv_rtol() {
+        let device = DeviceFaer::default();
+        // rank-1 2x2
+        let a = rt::asarray((vec![1.0f64, 2.0, 2.0, 4.0], [2, 2].c(), &device));
+
+        // the default, `()`, and `None` are the same tolerance
+        let d = rt::linalg::pinv(a.view());
+        let e = rt::linalg::pinv((a.view(), ()));
+        let f = rt::linalg::pinv((a.view(), None));
+        assert_eq!(fingerprint(&d.pinv), fingerprint(&e.pinv));
+        assert_eq!(fingerprint(&d.pinv), fingerprint(&f.pinv));
+
+        // a bare scalar and a 0-d rtol tensor agree
+        let s = rt::linalg::pinv((a.view(), 1e-8f64));
+        let tiny = rt::from_scalar(1e-8f64, &device);
+        let t = rt::linalg::pinv((a.view(), tiny));
+        assert_eq!(fingerprint(&s.pinv), fingerprint(&t.pinv));
+
+        // an array rtol is one tolerance per matrix: the batch `[0, 1]` leaves the
+        // rank-1 matrix alone but zeroes the identity (rtol = 1 >= s_max)
+        let stack = rt::asarray((vec![1.0f64, 2.0, 2.0, 4.0, 1.0, 0.0, 0.0, 1.0], [2, 2, 2].c(), &device));
+        let rtol = rt::asarray((vec![0.0f64, 1.0], [2].c(), &device));
+        let p = rt::linalg::pinv((stack.view(), rtol));
+
+        let m0 = rt::asarray((vec![1.0f64, 2.0, 2.0, 4.0], [2, 2].c(), &device));
+        let m1 = rt::asarray((vec![1.0f64, 0.0, 0.0, 1.0], [2, 2].c(), &device));
+        let p0 = rt::linalg::pinv((m0.view(), 0.0f64));
+        let p1 = rt::linalg::pinv((m1.view(), 1.0f64));
+        assert_eq!(fingerprint(&p.pinv.i((0, .., ..))), fingerprint(&p0.pinv));
+        assert_eq!(fingerprint(&p.pinv.i((1, .., ..))), fingerprint(&p1.pinv));
+    }
+
+    #[test]
+    fn test_pinv_rtol_empty_and_mismatch() {
+        let device = DeviceFaer::default();
+
+        // an empty batch with an empty array rtol must not panic (array-api
+        // `test_pinv` draws exactly this)
+        let a = rt::asarray((Vec::<f64>::new(), [0, 1, 1].c(), &device));
+        let rtol = rt::asarray((Vec::<f64>::new(), [0].c(), &device));
+        let p = rt::linalg::pinv((a.view(), rtol));
+        assert_eq!(*p.pinv.shape(), [0, 1, 1]);
+        assert_eq!(p.rank, 0);
+
+        // an rtol tensor carries its own device; a mismatch against the input is caught
+        let mut row = DeviceFaer::default();
+        row.set_default_order(RowMajor);
+        let mut col = DeviceFaer::default();
+        col.set_default_order(ColMajor);
+        let a = rt::asarray((vec![1.0f64, 2.0, 3.0, 4.0], [2, 2].c(), &row));
+        let bad = rt::from_scalar(1e-8f64, &col);
+        assert!(rt::linalg::pinv_f((a.view(), bad)).is_err());
+        // a bare scalar has no device, so nothing to mismatch
+        assert_eq!(rt::linalg::pinv((a.view(), 1e-8f64)).rank, 2);
+    }
+
+    #[test]
     fn test_pinv_empty() {
         // a zero-size matrix axis must not panic (the SVD would return an empty
         // singular-value vector); pinv is the transposed zero matrix, rank 0

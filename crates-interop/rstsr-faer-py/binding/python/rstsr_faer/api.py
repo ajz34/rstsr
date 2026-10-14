@@ -1955,6 +1955,23 @@ def vector_norm(x, /, *, axis=None, keepdims=False, ord=2):
 
 
 def pinv(x, /, *, rtol=None):
+    # `rtol` is a real floating scalar or an array broadcast against the matrix
+    # stack; a scalar passes through as a Python float and only an array is cast
+    # to x's real dtype — marshalling, not a promotion cast (the rust entry
+    # holds the two cases apart), same as matrix_rank
+    if isinstance(rtol, Array):
+        real = _REAL_FLOATING_OF.get(x.dtype.name)
+        if real is None:
+            raise TypeError(
+                f"pinv is defined only for real and complex floating dtypes, got {x.dtype.name}"
+            )
+        rtol = _handle(astype(rtol, real))
+    elif rtol is not None:
+        if not isinstance(rtol, (_py_bool, _py_int, _py_float)):
+            raise TypeError(
+                f"rtol must be a real floating-point scalar, got {type(rtol).__name__}"
+            )
+        rtol = float(rtol)
     return _wrap(_linalg_pinv(_handle(x), rtol))
 
 
