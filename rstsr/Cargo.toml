@@ -94,3 +94,9 @@ ilp64 = [
 [package.metadata.docs.rs]
 features = ["default", "openblas", "linalg", "sci", "tblis", "dlpack"]
 rustdoc-args = ["--cfg", "docsrs", "--document-private-items", "--html-in-header", "katex-header.html"]
+
+# The linalg cheat-sheet examples use the `rt::linalg` family, available only
+# with the `linalg` feature. The core cheat-sheet test is ungated.
+[[test]]
+name = "cheatsheet_linalg"
+required-features = ["linalg"]

@@ -1,6 +1,11 @@
 #![doc = include_str!("../notes_to_api_doc.md")]
 #![doc = include_str!("../readme.md")]
+// the crate-root table of contents links the `cheatsheet::linalg` subpage,
+// which does not exist without the `linalg` feature
+#![cfg_attr(not(feature = "linalg"), allow(rustdoc::broken_intra_doc_links))]
 #![cfg_attr(not(test), no_std)]
+// documents which items require an optional feature (docs.rs renders the badges)
+#![cfg_attr(docsrs, feature(doc_cfg))]
 pub mod prelude;
 
 // re-exported so the crate-level doc pages can link `crate::order_semantics`
@@ -8,6 +13,26 @@ pub use rstsr_core::order_semantics;
 
 #[allow(unused_imports)]
 use crate as rstsr;
+
+pub mod cheatsheet {
+    #![doc = include_str!("docs/cheatsheet.md")]
+    #![allow(unused_imports)]
+    // the core page links to the linalg subpage, which is absent without `linalg`
+    #![cfg_attr(not(feature = "linalg"), allow(rustdoc::broken_intra_doc_links))]
+
+    use crate::prelude::*;
+    use rt::*;
+
+    #[cfg(feature = "linalg")]
+    pub mod linalg {
+        #![doc = include_str!("docs/cheatsheet_linalg.md")]
+        #![allow(unused_imports)]
+
+        use crate::prelude::*;
+        use rt::linalg::*;
+        use rt::*;
+    }
+}
 
 pub mod api_specification {
     #![doc = include_str!("docs/api_specification.md")]
@@ -17,6 +42,7 @@ pub mod api_specification {
     use rstsr_dtype_traits::*;
     use rt::*;
     extern crate alloc;
+    use rstsr_dtype_traits::*;
 }
 
 pub mod array_api_standard {

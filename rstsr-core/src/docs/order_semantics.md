@@ -19,12 +19,13 @@ device.set_default_order(ColMajor); // or RowMajor; RowMajor is the default
                                    // under this crate's default features
 ```
 
-This page explains what the default order affects. Functions also state their
-own order behavior in their docstrings: order-independent ones carry the
-one-line notice "This function behaves identically under [`RowMajor`] and
-[`ColMajor`] device default orders", and order-dependent ones carry the
-**Row/Column Major Notice** warning. (Functions documented before this
-convention are being retrofitted.)
+This page explains what the default order affects. Individual functions also
+state their own order behavior in their docstrings.
+
+Order-independent functions carry the one-line notice "This function behaves
+identically under [`RowMajor`] and [`ColMajor`] device default orders".
+Order-dependent functions carry the **Row/Column Major Notice** warning.
+(Functions documented before this convention are being retrofitted.)
 
 ## What the default order controls
 
@@ -41,46 +42,94 @@ not pin an order themselves:
 | Flattened visit order (the `reshape(-1)` sequence: [`repeat`] / [`roll`] with `axis = None`, [`nonzero`], the `unique_*` first-occurrence sequence) | row-major sequence | column-major sequence |
 
 Layout-only manipulations ([`transpose`], slicing, [`flip`], ...) are not
-affected at all. Element-wise computations are unaffected in their results;
-only the memory arrangement of newly allocated results follows the default
-order. The same holds for the gathering operations whose selection is described
-by coordinates rather than by a visit sequence — [`index_select`],
-[`take_along_axis`] and, for a run of integer index arrays that stays together,
-[`array_index`]: their shape and values are order-independent, and only the
-arrangement of a newly allocated result (and anything that flattens it:
-`to_vec()`, `iter()`) follows the device default order. [`array_index`] is
-*shape*-dependent on the order when the advanced indexers are apart: its
-placement rule is measured in the device's access order, so a displaced run of
-index arrays goes to the front under [`RowMajor`] and to the **back** under
-[`ColMajor`] (see its Row/Column Major Notice). Either way it reads its index
-arrays — and visits the broadcast dimensions they describe — in the device
-order, and that traversal is not observable in the result. A boolean mask in
-[`array_index`] takes the same placement rule, but its count dimension *is* the
-[`nonzero`] visit sequence: a mask of rank two or more therefore gathers the
-same positions in a different order under [`ColMajor`] — a difference in values,
-not only in arrangement (the same class as [`mask_select`]'s sequence below).
-[`mask_select`] is
-the exception among the gathers:
-its selection *sequence* is the mask visit order, which follows the device
-default order by design — not the row-major rule the Python Array API
-prescribes for boolean index arrays — so on a column-major device even a 1-D
-result carries the column-major sequence (see its Row/Column Major Notice). For
-every other function, consult its own docstring notice rather than assuming.
+affected at all. Element-wise computations are unaffected in their results.
+Only the memory arrangement of newly allocated results follows the default
+order.
 
-The rest of this page demonstrates the three cases worth understanding in
-depth: creation, broadcasting, and reshape.
+The same holds for gathering operations whose selection is described by
+coordinates rather than by a visit sequence: [`index_select`],
+[`take_along_axis`], and [`array_index`] when its integer index arrays stay
+together. Their shape and values are order-independent. Only the arrangement of
+a newly allocated result, and anything that flattens it (`to_vec()`, `iter()`),
+follows the device default order.
 
-## Creation: same shape, different memory arrangement
+[`array_index`] becomes *shape*-dependent on the order when its advanced
+indexers are apart. Its placement rule is measured in the device's access order,
+so a displaced run of index arrays goes to the front under [`RowMajor`] and to
+the **back** under [`ColMajor`] (see its Row/Column Major Notice).
 
-Creating by shape under the two orders produces tensors with identical
-logical shapes but different strides (the same linear sequence fills the
-tensor; only the mapping between logical indices and memory positions
-differs):
+Either way it reads its index arrays, and visits the broadcast dimensions they
+describe, in the device order. That traversal is not observable in the result.
+
+A boolean mask in [`array_index`] takes the same placement rule, but its count
+dimension *is* the [`nonzero`] visit sequence. A mask of rank two or more
+therefore gathers the same positions in a different order under [`ColMajor`].
+The difference is in the values, not only in the arrangement, and belongs to the
+same class as [`mask_select`]'s sequence below.
+
+[`mask_select`] is the exception among the gathers. Its selection *sequence* is
+the mask visit order, which follows the device default order by design. It does
+not follow the row-major rule the Python Array API prescribes for boolean index
+arrays, so on a column-major device even a 1-D result carries the column-major
+sequence.
+
+For every other function, consult its own docstring notice rather than
+assuming.
+
+The rest of this page demonstrates the cases worth understanding in depth:
+creation, iteration, broadcasting, and reshape.
+
+## Row/column-major is not the same as c/f-contiguity
+
+Row/column-major describes the *iteration* order, while c/f-contiguity describes
+the *storage* order, and the two can disagree. A C-contiguous tensor on a
+row-major device already stores its elements in iteration order, so flattening
+it needs no copy. An F-contiguous tensor on the same device holds the same
+logical values in a different memory sequence, so flattening it requires a copy.
+The reshape section below works through this case.
+
+## Iteration
+
+Element iteration (`iter()`, and the mutable `iter_mut()`) walks the tensor in
+the device default order, not in storage order. The same tensor therefore yields
+the same values in a different sequence on the two devices:
 
 ```rust
 # use rstsr::prelude::*;
-# let mut device = DeviceCpu::default();
-# device.set_default_order(RowMajor);
+let mut device = DeviceCpu::default();
+device.set_default_order(RowMajor);
+let a = rt::tensor_from_nested!([[0, 1, 2], [3, 4, 5]], &device);
+let v: Vec<i32> = a.view().iter().copied().collect();
+println!("{v:?}");
+// [0, 1, 2, 3, 4, 5]
+# assert_eq!(v, vec![0, 1, 2, 3, 4, 5]);
+```
+
+```rust
+# use rstsr::prelude::*;
+let mut device = DeviceCpu::default();
+device.set_default_order(ColMajor);
+let a = rt::tensor_from_nested!([[0, 1, 2], [3, 4, 5]], &device);
+let v: Vec<i32> = a.view().iter().copied().collect();
+println!("{v:?}");
+// [0, 3, 1, 4, 2, 5]
+# assert_eq!(v, vec![0, 3, 1, 4, 2, 5]);
+```
+
+The [`tensor_from_nested!`] macro always builds a row-major (C-contiguous)
+layout, so both snippets hold the *same* buffer. Only the traversal order
+differs.
+
+## Creation: same shape, different memory arrangement
+
+Creating by shape under the two orders produces tensors with identical logical
+shapes but different strides. The same linear sequence fills the tensor; only
+the mapping between logical indices and memory positions differs:
+
+```rust
+# use rstsr::prelude::*;
+let mut device = DeviceCpu::default();
+device.set_default_order(RowMajor);
 let a = rt::arange((6, &device)).into_shape([2, 3]);
 println!("{a}");
 // [[ 0 1 2]
@@ -92,8 +141,8 @@ println!("{:?}", a.layout());
 
 ```rust
 # use rstsr::prelude::*;
-# let mut device = DeviceCpu::default();
-# device.set_default_order(ColMajor);
+let mut device = DeviceCpu::default();
+device.set_default_order(ColMajor);
 let a = rt::arange((6, &device)).into_shape([2, 3]);
 println!("{a}");
 // [[ 0 2 4]
@@ -109,9 +158,8 @@ order.
 
 ## Broadcasting: alignment from the last or the first axis
 
-Under [`RowMajor`], shapes align from the **last** axis - the NumPy rule.
-Under [`ColMajor`], shapes align from the **first** axis - the
-Fortran/Julia rule:
+Under [`RowMajor`], shapes align from the **last** axis, the NumPy rule. Under
+[`ColMajor`], shapes align from the **first** axis, the Fortran/Julia rule:
 
 ```rust
 # use rstsr::prelude::*;
@@ -144,21 +192,23 @@ println!("{result:?}");
 ```
 
 Code written NumPy-style usually keeps working under [`ColMajor`] only when
-shapes are written Fortran-style (dimensions pre-padded on the other side).
+shapes are written Fortran-style, with dimensions pre-padded on the other side.
 
 ## Reshape: iteration invariance
 
-[`reshape`] reads the input in the logical order given by its order
-(the device default order, unless specified) and writes the values into the
-output in that same order: the i-th element in reading order of the input
-becomes the i-th element in reading order of the output. Reshaping never
-changes the values, nor their order in the reading sequence - only the shape,
-and (when layouts are incompatible) the memory arrangement:
+[`reshape`] reads the input in the logical order given by its order (the device
+default order, unless specified) and writes the values into the output in that
+same order.
+
+The i-th element in reading order of the input becomes the i-th element in
+reading order of the output. Reshaping never changes the values, nor their order
+in the reading sequence. It changes only the shape and, when layouts are
+incompatible, the memory arrangement:
 
 ```rust
 # use rstsr::prelude::*;
-# let mut device = DeviceCpu::default();
-# device.set_default_order(RowMajor);
+let mut device = DeviceCpu::default();
+device.set_default_order(RowMajor);
 let a = rt::arange((6, &device)).into_shape([2, 3]);
 let b = a.reshape([3, 2]);
 println!("{}", a.reshape([6]));
@@ -169,19 +219,20 @@ println!("{}", b.reshape([6]));
 # assert_eq!(format!("{}", b.reshape([6])), "[ 0 1 2 3 4 5]");
 ```
 
-Which reshapes avoid a copy depends on the order: for a tensor that is
+Which reshapes avoid a copy depends on the order. For a tensor that is
 C-contiguous under [`RowMajor`] (or F-contiguous under [`ColMajor`]), the
 contiguous run of axes is the *trailing* axes in the row-major case and the
-*leading* axes in the column-major case. In the notation `(4, [6, 9])` used
-by [`reshape`], the bracketed axes form one contiguous run. Under
-[`ColMajor`], the same slice that was `(4, [6, 9])`-contiguous in the
+*leading* axes in the column-major case. In the notation `(4, [6, 9])` used by
+[`reshape`], the bracketed axes form one contiguous run.
+
+Under [`ColMajor`], the same slice that was `(4, [6, 9])`-contiguous in the
 row-major discussion of [`reshape`] merges its leading dimensions for free,
 while merging across the boundary requires a copy:
 
 ```rust
 # use rstsr::prelude::*;
-# let mut device = DeviceCpu::default();
-# device.set_default_order(ColMajor);
+let mut device = DeviceCpu::default();
+device.set_default_order(ColMajor);
 // contiguous situation: ([4, 6], 9); the first two dimensions are contiguous
 let a = rt::arange((288, &device)).into_shape([4, 8, 9]).into_slice((.., 0..6, ..));
 println!("{:?}", a.layout());

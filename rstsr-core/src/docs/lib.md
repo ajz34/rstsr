@@ -10,15 +10,23 @@ If you are more aware of matmul efficiency, or by other considerations (we will 
 
 User document refers to [readthedocs](https://rstsr-book.readthedocs.io/). This document is still in construction.
 
+### Cheat sheet
+
+For NumPy/SciPy users, the `rstsr` facade crate ships a **cheat sheet** mapping common operations to their RSTSR equivalents:
+- the [core operations page](https://docs.rs/rstsr/latest/rstsr/cheatsheet/index.html) — printing and layout, creation, indexing, manipulation, operators, reductions, sorting;
+- the [linear algebra page](https://docs.rs/rstsr/latest/rstsr/cheatsheet/linalg/index.html) — the faer-backed `rt::linalg` family.
+
+Each row is verified by an integration test (`rstsr/tests/cheatsheet_*.rs`) and by a NumPy/SciPy parity script; the authoring conventions live in the skill `api-cheatsheet-conventions`.
+
 ## API specifications
 
 [API specifications](`api_specification`) is provided for summary of important identifiers (structs, traits and functions) in `rstsr-core`.
 
 Currently, more detailed documentation for each identifiers are still constructing.
 
-We also provide [fullfillment for Array API standard](`array_api_standard`). This fullfillment check shows how much functionalities we have achieved to be a basic tensor (array) library.
+We also provide [fulfillment for Array API standard](`array_api_standard`). This fulfillment check shows how much functionalities we have achieved to be a basic tensor (array) library.
 
-For NumPy users, in this meantime, [fullfillment for Array API standard](`array_api_standard`) shows the similar parts of RSTSR and NumPy; and these parts in [API specifications](`api_specification`) shows the difference between RSTSR and NumPy:
+For NumPy users, in this meantime, [fulfillment for Array API standard](`array_api_standard`) shows the similar parts of RSTSR and NumPy; and these parts in [API specifications](`api_specification`) shows the difference between RSTSR and NumPy:
 - [Tensor Structure and Ownership](`api_specification#tensor-structure-and-ownership`)
 - [RSTSR Specific Identifiers](`api_specification#rstsr-specific-identifiers`)
 - [Storage-dependent manipulation](`api_specification#storage-dependent-manipulation`)
