@@ -4,6 +4,7 @@
 - [Array API Standard](array_api_standard): [Python Array API standard](https://data-apis.org/array-api/latest/) Fulfillment.
 - [NumPy/SciPy cheat sheet](cheatsheet): NumPy/SciPy operations mapped to RSTSR.
     - [Linear algebra (faer)](cheatsheet::linalg): the `rt::linalg` family with SciPy references.
+- [Row/column-major order semantics](order_semantics): the device default orders and what they affect.
 
 # Notes to User document
 

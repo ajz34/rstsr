@@ -21,7 +21,7 @@ fn creation_special() {
     let f = rt::full(([2, 2], 7, &device));
     assert_eq!(f.reshape(-1).to_vec(), vec![7, 7, 7, 7]);
     let e: Tensor<i32, DeviceFaer, _> = rt::eye((3, &device));
-    assert_eq!(rt::trace(&e, ()).to_scalar(), 3);
+    assert_eq!(e.trace(()).to_scalar(), 3);
 
     let a = rt::arange((6.0, &device));
     assert_eq!(a.to_vec(), vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0]);
@@ -48,6 +48,20 @@ fn creation_from_lists() {
 }
 
 #[test]
+fn creation_from_existing() {
+    let device = device();
+    let a = rt::tensor_from_nested!([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], &device);
+
+    assert_eq!(a.zeros_like().sum(), 0.0);
+    assert_eq!(a.ones_like().sum(), 6.0);
+    assert_eq!((&a).tril().reshape(-1).to_vec(), vec![1.0, 0.0, 0.0, 4.0, 5.0, 0.0]);
+    assert_eq!((&a).triu().reshape(-1).to_vec(), vec![1.0, 2.0, 3.0, 0.0, 5.0, 6.0]);
+    assert_eq!((&a).diag().to_vec(), vec![1.0, 5.0]);
+    let v = rt::tensor_from_nested!([1.0, 2.0, 3.0], &device);
+    assert_eq!(v.diag().shape(), &[3, 3]);
+}
+
+#[test]
 fn indexing_basic() {
     let device = device();
     let m = rt::arange((12, &device)).into_shape([3, 4]);
@@ -59,6 +73,17 @@ fn indexing_basic() {
     let v = rt::arange((6, &device));
     assert_eq!(v.i(slice!(1, 6, 2)).to_vec(), vec![1, 3, 5]);
     assert_eq!(v.i(slice!(None, None, -1)).to_vec(), vec![5, 4, 3, 2, 1, 0]);
+
+    // write through a mutable view
+    let mut w = rt::arange((12, &device)).into_shape([3, 4]);
+    w.i_mut((.., 3)).assign(&rt::tensor_from_nested!([100, 200, 300], &device));
+    assert_eq!(w.i((.., 3)).to_vec(), vec![100, 200, 300]);
+    let mut u = rt::arange((12, &device)).into_shape([3, 4]);
+    *&mut u.i_mut(0..2) += &rt::tensor_from_nested!([[1, 1, 1, 1], [1, 1, 1, 1]], &device);
+    assert_eq!(u.i(0).to_vec(), vec![1, 2, 3, 4]);
+    let mut t = rt::arange((12, &device)).into_shape([3, 4]);
+    t.i_mut(2..).add_assign(&rt::tensor_from_nested!([10, 10, 10, 10], &device));
+    assert_eq!(t.i(2).to_vec(), vec![18, 19, 20, 21]);
 }
 
 #[test]
@@ -67,20 +92,26 @@ fn indexing_array() {
     let m = rt::arange((12, &device)).into_shape([3, 4]);
 
     // integer-array indexing
-    assert_eq!(rt::array_index(&m, [2, 0]).i(0).to_vec(), vec![8, 9, 10, 11]);
-    assert_eq!(rt::array_index(&m, ([2, 0], [1, 3])).to_vec(), vec![9, 3]);
-    assert_eq!(rt::array_index(&m, ([2, 0], 1)).to_vec(), vec![9, 1]);
-    assert_eq!(rt::index_select(&m, 1, [3, 1]).i(0).to_vec(), vec![3, 1]);
+    assert_eq!(m.array_index([2, 0]).i(0).to_vec(), vec![8, 9, 10, 11]);
+    assert_eq!(m.array_index(([2, 0], [1, 3])).to_vec(), vec![9, 3]);
+    assert_eq!(m.array_index(([2, 0], 1)).to_vec(), vec![9, 1]);
+    assert_eq!(m.array_index((.., [3, 1])).i(0).to_vec(), vec![3, 1]);
+    assert_eq!(m.index_select(1, [3, 1]).i(0).to_vec(), vec![3, 1]);
     let idx = rt::tensor_from_nested!([[3], [1], [0]], &device);
-    assert_eq!(rt::take_along_axis(&m, &idx, -1).shape(), &[3, 1]);
+    assert_eq!(m.take_along_axis(&idx, -1).shape(), &[3, 1]);
 
     // boolean-array indexing
     let mask = rt::tensor_from_nested!(
         [[true, false, true, false], [false, false, false, true], [false, false, true, false]],
         &device
     );
-    assert_eq!(rt::mask_select(&m, &mask).to_vec(), vec![0, 2, 7, 10]);
-    assert_eq!(rt::bool_select(&m, 1, [true, false, true, false]).shape(), &[3, 2]);
+    assert_eq!(m.mask_select(&mask).to_vec(), vec![0, 2, 7, 10]);
+    assert_eq!(m.array_index(&mask).to_vec(), vec![0, 2, 7, 10]);
+    let prefix = rt::tensor_from_nested!([true, false, true], &device);
+    assert_eq!(m.array_index(&prefix).shape(), &[2, 4]);
+    assert_eq!(m.bool_select(1, [true, false, true, false]).shape(), &[3, 2]);
+    let col_mask = rt::tensor_from_nested!([true, false, true, false], &device);
+    assert_eq!(m.array_index((.., &col_mask)).shape(), &[3, 2]);
 }
 
 #[test]
@@ -114,12 +145,12 @@ fn manipulation_joining() {
     assert_eq!(rt::stack([&a, &a]).shape(), &[2, 3]);
 
     let t = rt::tensor_from_nested!([1, 2], &device);
-    assert_eq!(rt::tile(&t, [2, 2]).reshape(-1).to_vec(), vec![1, 2, 1, 2, 1, 2, 1, 2]);
-    assert_eq!(rt::repeat(&t, (2, None)).to_vec(), vec![1, 1, 2, 2]);
-    assert_eq!(rt::roll(&a, (2, None)).to_vec(), vec![1, 2, 0]);
+    assert_eq!(t.tile([2, 2]).reshape(-1).to_vec(), vec![1, 2, 1, 2, 1, 2, 1, 2]);
+    assert_eq!(t.repeat((2, None)).to_vec(), vec![1, 1, 2, 2]);
+    assert_eq!(a.roll((2, None)).to_vec(), vec![1, 2, 0]);
 
     let sq = rt::arange((9, &device)).into_shape([3, 3]);
-    assert_eq!(rt::trace(&sq, ()).to_scalar(), 12);
+    assert_eq!(sq.trace(()).to_scalar(), 12);
 }
 
 #[test]
@@ -130,6 +161,7 @@ fn operations_operators() {
 
     assert_eq!((&a + &b).to_vec(), vec![5, 7, 9]);
     assert_eq!((&a * 2).to_vec(), vec![2, 4, 6]);
+    // `.rem` is the `%` matmul; the elementwise remainder is the free function only
     assert_eq!(rt::rem(&a, &b).to_vec(), vec![1, 2, 3]);
 
     // `%` is matrix multiplication
@@ -145,12 +177,12 @@ fn operations_elementwise() {
     let device = device();
     let a = rt::tensor_from_nested!([1.0, 4.0, 9.0], &device);
 
-    assert_eq!(rt::sqrt(&a).to_vec(), vec![1.0, 2.0, 3.0]);
-    assert_eq!(rt::clip(&a, (2, 5)).to_vec(), vec![2.0, 4.0, 5.0]);
-    assert_eq!(rt::greater(&a, 3.0).to_vec(), vec![false, true, true]);
-    let cond = rt::greater(&a, 3.0);
+    assert_eq!((&a).sqrt().to_vec(), vec![1.0, 2.0, 3.0]);
+    assert_eq!((&a).clip((2, 5)).to_vec(), vec![2.0, 4.0, 5.0]);
+    assert_eq!((&a).greater(3.0).to_vec(), vec![false, true, true]);
+    let cond = (&a).greater(3.0);
     let y = rt::tensor_from_nested!([10.0, 20.0, 30.0], &device);
-    assert_eq!(rt::r#where(&cond, &y, &a).to_vec(), vec![1.0, 20.0, 30.0]);
+    assert_eq!(cond.r#where(&y, &a).to_vec(), vec![1.0, 20.0, 30.0]);
     assert_eq!(a.mapv(|x| x + 1.0).to_vec(), vec![2.0, 5.0, 10.0]);
 }
 
@@ -159,18 +191,18 @@ fn reduction_basic() {
     let device = device();
     let a = rt::arange((24.0, &device)).into_shape([2, 3, 4]);
 
-    assert_eq!(rt::sum(&a), 276.0);
-    assert_eq!(rt::sum_axes(&a, -1).shape(), &[2, 3]);
-    assert_eq!(rt::sum_axes(&a, (0, 2)).shape(), &[3]);
-    assert_eq!(rt::sum_with_args(&a, (-1, true)).shape(), &[2, 3, 1]);
-    assert_eq!(rt::mean(&a), 11.5);
-    assert_eq!(rt::max(&a), 23.0);
-    assert_eq!(rt::min(&a), 0.0);
-    assert_eq!(rt::argmax(&a), 23);
-    assert_eq!(rt::count_nonzero(&a), 23);
+    assert_eq!(a.sum(), 276.0);
+    assert_eq!(a.sum_axes(-1).shape(), &[2, 3]);
+    assert_eq!(a.sum_axes((0, 2)).shape(), &[3]);
+    assert_eq!(a.sum_with_args((-1, true)).shape(), &[2, 3, 1]);
+    assert_eq!(a.mean(), 11.5);
+    assert_eq!(a.max(), 23.0);
+    assert_eq!(a.min(), 0.0);
+    assert_eq!(a.argmax(), 23);
+    assert_eq!(a.count_nonzero(), 23);
     let v = rt::arange((4.0, &device));
-    assert_eq!(rt::cumulative_sum(&v, None).to_vec(), vec![0.0, 1.0, 3.0, 6.0]);
-    assert!(rt::all(rt::greater(&a, -1.0)));
+    assert_eq!(v.cumulative_sum(None).to_vec(), vec![0.0, 1.0, 3.0, 6.0]);
+    assert!((&a).greater(-1.0).all());
 }
 
 #[test]
@@ -178,18 +210,18 @@ fn sorting_and_set() {
     let device = device();
     let a = rt::tensor_from_nested!([3, 1, 3, 2, 1], &device);
 
-    assert_eq!(rt::sort(&a, None).to_vec(), vec![1, 1, 2, 3, 3]);
-    assert_eq!(rt::argsort(&a, None).to_vec(), vec![1, 4, 3, 0, 2]);
-    assert_eq!(rt::unique_values(&a).to_vec(), vec![1, 2, 3]);
+    assert_eq!(a.sort(None).to_vec(), vec![1, 1, 2, 3, 3]);
+    assert_eq!(a.argsort(None).to_vec(), vec![1, 4, 3, 0, 2]);
+    assert_eq!(a.unique_values().to_vec(), vec![1, 2, 3]);
     let test = rt::tensor_from_nested!([1, 3], &device);
-    assert_eq!(rt::isin(&a, &test, false).to_vec(), vec![true, true, true, false, true]);
+    assert_eq!(a.isin(&test, false).to_vec(), vec![true, true, true, false, true]);
 
     let sorted = rt::tensor_from_nested!([1, 3, 5, 7], &device);
     let v = rt::tensor_from_nested!([2, 6], &device);
-    assert_eq!(rt::searchsorted(&sorted, &v, None).to_vec(), vec![1, 3]);
+    assert_eq!(sorted.searchsorted(&v, None).to_vec(), vec![1, 3]);
 
     let d = rt::tensor_from_nested!([1, 4, 9, 16], &device);
-    assert_eq!(rt::diff(&d, -1, 1, None, None).to_vec(), vec![3, 5, 7]);
+    assert_eq!(d.diff(-1, 1, None, None).to_vec(), vec![3, 5, 7]);
 }
 
 #[test]
@@ -197,5 +229,5 @@ fn compare_allclose() {
     let device = device();
     let a = rt::tensor_from_nested!([1.0, 2.0, 3.0], &device);
     let b = rt::tensor_from_nested!([1.0, 2.0, 3.0 + 1e-12], &device);
-    assert!(rt::allclose(&a, &b, None));
+    assert!(a.allclose(&b, None));
 }
