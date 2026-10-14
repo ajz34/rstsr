@@ -66,6 +66,32 @@ mod doc_order_semantics {
     }
 
     #[test]
+    fn iteration_order() {
+        crate::specify_test!("iteration_order");
+
+        // iteration follows the device default order, not the storage order;
+        // `tensor_from_nested!` always builds a row-major layout, so both
+        // snippets below hold the same buffer
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+        let a = rt::tensor_from_nested!([[0, 1, 2], [3, 4, 5]], &device);
+        let v: Vec<i32> = a.view().iter().copied().collect();
+        println!("{v:?}");
+        // [0, 1, 2, 3, 4, 5]
+        assert_eq!(v, vec![0, 1, 2, 3, 4, 5]);
+        assert_eq!(format!("{v:?}"), "[0, 1, 2, 3, 4, 5]");
+
+        let mut device = DeviceType::default();
+        device.set_default_order(ColMajor);
+        let a = rt::tensor_from_nested!([[0, 1, 2], [3, 4, 5]], &device);
+        let v: Vec<i32> = a.view().iter().copied().collect();
+        println!("{v:?}");
+        // [0, 3, 1, 4, 2, 5]
+        assert_eq!(v, vec![0, 3, 1, 4, 2, 5]);
+        assert_eq!(format!("{v:?}"), "[0, 3, 1, 4, 2, 5]");
+    }
+
+    #[test]
     fn default_order_setup() {
         crate::specify_test!("default_order_setup");
 
