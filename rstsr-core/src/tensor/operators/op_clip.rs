@@ -427,7 +427,7 @@ where
 /// - RSTSR: `rt::clip(&x, (lo, hi))` or `x.clip((lo, hi))`
 ///
 /// Please note the differences (recorded in the
-/// [tracking registry](https://github.com/RESTGroup/rstsr/blob/master/rstsr-core/tests/tracking/numpy_differences.md)):
+/// [tracking registry](https://github.com/RESTGroup/rstsr/blob/main/rstsr-core/tests/tracking/numpy_differences.md)):
 ///
 /// - Scalar bounds are strongly promoted (rstsr house rule); NumPy's NEP 50 weak-scalar dtype
 ///   minimization is not implemented.
