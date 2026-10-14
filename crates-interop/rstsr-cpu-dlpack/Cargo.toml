@@ -1,9 +1,8 @@
 [package]
 name = "rstsr-cpu-dlpack"
-# Versioned independently of the workspace: this crate depends on `dlpark`, whose MSRV (1.88)
-# is higher than the workspace's (1.82).
-version = "0.10.0-alpha.3"
+version.workspace = true
 edition.workspace = true
+# Higher than the workspace's 1.82: this crate depends on `dlpark` (MSRV 1.88).
 rust-version = "1.88.0"
 repository.workspace = true
 keywords.workspace = true
