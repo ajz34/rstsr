@@ -20,7 +20,7 @@ Welcome to RSTSR, an n-dimensional tensor toolkit library, in native rust.
 
 This crate will be a building block for scientific computation in native Rust, similar to NumPy of Python.
 
-For users comes from NumPy, the [NumPy-RSTSR Cheatsheet](https://restgroup.github.io/rstsr-book/docs/numpy-cheatsheet) ([简体中文](https://restgroup.github.io/rstsr-book/zh-hans/docs/numpy-cheatsheet)) will let you quickly be familiar with RSTSR.
+For users coming from NumPy, the [NumPy-RSTSR Cheatsheet](https://docs.rs/rstsr/latest/rstsr/cheatsheet/index.html) will let you quickly be familiar with RSTSR.
 
 **This project is still in early stage, and radical code factorization could occur; dev-documentation can still be greatly improved.**
 
@@ -30,11 +30,13 @@ For users comes from NumPy, the [NumPy-RSTSR Cheatsheet](https://restgroup.githu
 - % (remainder) as matrix multiplication (you can `&a % &b` to perform `a.matmul(&b)`).
 - Allow different devices in framework.
     - We will try to support CUDA and HIP in near future.
-- Full support of n-dimensional, broadcasting, basic slicing, reshape.
+- Full support of n-dimensional, broadcasting, basic slicing, reshape, fancy indexing.
 - Fast on multi-threading CPU.
-    - Matmul is provided by backends (such as [faer](https://github.com/sarah-quinones/faer-rs/) or [OpenBLAS](https://github.com/OpenMathLib/OpenBLAS/)).
+    - Matmul and linalg operations are provided by backends (such as [faer](https://github.com/sarah-quinones/faer-rs/) or [OpenBLAS](https://github.com/OpenMathLib/OpenBLAS/)).
     - Other cases (summation, element-wise operations) are on-par or even much faster than NumPy (by fast layout iterators and [rayon](https://github.com/rayon-rs/rayon/) threading).
+    - Einsum is supported by tblis plugin ([rt::tblis::einsum](https://docs.rs/rstsr/latest/rstsr/prelude/rstsr_funcs/tblis/fn.einsum.html)).
 - Either row-major or column-major is supported (controled by cargo feature). Dynamic row/col-major control can also be performed by device setting.
+- Full support of [Python array API standard](https://data-apis.org/array-api/latest/) (in native rust, and python binding with thin wrapper [rstsr-faer-py](https://pypi.org/project/rstsr-faer-py/)).
 
 | Supported devices (backends) | Device type name | Crate | Cargo feature |
 |--|--|--|--|
@@ -94,10 +96,11 @@ We need a numeric library that supports
 - a framework that supports different backends
 - fast, at least efficient on server CPU
 - supports parallel by threading (specifically rayon)
-- large dynamic dimension tensor and its reshape
-- functionality can be extended by other crates
+- large dynamic dimension tensor and its reshape, broadcasting, slicing
+- functionality and devices can be extended by crates implementation
 
 And further more,
+- looks like, and writes like NumPy
 - the framework may not overwhelm chemist scientists
 
 Many crates in native rust done well in some aspects but not all.
@@ -106,12 +109,10 @@ This crate gets inspire from [NumPy](https://github.com/data-apis/array-api/), [
 
 > **What is supposed to be supported in near future?**
 
-- Plugins: Einstein summation, FFT
+- Plugins: FFT, HDF5
 - GPU devices: CUDA and HIP device support
 - `rstsr-sci-traits`: Optimization, ODE, special functions
-- `rstsr-core`: Full support of [Python array API standard](https://data-apis.org/array-api/latest/) (in native rust instead of python binding)
-    - searching functions
-    - manipulation functions (tile, roll, moveaxis)
+- `rstsr-linalg-traits`: More linear algebra functions
 
 > **What's RSTSR meaning?**
 
@@ -122,6 +123,8 @@ RSTSR either refers to
 This crate was originally trying to developed a more dev-friendly experience for chemist programmer from numpy/scipy/pytorch. However, scientists and engineers from any discipline are welcomed to try this tensor toolkit.
 
 > **Is there an illustrative project for using RSTSR in real-world project?**
+
+We have applied RSTSR in [REST](https://gitee.com/restgroup/rest), a quantum chemistry program, to achieve state-of-the-art performance on high precision thermochemistry and spectrum simulation.
 
 We refer a project that developed before rstsr v0.1: [showcase of RI-CCSD](https://github.com/ajz34/showcase_rust_riccsd).
 File [riccsd.rs](https://github.com/ajz34/showcase_rust_riccsd/blob/master/src/riccsd.rs) is a demonstration of code style to use RSTSR.
@@ -134,7 +137,7 @@ We do not support autodiff and lazy-evaluation in far future. In this mean time,
 
 ## Acknowledge
 
-This is a subproject of [REST](https://gitee.com/restgroup/rest). REST is supported by 
+This is a subproject of [REST](https://gitee.com/restgroup/rest), a rust-based electronic structure toolkit. REST is supported by 
 - NSFC (National Natural Science Foundation of China): 22125301, 22393911, 22393912, 22321003, 22233002;
 - Innovation Program for Quantum Science and Technology: 2021ZD0303305;
 - robotic AI-Scientist platform of Chinese Academy of Science.
