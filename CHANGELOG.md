@@ -1,5 +1,71 @@
 # Changelog
 
+## v0.10.0 -- 2026-10-14
+
+The first stable release of the 0.10 series. This cycle consolidates rather than
+extends: a documentation campaign over the overloaded APIs, a LAPACKE-shaped
+retrofit of the LAPACK drivers, and the first distribution of the
+`rstsr-faer-py` validation wheel.
+
+API breaking changes
+
+- `rstsr-cpu-dlpack` is rebased on `dlpark`: the raw DLPack types are reached as
+  `rstsr_cpu_dlpack::dlpark::ffi::*` instead of `::dlpack_ffi::*` (the C layout is
+  unchanged), and the export entry points now require `Send` on the storage they
+  hand out. (RESTGroup/rstsr#153)
+
+New features
+
+- **`rstsr-faer-py` is distributed as a wheel.** A workflow builds the pyo3
+  extension for manylinux and uploads it through Trusted Publishing (OIDC, no
+  stored secret), and the package now carries the metadata, long description and
+  "not for real use" notice a PyPI page needs. (RESTGroup/rstsr#155)
+- `pinv` accepts an array `rtol` broadcast against the matrix batch — the same
+  argument shape as `matrix_rank` — in both the Rust API and the shim's
+  `linalg.pinv`. (RESTGroup/rstsr#156)
+
+Enhancement
+
+- **LAPACK drivers take the LAPACKE two-tier shape**: one `unsafe *_work` thunk
+  per routine holds the column/row-major branch, including the leading-dimension
+  checks row-major calls were missing, and the driver impl runs the workspace
+  query, allocation and compute through it. Query results are validated before
+  use, allocation failures return the LAPACKE sentinels instead of panicking, and
+  `info` is decoded in one place for every builder. (RESTGroup/rstsr#152)
+- **API-docstring campaign**: every overloaded `rstsr-core` entry documents its
+  overload forms with tested snippets, the API specification page covers the
+  identifiers added since it was last revised, and the `ext_*` entries state that
+  they exist for array-API promotion and point at the ordinary form for Rust use.
+  (RESTGroup/rstsr#149, #151)
+
+Bug Fix
+
+- `unpack_tri` / `unpack_triu` with `FlagSymm::N` zero-fill the triangle the
+  packed data does not describe, instead of exposing uninitialized memory.
+  (RESTGroup/rstsr#150)
+- The complex `sysv` / `syev` / `syevd` / `sygv` / `sygvd` drivers no longer
+  write a complex workspace query through an `f64` stack slot (undefined
+  behavior). (RESTGroup/rstsr#152)
+
+Python array-API conformance (validation instrument)
+
+- Against `array-api-tests` (pinned `6c0b59f`, spec 2025.12) the last measured
+  standing is 1332 passed / 17 failed / 33 skipped of 1382 — the 14 out-of-scope
+  `fft` name nodes plus three `linalg` value nodes held back by one faer SVD
+  non-convergence. The wheel published to PyPI is this instrument, not a usable
+  Python tensor library.
+
+Dev infrastructure
+
+- The `rstsr-faer-py` extension is split into 13 crates under
+  `crates-interop/rstsr-faer-py/`, so no single `rustc` monomorphizes the whole
+  dtype-dispatch surface (25 GB → 4 GB peak per process). (RESTGroup/rstsr#155)
+- The distributed wheel is stripped (the symbol tables alone were ~410 MB;
+  51 MB → 39 MB) and built with four parallel jobs; local grading wheels stay
+  unstripped so backtraces survive.
+- Tests only: empty-collection assertions are pinned to `is_empty()`, so clippy's
+  all-features run stops failing on `E0282` inference. (RESTGroup/rstsr#154)
+
 ## v0.10.0-alpha.2 -- 2026-10-12
 
 This cycle completes the Python array API standard's `linalg` extension and
