@@ -4,12 +4,21 @@ build-backend = "maturin"
 
 [project]
 name = "rstsr-faer-py"
+description = "Python array-API binding of rstsr (faer device); validation instrument for the Python array API standard"
 requires-python = ">=3.10"
+license = "Apache-2.0"
+keywords = ["tensor", "array", "blas", "multidimensional", "scientific"]
 classifiers = [
     "Programming Language :: Rust",
     "Programming Language :: Python :: Implementation :: CPython",
 ]
+readme = "PYPI-README.md"
 dynamic = ["version"]
+
+[project.urls]
+Homepage = "https://restgroup.github.io/rstsr-book/"
+Repository = "https://github.com/RESTGroup/rstsr"
+Issues = "https://github.com/RESTGroup/rstsr/issues"
 
 [tool.maturin]
 python-source = "python"
