@@ -1,5 +1,7 @@
 # Array API standard Fulfillment
 
+Array API compliance is testified by the [`rstsr-faer-py`](https://pypi.org/project/rstsr-faer-py/) package on PyPI, which exposes the faer backend as a Python `array_api` namespace and is run against the official [`array-api-tests`](https://github.com/data-apis/array-api-tests) conformance suite.
+
 For column status:
 - Y: Implemented in rstsr (may not be fully functional like numpy or Python array API specification, but should be enough);
 - C: Changed feature (**breaking using experience from numpy**);
@@ -128,7 +130,7 @@ Boolean-mask indexing (`x[mask]` and `x[mask] = value`) is provided by [`mask_se
 | Y | [`empty`] | [`empty`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.empty.html) | Returns an uninitialized array having a specified `shape`. |
 | Y | [`empty_like`] | [`empty_like`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.empty_like.html) | Returns an uninitialized array with the same `shape` as an input array `x`. |
 | Y | [`eye`] | [`eye`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.eye.html) | Returns a two-dimensional array with ones on the kth diagonal and zeros elsewhere. |
-| D | | [`from_dlpack`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.from_dlpack.html) | Returns a new array containing the data from another (array) object with a `__dlpack__` method. |
+| Y | `from_dlpack_versioned_f` | [`from_dlpack`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.from_dlpack.html) | Returns a new array containing the data from another (array) object with a `__dlpack__` method. Requires the `dlpack` cargo feature of the `rstsr` facade crate (the `rt::dlpack` module). |
 | Y | [`full`] | [`full`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.full.html) | Returns a new array having a specified `shape` and filled with `fill_value`. |
 | Y | [`full_like`] | [`full_like`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.full_like.html) | Returns a new array filled with fill_value and having the same `shape` as an input array `x`. |
 | Y | [`linspace`] | [`linspace`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.linspace.html) | Returns evenly spaced numbers over a specified interval. |
@@ -279,8 +281,8 @@ The reference implementation (as in [`DeviceCpuSerial`] and [`DeviceFaer`]), fol
 
 | status | implementation | Python API | description |
 |-|-|-|-|
-| | | [`cumulative_prod`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.cumulative_prod.html) | Calculates the cumulative product of elements in the input array `x`. |
-| | | [`cumulative_sum`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.cumulative_sum.html) | Calculates the cumulative sum of elements in the input array `x`. |
+| Y | [`cumulative_prod`], [`cumulative_prod_with_dtype`] | [`cumulative_prod`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.cumulative_prod.html) | Calculates the cumulative product of elements in the input array `x`. |
+| Y | [`cumulative_sum`], [`cumulative_sum_with_dtype`] | [`cumulative_sum`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.cumulative_sum.html) | Calculates the cumulative sum of elements in the input array `x`. |
 | Y | [`max`], [`max_axes`], [`max_with_args`] | [`max`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.max.html) | Calculates the maximum value of the input array `x`. |
 | Y | [`mean`], [`mean_axes`], [`mean_with_args`], [`mean_with_dtype`] | [`mean`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.mean.html) | Calculates the arithmetic mean of the input array `x`. |
 | Y | [`min`], [`min_axes`], [`min_with_args`] | [`min`](https://data-apis.org/array-api/latest/API_specification/generated/array_api.min.html) | Calculates the minimum value of the input array `x`. |
@@ -402,4 +404,4 @@ The reference implementation (as in [`DeviceCpuSerial`] and [`DeviceFaer`]), fol
 
 We decide to **drop** some supports in Python Array API:
 - **Reflected (swapped) operands.** A typical function in python is [`__radd__`](https://docs.python.org/3/reference/datamodel.html#object.__radd__). Reflected operands are not easy to be implemented in rust. I believe that in python, this is realized by checking dynamic object type; this is not friendly to language that requires compilation.
-- **Functions related to Python Array API namespace and dlpack.** These routines are mostly for forcing other python packages to be compatible to Python Array API. This is not possible for another language currently.
+- **Functions related to Python Array API namespace.** These routines are mostly for forcing other python packages to be compatible to Python Array API. This is not possible for another language currently. (DLPack interop itself is not dropped: it is available behind the `dlpack` cargo feature of the `rstsr` facade crate; see `from_dlpack` above.)
