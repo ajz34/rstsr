@@ -6,7 +6,7 @@ on:
       publish:
         description: Where to upload the built wheel
         type: choice
-        options: [none, testpypi]
+        options: [none, testpypi, pypi]
         default: none
 
 permissions:
@@ -86,3 +86,26 @@ jobs:
           repository-url: https://test.pypi.org/legacy/
           packages-dir: dist
           skip-existing: true # forgiving while iterating on one version
+
+  publish-pypi:
+    name: publish to PyPI
+    needs: build
+    runs-on: ubuntu-latest # pypa/gh-action-pypi-publish runs on Linux only
+    if: github.event_name == 'workflow_dispatch' && inputs.publish == 'pypi'
+    environment:
+      name: pypi
+      url: https://pypi.org/p/rstsr-faer-py
+    permissions:
+      id-token: write # OIDC trusted publishing, no stored secret
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      # No `repository-url`: this job uploads to the real index. No
+      # `skip-existing` either — a PyPI version is immutable, so a duplicate
+      # upload must fail loudly rather than silently do nothing.
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist
