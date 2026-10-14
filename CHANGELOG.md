@@ -1,5 +1,34 @@
 # Changelog
 
+## v0.10.1 -- 2026-10-14
+
+A documentation release. The `rstsr` facade gains a NumPy/SciPy cheat sheet, its
+docs.rs pages render feature-gated items, and the Array API fulfillment pages are
+brought up to date. No API changes.
+
+Documentation
+
+- **NumPy/SciPy cheat sheet** for the `rstsr` crate: a core-operations page and a
+  faer-backed `rt::linalg` page map common NumPy and SciPy calls to their RSTSR
+  equivalents. The RSTSR column prefers associated methods (`a.sum()`,
+  `a.zeros_like()`) over the free functions, except where only a free function
+  exists or the method means something else (`rt::rem`, `rt::add_with_output`).
+  (RESTGroup/rstsr#158)
+- The `rstsr` facade renders its docs.rs pages with `doc_cfg`, so feature-gated
+  items carry "available on crate feature ..." badges. (RESTGroup/rstsr#158)
+- The `order_semantics` page is rewritten in shorter paragraphs, with an explicit
+  note that row/column-major (iteration order) is not c/f-contiguity (storage
+  order) and a new section on the `iter()` flattening order. (RESTGroup/rstsr#158)
+- The Array API fulfillment pages are corrected: `cumulative_sum` /
+  `cumulative_prod` and the linear-algebra extension functions are marked
+  implemented, and `from_dlpack` is available behind the `dlpack` feature of the
+  facade crate rather than dropped. (RESTGroup/rstsr#158)
+
+Dev infrastructure
+
+- A CI workflow runs the cheat-sheet integration tests and the NumPy/SciPy parity
+  script. (RESTGroup/rstsr#158)
+
 ## v0.10.0 -- 2026-10-14
 
 The first stable release of the 0.10 series. This cycle consolidates rather than
