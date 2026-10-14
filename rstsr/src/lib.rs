@@ -4,6 +4,8 @@
 // which does not exist without the `linalg` feature
 #![cfg_attr(not(feature = "linalg"), allow(rustdoc::broken_intra_doc_links))]
 #![cfg_attr(not(test), no_std)]
+// documents which items require an optional feature (docs.rs renders the badges)
+#![cfg_attr(docsrs, feature(doc_cfg))]
 pub mod prelude;
 
 // re-exported so the crate-level doc pages can link `crate::order_semantics`
@@ -42,10 +44,6 @@ pub mod api_specification {
     extern crate alloc;
     use rstsr_dtype_traits::*;
 }
-
-// re-export the order-semantics page so the shared spec pages' `crate::order_semantics`
-// links resolve in this crate too (they are symlinked from rstsr-core)
-pub use rstsr_core::order_semantics;
 
 pub mod array_api_standard {
     #![doc = include_str!("docs/array_api_standard.md")]
