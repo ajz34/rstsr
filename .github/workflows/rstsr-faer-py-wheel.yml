@@ -6,7 +6,7 @@ on:
       publish:
         description: Where to upload the built wheel
         type: choice
-        options: [none, testpypi]
+        options: [none, testpypi, pypi]
         default: none
 
 permissions:
@@ -42,16 +42,22 @@ jobs:
           target: ${{ matrix.target }}
           manylinux: ${{ matrix.manylinux }}
           command: build
-          args: --release --out dist
+          # --strip is the only lever that matters for wheel size: it drops the
+          # ~410 MB of symbol tables, 51 MB -> 39 MB. Measured (local, jobs=4):
+          # opt-level="s" adds nothing (39.10 MB) and thin LTO buys 1 MB for a
+          # 10.5 GB link spike. Local grading wheels stay unstripped for
+          # backtraces; only the distributed artifact is stripped.
+          args: --release --strip --out dist
           rust-toolchain: nightly
           docker-options: -e CARGO_BUILD_JOBS
         env:
-          # Two jobs: the dtype-dispatch surface is split across crates, so a
-          # single rustc peaks at ~4 GB and the whole build stays far inside
-          # the runner's RAM. The default release profile (opt-level 3,
-          # codegen-units 16) is kept — it measured the same as opt-level 2,
-          # and the peak is monomorphization-bound, not profile-bound.
-          CARGO_BUILD_JOBS: 2
+          # Four jobs for a shorter build. The dtype-dispatch surface is split
+          # across crates, so one rustc peaks at ~4 GB (was 25 GB unsplit) and
+          # four measured ~13 GB system-wide on a dev box: near the 16 GB
+          # runner's ceiling, so lower this to 2 if the runner swaps. The
+          # default release profile is kept — the peak is monomorphization-
+          # bound, not profile-bound (opt-level 2 measured the same).
+          CARGO_BUILD_JOBS: 4
 
       - name: Upload wheel artifact
         uses: actions/upload-artifact@v4
@@ -80,3 +86,26 @@ jobs:
           repository-url: https://test.pypi.org/legacy/
           packages-dir: dist
           skip-existing: true # forgiving while iterating on one version
+
+  publish-pypi:
+    name: publish to PyPI
+    needs: build
+    runs-on: ubuntu-latest # pypa/gh-action-pypi-publish runs on Linux only
+    if: github.event_name == 'workflow_dispatch' && inputs.publish == 'pypi'
+    environment:
+      name: pypi
+      url: https://pypi.org/p/rstsr-faer-py
+    permissions:
+      id-token: write # OIDC trusted publishing, no stored secret
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      # No `repository-url`: this job uploads to the real index. No
+      # `skip-existing` either — a PyPI version is immutable, so a duplicate
+      # upload must fail loudly rather than silently do nothing.
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist
