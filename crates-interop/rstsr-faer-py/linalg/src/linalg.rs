@@ -253,39 +253,39 @@ pub fn linalg_vector_norm(
     Ok(NativeArray { t })
 }
 
+/// `rtol` for `pinv`: a bare Python float becomes a scalar tolerance (no
+/// device), a tensor one per matrix. Same marshalling as `matrix_rank_rtol`.
+fn pinv_rtol<T>(rtol: Option<&pyo3::Bound<'_, PyAny>>) -> PyResult<rt::linalg::PinvRtol<T::Real, DeviceFaer>>
+where
+    T: ComplexFloat,
+    T::Real: num::FromPrimitive + Clone + Send + Sync + 'static,
+    AnyTensor: AnyTensorRef<T::Real>,
+{
+    let Some(r) = rtol else {
+        return Ok(rt::linalg::PinvRtol::None);
+    };
+    if let Ok(f) = r.extract::<f64>() {
+        let f = T::Real::from_f64(f)
+            .ok_or_else(|| PyTypeError::new_err("pinv: rtol is not representable in the input's real dtype"))?;
+        return Ok(rt::linalg::PinvRtol::Float(f));
+    }
+    match r.cast::<NativeArray>()?.borrow().t.tensor_ref() {
+        Some(t) => Ok(rt::linalg::PinvRtol::Array(t.clone())),
+        None => type_err("pinv: rtol must have the input's real floating dtype"),
+    }
+}
+
 /// Moore-Penrose pseudoinverse; the rust entry's rank output is dropped
-/// (array-API `pinv` returns only the array).
+/// (array-API `pinv` returns only the array). `rtol` is absent/`None` for the
+/// default `max(M, N) * eps`, a Python float for one tolerance on every matrix,
+/// or an array broadcast against the batch for one tolerance per matrix.
 #[pyfunction]
-pub fn linalg_pinv(x: &NativeArray, rtol: Option<f64>) -> PyResult<NativeArray> {
+pub fn linalg_pinv(x: &NativeArray, rtol: Option<&pyo3::Bound<'_, PyAny>>) -> PyResult<NativeArray> {
     let t = match &x.t {
-        AnyTensor::F32(a) => {
-            let r = match rtol {
-                None => err_py(rt::linalg::pinv_f(a))?.pinv,
-                Some(v) => err_py(rt::linalg::pinv_f((a, 0.0f32, v as f32)))?.pinv,
-            };
-            any_of(r)
-        },
-        AnyTensor::F64(a) => {
-            let r = match rtol {
-                None => err_py(rt::linalg::pinv_f(a))?.pinv,
-                Some(v) => err_py(rt::linalg::pinv_f((a, 0.0f64, v)))?.pinv,
-            };
-            any_of(r)
-        },
-        AnyTensor::C32(a) => {
-            let r = match rtol {
-                None => err_py(rt::linalg::pinv_f(a))?.pinv,
-                Some(v) => err_py(rt::linalg::pinv_f((a, 0.0f32, v as f32)))?.pinv,
-            };
-            any_of(r)
-        },
-        AnyTensor::C64(a) => {
-            let r = match rtol {
-                None => err_py(rt::linalg::pinv_f(a))?.pinv,
-                Some(v) => err_py(rt::linalg::pinv_f((a, 0.0f64, v)))?.pinv,
-            };
-            any_of(r)
-        },
+        AnyTensor::F32(a) => any_of(err_py(rt::linalg::pinv_f((a, pinv_rtol::<f32>(rtol)?)))?.pinv),
+        AnyTensor::F64(a) => any_of(err_py(rt::linalg::pinv_f((a, pinv_rtol::<f64>(rtol)?)))?.pinv),
+        AnyTensor::C32(a) => any_of(err_py(rt::linalg::pinv_f((a, pinv_rtol::<Complex<f32>>(rtol)?)))?.pinv),
+        AnyTensor::C64(a) => any_of(err_py(rt::linalg::pinv_f((a, pinv_rtol::<Complex<f64>>(rtol)?)))?.pinv),
         _ => return type_err("linalg: rstsr/faer provides pinv only for float/complex dtypes"),
     };
     Ok(NativeArray { t })
