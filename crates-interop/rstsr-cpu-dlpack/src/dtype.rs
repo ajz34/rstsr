@@ -1,6 +1,6 @@
 //! DLPack data types and the Rust element types they map to.
 
-use dlpack_ffi::{DLDataType, DLDataTypeCode};
+use dlpark::ffi::{DLDataType, DLDataTypeCode};
 use rstsr_common::error::Result;
 use rstsr_common::prelude::rstsr_macros::rstsr_raise;
 
@@ -40,10 +40,10 @@ pub trait DlpackDtype: Copy + 'static {
         rstsr_raise!(
             InvalidValue,
             "DLPack dtype {{code: {}, bits: {}, lanes: {}}} does not match the requested Rust type {{code: {}, bits: {}, lanes: {}}}",
-            dtype.code,
+            dtype.code.0,
             dtype.bits,
             dtype.lanes,
-            expected.code,
+            expected.code.0,
             expected.bits,
             expected.lanes
         )
@@ -65,17 +65,17 @@ macro_rules! impl_dlpack_dtype {
 }
 
 /// DLPack dtype code `kDLInt` (signed integers).
-pub const CODE_INT: u8 = DLDataTypeCode::kDLInt.0 as u8;
+pub const CODE_INT: DLDataTypeCode = DLDataTypeCode::INT;
 /// DLPack dtype code `kDLUInt` (unsigned integers).
-pub const CODE_UINT: u8 = DLDataTypeCode::kDLUInt.0 as u8;
+pub const CODE_UINT: DLDataTypeCode = DLDataTypeCode::UINT;
 /// DLPack dtype code `kDLFloat` (binary floating point).
-pub const CODE_FLOAT: u8 = DLDataTypeCode::kDLFloat.0 as u8;
+pub const CODE_FLOAT: DLDataTypeCode = DLDataTypeCode::FLOAT;
 /// DLPack dtype code `kDLBfloat` (bfloat16).
-pub const CODE_BFLOAT: u8 = DLDataTypeCode::kDLBfloat.0 as u8;
+pub const CODE_BFLOAT: DLDataTypeCode = DLDataTypeCode::BFLOAT;
 /// DLPack dtype code `kDLComplex` (complex floating point).
-pub const CODE_COMPLEX: u8 = DLDataTypeCode::kDLComplex.0 as u8;
+pub const CODE_COMPLEX: DLDataTypeCode = DLDataTypeCode::COMPLEX;
 /// DLPack dtype code `kDLBool` (booleans, 8 bits in DLPack).
-pub const CODE_BOOL: u8 = DLDataTypeCode::kDLBool.0 as u8;
+pub const CODE_BOOL: DLDataTypeCode = DLDataTypeCode::BOOL;
 
 impl_dlpack_dtype!(CODE_INT => i8, i16, i32, i64, i128);
 impl_dlpack_dtype!(CODE_UINT => u8, u16, u32, u64, u128);
@@ -111,7 +111,7 @@ macro_rules! __with_dlpack_dtype_half_arm {
         $crate::rstsr_raise!(
             UnImplemented,
             "DLPack dtype {{code: {}, bits: {}, lanes: {}}} requires the `half` feature of rstsr-cpu-dlpack",
-            $dtype.code,
+            $dtype.code.0,
             $dtype.bits,
             $dtype.lanes
         )
@@ -127,7 +127,7 @@ macro_rules! __with_dlpack_dtype_half_arm {
 ///
 /// ```
 /// use rstsr_cpu_dlpack::dtype::CODE_FLOAT;
-/// use rstsr_cpu_dlpack::dlpack_ffi::DLDataType;
+/// use rstsr_cpu_dlpack::dlpark::ffi::DLDataType;
 ///
 /// let dtype = DLDataType { code: CODE_FLOAT, bits: 64, lanes: 1 };
 /// let size: usize = rstsr_cpu_dlpack::with_dlpack_dtype!(dtype, |T| core::mem::size_of::<T>())?;
@@ -137,7 +137,7 @@ macro_rules! __with_dlpack_dtype_half_arm {
 #[macro_export]
 macro_rules! with_dlpack_dtype {
     ($dtype:expr, |$T:ident| $body:expr $(,)?) => {{
-        let dtype: $crate::dlpack_ffi::DLDataType = $dtype;
+        let dtype: $crate::dlpark::ffi::DLDataType = $dtype;
         match (dtype.code, dtype.bits, dtype.lanes) {
             ($crate::dtype::CODE_INT, 8, 1) => {
                 type $T = i8;
@@ -204,7 +204,7 @@ macro_rules! with_dlpack_dtype {
             _ => $crate::rstsr_raise!(
                 UnImplemented,
                 "unsupported DLPack dtype {{code: {}, bits: {}, lanes: {}}}",
-                dtype.code,
+                dtype.code.0,
                 dtype.bits,
                 dtype.lanes
             ),

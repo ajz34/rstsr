@@ -14,3 +14,6 @@ mod syevd;
 mod sygv;
 mod sygvd;
 mod sysv;
+
+// layout tests
+mod svd_layout;

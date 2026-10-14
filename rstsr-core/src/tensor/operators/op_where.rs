@@ -348,7 +348,7 @@ where
 /// - RSTSR: `rt::r#where(&cond, &x, &y)` or `cond.r#where(x, y)`
 ///
 /// Please note the differences (recorded in the
-/// [tracking registry](https://github.com/RESTGroup/rstsr/blob/master/rstsr-core/tests/tracking/numpy_differences.md)):
+/// [tracking registry](https://github.com/RESTGroup/rstsr/blob/main/rstsr-core/tests/tracking/numpy_differences.md)):
 ///
 /// - The condition must have a boolean dtype (array-api aligned); NumPy also accepts arbitrary
 ///   truthy masks, which should be translated with `rt::ne(mask, 0)`.

@@ -44,7 +44,7 @@ where
         let device = a.device().clone();
         rstsr_assert!(device.same_device(b.device()), DeviceMismatch)?;
         let mut b = overwritable_convert(b)?;
-        let order = if b.f_prefer() && !b.c_prefer() { ColMajor } else { RowMajor };
+        let order = get_output_order(&[], &[(b.c_prefer(), b.f_prefer())], device.default_order());
         let mut a = overwritable_convert_with_order(a, order)?;
         let uplo = uplo.unwrap_or_else(|| match device.default_order() {
             RowMajor => Lower,
@@ -62,10 +62,7 @@ where
 
         // run driver
         let info = unsafe { B::driver_sysv(order, uplo, n, nrhs, ptr_a, lda, ptr_ipiv, ptr_b, ldb) };
-        let info = info as i32;
-        if info != 0 {
-            rstsr_errcode!(info, "Lapack SYSV")?;
-        }
+        map_lapack_info(info, "Lapack SYSV")?;
 
         Ok((a.clone_to_mut(), ipiv, b.clone_to_mut()))
     }

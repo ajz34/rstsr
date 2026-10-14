@@ -2,7 +2,8 @@
 name = "rstsr-cpu-dlpack"
 version.workspace = true
 edition.workspace = true
-rust-version.workspace = true
+# Higher than the workspace's 1.82: this crate depends on `dlpark` (MSRV 1.88).
+rust-version = "1.88.0"
 repository.workspace = true
 keywords.workspace = true
 categories.workspace = true
@@ -11,7 +12,7 @@ readme = "readme.md"
 description = "DLPack interchange for rstsr CPU tensors (pure Rust, no Python bindings)"
 
 [dependencies]
-dlpack-ffi = { workspace = true }
+dlpark = { workspace = true }
 num = { workspace = true }
 half = { workspace = true, optional = true }
 rstsr-core = { workspace = true }
@@ -22,4 +23,4 @@ default = ["row_major", "std", "half"]
 row_major = ["rstsr-core/row_major", "rstsr-common/row_major"]
 col_major = ["rstsr-core/col_major", "rstsr-common/col_major"]
 std = ["rstsr-core/std", "rstsr-common/std"]
-half = ["dep:half"]
+half = ["dep:half", "dlpark/half"]

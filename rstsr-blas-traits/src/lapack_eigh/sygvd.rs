@@ -53,7 +53,7 @@ where
             RowMajor => Lower,
             ColMajor => Upper,
         });
-        let order = if a.f_prefer() && !a.c_prefer() { ColMajor } else { RowMajor };
+        let order = get_output_order(&[], &[(a.c_prefer(), a.f_prefer())], device.default_order());
         let mut a = overwritable_convert_with_order(a, order)?;
         let mut b = overwritable_convert_with_order(b, order)?;
 
@@ -70,7 +70,7 @@ where
 
         // run driver
         let info = unsafe { B::driver_sygvd(order, itype, jobz, uplo, n, ptr_a, lda, ptr_b, ldb, ptr_w) };
-        rstsr_assert_eq!(info, 0, InvalidLayout)?;
+        map_lapack_info(info, "Lapack SYGVD")?;
 
         Ok((w, a.clone_to_mut()))
     }

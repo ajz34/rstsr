@@ -1710,7 +1710,7 @@ mod test {
         let a = linspace((1.0, 4.0, 4, &device));
         let mask: Vec<usize> = vec![];
         let b = a.index_select(0, &mask);
-        assert_eq!(b.raw(), &[]);
+        assert!(b.raw().is_empty());
     }
 
     #[test]

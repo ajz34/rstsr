@@ -143,6 +143,52 @@ where
     Ok(())
 }
 
+/// As [`map_stack_slices`], for a second read-only input paired slice-by-slice
+/// with the first (`b` must have a 2-D inner slice; the batch shapes must
+/// match).
+pub(crate) fn map_stack_slices2x1<TA, TB, TC, DC, F>(
+    a: TensorView<'_, TA, DeviceFaer, IxD>,
+    b: TensorView<'_, TB, DeviceFaer, IxD>,
+    mut out: TensorMut<'_, TC, DeviceFaer, IxD>,
+    order: FlagOrder,
+    mut f: F,
+) -> Result<()>
+where
+    DC: DimAPI,
+    F: FnMut(
+        TensorView<'_, TA, DeviceFaer, Ix2>,
+        TensorView<'_, TB, DeviceFaer, Ix2>,
+        TensorMut<'_, TC, DeviceFaer, DC>,
+    ) -> Result<()>,
+{
+    let inner_ndim = out.ndim() + 2 - a.ndim();
+    let (a_iters, a_inner) = batch_parts(a.layout(), order, 2)?;
+    let (b_iters, b_inner) = batch_parts(b.layout(), order, 2)?;
+    let (o_iters, o_inner) = batch_parts(out.layout(), order, inner_ndim)?;
+    for (off_a, off_b, off_o) in izip!(a_iters, b_iters, o_iters) {
+        let mut a_i = a_inner.clone().into_dim::<Ix2>()?;
+        let mut b_i = b_inner.clone().into_dim::<Ix2>()?;
+        let mut o_i = o_inner.clone().into_dim::<DC>()?;
+        unsafe { a_i.set_offset(off_a) };
+        unsafe { b_i.set_offset(off_b) };
+        unsafe { o_i.set_offset(off_o) };
+        let a_slice = {
+            let (storage, _) = a.view().into_raw_parts();
+            unsafe { TensorView::new_unchecked(storage, a_i) }
+        };
+        let b_slice = {
+            let (storage, _) = b.view().into_raw_parts();
+            unsafe { TensorView::new_unchecked(storage, b_i) }
+        };
+        let o_slice = {
+            let (storage, _) = out.view_mut().into_raw_parts();
+            unsafe { TensorMut::new_unchecked(storage, o_i) }
+        };
+        f(a_slice, b_slice, o_slice)?;
+    }
+    Ok(())
+}
+
 /// As [`map_stack_slices`], for three outputs computed together from one slice.
 pub(crate) fn map_stack_slices3<TA, TB1, DB1, TB2, DB2, TB3, DB3, F>(
     a: TensorView<'_, TA, DeviceFaer, IxD>,

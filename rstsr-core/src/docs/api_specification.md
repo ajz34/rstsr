@@ -104,11 +104,11 @@ Device is designed to be able extended by other crates. The above devices [`Devi
 | Type | Identifier | Minimal Description |
 |--|--|--|
 | assoc | [`i`][Tensor::i] <br/> [`i_mut`][Tensor::i_mut] | Alias to [`slice`](slice()) and [`slice_mut`]. Recommended over using [`slice`](slice()) in most cases. |
-| assoc/fn | [`slice`](slice()) <br/> [`slice_mut`] | Basic slicing to tensor, generating view of smaller tensor. |
+| assoc/fn | [`slice`](slice()) <br/> [`slice_mut`] <br/> [`into_slice`] | Basic slicing to tensor, generating view of smaller tensor. |
 | macro | [`slice!`] | Construct basic-indexing slice by (`start`, `stop`, `step`), e.g. `slice!(1, -4, 2)`. |
 | core ops | operator `[]` <br/> [`Index`] <br/> [`IndexMut`] | Indexing tensor element, giving reference of scalar value (not efficient due to boundary check). |
 | assoc | [`index_uncheck`][Tensor::index_uncheck] <br/>[`index_mut_uncheck`][Tensor::index_mut_uncheck] | Indexing tensor element, giving reference of scalar value. |
-| assoc/fn | [`diagonal`] <br/> [`diagonal_mut`] | Returns view (or mutable view) of the specified diagonal of a matrix (or a stack of matrices). |
+| assoc/fn | [`diagonal`] <br/> [`diagonal_mut`] <br/> [`into_diagonal`] <br/> [`into_diagonal_mut`] | View (or mutable view) of the specified diagonal of a matrix (or a stack of matrices). |
 
 ### Advanced Indexing
 
@@ -116,8 +116,11 @@ Device is designed to be able extended by other crates. The above devices [`Devi
 |--|--|--|
 | assoc/fn | [`bool_select`] | Returns a new tensor, which indexes the input tensor along dimension `axis` using the boolean entries in `mask`. |
 | assoc/fn | [`index_select`] | Returns a new tensor, which indexes the input tensor along dimension `axis` using the entries in `indices`. |
-| assoc/fn | [`array_index`] | Array indexing (fancy indexing): indexes the tensor by integer arrays on one or more axes, mixed with basic indexers; returns a view when no index array is involved. |
+| assoc/fn | [`array_index`] <br/> [`array_index_assign`] | Array indexing (fancy indexing) by integer arrays; the in-place scatter counterpart. |
+| assoc/fn | [`mask_select`] <br/> [`mask_assign`] <br/> [`mask_fill`] | Select / assign / fill the elements where a boolean `mask` is true. |
 | assoc/fn | [`take`] | Take elements from an array along an axis. |
+| assoc/fn | [`take_along_axis`] <br/> [`put_along_axis`] | Gather / in-place scatter along `axis` by an index tensor. |
+| assoc/fn | [`index_put`] | In-place scatter of values along one axis by an index list. |
 
 ## RSTSR Specific Identifiers
 
@@ -210,7 +213,7 @@ Device is designed to be able extended by other crates. The above devices [`Devi
 |--|--|--|
 | fn | [`broadcast_arrays`] | Broadcasts any number of arrays against each other. |
 | fn | [`broadcast_shapes`] | Broadcasts shapes against each other and returns the resulting shape. |
-| assoc/fn | [`to_broadcast`] <br/> [`broadcast_to`][TensorAny::broadcast_to] | Broadcasts an array to a specified shape. |
+| assoc/fn | [`to_broadcast`] <br/> [`broadcast_to`][TensorAny::broadcast_to] <br/> [`into_broadcast`] | Broadcasts an array to a specified shape. |
 | assoc/fn | [`expand_dims`] <br/> [`unsqueeze`][TensorAny::unsqueeze] | Expands the shape of an array by inserting a new axis (dimension) of size one at the position specified by `axis`. |
 | assoc/fn | [`atleast_1d`] <br/> [`atleast_2d`] <br/> [`atleast_3d`] <br/> [`into_atleast_1d`] <br/> [`into_atleast_2d`] <br/> [`into_atleast_3d`] | View the input as a tensor with at least 1 / 2 / 3 dimensions (the `into_*` forms consume ownership). |
 | assoc/fn | [`flip`] | Reverses the order of elements in an array along the given axis. |
@@ -223,13 +226,15 @@ Device is designed to be able extended by other crates. The above devices [`Devi
 | assoc/fn | [`repeat`] | Repeat elements of a tensor along an axis (or the flattened row-major sequence). |
 | assoc/fn | [`roll`] | Roll array elements along a given axis (the flattened form visits row-major). |
 | assoc/fn | [`tile`] | Construct an array by tiling an input array. |
-| assoc/fn | [`permute_dims`] <br/> [`transpose`] <br/> [`matrix_transpose`] | Permutes the axes (dimensions) of an array `x`. |
+| assoc/fn | [`permute_dims`] <br/> [`transpose`] <br/> [`matrix_transpose`] <br/> [`into_matrix_transpose`] | Permutes the axes (dimensions) of an array `x`. |
 | assoc/fn | [`reshape_with_args`] | Reshapes the given tensor to the specified shape, with argument specifying the order and whether to copy data. |
 | assoc/fn | [`reverse_axes`] | Reverses the order of the axes (dimensions) of an array. |
 | assoc/fn | [`swapaxes`] | Interchange two axes of an array. |
 | assoc/fn | [`squeeze`] | Removes singleton dimensions (axes) from `x`. |
-| assoc/fn | [`to_compatible_shape`] | Reshapes the given tensor to the specified shape if the layout is compatible. |
+| assoc/fn | [`to_compatible_shape`] <br/> [`into_compatible_shape`] | Reshape to the specified shape if the layout is compatible. |
 | assoc/fn | [`to_dim`] <br/> [`to_dyn`] | Convert layout to the other dimension. |
+| assoc | [`reshapeable_without_copy`] | Whether the tensor can be reshaped to a given shape without copying data. |
+| assoc | `into_*` | Ownership-consuming layout-only variants of the operations above: [`into_flip`], [`into_swapaxes`], [`into_moveaxis`], [`into_permute_dims`], [`into_reverse_axes`], [`into_expand_dims`], [`into_squeeze`], [`into_unsqueeze`], [`into_transpose`], [`into_dim`], [`into_dyn`]. |
 
 ### Storage-dependent manipulation
 
@@ -331,9 +336,9 @@ Trait function calls like associated methods, so we also do not recommend usage 
 
 | Type | Identifier | Minimal Description |
 |--|--|--|
-| assoc/fn | [`vecdot`], [`ext_vecdot`] | Computes the (vector) dot product of two arrays. |
-| assoc/fn | [`tensordot`], [`ext_tensordot`] | Contracts two arrays over specified axes. |
-| assoc/fn | [`outer`], [`ext_outer`] | Computes the outer product of two one-dimensional arrays. |
+| assoc/fn | [`vecdot`], [`ext_vecdot`] <br/> [`vecdot_from`] | Computes the (vector) dot product of two arrays. |
+| assoc/fn | [`tensordot`], [`ext_tensordot`] <br/> [`tensordot_from`] | Contracts two arrays over specified axes. |
+| assoc/fn | [`outer`], [`ext_outer`] <br/> [`outer_from`] | Computes the outer product of two one-dimensional arrays. |
 | assoc/fn | [`trace`] | Sums along the diagonal of a tensor. |
 | assoc/fn | [`cross`], [`ext_cross`] | Computes the cross product of 3-element vectors along one axis. |
 
@@ -375,13 +380,31 @@ Custom user reduction (expert-level): [`reduce_all`], [`reduce_axes`], [`reduce_
 
 ### Sorting, searching and counting functions
 
-[`argmin`]/[`argmin_axes`], [`argmax`]/[`argmax_axes`], [`count_nonzero`]/[`count_nonzero_axes`], [`unraveled_argmin`]/[`unraveled_argmin_axes`], [`unraveled_argmax`]/[`unraveled_argmax_axes`], each with `_with_args` forms; select function [`where`] (boolean condition, NumPy three-argument form); and clip function [`clip`] (`(lo, hi)` bounds, each optional)
+[`argmin`]/[`argmin_axes`], [`argmax`]/[`argmax_axes`], [`count_nonzero`]/[`count_nonzero_axes`], [`unraveled_argmin`]/[`unraveled_argmin_axes`], [`unraveled_argmax`]/[`unraveled_argmax_axes`], each with `_with_args` forms; NaN-skipping [`nanargmin`]/[`nanargmin_axes`], [`nanargmax`]/[`nanargmax_axes`] (NumPy semantics). Select function [`where`] (boolean condition, NumPy three-argument form); and clip function [`clip`] (`(lo, hi)` bounds, each optional)
 
 Sorting family: [`sort`], [`argsort`] with [`SortArgs`] (`axis` + `descending` + `stable`), plus expert comparator variants [`sort_custom`]/[`argsort_custom`]. Searching: [`searchsorted`] with [`SearchSortedArgs`]; [`nonzero`]. Gathering: [`take_along_axis`]. Discrete differences: [`diff`] (`axis` + `n` + optional `prepend`/`append`).
 
 ### Utility functions
 
 [`all`]/[`all_axes`], [`any`]/[`any_axes`]
+
+## Utility Types and Argument Groups
+
+Types that appear in the signatures above: the axis arguments, the indexer types
+behind indexing, and the argument-group structs that let one function signature
+cover several call shapes.
+
+| Type | Identifier | Minimal Description |
+|--|--|--|
+| enum | [`AxisIndex`] | Single-axis argument ([`AxisIndex::None`] means the last axis). |
+| enum | [`AxesIndex`] | Multi-axis (or no-axis) argument. |
+| enum | [`SliceI`] | One basic-indexing slice entry (`start`, `stop`, `step`). |
+| enum | [`Indexer`] | One per-axis basic indexer (integer, slice, new-axis, ellipsis). |
+| enum | [`ArrayIndexer`] <br/> struct [`ArrayIndexArgs`] | Per-axis array-indexing indexer and its argument group. |
+| struct | [`ClipArgs`] <br/> enum [`ClipSide`] / [`ClipSideArg`] | Clip bounds and bounded side(s). |
+| enum | [`SearchSide`] | `searchsorted` side (`left` / `right`). |
+| struct | [`ReshapeArgs`], [`RepeatArg`] / [`RepeatArgs`], [`RollArgs`], [`SortArgs`], [`SearchSortedArgs`], [`ReduceArgs`], [`VarArgs`], [`CumulativeArgs`] | Argument groups carried as one tuple parameter. |
+| struct | [`UniqueCounts`], [`UniqueInverse`], [`UniqueAll`] | Named results of the `unique_*` family. |
 
 ## Developer Area
 

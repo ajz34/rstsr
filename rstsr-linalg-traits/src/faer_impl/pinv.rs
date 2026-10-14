@@ -1,6 +1,6 @@
 use crate::faer_impl::batch::batch_and_matrix_shape;
-use crate::faer_impl::batch::{map_stack_slices, stack_shape, with_parallel};
-use crate::traits_def::{PinvAPI, PinvResult};
+use crate::faer_impl::batch::{map_stack_slices, map_stack_slices2x1, stack_shape, with_parallel};
+use crate::traits_def::{PinvAPI, PinvResult, PinvRtol};
 use faer::traits::ComplexField;
 use faer_ext::IntoFaer;
 use num::{Float, FromPrimitive, Num, Zero};
@@ -52,8 +52,9 @@ where
     Ok(PinvResult { pinv, rank })
 }
 
-/// n-dim `pinv`. The `rank` scalar reports the largest per-matrix rank in the
-/// stack (the array-API drops it).
+/// n-dim `pinv` with a scalar tolerance (the `(a, atol, rtol)` and bare-tensor
+/// forms). The `rank` scalar reports the largest per-matrix rank in the stack
+/// (the array-API drops it).
 pub fn faer_impl_pinv_f<T>(
     a: TensorView<'_, T, DeviceFaer, IxD>,
     atol: Option<T::Real>,
@@ -63,9 +64,41 @@ where
     T: ComplexField + DivAssign<T::Real> + Num + Send + Sync + 'static,
     T::Real: Float + FromPrimitive + Send + Sync,
 {
+    faer_impl_pinv_common(a, atol, rtol.map_or(PinvRtol::None, PinvRtol::Float))
+}
+
+/// n-dim `pinv` with a [`PinvRtol`] tolerance: the default `max(M, N) * eps`,
+/// one scalar for every matrix, or one per matrix broadcast against the batch.
+pub fn faer_impl_pinv_rtol_f<T>(
+    a: TensorView<'_, T, DeviceFaer, IxD>,
+    rtol: PinvRtol<T::Real, DeviceFaer>,
+) -> Result<PinvResult<Tensor<T, DeviceFaer, IxD>>>
+where
+    T: ComplexField + DivAssign<T::Real> + Num + Send + Sync + 'static,
+    T::Real: Float + FromPrimitive + Send + Sync,
+{
+    faer_impl_pinv_common(a, None, rtol)
+}
+
+fn faer_impl_pinv_common<T>(
+    a: TensorView<'_, T, DeviceFaer, IxD>,
+    atol: Option<T::Real>,
+    rtol: PinvRtol<T::Real, DeviceFaer>,
+) -> Result<PinvResult<Tensor<T, DeviceFaer, IxD>>>
+where
+    T: ComplexField + DivAssign<T::Real> + Num + Send + Sync + 'static,
+    T::Real: Float + FromPrimitive + Send + Sync,
+{
     let device = a.device().clone();
     let order = device.default_order();
     let (batch_shape, [m, n]) = batch_and_matrix_shape(a.shape(), order)?;
+
+    // validate an array tolerance up front, before the empty-input short-circuit
+    // (and the SVD) can skip it: a bad tolerance errors on an empty input too
+    if let PinvRtol::Array(t) = &rtol {
+        rstsr_assert!(t.device().same_device(&device), DeviceMismatch, "pinv: rtol is on a different device")?;
+        broadcast_shapes_f(&[t.shape().to_vec(), batch_shape.clone()], order)?;
+    }
 
     // a zero-size matrix axis yields a zero pinv of shape (n, m) and rank 0;
     // the SVD below would otherwise panic on an empty singular-value vector
@@ -77,11 +110,40 @@ where
     let mut rank = 0;
     let pinv = with_parallel(&device, || {
         let mut out = zeros_f((stack_shape(&batch_shape, &[n, m], order), &device))?;
-        map_stack_slices::<T, T, Ix2, _>(a, out.view_mut(), order, |a_slice, mut out_slice| {
-            let r = faer_pinv_ix2(a_slice, atol, rtol)?;
-            rank = Ord::max(rank, r.rank);
-            out_slice.assign_f(r.pinv)
-        })?;
+        match &rtol {
+            PinvRtol::Array(t) => {
+                // materialize the batch tolerance (validated above) as one scalar
+                // per matrix: broadcast to the batch shape, then insert the inner
+                // (1, 1) axes, and pair each with its input slice
+                let target = stack_shape(&batch_shape, &[1, 1], order);
+                let src = into_broadcast_f(t.view(), batch_shape.clone())?;
+                let mut batch_rtol: Tensor<T::Real, DeviceFaer, IxD> = zeros_f((batch_shape.clone(), &device))?;
+                batch_rtol.assign_f(src)?;
+                let per_matrix = batch_rtol.into_shape_f(target)?;
+                map_stack_slices2x1::<T, T::Real, T, Ix2, _>(
+                    a,
+                    per_matrix.view(),
+                    out.view_mut(),
+                    order,
+                    |a_slice, r_slice, mut out_slice| {
+                        let r = faer_pinv_ix2(a_slice, atol, Some(r_slice[[0, 0]]))?;
+                        rank = Ord::max(rank, r.rank);
+                        out_slice.assign_f(r.pinv)
+                    },
+                )?;
+            },
+            PinvRtol::None | PinvRtol::Float(_) => {
+                let rtol = match &rtol {
+                    PinvRtol::Float(f) => Some(*f),
+                    _ => None,
+                };
+                map_stack_slices::<T, T, Ix2, _>(a, out.view_mut(), order, |a_slice, mut out_slice| {
+                    let r = faer_pinv_ix2(a_slice, atol, rtol)?;
+                    rank = Ord::max(rank, r.rank);
+                    out_slice.assign_f(r.pinv)
+                })?;
+            },
+        }
         Ok(out)
     })?;
 
@@ -124,6 +186,28 @@ where
     fn pinv_f(self) -> Result<Self::Out> {
         let a = self;
         let result = faer_impl_pinv_f(a.view().to_dyn(), None, None)?;
+        Ok(PinvResult { pinv: result.pinv.into_dim::<D>(), rank: result.rank })
+    }
+}
+
+#[duplicate_item(
+    ImplType                          Tr                               ;
+   [T, D, R: DataAPI<Data = Vec<T>>] [&TensorAny<R, T, DeviceFaer, D> ];
+   [T, D                           ] [TensorView<'_, T, DeviceFaer, D>];
+   [T, D                           ] [Tensor<T, DeviceFaer, D>        ];
+)]
+impl<ImplType, A> PinvAPI<DeviceFaer> for (Tr, A)
+where
+    T: ComplexField + DivAssign<T::Real> + Num + Send + Sync + 'static,
+    T::Real: Float + FromPrimitive + Zero + Send + Sync,
+    D: DimAPI,
+    A: TryInto<PinvRtol<T::Real, DeviceFaer>>,
+    A::Error: Into<Error>,
+{
+    type Out = PinvResult<Tensor<T, DeviceFaer, D>>;
+    fn pinv_f(self) -> Result<Self::Out> {
+        let (a, rtol) = self;
+        let result = faer_impl_pinv_rtol_f(a.view().to_dyn(), rtol.try_into().map_err(Into::into)?)?;
         Ok(PinvResult { pinv: result.pinv.into_dim::<D>(), rank: result.rank })
     }
 }
