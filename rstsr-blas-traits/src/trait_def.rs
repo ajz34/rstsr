@@ -11,6 +11,9 @@ pub trait BlasDriverBaseAPI<T>:
     DeviceAPI<T, Raw = Vec<T>>
     + DeviceAPI<T::Real, Raw = Vec<T::Real>>
     + DeviceAPI<blas_int, Raw = Vec<blas_int>>
+    + DeviceRawAPI<MaybeUninit<T>, Raw = Vec<MaybeUninit<T>>>
+    + DeviceRawAPI<MaybeUninit<T::Real>, Raw = Vec<MaybeUninit<T::Real>>>
+    + DeviceRawAPI<MaybeUninit<blas_int>, Raw = Vec<MaybeUninit<blas_int>>>
     + BlasThreadAPI
     + DeviceRayonAPI
     // lapacke functionality requirements
@@ -18,6 +21,9 @@ pub trait BlasDriverBaseAPI<T>:
     + DeviceNumAPI<blas_int, Ix1>
     + OpAddAssignAPI<blas_int, blas_int, Ix1>
     + OpSubAssignAPI<blas_int, blas_int, Ix1>
+    // batched scratch matmul (e.g. pinv batch driver, user generic code)
+    + DeviceMatMulAPI<T, T, T, Ix2, Ix2, Ix2>
+    + DeviceMatMulAPI<T, T, T, IxD, IxD, IxD>
     // linalg functionality requirements
     + OpDivAssignAPI<T, T::Real, IxD>
     + OpAbsAPI<T, Ix1, TOut = T::Real>
