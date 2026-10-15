@@ -1,5 +1,33 @@
 # Changelog
 
+## v0.10.2 -- 2026-10-15
+
+Two small post-release fixes surfaced by downstream and review follow-ups. No
+user-facing API is removed; new bounds on `BlasDriverBaseAPI` affect trait
+implementors only.
+
+Bug Fix
+
+- The `ManuallyDrop`-backed `asarray` path (`(&mut [T], ...)` inputs) fabricated
+  its `Vec` through a shared-provenance pointer; the two `&mut [T]` sites now
+  use `as_mut_ptr`, fixing a miri-confirmed Stacked-Borrows violation.
+  (RESTGroup/rstsr#159)
+
+Enhancement
+
+- `iter` / `indexed_iter`, `iter_mut` / `indexed_iter_mut`, `axes_iter` /
+  `indexed_axes_iter` and their `_mut` twins are available directly on `Tensor`,
+  `TensorArc` and `TensorCow` (`&self` for the shared forms; `TensorCow` is
+  immutable-only), as borrow-tied delegating wrappers over the view API.
+  Iterating an owned temporary remains a compile error, and view forms keep
+  their inner-lifetime semantics (`a.t().iter()`). (RESTGroup/rstsr#159)
+- `BlasDriverBaseAPI` carries the bounds generic LAPACK-driver code needs to
+  call the core matmul entry points: `DeviceMatMulAPI` (fixed and dynamic rank)
+  and explicit `DeviceRawAPI<MaybeUninit<...>, Raw = Vec<...>>` projections, so
+  downstream code bounded by `LapackDriverAPI<T>` no longer restates raw-type
+  bounds at every call site. The five vendor device impls gain `+ 'static`.
+  Implementors of `BlasDriverBaseAPI` are affected. (RESTGroup/rstsr#160)
+
 ## v0.10.1 -- 2026-10-14
 
 A documentation release. The `rstsr` facade gains a NumPy/SciPy cheat sheet, its
