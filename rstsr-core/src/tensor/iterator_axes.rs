@@ -194,8 +194,10 @@ where
     /// [`order_semantics`](crate::order_semantics)), and the yielded views (like the returned
     /// iterator) borrow the data owner through the view, so they may outlive the view value itself.
     ///
-    /// This method is defined on views only. For owned, arc or cow tensors, take a view first, e.g.
-    /// `a.view().axes_iter(0)`.
+    /// On views, the returned iterator and yielded views carry the view's
+    /// inner data lifetime. On owned, arc or cow tensors, the direct
+    /// [`Tensor::axes_iter`] / [`TensorArc::axes_iter`] / [`TensorCow::axes_iter`]
+    /// forms are equivalent to `a.view().axes_iter(0)`.
     ///
     /// This function behaves identically under [`RowMajor`] and [`ColMajor`] device default orders.
     ///
@@ -273,11 +275,100 @@ where
     ///   traversal order.
     /// - [`TensorMut::axes_iter_mut`]: mutable views.
     /// - [`TensorView::indexed_axes_iter`]: iteration with the axis positions.
+    ///
+    /// Associated methods on `Tensor` / `TensorArc` / `TensorCow`
+    ///
+    /// - [`Tensor::axes_iter`] / [`TensorArc::axes_iter`] / [`TensorCow::axes_iter`]:
+    ///   `self.view().axes_iter(axes)` as a direct call.
+    /// - [`Tensor::axes_iter_mut`] / [`TensorArc::axes_iter_mut`]:
+    ///   `self.view_mut().axes_iter_mut(axes)` as a direct call.
     pub fn axes_iter<I>(&self, axes: I) -> IterAxesView<'a, T, B>
     where
         I: TryInto<AxesIndex<isize>, Error: Into<Error>>,
     {
         self.axes_iter_f(axes).rstsr_unwrap()
+    }
+}
+
+/* #endregion */
+
+/* #region axes iter view iterator for owned/arc/cow tensors */
+
+// Direct `axes_iter*` forms on the owning kinds, delegating to the view route;
+// per-alias blocks for the same E0592 reason as in `iterator_elem.rs`.
+
+impl<T, B, D> Tensor<T, B, D>
+where
+    D: DimAPI,
+    B: DeviceAPI<T, Raw = Vec<T>>,
+{
+    /// Iterate over sub-views along axes; see [`TensorView::axes_iter`].
+    ///
+    /// Convenience form of `self.view().axes_iter(axes)` for owned tensors.
+    pub fn axes_iter<I>(&self, axes: I) -> IterAxesView<'_, T, B>
+    where
+        I: TryInto<AxesIndex<isize>, Error: Into<Error>>,
+    {
+        self.view().axes_iter(axes)
+    }
+
+    /// Iterate over (position, sub-view) pairs along axes; see
+    /// [`TensorView::indexed_axes_iter`].
+    pub fn indexed_axes_iter<I>(&self, axes: I) -> IndexedIterAxesView<'_, T, B>
+    where
+        I: TryInto<AxesIndex<isize>, Error: Into<Error>>,
+    {
+        self.view().indexed_axes_iter(axes)
+    }
+}
+
+impl<T, B, D> TensorArc<T, B, D>
+where
+    D: DimAPI,
+    B: DeviceAPI<T, Raw = Vec<T>>,
+{
+    /// Iterate over sub-views along axes; see [`TensorView::axes_iter`].
+    ///
+    /// Convenience form of `self.view().axes_iter(axes)` for arc tensors.
+    pub fn axes_iter<I>(&self, axes: I) -> IterAxesView<'_, T, B>
+    where
+        I: TryInto<AxesIndex<isize>, Error: Into<Error>>,
+    {
+        self.view().axes_iter(axes)
+    }
+
+    /// Iterate over (position, sub-view) pairs along axes; see
+    /// [`TensorView::indexed_axes_iter`].
+    pub fn indexed_axes_iter<I>(&self, axes: I) -> IndexedIterAxesView<'_, T, B>
+    where
+        I: TryInto<AxesIndex<isize>, Error: Into<Error>>,
+    {
+        self.view().indexed_axes_iter(axes)
+    }
+}
+
+impl<'a, T, B, D> TensorCow<'a, T, B, D>
+where
+    D: DimAPI,
+    B: DeviceAPI<T, Raw = Vec<T>>,
+{
+    /// Iterate over sub-views along axes; see [`TensorView::axes_iter`].
+    ///
+    /// Convenience form of `self.view().axes_iter(axes)` for cow tensors.
+    pub fn axes_iter<I>(&self, axes: I) -> IterAxesView<'_, T, B>
+    where
+        I: TryInto<AxesIndex<isize>, Error: Into<Error>>,
+    {
+        self.view().axes_iter(axes)
+    }
+
+    /// Iterate over (position, sub-view) pairs along axes; see
+    /// [`TensorView::indexed_axes_iter`].
+    pub fn indexed_axes_iter<I>(&self, axes: I) -> IndexedIterAxesView<'_, T, B>
+    where
+        I: TryInto<AxesIndex<isize>, Error: Into<Error>>,
+    {
+        self.view().indexed_axes_iter(axes)
     }
 }
 
@@ -468,8 +559,9 @@ where
     /// Iterate over mutable views of a mutable tensor view along the given
     /// axis; see [`TensorView::axes_iter`].
     ///
-    /// This method is defined on mutable views only and consumes the view.
-    /// For owned tensors, take a mutable view first, e.g.
+    /// This method is defined on mutable views and consumes the view.
+    /// For owned or arc tensors, use the direct [`Tensor::axes_iter_mut`] /
+    /// [`TensorArc::axes_iter_mut`], or take a mutable view first, e.g.
     /// `a.view_mut().axes_iter_mut(0)`.
     ///
     /// # Examples
@@ -922,9 +1014,98 @@ where
 
 /* #endregion */
 
+/* #region axes iter mut iterator for owned/arc tensors */
+
+// Direct `axes_iter_mut*` forms, delegating to the view route (per-alias
+// blocks as above).
+
+impl<T, B, D> Tensor<T, B, D>
+where
+    D: DimAPI,
+    B: DeviceAPI<T, Raw = Vec<T>>,
+{
+    /// Iterate over mutable sub-views along axes; see
+    /// [`TensorMut::axes_iter_mut`].
+    ///
+    /// Convenience form of `self.view_mut().axes_iter_mut(axes)` for owned
+    /// tensors.
+    pub fn axes_iter_mut<I>(&mut self, axes: I) -> IterAxesMut<'_, T, B>
+    where
+        I: TryInto<AxesIndex<isize>, Error: Into<Error>>,
+    {
+        self.view_mut().axes_iter_mut(axes)
+    }
+
+    /// Iterate over (position, mutable sub-view) pairs along axes; see
+    /// [`TensorMut::indexed_axes_iter_mut`].
+    pub fn indexed_axes_iter_mut<I>(&mut self, axes: I) -> IndexedIterAxesMut<'_, T, B>
+    where
+        I: TryInto<AxesIndex<isize>, Error: Into<Error>>,
+    {
+        self.view_mut().indexed_axes_iter_mut(axes)
+    }
+}
+
+impl<T, B, D> TensorArc<T, B, D>
+where
+    D: DimAPI,
+    B: DeviceAPI<T, Raw = Vec<T>>,
+    T: Clone,
+{
+    /// Iterate over mutable sub-views along axes; see
+    /// [`TensorMut::axes_iter_mut`].
+    ///
+    /// Convenience form of `self.view_mut().axes_iter_mut(axes)` for arc
+    /// tensors; the iteration clones the buffer when the data is shared
+    /// (copy-on-write), as any `view_mut` does.
+    pub fn axes_iter_mut<I>(&mut self, axes: I) -> IterAxesMut<'_, T, B>
+    where
+        I: TryInto<AxesIndex<isize>, Error: Into<Error>>,
+    {
+        self.view_mut().axes_iter_mut(axes)
+    }
+}
+
+/* #endregion */
+
 #[cfg(test)]
 mod tests_serial {
     use super::*;
+
+    #[test]
+    fn test_axes_iter_on_owned_arc_cow() {
+        // Direct forms match the view route; arc axes_iter_mut is copy-on-write.
+        #[cfg(not(feature = "col_major"))]
+        let (rows0, rows_inc) = (vec![vec![0, 1, 2], vec![3, 4, 5]], vec![vec![1, 2, 3], vec![4, 5, 6]]);
+        // column-major storage: t[i, j] = arange[i + 2 * j]
+        #[cfg(feature = "col_major")]
+        let (rows0, rows_inc) = (vec![vec![0, 2, 4], vec![1, 3, 5]], vec![vec![1, 3, 5], vec![2, 4, 6]]);
+
+        let a = arange(6).into_shape([2, 3]);
+        let rows: Vec<Vec<_>> = a.axes_iter(0).map(|v| v.iter().cloned().collect()).collect();
+        assert_eq!(rows, rows0);
+        let n = a.indexed_axes_iter(0).count();
+        assert_eq!(n, 2);
+
+        let s = arange(6).into_shape([2, 3]).into_shared();
+        let rows: Vec<Vec<_>> = s.axes_iter(0).map(|v| v.iter().cloned().collect()).collect();
+        assert_eq!(rows, rows0);
+
+        let c = arange(6).into_shape([2, 3]).into_cow();
+        let rows: Vec<Vec<_>> = c.axes_iter(0).map(|v| v.iter().cloned().collect()).collect();
+        assert_eq!(rows, rows0);
+
+        let mut u = arange(6).into_shape([2, 3]).into_shared();
+        let shared = u.clone();
+        u.axes_iter_mut(0).for_each(|mut v| {
+            v += 1;
+        });
+        let rows: Vec<Vec<_>> = shared.axes_iter(0).map(|v| v.iter().cloned().collect()).collect();
+        // COW: `u` got a fresh buffer; the shared clone is untouched
+        assert_eq!(rows, rows0);
+        let rows: Vec<Vec<_>> = u.axes_iter(0).map(|v| v.iter().cloned().collect()).collect();
+        assert_eq!(rows, rows_inc);
+    }
 
     #[test]
     fn test_axes_iter() {
