@@ -700,10 +700,11 @@ where
 
     fn asarray_f(self) -> Result<Self::Out> {
         let (input, layout, device) = self;
-        let ptr = input.as_ptr();
+        // as_mut_ptr (not as_ptr): the Vec must keep the &mut provenance for later mutable
+        // re-derivations
+        let ptr = input.as_mut_ptr();
         let len = input.len();
         let raw = unsafe {
-            let ptr = ptr as *mut T;
             // SAFETY: the Vec aliases the caller's `&mut [T]` (len = actual length); it is
             // wrapped in `ManuallyDrop`/`DataMut` below so it is never deallocated or
             // resized, and the exclusive `&mut` borrow provides write access. `new_f`
@@ -749,10 +750,11 @@ where
         let layout = [input.len()].c();
         let device = device.clone();
 
-        let ptr = input.as_ptr();
+        // as_mut_ptr (not as_ptr): the Vec must keep the &mut provenance for later mutable
+        // re-derivations
+        let ptr = input.as_mut_ptr();
         let len = input.len();
         let raw = unsafe {
-            let ptr = ptr as *mut T;
             // SAFETY: the Vec aliases the caller's `&mut [T]` (len = actual length); it is
             // wrapped in `ManuallyDrop`/`DataMut` below so it is never deallocated or
             // resized, and the exclusive `&mut` borrow provides write access. `new_f`

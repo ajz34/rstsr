@@ -94,11 +94,12 @@ where
     /// [`ColMajor`]; see [`order_semantics`](crate::order_semantics). Use
     /// [`TensorView::iter_with_order`] to pin the traversal order explicitly.
     ///
-    /// This method is defined on views only. For owned, arc or cow tensors,
-    /// take a view first, e.g. `a.view().iter()` or `a.t().iter()`; the
-    /// returned iterator borrows the data owner through the view and may
-    /// outlive the view value itself. Accordingly, an iterator cannot
-    /// outlive the data owner:
+    /// On views, the returned iterator carries the view's inner data lifetime:
+    /// it borrows the data owner through the view and may outlive the view
+    /// value itself (e.g. the one-liner `a.t().iter()`). On owned, arc or cow
+    /// tensors, the direct [`Tensor::iter`] / [`TensorArc::iter`] /
+    /// [`TensorCow::iter`] forms are equivalent to `a.view().iter()`. An
+    /// iterator cannot outlive the data owner:
     ///
     /// ```rust,compile_fail
     /// # use rstsr::prelude::*;
@@ -140,8 +141,78 @@ where
     ///   order.
     /// - [`TensorMut::iter_mut`]: mutable element iteration.
     /// - [`TensorView::indexed_iter`]: iteration with logical indices.
+    ///
+    /// Associated methods on `Tensor` / `TensorArc` / `TensorCow`
+    ///
+    /// - [`Tensor::iter`] / [`TensorArc::iter`] / [`TensorCow::iter`]: `self.view().iter()` as a
+    ///   direct call.
+    /// - [`Tensor::iter_mut`] / [`TensorArc::iter_mut`]: `self.view_mut().iter_mut()` as a direct
+    ///   call.
     pub fn iter(&self) -> IterVecView<'a, T, D> {
         self.iter_f().rstsr_unwrap()
+    }
+}
+
+/* #endregion */
+
+/* #region elem view iterator for owned/arc/cow tensors */
+
+// Direct `iter*` forms on the owning kinds, delegating to the view route.
+// Per-alias blocks: a generic `TensorAny` block collides with the view block
+// above (E0592). Borrow-tied to `&self`, so owned temporaries still fail to
+// compile.
+
+impl<T, B, D> Tensor<T, B, D>
+where
+    D: DimAPI,
+    B: DeviceAPI<T, Raw = Vec<T>>,
+{
+    /// Iterate over the elements by reference; see [`TensorView::iter`].
+    ///
+    /// Convenience form of `self.view().iter()` for owned tensors.
+    pub fn iter(&self) -> IterVecView<'_, T, D> {
+        self.view().iter()
+    }
+
+    /// Iterate over (index, element) pairs; see [`TensorView::indexed_iter`].
+    pub fn indexed_iter(&self) -> IndexedIterVecView<'_, T, D> {
+        self.view().indexed_iter()
+    }
+}
+
+impl<T, B, D> TensorArc<T, B, D>
+where
+    D: DimAPI,
+    B: DeviceAPI<T, Raw = Vec<T>>,
+{
+    /// Iterate over the elements by reference; see [`TensorView::iter`].
+    ///
+    /// Convenience form of `self.view().iter()` for arc tensors.
+    pub fn iter(&self) -> IterVecView<'_, T, D> {
+        self.view().iter()
+    }
+
+    /// Iterate over (index, element) pairs; see [`TensorView::indexed_iter`].
+    pub fn indexed_iter(&self) -> IndexedIterVecView<'_, T, D> {
+        self.view().indexed_iter()
+    }
+}
+
+impl<'a, T, B, D> TensorCow<'a, T, B, D>
+where
+    D: DimAPI,
+    B: DeviceAPI<T, Raw = Vec<T>>,
+{
+    /// Iterate over the elements by reference; see [`TensorView::iter`].
+    ///
+    /// Convenience form of `self.view().iter()` for cow tensors.
+    pub fn iter(&self) -> IterVecView<'_, T, D> {
+        self.view().iter()
+    }
+
+    /// Iterate over (index, element) pairs; see [`TensorView::indexed_iter`].
+    pub fn indexed_iter(&self) -> IndexedIterVecView<'_, T, D> {
+        self.view().indexed_iter()
     }
 }
 
@@ -251,8 +322,9 @@ where
     /// Iterate over the elements of a mutable tensor view by mutable
     /// reference; see [`TensorView::iter`] for the traversal order.
     ///
-    /// This method is defined on mutable views only and consumes the view.
-    /// For owned tensors, take a mutable view first, e.g.
+    /// This method is defined on mutable views and consumes the view.
+    /// For owned or arc tensors, use the direct [`Tensor::iter_mut`] /
+    /// [`TensorArc::iter_mut`], or take a mutable view first, e.g.
     /// `a.view_mut().iter_mut()`; the returned iterator borrows the data
     /// owner and may outlive the view value itself.
     ///
@@ -530,17 +602,57 @@ where
 
 /* #endregion */
 
+/* #region elem mut iterator for owned/arc tensors */
+
+// Direct `iter_mut*` forms, delegating to the view route (per-alias blocks
+// as above).
+
+impl<T, B, D> Tensor<T, B, D>
+where
+    D: DimAPI,
+    B: DeviceAPI<T, Raw = Vec<T>>,
+{
+    /// Iterate over the elements by mutable reference; see
+    /// [`TensorMut::iter_mut`].
+    ///
+    /// Convenience form of `self.view_mut().iter_mut()` for owned tensors;
+    /// the iterator borrows the tensor through `&mut self`.
+    pub fn iter_mut(&mut self) -> IterVecMut<'_, T, D> {
+        self.view_mut().iter_mut()
+    }
+
+    /// Iterate over (index, element) pairs by mutable reference; see
+    /// [`TensorMut::indexed_iter_mut`].
+    pub fn indexed_iter_mut(&mut self) -> IndexedIterVecMut<'_, T, D> {
+        self.view_mut().indexed_iter_mut()
+    }
+}
+
+impl<T, B, D> TensorArc<T, B, D>
+where
+    D: DimAPI,
+    B: DeviceAPI<T, Raw = Vec<T>>,
+    T: Clone,
+{
+    /// Iterate over the elements by mutable reference; see
+    /// [`TensorMut::iter_mut`].
+    ///
+    /// Convenience form of `self.view_mut().iter_mut()` for arc tensors;
+    /// unique iteration clones the buffer when the data is shared
+    /// (copy-on-write), as any `view_mut` does.
+    pub fn iter_mut(&mut self) -> IterVecMut<'_, T, D> {
+        self.view_mut().iter_mut()
+    }
+}
+
+/* #endregion */
+
 #[cfg(test)]
 mod tests_serial {
     use super::*;
 
     #[test]
     fn test_iter_correctness() {
-        // Soundness regression guard: `iter` used to `transmute` its borrow to
-        // an unrelated lifetime, which made `let it = { let t = tensor;
-        // t.iter() };` compile (use-after-free). Iteration is now view-only:
-        // the iterator borrows the data owner through the view's inner
-        // lifetime, and `iter` on an owned tensor no longer exists.
         let t = arange(6);
         let v: Vec<_> = t.view().iter().cloned().collect();
         assert_eq!(v, vec![0, 1, 2, 3, 4, 5]);
@@ -553,11 +665,37 @@ mod tests_serial {
     }
 
     #[test]
+    fn test_iter_on_owned_arc_cow() {
+        // Direct forms on the owning kinds match the view route; arc mut iteration is
+        // copy-on-write.
+        let t = arange(6);
+        let v: Vec<_> = t.iter().cloned().collect();
+        assert_eq!(v, vec![0, 1, 2, 3, 4, 5]);
+        let pairs: Vec<_> = t.indexed_iter().map(|(idx, x)| (idx.to_vec(), *x)).collect();
+        assert_eq!(pairs[2], (vec![2], 2));
+
+        let s = arange(6).into_shared();
+        let v: Vec<_> = s.iter().cloned().collect();
+        assert_eq!(v, vec![0, 1, 2, 3, 4, 5]);
+
+        let mut u = arange(6).into_shared();
+        let shared = u.clone();
+        u.iter_mut().for_each(|x| *x += 1);
+        // COW: `u` got a fresh buffer; the shared clone is untouched
+        let v: Vec<_> = shared.iter().cloned().collect();
+        assert_eq!(v, vec![0, 1, 2, 3, 4, 5]);
+        let v: Vec<_> = u.iter().cloned().collect();
+        assert_eq!(v, vec![1, 2, 3, 4, 5, 6]);
+
+        let c = arange(6).into_cow();
+        let v: Vec<_> = c.iter().cloned().collect();
+        assert_eq!(v, vec![0, 1, 2, 3, 4, 5]);
+    }
+
+    #[test]
     fn test_iter_one_liner_on_view_temporary() {
-        // The one-liner over a view temporary is sound again (it was a
-        // compile error after tying the iterator to `&self`): the iterator
-        // borrows the owner `a` through the view's inner lifetime, so the
-        // dropped view temporary is irrelevant.
+        // The iterator borrows the owner `a` through the view's inner lifetime,
+        // so the dropped view temporary is irrelevant.
         let a = arange(6).into_shape([3, 2]);
         let it = a.t().iter();
         let v: Vec<_> = it.cloned().collect();
