@@ -10,6 +10,9 @@ use itertools::izip;
 /// - Shape is the size of each dimension of tensor.
 /// - Stride is the number of elements to skip to get to the next element in each dimension.
 /// - Offset is the starting position of tensor.
+///
+/// A zero-size tensor (any shape axis is 0) has no addressable element, so its
+/// strides are unspecified; the contiguous-stride constructors report all zeros.
 #[doc = include_str!("readme.md")]
 #[derive(Clone)]
 pub struct Layout<D>
@@ -625,7 +628,8 @@ pub trait DimLayoutContigAPI: DimBaseAPI + DimShapeAPI {
         let shape = self.clone();
         let stride = shape.stride_c_contig();
         // SAFETY: `stride_c_contig` builds non-overlapping contiguous strides from
-        // `shape`; all indices stay below the shape product.
+        // `shape`; all indices stay below the shape product. A zero-size shape yields
+        // all-zero strides, so no index is addressable.
         unsafe { Layout::new_unchecked(shape, stride, offset.unwrap_or(0)) }
     }
 
@@ -635,7 +639,8 @@ pub trait DimLayoutContigAPI: DimBaseAPI + DimShapeAPI {
         let shape = self.clone();
         let stride = shape.stride_f_contig();
         // SAFETY: `stride_f_contig` builds non-overlapping contiguous strides from
-        // `shape`; all indices stay below the shape product.
+        // `shape`; all indices stay below the shape product. A zero-size shape yields
+        // all-zero strides, so no index is addressable.
         unsafe { Layout::new_unchecked(shape, stride, offset.unwrap_or(0)) }
     }
 

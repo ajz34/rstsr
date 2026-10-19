@@ -24,6 +24,9 @@ pub trait DimShapeAPI: DimBaseAPI {
 
     /// Stride for a f-contiguous tensor using this shape.
     ///
+    /// A shape with a zero-length axis contains no element, so its strides are
+    /// unspecified; all strides are then returned as zero.
+    ///
     /// # Examples
     ///
     /// ```
@@ -31,10 +34,16 @@ pub trait DimShapeAPI: DimBaseAPI {
     ///
     /// let stride = [2, 3, 5].stride_f_contig();
     /// assert_eq!(stride, [1, 2, 6]);
+    ///
+    /// let stride = [2, 0, 5].stride_f_contig();
+    /// assert_eq!(stride, [0, 0, 0]);
     /// ```
     fn stride_f_contig(&self) -> Self::Stride;
 
     /// Stride for a c-contiguous tensor using this shape.
+    ///
+    /// A shape with a zero-length axis contains no element, so its strides are
+    /// unspecified; all strides are then returned as zero.
     ///
     /// # Examples
     ///
@@ -43,10 +52,16 @@ pub trait DimShapeAPI: DimBaseAPI {
     ///
     /// let stride = [2, 3, 5].stride_c_contig();
     /// assert_eq!(stride, [15, 5, 1]);
+    ///
+    /// let stride = [2, 0, 5].stride_c_contig();
+    /// assert_eq!(stride, [0, 0, 0]);
     /// ```
     fn stride_c_contig(&self) -> Self::Stride;
 
     /// Stride for contiguous tensor using this shape.
+    ///
+    /// A shape with a zero-length axis contains no element, so its strides are
+    /// unspecified; all strides are then returned as zero.
     ///
     /// # Cargo feature dependent
     ///
@@ -87,6 +102,10 @@ impl<const N: usize> DimShapeAPI for Ix<N> {
     }
 
     fn stride_f_contig(&self) -> [isize; N] {
+        // size-0 tensor: no element is addressable, report zero strides
+        if self.contains(&0) {
+            return [0; N];
+        }
         let mut stride = [1; N];
         for i in 1..N {
             stride[i] = stride[i - 1] * self[i - 1].max(1) as isize;
@@ -95,6 +114,10 @@ impl<const N: usize> DimShapeAPI for Ix<N> {
     }
 
     fn stride_c_contig(&self) -> [isize; N] {
+        // size-0 tensor: no element is addressable, report zero strides
+        if self.contains(&0) {
+            return [0; N];
+        }
         let mut stride = [1; N];
         if N == 0 {
             return stride;
@@ -197,6 +220,10 @@ impl DimShapeAPI for IxD {
     }
 
     fn stride_f_contig(&self) -> Vec<isize> {
+        // size-0 tensor: no element is addressable, report zero strides
+        if self.contains(&0) {
+            return vec![0; self.len()];
+        }
         let mut stride = vec![1; self.len()];
         for i in 1..self.len() {
             stride[i] = stride[i - 1] * self[i - 1] as isize;
@@ -205,6 +232,10 @@ impl DimShapeAPI for IxD {
     }
 
     fn stride_c_contig(&self) -> Vec<isize> {
+        // size-0 tensor: no element is addressable, report zero strides
+        if self.contains(&0) {
+            return vec![0; self.len()];
+        }
         let mut stride = vec![1; self.len()];
         if self.is_empty() {
             return stride;
@@ -300,7 +331,28 @@ mod test {
         assert_eq!(stride, vec![]);
         // zero element test
         let stride = [1, 2, 0, 4].stride_f_contig();
-        println!("{stride:?}");
+        assert_eq!(stride, [0, 0, 0, 0]);
+        let stride = vec![1, 2, 0, 4].stride_f_contig();
+        assert_eq!(stride, vec![0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn test_stride_zero_size() {
+        // size-0 shapes report all-zero strides, static and dynamic, both orders
+        for shape in [[0, 18], [18, 0], [0, 0]] {
+            assert_eq!(shape.stride_f_contig(), [0, 0], "shape {shape:?}");
+            assert_eq!(shape.stride_c_contig(), [0, 0], "shape {shape:?}");
+            let shape_d = shape.to_vec();
+            assert_eq!(shape_d.stride_f_contig(), vec![0, 0], "shape {shape_d:?}");
+            assert_eq!(shape_d.stride_c_contig(), vec![0, 0], "shape {shape_d:?}");
+        }
+
+        let shape = [2, 0, 3];
+        assert_eq!(shape.stride_f_contig(), [0, 0, 0]);
+        assert_eq!(shape.stride_c_contig(), [0, 0, 0]);
+        let shape_d = shape.to_vec();
+        assert_eq!(shape_d.stride_f_contig(), vec![0, 0, 0]);
+        assert_eq!(shape_d.stride_c_contig(), vec![0, 0, 0]);
     }
 
     #[test]
@@ -315,6 +367,8 @@ mod test {
         assert_eq!(stride, vec![]);
         // zero element test
         let stride = [1, 2, 0, 4].stride_c_contig();
-        println!("{stride:?}");
+        assert_eq!(stride, [0, 0, 0, 0]);
+        let stride = vec![1, 2, 0, 4].stride_c_contig();
+        assert_eq!(stride, vec![0, 0, 0, 0]);
     }
 }
