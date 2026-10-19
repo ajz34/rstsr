@@ -53,6 +53,12 @@ where
     pub fn run(self) -> Result<TensorMutable2<'c, T, B>> {
         let Self { a, b, c, alpha, beta, side, uplo, order } = self;
 
+        // empty C: skip contiguity conversions and use the guard in internal_run
+        if b.nrow() == 0 || b.ncol() == 0 {
+            let obj = SYHEMM_ { a, b, c, alpha, beta, side, uplo, order: Some(ColMajor) };
+            return obj.internal_run();
+        }
+
         // determine preferred layout
         let order_c = c.as_ref().map(|c| (c.c_prefer(), c.f_prefer()));
         let order = order.map(|order| match order {
@@ -95,22 +101,24 @@ where
 
         // this function only accepts column major
         rstsr_assert_eq!(order, Some(ColMajor), RuntimeError)?;
-        rstsr_assert!(a.f_prefer(), RuntimeError)?;
-        rstsr_assert!(b.f_prefer(), RuntimeError)?;
 
         // device check
         rstsr_assert!(a.device().same_device(b.device()), DeviceMismatch)?;
 
-        // initialize intent(hide)
+        // initialize intent(hide); B is the m x n matrix
         let m = b.nrow();
-        let n = a.ncol();
-        let lda = a.ld_col().unwrap();
-        let ldb = b.ld_col().unwrap();
+        let n = b.ncol();
 
         // perform check
         match side {
             Left => rstsr_assert_eq!(a.shape(), &[m, m], InvalidLayout)?,
             Right => rstsr_assert_eq!(a.shape(), &[n, n], InvalidLayout)?,
+        }
+
+        // A and B are not read when C is empty
+        if m != 0 && n != 0 {
+            rstsr_assert!(a.f_prefer(), RuntimeError)?;
+            rstsr_assert!(b.f_prefer(), RuntimeError)?;
         }
 
         // optional intent(out)
@@ -127,11 +135,20 @@ where
             TensorMutable2::Owned(zeros_f(([m, n].f(), a.device()))?.into_dim())
         };
 
+        // empty C: no element is read or written
+        if m == 0 || n == 0 {
+            return Ok(c.clone_to_mut());
+        }
+
+        let lda = require_ld(a.ld_col(), a.layout(), "A")?;
+        let ldb = require_ld(b.ld_col(), b.layout(), "B")?;
+
         // perform blas
         let ptr_a = a.as_ptr();
         let ptr_b = b.as_ptr();
-        let ldc = c.view_mut().ld_col().unwrap();
-        let ptr_c = c.view_mut().as_mut_ptr();
+        let mut c_view = c.view_mut();
+        let ldc = require_ld(c_view.ld_col(), c_view.layout(), "C")?;
+        let ptr_c = c_view.as_mut_ptr();
 
         unsafe {
             B::driver_syhemm(ColMajor, side, uplo, m, n, alpha, ptr_a, lda, ptr_b, ldb, beta, ptr_c, ldc);

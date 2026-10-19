@@ -51,11 +51,17 @@ where
     pub fn run(self) -> Result<TensorMutable2<'b, T, B>> {
         let Self { a, b, alpha, side, uplo, transa, diag, order } = self;
 
-        rstsr_assert!(a.device().same_device(b.device()), DeviceMismatch)?;
         let uplo = uplo.unwrap_or_else(|| match a.device().default_order() {
             RowMajor => Lower,
             ColMajor => Upper,
         });
+
+        // empty B: skip operand transposition and use the guard in internal_run
+        let [m, n] = *b.shape();
+        if m == 0 || n == 0 {
+            let obj = TRSM_ { a, b, alpha, side, uplo: Some(uplo), transa, diag, order: Some(ColMajor) };
+            return obj.internal_run();
+        }
 
         // determine preferred layout
         let order_b = (b.c_prefer(), b.f_prefer());
@@ -102,16 +108,14 @@ where
 
         // this function only accepts column major
         rstsr_assert_eq!(order, Some(ColMajor), RuntimeError)?;
-        rstsr_assert!(a.f_prefer(), RuntimeError)?;
 
         // device check
-        rstsr_assert!(a.device().same_device(b.device()), DeviceError)?;
+        rstsr_assert!(a.device().same_device(b.device()), DeviceMismatch)?;
         rstsr_assert!(uplo.is_some(), InvalidValue, "uplo in internal_run should not be None")?;
         let uplo = uplo.unwrap();
 
         // initialize intent(hide)
         let [m, n] = *b.shape();
-        let lda = a.ld(ColMajor).unwrap();
 
         // perform check
         match side {
@@ -119,13 +123,23 @@ where
             Right => rstsr_assert_eq!(a.shape(), &[n, n], InvalidLayout)?,
         };
 
+        // empty B: nothing to solve
+        if m == 0 || n == 0 {
+            return overwritable_convert_with_order(b, ColMajor);
+        }
+
+        rstsr_assert!(a.f_prefer(), RuntimeError)?;
+
+        let lda = require_ld(a.ld(ColMajor), a.layout(), "A")?;
+
         // prepare output
         let mut b = overwritable_convert_with_order(b, ColMajor)?;
 
         // perform blas
         let ptr_a = a.as_ptr();
-        let ldb = b.view_mut().ld_col().unwrap();
-        let ptr_b = b.view_mut().as_mut_ptr();
+        let mut b_view = b.view_mut();
+        let ldb = require_ld(b_view.ld_col(), b_view.layout(), "B")?;
+        let ptr_b = b_view.as_mut_ptr();
 
         unsafe { B::driver_trsm(ColMajor, side, uplo, transa, diag, m, n, alpha, ptr_a, lda, ptr_b, ldb) };
 
