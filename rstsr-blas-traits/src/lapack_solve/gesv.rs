@@ -44,12 +44,33 @@ where
 
         let [n, nrhs] = *b.view().shape();
         rstsr_assert_eq!(a.view().shape(), &[n, n], InvalidLayout, "GESV: A shape")?;
-        let lda = a.view().ld(order).unwrap();
-        let ldb = b.view().ld(order).unwrap();
+
+        // empty system: nothing is factored and nothing is solved
+        if n == 0 {
+            let ipiv = unsafe { empty_f(([n], &device))?.into_dim::<Ix1>() };
+            return Ok((a.clone_to_mut(), ipiv, b.clone_to_mut()));
+        }
+
+        let lda = a.view().testify_ld(order, "A")?;
         let mut ipiv = unsafe { empty_f(([n], &device))?.into_dim::<Ix1>() };
         let ptr_a = a.view_mut().as_mut_ptr();
-        let ptr_b = b.view_mut().as_mut_ptr();
         let ptr_ipiv = ipiv.as_mut_ptr();
+
+        // B is not accessed when nrhs == 0, but the driver may slice it: use a
+        // scratch buffer and the smallest leading dimension each order allows
+        let mut b_scratch = if nrhs == 0 { Some(zeros_f(([n.max(1)], &device))?.into_dim::<Ix1>()) } else { None };
+        let ldb = if nrhs == 0 {
+            match order {
+                RowMajor => 1,
+                ColMajor => n.max(1),
+            }
+        } else {
+            b.view().testify_ld(order, "B")?
+        };
+        let ptr_b = match b_scratch.as_mut() {
+            Some(scratch) => scratch.as_mut_ptr(),
+            None => b.view_mut().as_mut_ptr(),
+        };
 
         // run driver
         let info = unsafe { B::driver_gesv(order, n, nrhs, ptr_a, lda, ptr_ipiv, ptr_b, ldb) };

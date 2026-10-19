@@ -52,6 +52,22 @@ where
     pub fn run(self) -> Result<TensorMutable2<'c, T, B>> {
         let Self { a, b, c, alpha, beta, transa, transb, order } = self;
 
+        // empty C: skip operand transposition and use the guard in internal_run
+        let m = match transa {
+            FlagTrans::N => a.nrow(),
+            FlagTrans::T | FlagTrans::C => a.ncol(),
+            _ => rstsr_invalid!(transa)?,
+        };
+        let n = match transb {
+            FlagTrans::N => b.ncol(),
+            FlagTrans::T | FlagTrans::C => b.nrow(),
+            _ => rstsr_invalid!(transb)?,
+        };
+        if m == 0 || n == 0 {
+            let obj = GEMM_ { a, b, c, alpha, beta, transa, transb, order: Some(ColMajor) };
+            return obj.internal_run();
+        }
+
         // determine preferred layout
         let order_c = c.as_ref().map(|c| (c.c_prefer(), c.f_prefer()));
         let order = order.map(|order| match order {
@@ -90,8 +106,6 @@ where
 
         // this function only accepts column major
         rstsr_assert_eq!(order, Some(ColMajor), RuntimeError)?;
-        rstsr_assert!(a.f_prefer(), RuntimeError)?;
-        rstsr_assert!(b.f_prefer(), RuntimeError)?;
 
         // device check
         rstsr_assert!(a.device().same_device(b.device()), DeviceMismatch)?;
@@ -108,14 +122,17 @@ where
             FlagTrans::T | FlagTrans::C => b.nrow(),
             _ => rstsr_invalid!(transb)?,
         };
-        let lda = a.ld_col().unwrap();
-        let ldb = b.ld_col().unwrap();
-
         // perform check
         match transb {
             FlagTrans::N => rstsr_assert_eq!(b.nrow(), k, InvalidLayout)?,
             FlagTrans::T | FlagTrans::C => rstsr_assert_eq!(b.ncol(), k, InvalidLayout)?,
             _ => rstsr_invalid!(transb)?,
+        }
+
+        // A and B are not read when C is empty
+        if m != 0 && n != 0 {
+            rstsr_assert!(a.f_prefer(), RuntimeError)?;
+            rstsr_assert!(b.f_prefer(), RuntimeError)?;
         }
 
         // optional intent(out)
@@ -133,11 +150,23 @@ where
             TensorMutable2::Owned(zeros_f(([m, n].f(), a.device()))?.into_dim())
         };
 
+        // empty C: no element is read or written
+        if m == 0 || n == 0 {
+            return Ok(c.clone_to_mut());
+        }
+
+        // with k == 0 BLAS never dereferences A or B; only C := beta * C.
+        // The leading dimensions are therefore derived from the shapes
+        // instead of the (empty) layouts.
+        let (lda, ldb) =
+            if k == 0 { (a.nrow().max(1), 1) } else { (a.testify_ld(ColMajor, "A")?, b.testify_ld(ColMajor, "B")?) };
+
         // perform blas
         let ptr_a = a.as_ptr();
         let ptr_b = b.as_ptr();
-        let ldc = c.view_mut().ld_col().unwrap();
-        let ptr_c = c.view_mut().as_mut_ptr();
+        let mut c_view = c.view_mut();
+        let ldc = c_view.testify_ld(ColMajor, "C")?;
+        let ptr_c = c_view.as_mut_ptr();
 
         unsafe {
             B::driver_gemm(ColMajor, transa, transb, m, n, k, alpha, ptr_a, lda, ptr_b, ldb, beta, ptr_c, ldc);

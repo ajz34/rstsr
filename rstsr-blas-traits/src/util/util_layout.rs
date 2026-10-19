@@ -1,4 +1,4 @@
-use rstsr_core::prelude::rstsr_structs::*;
+use rstsr_core::prelude_dev::*;
 
 /// Determine the single order a BLAS/LAPACK call should run in, from the
 /// layout preferences of its tensor arguments.

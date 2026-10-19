@@ -61,8 +61,14 @@ where
         rstsr_assert_eq!(a.view().shape(), &[n, n], InvalidLayout)?;
         rstsr_assert_eq!(b.view().shape(), &[n, n], InvalidLayout)?;
 
-        let lda = a.view().ld(order).unwrap();
-        let ldb = b.view().ld(order).unwrap();
+        // empty A: no eigenvalues
+        if n == 0 {
+            let w = zeros_f(([0], &device))?.into_dim::<Ix1>();
+            return Ok((w, a.clone_to_mut()));
+        }
+
+        let lda = a.view().testify_ld(order, "A")?;
+        let ldb = b.view().testify_ld(order, "B")?;
         let mut w = unsafe { empty_f(([n].c(), &device))?.into_dim::<Ix1>() };
         let ptr_a = a.view_mut().as_mut_ptr();
         let ptr_b = b.view_mut().as_mut_ptr();

@@ -60,7 +60,6 @@ where
         };
         let [m, n] = *a.view().shape();
         let minmn = m.min(n);
-        let lda = a.view().ld(order).unwrap();
 
         let ([u0, u1], [vt0, vt1]) = match jobz {
             'N' => ([0, 0], [0, 0]),
@@ -93,8 +92,15 @@ where
         let mut s = unsafe { empty_f(([minmn], &device))?.into_dim::<Ix1>() };
         let mut superb = unsafe { empty_f(([minmn.saturating_sub(1)], &device))?.into_dim::<Ix1>() };
 
-        let ldu = u_f.as_ref().map_or(1, |u| u.view().ld(order).unwrap());
-        let ldvt = vt_f.as_ref().map_or(1, |v| v.view().ld(order).unwrap());
+        let lda = a.view().testify_ld(order, "A")?;
+        let ldu = match u_f.as_ref() {
+            Some(u) => u.testify_ld(order, "U")?,
+            None => 1,
+        };
+        let ldvt = match vt_f.as_ref() {
+            Some(v) => v.testify_ld(order, "VT")?,
+            None => 1,
+        };
 
         let info = unsafe {
             B::driver_gesvd(
