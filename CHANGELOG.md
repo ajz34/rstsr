@@ -1,5 +1,38 @@
 # Changelog
 
+## v0.10.3 -- 2026-10-19
+
+Zero-size layouts get a stride and leading-dimension contract, and the BLAS-3 and
+LAPACK wrappers accept empty operands.
+
+API breaking changes (user should not feel that)
+
+- `ld_row` / `ld_col` return `None` for overlapping layouts and `max(1, other)`
+  for axes of length 0 or 1. (RESTGroup/rstsr#162)
+
+New features
+
+- `TensorBase::testify_ld` reports an illegal leading dimension as an
+  `InvalidLayout` error. (RESTGroup/rstsr#162)
+- `gemm`, `syhemm` and `trsm` accept empty operands. (RESTGroup/rstsr#162)
+- LAPACK wrappers accept empty operands; `gesv`/`sysv` still factor `A` when the
+  right-hand side has no columns. (RESTGroup/rstsr#162)
+
+Behavior change
+
+- Contiguous constructors report all-zero strides for zero-size shapes.
+  (RESTGroup/rstsr#162)
+
+Bug Fix
+
+- Empty operands no longer reach BLAS/LAPACK drivers. (RESTGroup/rstsr#162)
+- `syhemm` used `a.ncol()` instead of `b.ncol()` for the output columns.
+  (RESTGroup/rstsr#162)
+
+Dev infrastructure
+
+- Add an OpenBLAS-only zero-size test suite. (RESTGroup/rstsr#162)
+
 ## v0.10.2 -- 2026-10-15
 
 Two small post-release fixes surfaced by downstream and review follow-ups. No
