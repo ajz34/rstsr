@@ -24,6 +24,15 @@ pub struct DeviceOpenBLAS {
     base: DeviceCpuRayon,
 }
 
+/// The linked OpenBLAS configuration string, e.g. `"OpenBLAS 0.3.32 ..."`.
+pub fn openblas_config() -> String {
+    let ptr = unsafe { rstsr_openblas_ffi::cblas::openblas_get_config() };
+    if ptr.is_null() {
+        return String::new();
+    }
+    unsafe { std::ffi::CStr::from_ptr(ptr) }.to_string_lossy().into_owned()
+}
+
 pub(crate) use rstsr_openblas_ffi as lapack_ffi;
 pub(crate) use DeviceOpenBLAS as DeviceBLAS;
 pub(crate) use DeviceOpenBLAS as DeviceRayonAutoImpl;
