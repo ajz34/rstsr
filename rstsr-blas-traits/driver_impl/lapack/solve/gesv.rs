@@ -53,7 +53,8 @@ pub unsafe fn fn_work(
                 Err(_) => return -1011,
             };
             let a_slice = from_raw_parts_mut(a, n * lda);
-            let b_slice = from_raw_parts_mut(b, n * ldb);
+            // an empty B (nrhs == 0) has no addressable element
+            let b_slice = from_raw_parts_mut(b, if nrhs == 0 { 0 } else { n * ldb });
             let la = Layout::new_unchecked([n, n], [lda as isize, 1], 0);
             let lb = Layout::new_unchecked([n, nrhs], [ldb as isize, 1], 0);
             let la_t = Layout::new_unchecked([n, n], [1, lda_t as isize], 0);
@@ -158,7 +159,8 @@ pub unsafe fn fn_work(
                 Err(_) => return -1011,
             };
             let a_slice = from_raw_parts_mut(a, n * lda);
-            let b_slice = from_raw_parts_mut(b, n * ldb);
+            // an empty B (nrhs == 0) has no addressable element
+            let b_slice = from_raw_parts_mut(b, if nrhs == 0 { 0 } else { n * ldb });
             let la = Layout::new_unchecked([n, n], [lda as isize, 1], 0);
             let lb = Layout::new_unchecked([n, nrhs], [ldb as isize, 1], 0);
             let la_t = Layout::new_unchecked([n, n], [1, lda_t as isize], 0);
