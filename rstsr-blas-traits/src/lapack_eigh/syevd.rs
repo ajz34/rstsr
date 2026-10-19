@@ -51,7 +51,13 @@ where
         let [n, m] = *a.view().shape();
         rstsr_assert_eq!(n, m, InvalidLayout)?;
 
-        let lda = a.view().ld(order).unwrap();
+        // empty A: no eigenvalues
+        if n == 0 {
+            let w = zeros_f(([0], &device))?.into_dim::<Ix1>();
+            return Ok((w, a.clone_to_mut()));
+        }
+
+        let lda = a.view().testify_ld(order, "A")?;
         let mut w = unsafe { empty_f(([n].c(), &device))?.into_dim::<Ix1>() };
         let ptr_a = a.view_mut().as_mut_ptr();
         let ptr_w = w.as_mut_ptr();

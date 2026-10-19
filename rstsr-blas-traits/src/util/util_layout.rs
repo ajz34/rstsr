@@ -1,19 +1,5 @@
 use rstsr_core::prelude_dev::*;
 
-/// Require a legal leading dimension from [`TensorBase::ld_row`] or
-/// [`TensorBase::ld_col`].
-///
-/// `None` means the layout has no legal leading dimension for the requested
-/// order (wrong order, or an empty/degenerate layout), which the BLAS/LAPACK
-/// wrappers report as `InvalidLayout`. The offending layout is included in the
-/// error message.
-pub fn require_ld<D>(ld: Option<usize>, layout: &Layout<D>, operand: &str) -> Result<usize>
-where
-    D: DimDevAPI,
-{
-    ld.ok_or_else(|| rstsr_error!(InvalidLayout, "no legal leading dimension for operand {operand}: {layout:?}"))
-}
-
 /// Determine the single order a BLAS/LAPACK call should run in, from the
 /// layout preferences of its tensor arguments.
 ///
@@ -60,18 +46,5 @@ pub fn get_output_order(
         ColMajor
     } else {
         default_order
-    }
-}
-
-#[cfg(test)]
-mod test {
-    use super::*;
-
-    #[test]
-    fn require_ld_reports_operand_and_layout() {
-        let layout: Layout<Ix2> = [0usize, 18].f();
-        let msg = format!("{:?}", require_ld(None, &layout, "B").unwrap_err());
-        assert!(msg.contains("operand B"), "message = {msg}");
-        assert!(msg.contains("shape: [0, 18]"), "message = {msg}");
     }
 }

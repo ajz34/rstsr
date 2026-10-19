@@ -36,8 +36,16 @@ where
         let order = get_output_order(&[], &[(a.c_prefer(), a.f_prefer())], device.default_order());
 
         let [m, n] = *a.view().shape();
-        let lda = a.view().ld(order).unwrap();
-        let mut ipiv = unsafe { empty_f(([m.min(n)].c(), &device))?.into_dim::<Ix1>() };
+        let k = m.min(n);
+
+        // empty A: no pivots
+        if k == 0 {
+            let ipiv = unsafe { empty_f(([k].c(), &device))?.into_dim::<Ix1>() };
+            return Ok((a.clone_to_mut(), ipiv));
+        }
+
+        let lda = a.view().testify_ld(order, "A")?;
+        let mut ipiv = unsafe { empty_f(([k].c(), &device))?.into_dim::<Ix1>() };
         let ptr_a = a.view_mut().as_mut_ptr();
         let ptr_ipiv = ipiv.as_mut_ptr();
 

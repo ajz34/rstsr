@@ -1,7 +1,7 @@
 //! Matrix-oriented helpers on 2-D tensors: shape accessors ([`TensorBase::nrow`],
 //! [`TensorBase::ncol`]) and leading-dimension queries ([`TensorBase::ld`],
-//! [`TensorBase::ld_row`], [`TensorBase::ld_col`]) used by BLAS-style
-//! interfaces.
+//! [`TensorBase::ld_row`], [`TensorBase::ld_col`], [`TensorBase::testify_ld`])
+//! used by BLAS-style interfaces.
 
 use crate::prelude_dev::*;
 
@@ -57,6 +57,18 @@ impl<S> TensorBase<S, Ix2> {
             RowMajor => self.ld_row(),
         }
     }
+
+    /// Leading dimension under `order`, or an `InvalidLayout` error when the
+    /// layout has no legal one.
+    ///
+    /// This is the fallible form of [`TensorBase::ld`], used by BLAS/LAPACK
+    /// wrappers: `None` (wrong order, or an empty/degenerate layout) becomes an
+    /// error that names the offending operand and layout.
+    pub fn testify_ld(&self, order: FlagOrder, operand: &str) -> Result<usize> {
+        self.ld(order).ok_or_else(|| {
+            rstsr_error!(InvalidLayout, "no legal leading dimension for operand {operand}: {:?}", self.layout())
+        })
+    }
 }
 
 #[cfg(test)]
@@ -69,5 +81,14 @@ mod test {
         println!("{:?}", l.f_prefer());
         println!("{:?}", l.c_prefer());
         println!("{l:?}");
+    }
+
+    #[test]
+    fn testify_ld_reports_operand_and_layout() {
+        let device = DeviceCpuSerial::default();
+        let a: Tensor<f64, DeviceCpuSerial, Ix2> = zeros_f(([2usize, 3].c(), &device)).unwrap().into_dim::<Ix2>();
+        let msg = format!("{:?}", a.testify_ld(ColMajor, "A").unwrap_err());
+        assert!(msg.contains("operand A"), "message = {msg}");
+        assert!(msg.contains("shape: [2, 3]"), "message = {msg}");
     }
 }

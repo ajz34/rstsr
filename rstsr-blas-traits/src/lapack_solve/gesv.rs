@@ -44,8 +44,16 @@ where
 
         let [n, nrhs] = *b.view().shape();
         rstsr_assert_eq!(a.view().shape(), &[n, n], InvalidLayout, "GESV: A shape")?;
-        let lda = a.view().ld(order).unwrap();
-        let ldb = b.view().ld(order).unwrap();
+
+        // empty system: nothing is factored and nothing is solved
+        if n == 0 {
+            let ipiv = unsafe { empty_f(([n], &device))?.into_dim::<Ix1>() };
+            return Ok((a.clone_to_mut(), ipiv, b.clone_to_mut()));
+        }
+
+        let lda = a.view().testify_ld(order, "A")?;
+        // B is not accessed when nrhs == 0; derive ldb from the shape
+        let ldb = if nrhs == 0 { n.max(1) } else { b.view().testify_ld(order, "B")? };
         let mut ipiv = unsafe { empty_f(([n], &device))?.into_dim::<Ix1>() };
         let ptr_a = a.view_mut().as_mut_ptr();
         let ptr_b = b.view_mut().as_mut_ptr();

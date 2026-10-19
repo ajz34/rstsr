@@ -140,14 +140,14 @@ where
             return Ok(c.clone_to_mut());
         }
 
-        let lda = require_ld(a.ld_col(), a.layout(), "A")?;
-        let ldb = require_ld(b.ld_col(), b.layout(), "B")?;
+        let lda = a.testify_ld(ColMajor, "A")?;
+        let ldb = b.testify_ld(ColMajor, "B")?;
 
         // perform blas
         let ptr_a = a.as_ptr();
         let ptr_b = b.as_ptr();
         let mut c_view = c.view_mut();
-        let ldc = require_ld(c_view.ld_col(), c_view.layout(), "C")?;
+        let ldc = c_view.testify_ld(ColMajor, "C")?;
         let ptr_c = c_view.as_mut_ptr();
 
         unsafe {

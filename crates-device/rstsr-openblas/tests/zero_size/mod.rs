@@ -7,3 +7,4 @@
 //! no-op semantics.
 
 mod blas3;
+mod lapack;

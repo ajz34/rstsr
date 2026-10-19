@@ -130,7 +130,7 @@ where
 
         rstsr_assert!(a.f_prefer(), RuntimeError)?;
 
-        let lda = require_ld(a.ld(ColMajor), a.layout(), "A")?;
+        let lda = a.testify_ld(ColMajor, "A")?;
 
         // prepare output
         let mut b = overwritable_convert_with_order(b, ColMajor)?;
@@ -138,7 +138,7 @@ where
         // perform blas
         let ptr_a = a.as_ptr();
         let mut b_view = b.view_mut();
-        let ldb = require_ld(b_view.ld_col(), b_view.layout(), "B")?;
+        let ldb = b_view.testify_ld(ColMajor, "B")?;
         let ptr_b = b_view.as_mut_ptr();
 
         unsafe { B::driver_trsm(ColMajor, side, uplo, transa, diag, m, n, alpha, ptr_a, lda, ptr_b, ldb) };

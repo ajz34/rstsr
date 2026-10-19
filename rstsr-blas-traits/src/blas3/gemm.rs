@@ -158,17 +158,14 @@ where
         // with k == 0 BLAS never dereferences A or B; only C := beta * C.
         // The leading dimensions are therefore derived from the shapes
         // instead of the (empty) layouts.
-        let (lda, ldb) = if k == 0 {
-            (a.nrow().max(1), 1)
-        } else {
-            (require_ld(a.ld_col(), a.layout(), "A")?, require_ld(b.ld_col(), b.layout(), "B")?)
-        };
+        let (lda, ldb) =
+            if k == 0 { (a.nrow().max(1), 1) } else { (a.testify_ld(ColMajor, "A")?, b.testify_ld(ColMajor, "B")?) };
 
         // perform blas
         let ptr_a = a.as_ptr();
         let ptr_b = b.as_ptr();
         let mut c_view = c.view_mut();
-        let ldc = require_ld(c_view.ld_col(), c_view.layout(), "C")?;
+        let ldc = c_view.testify_ld(ColMajor, "C")?;
         let ptr_c = c_view.as_mut_ptr();
 
         unsafe {

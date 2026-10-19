@@ -39,7 +39,13 @@ where
         rstsr_assert_eq!(a.view().nrow(), a.view().ncol(), InvalidLayout, "Lapack POTRF: A must be square")?;
 
         let n = a.view().nrow();
-        let lda = a.view().ld(order).unwrap();
+
+        // empty A: nothing to factor
+        if n == 0 {
+            return Ok(a);
+        }
+
+        let lda = a.view().testify_ld(order, "A")?;
         let ptr_a = a.view_mut().as_mut_ptr();
 
         // run driver

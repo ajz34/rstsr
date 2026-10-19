@@ -30,15 +30,21 @@ where
         let mut a = overwritable_convert_with_order(a, order)?;
         let mut ipiv = ipiv.into_contig_f(ColMajor)?;
 
-        // rust is 0-indexed
-        ipiv += 1;
-
         // perform check
         rstsr_assert_eq!(a.view().nrow(), a.view().ncol(), InvalidLayout, "Lapack GETRI: A must be square")?;
 
         let n = a.view().nrow();
         rstsr_assert!(ipiv.size() >= n, InvalidLayout, "Lapack GETRI: ipiv must have at least n elements")?;
-        let lda = a.view().ld(order).unwrap();
+
+        // empty A: nothing to invert
+        if n == 0 {
+            return Ok(a.clone_to_mut());
+        }
+
+        // rust is 0-indexed
+        ipiv += 1;
+
+        let lda = a.view().testify_ld(order, "A")?;
         let ptr_a = a.view_mut().as_mut_ptr();
         let ptr_ipiv = ipiv.as_mut_ptr();
 
