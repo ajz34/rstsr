@@ -1,16 +1,32 @@
-name: rstsr-openblas tests arm64
+# Tier 2 — rstsr-openblas on arm64. Tier 2 runs on scheduled context and when
+# the `ci:full` label is set; on plain PRs it is skipped.
+# Tier assignments: rules/testing.md.
+name: tier2-openblas-arm
 
 on:
   push:
     branches:
     - main
   pull_request:
+    types: [labeled]
+
+# Compile and test on stable: this package targets stable Rust (MSRV in
+# the facade manifest). RUSTUP_TOOLCHAIN outranks the repo's
+# rust-toolchain.toml (nightly, for nightly-only rustfmt options).
+# clippy.yml keeps the nightly toolchain for fmt/clippy.
+env:
+  RUSTUP_TOOLCHAIN: stable
 
 jobs:
   unittests:
+    # `ci:full` label: run the whole tier-2 surface on a PR.
+    if: github.event_name == 'push' || github.event.label.name == 'ci:full'
     runs-on: ubuntu-24.04-arm
     steps:
     - uses: actions/checkout@v4
+    - uses: Swatinem/rust-cache@v2
+      with:
+        prefix-key: openblas-arm
     - uses: conda-incubator/setup-miniconda@v3
       with:
         architecture: aarch64

@@ -1,10 +1,18 @@
-name: rstsr no_std builds
+# Tier 3 — no_std builds (pre-release check). Runs on workflow_dispatch and
+# push to main; not on plain PRs. Tier assignments: rules/testing.md.
+name: tier3-no-std
 
 on:
   push:
     branches:
       - main
-  pull_request:
+  workflow_dispatch:
+
+# no_std also builds on stable (verified: both targets have stable rust-std,
+# and the crates carry no nightly-only features). The env keeps rustup from
+# resolving the repo's nightly rust-toolchain.toml.
+env:
+  RUSTUP_TOOLCHAIN: stable
 
 jobs:
   # Build the core rstsr crates for bare-metal (no std library) targets.
@@ -23,8 +31,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@nightly
+        uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: no-std
       - name: Build rstsr (row-major, no_std)
         run: cargo build --target ${{ matrix.target }} --package rstsr --no-default-features --features row_major

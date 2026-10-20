@@ -1,0 +1,72 @@
+# Tier 1 — rstsr-core (row-major CPU + faer entries, unit/integration/doctest).
+# Runs on every PR and every push to main.
+# Tier assignments: ADR-0012 (entry matrix) and rules/testing.md (tier matrix).
+name: tier1-core
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+# Compile and test on stable: this package targets stable Rust (MSRV in
+# the facade manifest). RUSTUP_TOOLCHAIN outranks the repo's
+# rust-toolchain.toml (nightly, for nightly-only rustfmt options).
+# clippy.yml keeps the nightly toolchain for fmt/clippy.
+env:
+  RUSTUP_TOOLCHAIN: stable
+
+jobs:
+  unittests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - name: unittest
+        run: cargo test -p rstsr-core --lib --release
+      - name: unittest (common)
+        run: cargo test -p rstsr-common --lib --release
+
+  unittests-col-major:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Distinct feature configuration (col_major vs default) -> distinct key,
+      # so the two lib jobs do not thrash each other's cache.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: col-major
+      - name: unittest
+        run: cargo test -p rstsr-core --lib --release --no-default-features --features="std backtrace faer rayon col_major faer_as_default"
+
+  integration-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Explicit target list: entry_row_faer is covered by its dedicated job,
+      # so this job does not compile the shared body a second time.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: integration
+      - name: integrationtest
+        run: cargo test -p rstsr-core --test entry_row_cpu --test allocatable --release
+
+  integration-tests-faer:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: integration
+      - name: integrationtest (faer entry, row-major)
+        run: cargo test -p rstsr-core --test entry_row_faer --release
+
+  doctests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: doctests
+      - name: doctest
+        run: cargo test -p rstsr-core --doc --release

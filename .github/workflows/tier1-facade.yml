@@ -1,4 +1,6 @@
-name: rstsr facade tests
+# Tier 1 — facade cheat-sheet parity (integration tests + parity script).
+# Runs on every PR and push to main. Tier assignments: rules/testing.md.
+name: tier1-facade
 
 on:
   push:
@@ -6,11 +8,21 @@ on:
     - main
   pull_request:
 
+# Compile and test on stable: this package targets stable Rust (MSRV in
+# the facade manifest). RUSTUP_TOOLCHAIN outranks the repo's
+# rust-toolchain.toml (nightly, for nightly-only rustfmt options).
+# clippy.yml keeps the nightly toolchain for fmt/clippy.
+env:
+  RUSTUP_TOOLCHAIN: stable
+
 jobs:
   cheatsheet:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
+    - uses: Swatinem/rust-cache@v2
+      with:
+        prefix-key: facade
     # core page examples under default features; the linalg target is named
     # explicitly because `--test "*"` would *require* its `linalg` feature.
     - name: facade integration tests (core cheat sheet)

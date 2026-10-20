@@ -1,4 +1,7 @@
-name: rstsr-openblas tests
+# Tier 1 — rstsr-openblas conformance (driver/linalg bodies + shared core body
+# via RSTSR_DEV dynamic linking). Runs on every PR and push to main.
+# Tier assignments: rules/testing.md (tier matrix).
+name: tier1-openblas
 
 on:
   push:
@@ -6,11 +9,21 @@ on:
     - main
   pull_request:
 
+# Compile and test on stable: this package targets stable Rust (MSRV in
+# the facade manifest). RUSTUP_TOOLCHAIN outranks the repo's
+# rust-toolchain.toml (nightly, for nightly-only rustfmt options).
+# clippy.yml keeps the nightly toolchain for fmt/clippy.
+env:
+  RUSTUP_TOOLCHAIN: stable
+
 jobs:
   unittests:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
+    - uses: Swatinem/rust-cache@v2
+      with:
+        prefix-key: openblas
     - uses: conda-incubator/setup-miniconda@v2
       with:
         miniconda-version: "latest"
@@ -44,6 +57,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
+    - uses: Swatinem/rust-cache@v2
+      with:
+        prefix-key: openblas-pthread
     - uses: conda-incubator/setup-miniconda@v2
       with:
         miniconda-version: "latest"
