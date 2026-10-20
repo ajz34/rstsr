@@ -1,4 +1,7 @@
-name: rstsr-openblas tests
+# Tier 1 — rstsr-openblas conformance (driver/linalg bodies + shared core body
+# via RSTSR_DEV dynamic linking). Runs on every PR and push to main.
+# Tier assignments: rules/testing.md (tier matrix).
+name: tier1-openblas
 
 on:
   push:

@@ -1,10 +1,12 @@
-name: rstsr no_std builds
+# Tier 3 — no_std builds (pre-release check). Runs on workflow_dispatch and
+# push to main; not on plain PRs. Tier assignments: rules/testing.md.
+name: tier3-no-std
 
 on:
   push:
     branches:
       - main
-  pull_request:
+  workflow_dispatch:
 
 jobs:
   # Build the core rstsr crates for bare-metal (no std library) targets.

@@ -1,4 +1,6 @@
-name: rstsr-faer-py wheel
+# Tier 3 — rstsr-faer-py wheel build/publish (pre-release check; manual).
+# Tier assignments: rules/testing.md.
+name: tier3-faer-py-wheel
 
 on:
   workflow_dispatch:

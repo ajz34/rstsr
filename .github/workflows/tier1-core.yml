@@ -1,4 +1,7 @@
-name: rstsr-core tests
+# Tier 1 — rstsr-core (row-major CPU + faer entries, unit/integration/doctest).
+# Runs on every PR and every push to main.
+# Tier assignments: ADR-0012 (entry matrix) and rules/testing.md (tier matrix).
+name: tier1-core
 
 on:
   push:
@@ -22,7 +25,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: unittest
         run: cargo test -p rstsr-core --lib --release --no-default-features --features="std backtrace faer rayon col_major faer_as_default"
-  
+
   integration-tests:
     runs-on: ubuntu-latest
     steps:

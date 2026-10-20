@@ -1,4 +1,6 @@
-name: rstsr-lianlg-traits tests
+# Tier 1 — rstsr-linalg-traits (faer implementation + SciPy validator scripts).
+# Runs on every PR and push to main. Tier assignments: rules/testing.md.
+name: tier1-linalg-traits
 
 on:
   push:

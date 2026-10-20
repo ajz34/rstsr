@@ -1,4 +1,6 @@
-name: rstsr facade tests
+# Tier 1 — facade cheat-sheet parity (integration tests + parity script).
+# Runs on every PR and push to main. Tier assignments: rules/testing.md.
+name: tier1-facade
 
 on:
   push:
