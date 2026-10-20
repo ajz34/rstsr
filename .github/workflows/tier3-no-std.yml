@@ -8,6 +8,12 @@ on:
       - main
   workflow_dispatch:
 
+# no_std also builds on stable (verified: both targets have stable rust-std,
+# and the crates carry no nightly-only features). The env keeps rustup from
+# resolving the repo's nightly rust-toolchain.toml.
+env:
+  RUSTUP_TOOLCHAIN: stable
+
 jobs:
   # Build the core rstsr crates for bare-metal (no std library) targets.
   # The facade `-p rstsr` pulls in rstsr-core, rstsr-common, rstsr-dtype-traits
@@ -25,7 +31,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@nightly
+        uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2

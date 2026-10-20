@@ -9,6 +9,13 @@ on:
       - main
   pull_request:
 
+# Compile and test on stable: this package targets stable Rust (MSRV in
+# the facade manifest). RUSTUP_TOOLCHAIN outranks the repo's
+# rust-toolchain.toml (nightly, for nightly-only rustfmt options).
+# clippy.yml keeps the nightly toolchain for fmt/clippy.
+env:
+  RUSTUP_TOOLCHAIN: stable
+
 jobs:
   unittests:
     runs-on: ubuntu-latest
