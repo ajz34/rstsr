@@ -17,6 +17,9 @@ jobs:
     runs-on: ubuntu-24.04-arm
     steps:
     - uses: actions/checkout@v4
+    - uses: Swatinem/rust-cache@v2
+      with:
+        prefix-key: openblas-arm
     - uses: conda-incubator/setup-miniconda@v3
       with:
         architecture: aarch64

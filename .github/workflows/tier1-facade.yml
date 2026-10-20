@@ -13,6 +13,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
+    - uses: Swatinem/rust-cache@v2
+      with:
+        prefix-key: facade
     # core page examples under default features; the linalg target is named
     # explicitly because `--test "*"` would *require* its `linalg` feature.
     - name: facade integration tests (core cheat sheet)

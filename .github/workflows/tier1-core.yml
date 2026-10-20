@@ -14,6 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
       - name: unittest
         run: cargo test -p rstsr-core --lib --release
       - name: unittest (common)
@@ -23,6 +24,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # Distinct feature configuration (col_major vs default) -> distinct key,
+      # so the two lib jobs do not thrash each other's cache.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: col-major
       - name: unittest
         run: cargo test -p rstsr-core --lib --release --no-default-features --features="std backtrace faer rayon col_major faer_as_default"
 
@@ -30,13 +36,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # Explicit target list: entry_row_faer is covered by its dedicated job,
+      # so this job does not compile the shared body a second time.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: integration
       - name: integrationtest
-        run: cargo test -p rstsr-core --test "*" --release
+        run: cargo test -p rstsr-core --test entry_row_cpu --test allocatable --release
 
   integration-tests-faer:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: integration
       - name: integrationtest (faer entry, row-major)
         run: cargo test -p rstsr-core --test entry_row_faer --release
 
@@ -44,5 +58,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: doctests
       - name: doctest
         run: cargo test -p rstsr-core --doc --release

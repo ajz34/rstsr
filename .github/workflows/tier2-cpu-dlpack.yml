@@ -19,6 +19,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: cpu-dlpack
       - name: unittest (default features)
         run: cargo test -p rstsr-cpu-dlpack --release
       - name: unittest (col-major)

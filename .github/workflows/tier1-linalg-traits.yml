@@ -13,6 +13,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
+    - uses: Swatinem/rust-cache@v2
+      with:
+        prefix-key: linalg-traits
     - uses: conda-incubator/setup-miniconda@v2
     - name: conda environment setup
       run: |

@@ -28,5 +28,8 @@ jobs:
         uses: dtolnay/rust-toolchain@nightly
         with:
           targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: no-std
       - name: Build rstsr (row-major, no_std)
         run: cargo build --target ${{ matrix.target }} --package rstsr --no-default-features --features row_major
