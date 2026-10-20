@@ -12,10 +12,10 @@
 //! 1. Collects library search directories from `LD_LIBRARY_PATH`, `DYLD_LIBRARY_PATH`,
 //!    `LIBRARY_PATH`, `PATH` and `AOCL_ROOT` (its `lib` / `lib_LP64` subdirs), emitting
 //!    `cargo:rustc-link-search` for each.
-//! 2. Bakes an `-rpath` for the loader-style dirs so the test binary finds the dylibs at
-//!    runtime without re-exporting the environment.
-//! 3. Links `blis-mt` (CBLAS) and `flame` (LAPACK) — the AOCL libraries
-//!    `rstsr-aocl-ffi`'s externs resolve against.
+//! 2. Bakes an `-rpath` for the loader-style dirs so the test binary finds the dylibs at runtime
+//!    without re-exporting the environment.
+//! 3. Links `blis-mt` (CBLAS) and `flame` (LAPACK) — the AOCL libraries `rstsr-aocl-ffi`'s externs
+//!    resolve against.
 
 use std::path::PathBuf;
 

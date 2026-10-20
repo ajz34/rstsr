@@ -12,8 +12,8 @@
 //! 1. Collects library search directories from `LD_LIBRARY_PATH`, `DYLD_LIBRARY_PATH`,
 //!    `LIBRARY_PATH`, `PATH` and `MKLROOT` (its `lib` / `lib/intel64` subdirs), emitting
 //!    `cargo:rustc-link-search` for each.
-//! 2. Bakes an `-rpath` for the loader-style dirs so the test binary finds the dylibs at
-//!    runtime without re-exporting the environment.
+//! 2. Bakes an `-rpath` for the loader-style dirs so the test binary finds the dylibs at runtime
+//!    without re-exporting the environment.
 //! 3. Links `mkl_rt` (the single-library dynamic dispatch interface).
 //!
 //! `mkl_rt` resolves the threading layer at run time; if a threaded call fails with
