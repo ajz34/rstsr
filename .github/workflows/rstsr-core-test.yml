@@ -30,6 +30,13 @@ jobs:
       - name: integrationtest
         run: cargo test -p rstsr-core --test "*" --release
 
+  integration-tests-faer:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: integrationtest (faer entry, row-major)
+        run: cargo test -p rstsr-core --test entry_row_faer --release
+
   doctests:
     runs-on: ubuntu-latest
     steps:
