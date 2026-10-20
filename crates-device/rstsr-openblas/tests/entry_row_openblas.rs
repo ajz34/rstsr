@@ -1,3 +1,4 @@
+// Entry binary: row-major, DeviceOpenBLAS. See ADR-0012.
 mod core_func;
 mod test_utils;
 
