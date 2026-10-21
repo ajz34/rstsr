@@ -102,12 +102,7 @@ where
         format_tensor_cpu_serial(fmt, raw.as_slice(), layout, max_print, min_print, Display::fmt)
     }
 
-    fn format_debug(
-        &self,
-        raw: &Self::Raw,
-        layout: &Layout<D>,
-        fmt: &mut core::fmt::Formatter<'_>,
-    ) -> core::fmt::Result
+    fn format_debug(&self, raw: &Self::Raw, layout: &Layout<D>, fmt: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
     where
         T: Debug,
     {
