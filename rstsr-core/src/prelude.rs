@@ -11,9 +11,10 @@
 pub mod rstsr_traits {
     pub use rstsr_common::prelude::rstsr_traits::*;
 
+    pub use crate::format::DeviceFormatAPI;
     pub use crate::storage::conversion::DeviceChangeAPI;
     pub use crate::storage::data::{DataAPI, DataCloneAPI, DataForceMutAPI, DataIntoCowAPI, DataMutAPI, DataOwnedAPI};
-    pub use crate::storage::device::{DeviceAPI, DeviceBaseAPI, DeviceRawAPI, DeviceStorageAPI};
+    pub use crate::storage::device::{DeviceAPI, DeviceBaseAPI, DeviceRawAPI, DeviceStorageAPI, DeviceToCpuAPI};
     pub use crate::tensor::asarray::AsArrayAPI;
     pub use crate::tensor::creation::{
         ArangeAPI, EmptyAPI, EmptyLikeAPI, EyeAPI, FromNestedArrayAPI, FullAPI, FullLikeAPI, LinspaceAPI, OnesAPI,

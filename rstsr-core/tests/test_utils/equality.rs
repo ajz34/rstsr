@@ -17,7 +17,12 @@ pub fn assert_equal<TA, TB, B, DA, DB>(
 ) where
     TA: Clone + Debug,
     TB: Clone + Debug,
-    B: DeviceAPI<TA, Raw: Clone> + DeviceAPI<TB, Raw: Clone> + OpAllCloseAPI<TA, TB, f64, IxDyn> + Debug,
+    B: DeviceAPI<TA>
+        + DeviceAPI<TB>
+        + DeviceFormatAPI<TA, IxDyn>
+        + DeviceFormatAPI<TB, IxDyn>
+        + OpAllCloseAPI<TA, TB, f64, IxDyn>
+        + Debug,
     DA: DimAPI,
     DB: DimAPI,
 {

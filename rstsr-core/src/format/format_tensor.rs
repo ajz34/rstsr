@@ -1,240 +1,27 @@
 use crate::prelude_dev::*;
 use core::fmt::{Debug, Display, LowerExp, UpperExp};
-use core::sync::atomic::{AtomicUsize, Ordering};
+use core::sync::atomic::AtomicUsize;
 
 pub static MIN_PRINT: AtomicUsize = AtomicUsize::new(3);
 pub static MAX_PRINT: AtomicUsize = AtomicUsize::new(8);
 
-pub struct FnPrintVecWithLayout<'v, 'l, 'f1, 'f2, T, D>
-where
-    T: Clone,
-    D: DimAPI,
-{
-    vec: &'v [T],
-    layout: &'l Layout<D>,
-    offset: usize,
-    idx_prev: Vec<usize>,
-    max_print: usize,
-    min_print: usize,
-    fmt: &'f1 mut core::fmt::Formatter<'f2>,
-    fmt_elem: fn(&T, &mut core::fmt::Formatter<'_>) -> core::fmt::Result,
-}
-
-/* #region generic print */
-
-fn print_vec_with_layout_dfs_inner<T, D>(c: &mut FnPrintVecWithLayout<T, D>) -> core::fmt::Result
-where
-    T: Clone,
-    D: DimAPI,
-{
-    let FnPrintVecWithLayout { vec, layout, offset, idx_prev, max_print, min_print, fmt, fmt_elem } = c;
-    let max_print = *max_print;
-    let min_print = *min_print;
-    let ndim = layout.ndim();
-    let offset = *offset;
-    let len_prev = idx_prev.len();
-    let shape = layout.shape().as_ref();
-    let stride = layout.stride().as_ref();
-    let fmt_elem = *fmt_elem;
-
-    // special case
-    if ndim == 0 {
-        return fmt_elem(&vec[layout.offset()], fmt);
-    }
-
-    if idx_prev.last().is_some_and(|&v| v == shape[len_prev - 1]) {
-        // hit shape boundary
-
-        // special case: zero shape quick return
-        if idx_prev.last().is_some_and(|&v| v == 0) {
-            return write!(fmt, "[]");
-        }
-
-        // pop last index, increase previous index by 1 or skip
-        if len_prev == 1 {
-            // multiple dimension exit
-            return Ok(());
-        } else {
-            let p1_prev = idx_prev.pop().unwrap();
-            let p2_prev = idx_prev.pop().unwrap();
-            let offset =
-                offset as isize - p1_prev as isize * stride[len_prev - 1] - p2_prev as isize * stride[len_prev - 2];
-            if shape[len_prev - 2] < max_print || p2_prev + min_print >= shape[len_prev - 2] || p2_prev + 1 < min_print
-            {
-                let p2 = p2_prev + 1;
-                idx_prev.push(p2);
-                let offset = offset + p2 as isize * stride[len_prev - 2];
-                let offset = offset as usize;
-                c.offset = offset;
-                return print_vec_with_layout_dfs_inner(c);
-            } else {
-                write!(fmt, "{}...\n\n", " ".repeat(len_prev - 1))?;
-                let p2: usize = shape[len_prev - 2] - min_print;
-                idx_prev.push(p2);
-                let offset = offset + p2 as isize * stride[len_prev - 2];
-                let offset = offset as usize;
-                c.offset = offset;
-                return print_vec_with_layout_dfs_inner(c);
-            }
-        }
-    } else {
-        // not hit shape boundary
-        if len_prev + 1 != ndim {
-            // new index can still be pushed
-            idx_prev.push(0);
-            return print_vec_with_layout_dfs_inner(c);
-        } else {
-            // last line
-
-            // number of last dimension
-            let nlast = *shape.last().unwrap();
-            let stride_last = *stride.last().unwrap();
-
-            // special case: zero shape quick return
-            if nlast == 0 {
-                return write!(fmt, "[]");
-            }
-
-            // prefix: "  [[["
-            // count zeros from last element as numbers of "["
-            if idx_prev.is_empty() {
-                write!(fmt, "[")?;
-            } else {
-                let mut nbra = 1;
-                for &idx in idx_prev.iter().rev() {
-                    if idx == 0 {
-                        nbra += 1;
-                    } else {
-                        break;
-                    }
-                }
-                write!(fmt, "{:}", " ".repeat(ndim - nbra))?;
-                write!(fmt, "{:}", "[".repeat(nbra))?;
-            }
-
-            // values: " 1.23 4.56 ... 7.89 10.11"
-            if nlast <= max_print.max(2 * min_print + 1) {
-                // all elements in last dimension should be printed
-                for i in 0..nlast {
-                    let offset_i = (offset as isize + i as isize * stride_last) as usize;
-                    write!(fmt, " ")?;
-                    fmt_elem(&vec[offset_i], fmt)?;
-                }
-            } else {
-                // only print the first/last min_print elements
-                for i in 0..min_print {
-                    let offset_i = (offset as isize + i as isize * stride_last) as usize;
-                    write!(fmt, " ")?;
-                    fmt_elem(&vec[offset_i], fmt)?;
-                }
-                write!(fmt, " ...")?;
-                for i in (nlast - min_print)..nlast {
-                    let offset_i = (offset as isize + i as isize * stride_last) as usize;
-                    write!(fmt, " ")?;
-                    fmt_elem(&vec[offset_i], fmt)?;
-                }
-            };
-
-            // suffix: "]]]"
-            // count (if index = shape) from last element as numbers of "["
-            if idx_prev.is_empty() {
-                write!(fmt, "]")?;
-            } else {
-                let mut nket = 1;
-                for i in (0..idx_prev.len()).rev() {
-                    if idx_prev[i] == shape[i] - 1 {
-                        nket += 1;
-                    } else {
-                        break;
-                    }
-                }
-                write!(fmt, "{:}", "]".repeat(nket))?;
-                if nket != ndim {
-                    // last line should not add new-line character
-                    if nket > 1 {
-                        writeln!(fmt, "\n")?;
-                    } else {
-                        writeln!(fmt)?;
-                    }
-                }
-            }
-
-            // pop last index, increase previous index by 1 or skip
-            if len_prev == 0 {
-                // one-dimension exit
-                return Ok(());
-            } else {
-                let p1_prev = idx_prev.pop().unwrap();
-                let offset = offset as isize - p1_prev as isize * stride[len_prev - 1];
-                if shape[len_prev - 1] < max_print
-                    || p1_prev + min_print >= shape[len_prev - 1]
-                    || p1_prev + 1 < min_print
-                {
-                    let p1 = p1_prev + 1;
-                    idx_prev.push(p1);
-                    let offset = offset + p1 as isize * stride[len_prev - 1];
-                    let offset = offset as usize;
-                    c.offset = offset;
-                    return print_vec_with_layout_dfs_inner(c);
-                } else {
-                    writeln!(fmt, "{}...", " ".repeat(len_prev))?;
-                    let p1: usize = shape[len_prev - 1] - min_print;
-                    idx_prev.push(p1);
-                    let offset = offset + p1 as isize * stride[len_prev - 1];
-                    let offset = offset as usize;
-                    c.offset = offset;
-                    return print_vec_with_layout_dfs_inner(c);
-                }
-            }
-        }
-    }
-}
-
-fn print_vec_with_layout_generic<T, D>(
-    fmt: &mut core::fmt::Formatter<'_>,
-    vec: &[T],
-    layout: &Layout<D>,
-    max_print: usize,
-    min_print: usize,
-    fmt_elem: fn(&T, &mut core::fmt::Formatter<'_>) -> core::fmt::Result,
-) -> core::fmt::Result
-where
-    T: Clone,
-    D: DimAPI,
-{
-    let idx_prev = vec![];
-    let offset = layout.offset();
-    let mut config = FnPrintVecWithLayout { vec, layout, offset, idx_prev, max_print, min_print, fmt, fmt_elem };
-    print_vec_with_layout_dfs_inner(&mut config)
-}
-
-/* #endregion */
-
 /* #region display/lowerexp/upperexp print */
 
-#[duplicate_item(Trait; [Display]; [LowerExp]; [UpperExp])]
+#[duplicate_item(
+    Trait Method;
+    [Display] [format_display];
+    [LowerExp] [format_lower_exp];
+    [UpperExp] [format_upper_exp];
+)]
 impl<R, T, B, D> Trait for TensorAny<R, T, B, D>
 where
-    T: Clone + Trait,
-    for<'a> B: DeviceAPI<T, Raw: 'a>
-        + DeviceChangeAPI<
-            'a,
-            DeviceCpuSerial,
-            DataRef<'a, <B as DeviceRawAPI<T>>::Raw>,
-            T,
-            D,
-            Repr: DataAPI<Data = Vec<T>>,
-        >,
+    T: Trait,
+    B: DeviceFormatAPI<T, D>,
     D: DimAPI,
     R: DataAPI<Data = B::Raw>,
 {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        let tsr = self.view().change_device(&DeviceCpuSerial::default());
-        let slc = tsr.raw();
-        let layout = &tsr.layout();
-        let max_print = MAX_PRINT.load(Ordering::Relaxed);
-        let min_print = MIN_PRINT.load(Ordering::Relaxed);
-        print_vec_with_layout_generic(f, slc, layout, max_print, min_print, Trait::fmt)
+        self.device().Method(self.raw(), self.layout(), f)
     }
 }
 
@@ -250,35 +37,27 @@ pub fn print_vec_with_layout_debug<T, D>(
     min_print: usize,
 ) -> core::fmt::Result
 where
-    T: Clone + Debug,
+    T: Debug,
     D: DimAPI,
 {
-    print_vec_with_layout_generic(fmt, vec, layout, max_print, min_print, Debug::fmt)
+    format_tensor_cpu_serial(fmt, vec, layout, max_print, min_print, Debug::fmt)
 }
 
 /// Debug print for TensorAny (more expansive than Display print).
 ///
-/// Please note, for debug print, we force tensor to be copied. Debug print will compliy less trait
-/// bounds, so debugging in other devices can be somehow convenient.
-///
-/// So debug print a very large tensor can be very costly.
-///
-/// For CPU devices, the more appropriate way is to display print; the tensor is not cloned while
-/// printing.
+/// The buffer is rendered through the device's [`DeviceFormatAPI`]
+/// implementation. Host-backed devices read it in place without copying; a device
+/// implementation that copies internally (e.g. a GPU backend) may still pay that cost.
 impl<R, T, B, D> Debug for TensorAny<R, T, B, D>
 where
-    T: Clone + Debug,
-    B: DeviceAPI<T, Raw: Clone> + Debug,
+    T: Debug,
+    B: DeviceFormatAPI<T, D> + Debug,
     D: DimAPI,
-    R: DataCloneAPI<Data = B::Raw>,
+    R: DataAPI<Data = B::Raw>,
 {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         writeln!(f, "\n=== Debug Tensor Print ===")?;
-        let vec = self.storage().to_cpu_vec().unwrap();
-        let layout = &self.layout();
-        let max_print = MAX_PRINT.load(Ordering::Relaxed);
-        let min_print = MIN_PRINT.load(Ordering::Relaxed);
-        print_vec_with_layout_generic(f, &vec, layout, max_print, min_print, Debug::fmt)?;
+        self.device().format_debug(self.raw(), self.layout(), f)?;
         writeln!(f)?;
         Debug::fmt(&self.device(), f)?;
         writeln!(f)?;
@@ -295,6 +74,7 @@ where
 #[cfg(test)]
 mod playground {
     use super::*;
+    use core::sync::atomic::Ordering;
 
     #[derive(Debug)]
     struct VL<T, D>(Vec<T>, Layout<D>)
@@ -312,7 +92,7 @@ mod playground {
             let layout = &self.1;
             let max_print = MAX_PRINT.load(Ordering::Relaxed);
             let min_print = MIN_PRINT.load(Ordering::Relaxed);
-            print_vec_with_layout_generic(f, vec, layout, max_print, min_print, Display::fmt)
+            format_tensor_cpu_serial(f, vec, layout, max_print, min_print, Display::fmt)
         }
     }
 

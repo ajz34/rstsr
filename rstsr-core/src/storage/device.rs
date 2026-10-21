@@ -30,14 +30,26 @@ pub trait DeviceStorageAPI<T>: DeviceRawAPI<T> {
     {
         Self::len::<R>(storage) == 0
     }
+    /// Copy the buffer to a host `Vec<T>`.
+    ///
+    /// Requires the device to implement [`DeviceToCpuAPI`].
     fn to_cpu_vec<R>(storage: &Storage<R, T, Self>) -> Result<Vec<T>>
     where
-        Self::Raw: Clone,
-        R: DataAPI<Data = Self::Raw>;
+        Self: DeviceToCpuAPI<T>,
+        R: DataAPI<Data = Self::Raw>,
+    {
+        <Self as DeviceToCpuAPI<T>>::to_cpu_vec(storage)
+    }
+    /// Convert the storage into a host `Vec<T>`.
+    ///
+    /// Requires the device to implement [`DeviceToCpuAPI`].
     fn into_cpu_vec<R>(storage: Storage<R, T, Self>) -> Result<Vec<T>>
     where
-        Self::Raw: Clone,
-        R: DataCloneAPI<Data = Self::Raw>;
+        Self: DeviceToCpuAPI<T>,
+        R: DataCloneAPI<Data = Self::Raw>,
+    {
+        <Self as DeviceToCpuAPI<T>>::into_cpu_vec(storage)
+    }
     fn get_index<R>(storage: &Storage<R, T, Self>, index: usize) -> T
     where
         T: Clone,
@@ -51,6 +63,19 @@ pub trait DeviceStorageAPI<T>: DeviceRawAPI<T> {
     fn set_index<R>(storage: &mut Storage<R, T, Self>, index: usize, value: T)
     where
         R: DataMutAPI<Data = Self::Raw>;
+}
+
+/// Devices that can copy their buffer contents to a host `Vec<T>`.
+///
+/// Implementations decide the cost and requirements themselves; e.g. the CPU
+/// devices require `T: Clone` because their host copy is a `Vec<T>` clone.
+pub trait DeviceToCpuAPI<T>: DeviceStorageAPI<T> {
+    fn to_cpu_vec<R>(storage: &Storage<R, T, Self>) -> Result<Vec<T>>
+    where
+        R: DataAPI<Data = Self::Raw>;
+    fn into_cpu_vec<R>(storage: Storage<R, T, Self>) -> Result<Vec<T>>
+    where
+        R: DataCloneAPI<Data = Self::Raw>;
 }
 
 impl<R, T, B> Storage<R, T, B>
@@ -92,18 +117,17 @@ where
 
     pub fn to_cpu_vec(&self) -> Result<Vec<T>>
     where
-        B::Raw: Clone,
-        R: DataCloneAPI<Data = B::Raw>,
+        B: DeviceToCpuAPI<T>,
     {
-        B::to_cpu_vec(self)
+        <B as DeviceToCpuAPI<T>>::to_cpu_vec(self)
     }
 
     pub fn into_cpu_vec(self) -> Result<Vec<T>>
     where
-        B::Raw: Clone,
+        B: DeviceToCpuAPI<T>,
         R: DataCloneAPI<Data = B::Raw>,
     {
-        B::into_cpu_vec(self)
+        <B as DeviceToCpuAPI<T>>::into_cpu_vec(self)
     }
 
     #[inline]
