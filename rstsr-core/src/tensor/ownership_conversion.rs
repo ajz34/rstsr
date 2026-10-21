@@ -529,8 +529,7 @@ impl<T, B, D> Tensor<T, B, D>
 where
     T: Clone,
     D: DimAPI,
-    B: DeviceAPI<T> + DeviceCreationAnyAPI<T> + OpAssignAPI<T, Ix1>,
-    <B as DeviceRawAPI<T>>::Raw: Clone,
+    B: DeviceAPI<T> + DeviceToCpuAPI<T> + DeviceCreationAnyAPI<T> + OpAssignAPI<T, Ix1>,
 {
     pub fn into_vec_f(self) -> Result<Vec<T>> {
         rstsr_assert_eq!(self.ndim(), 1, InvalidLayout, "to_vec currently only support 1-D tensor")?;
@@ -814,7 +813,7 @@ where
 impl<R, T, B, D> TensorIntoOwnedAPI<T, B, D> for TensorAny<R, T, B, D>
 where
     R: DataCloneAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
-    <B as DeviceRawAPI<T>>::Raw: Clone,
+    R::Data: Clone,
     T: Clone,
     D: DimAPI,
     B: DeviceAPI<T> + DeviceRawAPI<MaybeUninit<T>> + DeviceCreationAnyAPI<T> + OpAssignAPI<T, D>,

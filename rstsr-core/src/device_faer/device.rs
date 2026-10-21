@@ -71,23 +71,6 @@ impl<T> DeviceStorageAPI<T> for DeviceFaer {
         storage.raw().len()
     }
 
-    fn to_cpu_vec<R>(storage: &Storage<R, T, Self>) -> Result<Vec<T>>
-    where
-        Self::Raw: Clone,
-        R: DataAPI<Data = Self::Raw>,
-    {
-        Ok(storage.raw().clone())
-    }
-
-    fn into_cpu_vec<R>(storage: Storage<R, T, Self>) -> Result<Vec<T>>
-    where
-        Self::Raw: Clone,
-        R: DataCloneAPI<Data = Self::Raw>,
-    {
-        let (raw, _) = storage.into_raw_parts();
-        Ok(raw.into_owned().into_raw())
-    }
-
     #[inline]
     fn get_index<R>(storage: &Storage<R, T, Self>, index: usize) -> T
     where
@@ -119,6 +102,23 @@ impl<T> DeviceStorageAPI<T> for DeviceFaer {
         R: DataMutAPI<Data = Self::Raw>,
     {
         storage.raw_mut()[index] = value;
+    }
+}
+
+impl<T: Clone> DeviceToCpuAPI<T> for DeviceFaer {
+    fn to_cpu_vec<R>(storage: &Storage<R, T, Self>) -> Result<Vec<T>>
+    where
+        R: DataAPI<Data = Self::Raw>,
+    {
+        Ok(storage.raw().clone())
+    }
+
+    fn into_cpu_vec<R>(storage: Storage<R, T, Self>) -> Result<Vec<T>>
+    where
+        R: DataCloneAPI<Data = Self::Raw>,
+    {
+        let (raw, _) = storage.into_raw_parts();
+        Ok(raw.into_owned().into_raw())
     }
 }
 

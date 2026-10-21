@@ -304,7 +304,6 @@ pub trait DataAPI {
 pub trait DataCloneAPI
 where
     Self: DataAPI,
-    Self::Data: Clone,
 {
     fn into_owned(self) -> DataOwned<Self::Data>;
     fn into_shared(self) -> DataArc<Self::Data>;
@@ -343,10 +342,7 @@ impl<C> DataAPI for DataOwned<C> {
     }
 }
 
-impl<C> DataCloneAPI for DataOwned<C>
-where
-    C: Clone,
-{
+impl<C> DataCloneAPI for DataOwned<C> {
     #[inline]
     fn into_owned(self) -> DataOwned<Self::Data> {
         self

@@ -268,9 +268,9 @@ where
 impl<R, T, B, D> Debug for TensorAny<R, T, B, D>
 where
     T: Clone + Debug,
-    B: DeviceAPI<T, Raw: Clone> + Debug,
+    B: DeviceAPI<T> + DeviceToCpuAPI<T> + Debug,
     D: DimAPI,
-    R: DataCloneAPI<Data = B::Raw>,
+    R: DataAPI<Data = B::Raw>,
 {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         writeln!(f, "\n=== Debug Tensor Print ===")?;
