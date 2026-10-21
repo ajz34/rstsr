@@ -19,8 +19,8 @@ pub fn assert_equal<TA, TB, B, DA, DB>(
     TB: Clone + Debug,
     B: DeviceAPI<TA>
         + DeviceAPI<TB>
-        + DeviceToCpuAPI<TA>
-        + DeviceToCpuAPI<TB>
+        + DeviceFormatAPI<TA, IxDyn>
+        + DeviceFormatAPI<TB, IxDyn>
         + OpAllCloseAPI<TA, TB, f64, IxDyn>
         + Debug,
     DA: DimAPI,

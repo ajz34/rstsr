@@ -22,6 +22,7 @@ pub use crate::cpu_serial::ext_linalg::matmul::*;
 pub use crate::cpu_serial::ext_linalg::outer::*;
 pub use crate::cpu_serial::ext_linalg::tensordot::*;
 pub use crate::cpu_serial::ext_linalg::vecdot::*;
+pub use crate::cpu_serial::format::*;
 pub use crate::cpu_serial::mask_indexing::*;
 pub use crate::cpu_serial::matmul_naive::*;
 pub use crate::cpu_serial::nonzero::*;

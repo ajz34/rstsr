@@ -71,7 +71,7 @@ tensor/indexing.rs#mod,modules,na,done,0,//! added
 tensor/linalg/mod.rs,modules,na,done,0,//! added
 tensor/operators/mod.rs,modules,na,done,0,//! added (generation-pattern doc; anchors come in batch 5)
 operators/ops/mod.rs,modules,na,done,0,//! added (generation-pattern doc)
-format/mod.rs,modules,na,done,0,//! added
+format/mod.rs,modules,na,done,1,//! added; example doctest + twin in doc_draft/docs/test_format.rs
 prelude.rs,modules,na,done,0,//! added (describes exports)
 prelude_dev.rs,modules,na,done,0,//! added (describes exports)
 src/docs/order_semantics.md,modules,na,done,0,created + wired as pub mod; examples twin-tested in tests/doc_draft/docs/test_order_semantics.rs

@@ -5,6 +5,7 @@ pub mod assignment;
 pub mod creation;
 pub mod cross;
 pub mod ext_linalg;
+pub mod format;
 pub mod mask_indexing;
 pub mod matmul_naive;
 pub mod nonzero;

@@ -27,6 +27,7 @@ pub use rstsr_dtype_traits::{
 
 pub use rstsr_native_impl::prelude_dev::*;
 
+pub use crate::format::*;
 pub use crate::operators::exports::*;
 pub use crate::storage::exports::*;
 pub use crate::tensor::exports::*;
