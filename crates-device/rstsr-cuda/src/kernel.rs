@@ -6,10 +6,13 @@
 //!   runtime from the device; strict library-fixed options.
 //! - Cache: per-ordinal in-memory `KernelKey -> Arc<CudaFunction>` plus an
 //!   on-disk cache of the **PTX text** (what `load_module` consumes).
-//! - Launch: raw `result::launch_kernel` with a hand-built `void*` param
-//!   array — marshaling is plain bytes (device pointers as u64, lengths/
-//!   strides as u64, fill scalars as little-endian bytes), so no cudarc
-//!   dtype trait is ever on our path.
+//! - `FlatLaunch`: raw `result::launch_kernel` with a hand-built `void*`
+//!   param array — marshaling is plain bytes (device pointers as u64,
+//!   lengths/strides as u64, fill scalars as little-endian bytes), so no
+//!   cudarc dtype trait is ever on our path. It is the **flat 1-D**
+//!   launcher (one element per thread); reductions (block reductions,
+//!   capped grid), GEMM (2-D tiles), and scans (multi-pass) need their
+//!   own launchers.
 //!
 //! Layout convention (D9 T0 floor): kernels are rank-generic, taking
 //! runtime shape/stride arrays (element units, pre-multiplied host-side)
@@ -207,18 +210,24 @@ pub(crate) fn make_key(ordinal: &CudaOrdinalObj, name: &str, source: &str, extra
     Ok(key)
 }
 
-/// Grid-stride launch geometry over `n` elements (256-thread blocks).
+/// Flat launch geometry: one element per thread, 256-thread blocks (the
+/// kernel guards the tail). 256 divides every SM's thread capacity evenly
+/// and is supported by all CUDA GPUs; per-arch tuning is deferred to the
+/// multi-element/vectorized kernel round.
 const BLOCK: u32 = 256;
 
-/// Raw byte-wise launcher (D2): owns the param storage for one launch.
-pub(crate) struct Launch<'a> {
+/// Flat 1-D launcher (D2): one element per thread, `ceil(n / BLOCK)`
+/// blocks, no shared memory; owns the param storage for one launch.
+/// Elementwise/gather/sequence kernels use this; other kernel classes
+/// (reductions, GEMM, scans) get their own launch geometry.
+pub(crate) struct FlatLaunch<'a> {
     stream: &'a Arc<CudaStreamObj>,
     function: &'a CudaFunction,
     n: usize,
     params: Vec<Vec<u8>>,
 }
 
-impl<'a> Launch<'a> {
+impl<'a> FlatLaunch<'a> {
     pub fn new(stream: &'a Arc<CudaStreamObj>, function: &'a CudaFunction, n: usize) -> Self {
         Self { stream, function, n, params: Vec::with_capacity(8) }
     }

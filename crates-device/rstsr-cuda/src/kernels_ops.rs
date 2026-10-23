@@ -12,7 +12,7 @@ use crate::buffer::CudaBuffer;
 use std::sync::Arc;
 use crate::dtype::CudaDType;
 use crate::error::map_driver_result;
-use crate::kernel::{assemble_source, make_key, order_input, Launch};
+use crate::kernel::{assemble_source, make_key, order_input, FlatLaunch};
 use crate::prelude_dev::*;
 
 /// Host-side flattened layout for T0 kernels: element-unit strides.
@@ -119,7 +119,7 @@ pub(crate) fn copy_same_dtype<T: CudaDType, DC: DimAPI, DA: DimAPI>(
     let scratch = KernelScratch::new(exec, &bytes)?;
     let (os, ost) = split_mark(&scratch, &bytes, o_mark);
     let (is, ist) = split_mark(&scratch, &bytes, i_mark);
-    let launch = Launch::new(exec, &f, lc.size())
+    let launch = FlatLaunch::new(exec, &f, lc.size())
         .arg_buf(c)
         .arg_usize(lo.shape.len())
         .arg_u64(os)
@@ -232,7 +232,7 @@ pub(crate) fn copy_cast<TA: CudaDType, TC: CudaDType, DA: DimAPI, DC: DimAPI>(
     let scratch = KernelScratch::new(exec, &bytes)?;
     let (os, ost) = split_mark(&scratch, &bytes, o_mark);
     let (is, ist) = split_mark(&scratch, &bytes, i_mark);
-    let launch = Launch::new(exec, &f, lc.size())
+    let launch = FlatLaunch::new(exec, &f, lc.size())
         .arg_buf(c)
         .arg_usize(lo.shape.len())
         .arg_u64(os)
@@ -304,7 +304,7 @@ extern "C" __global__ void rstsr_fill_cast(
     let o_mark = (0usize, bytes.len());
     let scratch = KernelScratch::new(exec, &bytes)?;
     let (os, ost) = split_mark(&scratch, &bytes, o_mark);
-    let launch = Launch::new(exec, &f, lc.size())
+    let launch = FlatLaunch::new(exec, &f, lc.size())
         .arg_buf(c)
         .arg_usize(lo.shape.len())
         .arg_u64(os)
@@ -350,7 +350,7 @@ pub fn sequence<T: CudaDType>(device: &DeviceCuda, n: usize, start: T, step: T) 
         core::ptr::copy_nonoverlapping(core::ptr::addr_of!(start) as *const u8, sbytes.as_mut_ptr(), nbytes);
         core::ptr::copy_nonoverlapping(core::ptr::addr_of!(step) as *const u8, stbytes.as_mut_ptr(), nbytes);
     }
-    let launch = Launch::new(exec, &f, n)
+    let launch = FlatLaunch::new(exec, &f, n)
         .arg_buf(&buf)
         .arg_usize(n)
         .arg_bytes(&sbytes)
@@ -394,7 +394,7 @@ pub(crate) fn linspace<T: CudaDType>(device: &DeviceCuda, n: usize, start: T, en
         core::ptr::copy_nonoverlapping(core::ptr::addr_of!(start) as *const u8, sbytes.as_mut_ptr(), nbytes);
         core::ptr::copy_nonoverlapping(core::ptr::addr_of!(end) as *const u8, ebytes.as_mut_ptr(), nbytes);
     }
-    let launch = Launch::new(exec, &f, n)
+    let launch = FlatLaunch::new(exec, &f, n)
         .arg_buf(&buf)
         .arg_usize(n)
         .arg_bytes(&sbytes)
@@ -458,7 +458,7 @@ pub(crate) fn gather_to_host<T: Clone>(
     }
     let out_len = indices.len() * esz;
     let out_buf = CudaBuffer::<u8>::new(exec, out_len)?;
-    let launch = Launch::new(exec, &f, indices.len())
+    let launch = FlatLaunch::new(exec, &f, indices.len())
         .arg_buf(&out_buf)
         .arg_buf(raw)
         .arg_buf(&scratch)
@@ -482,7 +482,7 @@ pub(crate) fn gather_to_host<T: Clone>(
 /// Device scratch holding the shape/stride arrays of one launch (uploaded
 /// once, H2D blocking — tiny). Allocated on the launch stream so its
 /// stream-ordered free lands after the kernel (allocation-stream owns
-/// free); keep alive until after `Launch::launch`.
+/// free); keep alive until after `FlatLaunch::launch`.
 struct KernelScratch {
     buf: CudaBuffer<u8>,
 }
@@ -525,7 +525,7 @@ impl<'a, T> TensorArg<'a, T> {
         Self { buf, layout: FlatLayout::of(layout) }
     }
 
-    fn push(self, launch: Launch, shape_ptr: u64, strides_ptr: u64) -> Launch {
+    fn push(self, launch: FlatLaunch, shape_ptr: u64, strides_ptr: u64) -> FlatLaunch {
         launch
             .arg_buf(self.buf)
             .arg_usize(self.layout.shape.len())
@@ -621,7 +621,7 @@ fn launch_binary<TOUT: CudaDType, TA: CudaDType, TB: CudaDType>(
     let (os, ost) = split_mark(&scratch, &bytes, marks[0]);
     let (as_, ast) = split_mark(&scratch, &bytes, marks[1]);
     let (bs, bst) = split_mark(&scratch, &bytes, marks[2]);
-    let launch = Launch::new(exec, &f, n);
+    let launch = FlatLaunch::new(exec, &f, n);
     let launch = TensorArg::new(c_typed, lc).push(launch, os, ost);
     let launch = TensorArg::new(a, la).push(launch, as_, ast);
     let launch = TensorArg::new(b, lb).push(launch, bs, bst);
@@ -665,7 +665,7 @@ fn launch_unary<TOUT: CudaDType, TB: CudaDType>(
     let scratch = KernelScratch::new(exec, &bytes)?;
     let (os, ost) = split_mark(&scratch, &bytes, marks[0]);
     let (bs, bst) = split_mark(&scratch, &bytes, marks[1]);
-    let launch = Launch::new(exec, &f, n);
+    let launch = FlatLaunch::new(exec, &f, n);
     let launch = TensorArg::new(c_typed, lc).push(launch, os, ost);
     let launch = TensorArg::new(b, lb).push(launch, bs, bst);
     launch.arg_usize(n).launch()
