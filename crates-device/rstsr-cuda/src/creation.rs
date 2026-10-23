@@ -8,7 +8,7 @@ use num::Num;
 impl<T> DeviceCreationAnyAPI<T> for DeviceCuda
 where
     Self: DeviceRawAPI<T, Raw = CudaBuffer<T>> + DeviceRawAPI<MaybeUninit<T>, Raw = CudaBuffer<MaybeUninit<T>>>,
-    T: Clone + Send + Sync + 'static,
+    T: Copy + Send + Sync + 'static,
 {
     unsafe fn empty_impl(&self, len: usize) -> Result<Storage<DataOwned<CudaBuffer<T>>, T, Self>> {
         let raw = CudaBuffer::new(self.stream(), len)?;
@@ -72,7 +72,7 @@ where
 impl<T> DeviceCreationNumAPI<T> for DeviceCuda
 where
     Self: DeviceRawAPI<T, Raw = CudaBuffer<T>>,
-    T: Num + Clone + Send + Sync + 'static,
+    T: Num + Copy + Send + Sync + 'static,
 {
     fn zeros_impl(&self, len: usize) -> Result<Storage<DataOwned<CudaBuffer<T>>, T, Self>> {
         let mut raw = CudaBuffer::new(self.stream(), len)?;
@@ -98,6 +98,7 @@ where
         + core::ops::Sub<Output = T>
         + core::ops::Div<Output = T>
         + num::ToPrimitive
+        + num::Zero
         + Send
         + Sync
         + 'static,
@@ -106,7 +107,7 @@ where
         // length: ceil((end - start) / step) in f64 — one division, matching
         // the accelerated CPU path; elements [i] = start + step*i in-kernel
         let n = {
-            let zero = start.clone() - start.clone();
+            let zero = T::zero();
             rstsr_assert!(step != zero, InvalidValue, "arange step must be nonzero")?;
             let fs = start.to_f64().unwrap_or(f64::NAN);
             let fe = end.to_f64().unwrap_or(f64::NAN);

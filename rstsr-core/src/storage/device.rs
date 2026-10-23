@@ -54,9 +54,16 @@ pub trait DeviceStorageAPI<T>: DeviceRawAPI<T> {
     where
         T: Clone,
         R: DataAPI<Data = Self::Raw>;
+    /// Address of element `index`.
+    ///
+    /// The pointer is meaningful only to the backend that owns the storage:
+    /// host devices return a host pointer, while device-memory backends
+    /// return a device address that must not be dereferenced on the host.
     fn get_index_ptr<R>(storage: &Storage<R, T, Self>, index: usize) -> *const T
     where
         R: DataAPI<Data = Self::Raw>;
+    /// Mutable form of [`DeviceStorageAPI::get_index_ptr`]; same pointer
+    /// contract applies.
     fn get_index_mut_ptr<R>(storage: &mut Storage<R, T, Self>, index: usize) -> *mut T
     where
         R: DataMutAPI<Data = Self::Raw>;

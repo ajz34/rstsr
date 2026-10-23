@@ -359,3 +359,123 @@ fn cross_stream_ordering_loop() {
         assert_eq!(v[4095], 8190.0);
     }
 }
+
+/* #region assign order/shape regressions */
+
+#[test]
+fn assign_reshape_of_strided_view() {
+    require_cuda!();
+    // rank/shape-changing assign: each side decomposes by its own shape, so
+    // the result must match the CPU devices' positional zip
+    let d = DeviceCuda::new(0);
+    let dcpu = DeviceCpuSerial::default();
+
+    let base = rt::arange((0., 12., 1., &d)).into_shape([3, 4]);
+    let a = base.swapaxes(0, 1);
+    let got = host_nd(&a.reshape([2, 6]).into_owned());
+
+    let base_cpu = rt::arange((0., 12., 1., &dcpu)).into_shape([3, 4]);
+    let a_cpu = base_cpu.swapaxes(0, 1);
+    let want = host_nd(&a_cpu.reshape([2, 6]).into_owned());
+
+    assert_eq!(got, want);
+}
+
+#[test]
+fn assign_reshape_flatten_of_strided_view() {
+    require_cuda!();
+    // flattening a non-contiguous view: same-rank source/dest must not take
+    // the linear-copy fast path
+    let d = DeviceCuda::new(0);
+    let dcpu = DeviceCpuSerial::default();
+
+    let base = rt::arange((0., 12., 1., &d)).into_shape([3, 4]);
+    let a = base.swapaxes(0, 1);
+    let got = host_nd(&a.reshape([12]).into_owned());
+
+    let base_cpu = rt::arange((0., 12., 1., &dcpu)).into_shape([3, 4]);
+    let a_cpu = base_cpu.swapaxes(0, 1);
+    let want = host_nd(&a_cpu.reshape([12]).into_owned());
+
+    assert_eq!(got, want);
+}
+
+#[test]
+fn assign_shape_change_on_col_major_device() {
+    require_cuda!();
+    // the same shape-changing assign under ColMajor must follow the
+    // column-major positional zip
+    let mut d = DeviceCuda::new(0);
+    d.set_default_order(ColMajor);
+    let mut dcpu = DeviceCpuSerial::default();
+    dcpu.set_default_order(ColMajor);
+
+    let base = rt::arange((0., 12., 1., &d)).into_shape([3, 4]);
+    let a = base.swapaxes(0, 1);
+    let got = host_nd(&a.reshape([2, 6]).into_owned());
+
+    let base_cpu = rt::arange((0., 12., 1., &dcpu)).into_shape([3, 4]);
+    let a_cpu = base_cpu.swapaxes(0, 1);
+    let want = host_nd(&a_cpu.reshape([2, 6]).into_owned());
+
+    assert_eq!(got, want);
+}
+
+#[test]
+fn assign_same_size_cast_pairs() {
+    require_cuda!();
+    // equal-size dtype pairs must cast element-wise, not byte-copy
+    let d = DeviceCuda::new(0);
+    let dcpu = DeviceCpuSerial::default();
+
+    let a: Tensor<i64, _, _> = rt::arange((0i64, 8i64, 1i64, &d));
+    let mut c: Tensor<f64, _, _> = rt::zeros(([8], &d));
+    c.assign(&a);
+    assert_eq!(host_vec1(&c), (0..8).map(|i| i as f64).collect::<Vec<_>>());
+
+    let b: Tensor<f32, _, _> = rt::arange((0f32, 8f32, 1f32, &d));
+    let mut ci: Tensor<i32, _, _> = rt::zeros(([8], &d));
+    ci.assign(&b);
+    assert_eq!(host_vec1(&ci), (0..8).collect::<Vec<i32>>());
+
+    // strided source (same shape) goes through the cast kernel
+    let base = rt::arange((0i64, 12i64, 1i64, &d)).into_shape([3, 4]);
+    let at = base.swapaxes(0, 1);
+    let mut cs: Tensor<f64, _, _> = rt::zeros(([4, 3], &d));
+    cs.assign(&at);
+
+    let base_cpu = rt::arange((0i64, 12i64, 1i64, &dcpu)).into_shape([3, 4]);
+    let at_cpu = base_cpu.swapaxes(0, 1);
+    let mut cs_cpu: Tensor<f64, _, _> = rt::zeros(([4, 3], &dcpu));
+    cs_cpu.assign(&at_cpu);
+    let view_cpu = cs_cpu.view();
+    assert_eq!(host_nd(&cs), host_nd(&view_cpu));
+}
+
+/* #endregion */
+
+/* #region stream write-target ordering */
+
+#[test]
+fn inplace_after_stream_retag() {
+    require_cuda!();
+    // a re-tagged buffer lives on its allocation stream while ops run on the
+    // device's execution stream; host reads must still see the op's result
+    let d1 = DeviceCuda::new(0);
+    let s2 = d1.ordinal_obj().context().new_stream().unwrap();
+    let mut d2 = d1.clone();
+    d2.set_stream(Arc::new(CudaStreamObj::wrap(d1.ordinal(), s2)));
+
+    for _ in 0..40 {
+        let a = rt::arange((0., 4096., 1., &d1));
+        let owned = a.into_device(&d2);
+        let s = rt::sin(owned);
+        let v = host_vec1(&s);
+        assert_eq!(v.len(), 4096);
+        for (i, x) in v.iter().enumerate() {
+            assert!((*x - (i as f64).sin()).abs() < 1e-12);
+        }
+    }
+}
+
+/* #endregion */

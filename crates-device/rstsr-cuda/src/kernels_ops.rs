@@ -6,7 +6,7 @@
 use crate::buffer::CudaBuffer;
 use crate::dtype::{CudaArith, CudaCmp, CudaDType, CudaFloat};
 use crate::error::map_driver_result;
-use crate::kernel::{assemble_source, make_key, order_input, FlatLaunch};
+use crate::kernel::{assemble_source, make_key, order_input, order_output, FlatLaunch};
 use crate::prelude_dev::*;
 use std::sync::{Arc, OnceLock};
 
@@ -94,16 +94,18 @@ impl LayoutPack {
 // /* #region byte-space copy (dtype-free) */
 
 /// Strided device-to-device copy in bytes: `out[oo] = in[io]` blockwise.
+/// Each side decomposes `lin` by its own shape and the device's order, so
+/// rank/shape-changing assigns reproduce the CPU devices' positional zip.
 const COPY_BYTES_SOURCE: &str = r#"
 extern "C" __global__ void rstsr_copy_bytes(
     char* out, int orank, const rstsr_usz* oshape, const rstsr_usz* ostrides, rstsr_usz ooffset,
-    const char* in, const rstsr_usz* istrides, rstsr_usz ioffset,
-    rstsr_usz n, rstsr_usz esz)
+    const char* in, int irank, const rstsr_usz* ishape, const rstsr_usz* istrides, rstsr_usz ioffset,
+    rstsr_usz n, rstsr_usz esz, int col_major)
 {
     rstsr_usz lin = (rstsr_usz)blockIdx.x * (rstsr_usz)blockDim.x + (rstsr_usz)threadIdx.x;
     if (lin >= n) return;
-    rstsr_usz oo = rstsr_index_to_offset(lin, orank, oshape, ostrides, ooffset);
-    rstsr_usz io = rstsr_index_to_offset(lin, orank, oshape, istrides, ioffset);
+    rstsr_usz oo = rstsr_iter_offset(lin, orank, oshape, ostrides, ooffset, col_major);
+    rstsr_usz io = rstsr_iter_offset(lin, irank, ishape, istrides, ioffset, col_major);
     // word-wise copy: esz is 1/2/4/8/16 and pointers are aligned
     const char* src = in + io * esz;
     char* dst = out + oo * esz;
@@ -133,12 +135,16 @@ pub(crate) fn copy_same_dtype<T: CudaDType, DC: DimAPI, DA: DimAPI>(
         return Ok(());
     }
     let exec = device.stream();
+    // order both operands' allocation streams before the kernel (the
+    // destination's includes a possibly pending allocation); order_output
+    // below publishes the write back for host reads
+    let _gc = order_input(c, exec)?;
     let _guard = order_input(a, exec)?;
     let key = make_key(device.ordinal_obj(), "rstsr_copy_bytes", copy_bytes_assembled(), &[])?;
     let f = device.ordinal_obj().kernel_function(&key)?;
     let lo = FlatLayout::of(lc);
     let li = FlatLayout::of(la);
-    let pack = LayoutPack::new(exec, &[(&lo, true), (&li, false)])?;
+    let pack = LayoutPack::new(exec, &[(&lo, true), (&li, true)])?;
     let launch = FlatLaunch::new(exec, &f, lc.size())
         .arg_buf(c)
         .arg_i32(lo.shape.len() as i32)
@@ -146,11 +152,23 @@ pub(crate) fn copy_same_dtype<T: CudaDType, DC: DimAPI, DA: DimAPI>(
         .arg_u64(pack.strides[0])
         .arg_usize(lo.offset)
         .arg_buf(a)
+        .arg_i32(li.shape.len() as i32)
+        .arg_u64(pack.shapes[1])
         .arg_u64(pack.strides[1])
         .arg_usize(li.offset)
         .arg_usize(lc.size())
-        .arg_usize(core::mem::size_of::<T>());
-    launch.launch()
+        .arg_usize(core::mem::size_of::<T>())
+        .arg_i32(col_major_of(device));
+    launch.launch()?;
+    // publish the write back to the destination's allocation stream, which
+    // owns host-read ordering (see `order_output`)
+    let _go = order_output(c, exec)?;
+    Ok(())
+}
+
+/// Whether the device's default order is column-major (kernel argument).
+fn col_major_of(device: &DeviceCuda) -> i32 {
+    (device.default_order() == ColMajor) as i32
 }
 
 // /* #endregion */
@@ -162,13 +180,13 @@ fn cast_source(tc: &str, ta: &str, expr: &str) -> String {
         r#"
 extern "C" __global__ void rstsr_cast(
     {tc}* out, int orank, const rstsr_usz* oshape, const rstsr_usz* ostrides, rstsr_usz ooffset,
-    const {ta}* in, const rstsr_usz* istrides, rstsr_usz ioffset,
-    rstsr_usz n)
+    const {ta}* in, int irank, const rstsr_usz* ishape, const rstsr_usz* istrides, rstsr_usz ioffset,
+    rstsr_usz n, int col_major)
 {{
     rstsr_usz lin = (rstsr_usz)blockIdx.x * (rstsr_usz)blockDim.x + (rstsr_usz)threadIdx.x;
     if (lin >= n) return;
-    rstsr_usz oo = rstsr_index_to_offset(lin, orank, oshape, ostrides, ooffset);
-    rstsr_usz io = rstsr_index_to_offset(lin, orank, oshape, istrides, ioffset);
+    rstsr_usz oo = rstsr_iter_offset(lin, orank, oshape, ostrides, ooffset, col_major);
+    rstsr_usz io = rstsr_iter_offset(lin, irank, ishape, istrides, ioffset, col_major);
     out[oo] = ({expr});
 }}
 "#,
@@ -235,6 +253,7 @@ pub(crate) fn copy_cast<TA: CudaDType, TC: CudaDType, DA: DimAPI, DC: DimAPI>(
         return Ok(());
     }
     let exec = device.stream();
+    let _gc = order_input(c, exec)?;
     let _guard = order_input(a, exec)?;
     let expr = cast_expr::<TA, TC>()?;
     let includes = [TA::INCLUDES, TC::INCLUDES].concat();
@@ -243,7 +262,7 @@ pub(crate) fn copy_cast<TA: CudaDType, TC: CudaDType, DA: DimAPI, DC: DimAPI>(
     let f = device.ordinal_obj().kernel_function(&key)?;
     let lo = FlatLayout::of(lc);
     let li = FlatLayout::of(la);
-    let pack = LayoutPack::new(exec, &[(&lo, true), (&li, false)])?;
+    let pack = LayoutPack::new(exec, &[(&lo, true), (&li, true)])?;
     let launch = FlatLaunch::new(exec, &f, lc.size())
         .arg_buf(c)
         .arg_i32(lo.shape.len() as i32)
@@ -251,10 +270,15 @@ pub(crate) fn copy_cast<TA: CudaDType, TC: CudaDType, DA: DimAPI, DC: DimAPI>(
         .arg_u64(pack.strides[0])
         .arg_usize(lo.offset)
         .arg_buf(a)
+        .arg_i32(li.shape.len() as i32)
+        .arg_u64(pack.shapes[1])
         .arg_u64(pack.strides[1])
         .arg_usize(li.offset)
-        .arg_usize(lc.size());
-    launch.launch()
+        .arg_usize(lc.size())
+        .arg_i32(col_major_of(device));
+    launch.launch()?;
+    let _go = order_output(c, exec)?;
+    Ok(())
 }
 
 // /* #endregion */
@@ -279,6 +303,7 @@ where
         return Ok(());
     }
     let exec = device.stream();
+    let _gc = order_input(c, exec)?;
     let expr = cast_expr::<TA, TC>()?;
     let scalar_c = format!("({expr})").replace("in[io]", "v_in");
     let src = format!(
@@ -319,7 +344,9 @@ extern "C" __global__ void rstsr_fill_cast(
         .arg_usize(lo.offset)
         .arg_usize(lc.size())
         .arg_bytes(&scalar_bytes);
-    launch.launch()
+    launch.launch()?;
+    let _go = order_output(c, exec)?;
+    Ok(())
 }
 
 // /* #endregion */
@@ -841,6 +868,9 @@ where
         return Ok(());
     }
     let exec = device.stream();
+    // in-place: the buffer is both operand and destination, so order prior
+    // work on its allocation stream in and the kernel back out
+    let _ga = order_input(a, exec)?;
     let src = assemble_source(T::INCLUDES, &unary_inplace_source(T::CNAME, expr));
     let key = make_key(device.ordinal_obj(), "rstsr_unary_inplace", &src, &[])?;
     let f = device.ordinal_obj().kernel_function(&key)?;
@@ -854,7 +884,9 @@ where
         .arg_u64(pack.strides[0])
         .arg_usize(lo.offset)
         .arg_usize(n);
-    launch.launch()
+    launch.launch()?;
+    let _go = order_output(a, exec)?;
+    Ok(())
 }
 
 /* #endregion */

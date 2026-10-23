@@ -21,7 +21,7 @@ where
 /// CPU -> CUDA (copy; a borrowed host view of device memory cannot exist).
 impl<'l, R, T, D> DeviceChangeAPI<'l, DeviceCuda, R, T, D> for DeviceCpuSerial
 where
-    T: Clone + Send + Sync + 'static,
+    T: Copy + Send + Sync + 'static,
     R: DataCloneAPI<Data = Vec<T>>,
     D: DimAPI,
 {
@@ -62,7 +62,7 @@ where
 /// CUDA -> CPU serial (copy).
 impl<'l, R, T, D> DeviceChangeAPI<'l, DeviceCpuSerial, R, T, D> for DeviceCuda
 where
-    T: Clone + Send + Sync + 'static,
+    T: Copy + Send + Sync + 'static,
     R: DataCloneAPI<Data = CudaBuffer<T>>,
     D: DimAPI,
 {
@@ -104,7 +104,7 @@ mod faer_impls {
 
     impl<'a, R, T, D> DeviceChangeAPI<'a, DeviceCuda, R, T, D> for DeviceFaer
     where
-        T: Clone + Send + Sync + 'static,
+        T: Copy + Send + Sync + 'static,
         D: DimAPI,
         R: DataCloneAPI<Data = Vec<T>>,
     {
@@ -144,7 +144,7 @@ mod faer_impls {
 
     impl<'a, R, T, D> DeviceChangeAPI<'a, DeviceFaer, R, T, D> for DeviceCuda
     where
-        T: Clone + Send + Sync + 'static,
+        T: Copy + Send + Sync + 'static,
         D: DimAPI,
         R: DataCloneAPI<Data = CudaBuffer<T>>,
     {
@@ -183,7 +183,7 @@ mod faer_impls {
 /// CUDA -> CUDA: same-ordinal zero-copy relabel; cross-ordinal peer copy.
 impl<'l, R, T, D> DeviceChangeAPI<'l, DeviceCuda, R, T, D> for DeviceCuda
 where
-    T: Clone + Send + Sync + 'static,
+    T: Copy + Send + Sync + 'static,
     R: DataCloneAPI<Data = CudaBuffer<T>>,
     D: DimAPI,
 {
@@ -215,10 +215,13 @@ where
         device: &DeviceCuda,
     ) -> Result<TensorAny<DataOwned<CudaBuffer<T>>, T, DeviceCuda, D>> {
         let (storage, layout) = tensor.into_raw_parts();
-        let same = storage.device().same_device(device);
+        // Same ordinal: order/flags/stream-only differences need no data
+        // movement (the buffer is order-agnostic), so relabel instead of
+        // copying; only a cross-ordinal transfer allocates and copies.
+        let same_ordinal = Arc::ptr_eq(storage.device().ordinal_obj(), device.ordinal_obj());
         let (data, _) = storage.into_raw_parts();
         let owned = data.into_owned().into_raw();
-        if same {
+        if same_ordinal {
             return Ok(TensorAny::new_f(Storage::new(DataOwned::from(owned), device.clone()), layout).rstsr_unwrap());
         }
         let mut raw = CudaBuffer::<T>::new(device.stream(), owned.len())?;
@@ -231,14 +234,15 @@ where
         device: &DeviceCuda,
     ) -> Result<TensorAny<Self::ReprTo, T, DeviceCuda, D>> {
         let layout = tensor.layout().clone();
-        if tensor.device().same_device(device) {
-            // view re-tag: borrow the same buffer under the new device value
+        if Arc::ptr_eq(tensor.device().ordinal_obj(), device.ordinal_obj()) {
+            // same GPU: view re-tag, borrowing the same buffer under the new
+            // device value (no copy; see `into_device`)
             let storage = Storage::new(DataCow::Ref(DataRef::TrueRef(tensor.raw())), device.clone());
             return Ok(TensorAny::new_f(storage, layout).rstsr_unwrap());
         }
-        let cloned = tensor.raw().clone();
-        let mut raw = CudaBuffer::<T>::new(device.stream(), cloned.len())?;
-        transfer::dtod_full(&cloned, &mut raw)?;
+        let src = tensor.raw();
+        let mut raw = CudaBuffer::<T>::new(device.stream(), src.len())?;
+        transfer::dtod_full(src, &mut raw)?;
         let storage = Storage::new(DataCow::Owned(DataOwned::from(raw)), device.clone());
         Ok(TensorAny::new_f(storage, layout).rstsr_unwrap())
     }

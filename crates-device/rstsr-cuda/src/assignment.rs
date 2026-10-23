@@ -49,18 +49,27 @@ where
     if lc.size() == 0 {
         return Ok(());
     }
-    let contig_same_order = (lc.c_contig() && la.c_contig()) || (lc.f_contig() && la.f_contig());
-    if contig_same_order
+    let same_dtype = core::any::TypeId::of::<TC>() == core::any::TypeId::of::<TA>();
+    // The linear copy is only valid when no element-wise transformation is
+    // needed (same dtype) and both layouts traverse their buffers in the
+    // same order under the device default order; shape equality makes the
+    // element mapping independent of that order.
+    let contig_same_order = match device.default_order() {
+        RowMajor => lc.c_contig() && la.c_contig(),
+        ColMajor => lc.f_contig() && la.f_contig(),
+    };
+    if same_dtype
+        && contig_same_order
+        && lc.shape().as_ref() == la.shape().as_ref()
         && lc.size() == c.len()
         && la.size() == a.len()
-        && core::mem::size_of::<TC>() == core::mem::size_of::<TA>()
         && lc.offset() == 0
         && la.offset() == 0
     {
         return memcpy_fast(c, a);
     }
-    if core::any::TypeId::of::<TC>() == core::any::TypeId::of::<TA>() {
-        // same dtype: dtype-free byte-copy kernel (T1 partially-strided aware)
+    if same_dtype {
+        // same dtype: dtype-free byte-copy kernel (rank/shape-generic)
         let a_typed: &CudaBuffer<TC> = unsafe { transmute_ref_cross::<TA, TC>(a) };
         return copy_same_dtype::<TC, DC, DA>(device, c, lc, a_typed, la);
     }

@@ -27,7 +27,7 @@ pub(crate) fn base_ptr_mut<T>(raw: &mut CudaBuffer<T>) -> CUdeviceptr {
 /// D2H of one element (used by `get_index` / `to_scalar`). Panics through
 /// the error mapping on driver failure; infallible in the trait.
 // DEFER: batched/fallible variant; per-element sync is debug-grade.
-pub(crate) fn d2h_scalar<T: Clone>(raw: &CudaBuffer<T>, index: usize) -> T {
+pub(crate) fn d2h_scalar<T: Copy>(raw: &CudaBuffer<T>, index: usize) -> T {
     let esz = core::mem::size_of::<T>();
     let stream = raw.slice.stream();
     let mut host = vec![0u8; esz];
@@ -46,14 +46,13 @@ pub(crate) fn d2h_scalar<T: Clone>(raw: &CudaBuffer<T>, index: usize) -> T {
 
 /// H2D of one element (used by `set_index`).
 // DEFER: batched variant; per-element sync is debug-grade.
-pub(crate) fn h2d_scalar<T>(raw: &mut CudaBuffer<T>, index: usize, value: T) {
+pub(crate) fn h2d_scalar<T: Copy>(raw: &mut CudaBuffer<T>, index: usize, value: T) {
     let esz = core::mem::size_of::<T>();
     // stage the value's bytes on the host (type-erased copy)
     let mut host = vec![0u8; esz];
     unsafe {
         core::ptr::copy_nonoverlapping(core::ptr::addr_of!(value) as *const u8, host.as_mut_ptr(), esz);
     }
-    drop(value);
     let stream = raw.slice.stream().clone();
     let ptr = base_ptr_mut(raw);
     unsafe {
@@ -64,7 +63,7 @@ pub(crate) fn h2d_scalar<T>(raw: &mut CudaBuffer<T>, index: usize, value: T) {
 }
 
 /// Full-buffer D2H into a host `Vec` (blocking; `to_cpu_vec` path).
-pub(crate) fn d2h_full<T>(raw: &CudaBuffer<T>) -> Result<Vec<T>> {
+pub(crate) fn d2h_full<T: Copy>(raw: &CudaBuffer<T>) -> Result<Vec<T>> {
     let esz = core::mem::size_of::<T>();
     let byte_len = raw.len * esz;
     let mut bytes = vec![0u8; byte_len];
@@ -85,7 +84,7 @@ pub(crate) fn d2h_full<T>(raw: &CudaBuffer<T>) -> Result<Vec<T>> {
 }
 
 /// Full-buffer H2D from a host `Vec` (blocking; `outof_cpu_vec` path).
-pub(crate) fn h2d_full<T>(device: &DeviceCuda, vec: Vec<T>) -> Result<CudaBuffer<T>> {
+pub(crate) fn h2d_full<T: Copy>(device: &DeviceCuda, vec: Vec<T>) -> Result<CudaBuffer<T>> {
     let len = vec.len();
     let esz = core::mem::size_of::<T>();
     let byte_len = len * esz;
@@ -112,6 +111,9 @@ pub(crate) fn dtod_full<T>(src: &CudaBuffer<T>, dst: &mut CudaBuffer<T>) -> Resu
     let sptr = base_ptr(src);
     let dptr = base_ptr_mut(dst);
     let stream = dst.slice.stream();
+    // the copy runs on the destination's stream; order the source's pending
+    // work into it
+    let _guard = crate::kernel::order_input_raw(src, stream)?;
     unsafe {
         map_driver_result(result::memcpy_dtod_async(dptr, sptr, byte_len, stream.cu_stream()))?;
         map_driver_result(stream.synchronize())?;
@@ -137,12 +139,12 @@ pub(crate) fn memset_zero<T>(raw: &mut CudaBuffer<T>) -> Result<()> {
 /// geometric dtod doubling.
 ///
 /// DEFER: device fill kernel.
-pub(crate) fn fill_naive<T: Clone>(raw: &mut CudaBuffer<T>, fill: &T) -> Result<()> {
+pub(crate) fn fill_naive<T: Copy>(raw: &mut CudaBuffer<T>, fill: &T) -> Result<()> {
     let n = raw.len;
     if n == 0 {
         return Ok(());
     }
-    h2d_scalar(raw, 0, fill.clone());
+    h2d_scalar(raw, 0, *fill);
     let esz = core::mem::size_of::<T>();
     let ptr = base_ptr_mut(raw);
     let stream = raw.slice.stream();

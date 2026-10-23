@@ -14,9 +14,12 @@ use core::fmt::Formatter;
 use duplicate::duplicate_item;
 use num::Complex;
 
+// `T: Copy` is the POD gate: device storage is byte-erased and host
+// read-back reinterprets those bytes as `T`, which is only defined for
+// plain-old-data.
 impl<T> DeviceToCpuAPI<T> for DeviceCuda
 where
-    T: Clone + Send + Sync + 'static,
+    T: Copy + Send + Sync + 'static,
 {
     fn to_cpu_vec<R>(storage: &Storage<R, T, Self>) -> Result<Vec<T>>
     where

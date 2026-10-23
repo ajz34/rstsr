@@ -159,7 +159,11 @@ impl<T> DeviceRawAPI<T> for DeviceCuda {
     type Raw = CudaBuffer<T>;
 }
 
-impl<T> DeviceStorageAPI<T> for DeviceCuda {
+// `T: Copy` (POD): buffer contents are raw device bytes, and
+// `get_index`/`set_index` reinterpret those bytes through a host staging
+// buffer. Unlike the CPU device (which stores a real `Vec<T>`), byte storage
+// cannot represent owned non-POD values such as `String`.
+impl<T: Copy> DeviceStorageAPI<T> for DeviceCuda {
     fn len<R>(storage: &Storage<R, T, Self>) -> usize
     where
         R: DataAPI<Data = Self::Raw>,
@@ -209,9 +213,9 @@ impl<T> DeviceStorageAPI<T> for DeviceCuda {
     }
 }
 
-// No bounds (CPU-device precedent): storage is byte-erased, so every type
-// is storable; capability gating lives on the op-impl level (`CudaDType`).
-impl<T> DeviceAPI<T> for DeviceCuda {}
+// POD-only storage (see `DeviceStorageAPI` above); finer capability gating
+// lives on the op-impl level (`CudaDType`).
+impl<T: Copy> DeviceAPI<T> for DeviceCuda {}
 
 /// Display prints `cuda:<ordinal>`; `Debug` is the detailed form.
 impl core::fmt::Display for DeviceCuda {

@@ -303,10 +303,36 @@ pub(crate) fn order_input_raw<T>(buf: &CudaBuffer<T>, exec: &Arc<CudaStream>) ->
     Ok(Some(event))
 }
 
-/// The shared T0 index-decomposition fragment (rank-generic), part of
+/// Order execution on `exec` before later work on `buf`'s allocation stream
+/// (no-op when they match), the mirror of [`order_input`]. Required after an
+/// op writes into an existing buffer: host reads only synchronize that
+/// buffer's allocation stream.
+pub(crate) fn order_output<T>(buf: &CudaBuffer<T>, exec: &Arc<CudaStreamObj>) -> Result<Option<Event>> {
+    order_output_raw(buf, exec.inner())
+}
+
+/// `order_output` over a raw cudarc stream.
+pub(crate) fn order_output_raw<T>(buf: &CudaBuffer<T>, exec: &Arc<CudaStream>) -> Result<Option<Event>> {
+    let alloc_stream = buf.as_bytes().stream();
+    if alloc_stream.cu_stream() == exec.cu_stream() {
+        return Ok(None);
+    }
+    let event = Event::create()?;
+    // SAFETY: both streams belong to this ordinal's context.
+    unsafe { event.order(exec.cu_stream(), alloc_stream.cu_stream())? };
+    Ok(Some(event))
+}
+
+/// The shared T0 index-decomposition fragments (rank-generic), part of
 /// every kernel source.
-/// `lin` is enumerated over the OUTPUT's row-major order: decompose by
-/// `oshape`, scale by the operand's strides (0 = broadcast axis).
+///
+/// `rstsr_index_to_offset` decomposes `lin` by one operand's shape in
+/// row-major order (elementwise kernels: both operands share the output's
+/// logical shape, strides 0 = broadcast axis).
+/// `rstsr_iter_offset` decomposes `lin` by an operand's *own* shape in the
+/// device's order; assign kernels use it for each side separately, which
+/// also covers rank/shape-changing assigns (positional zip in iteration
+/// order, matching the CPU devices).
 const INDEX_HELPER: &str = r#"
 __device__ rstsr_usz rstsr_index_to_offset(rstsr_usz lin, int rank,
     const rstsr_usz* oshape, const rstsr_usz* strides, rstsr_usz base_offset) {
@@ -314,6 +340,24 @@ __device__ rstsr_usz rstsr_index_to_offset(rstsr_usz lin, int rank,
     for (int ax = rank - 1; ax >= 0; --ax) {
         off += (lin % oshape[ax]) * strides[ax];
         lin /= oshape[ax];
+    }
+    return off;
+}
+
+__device__ rstsr_usz rstsr_iter_offset(rstsr_usz lin, int rank,
+    const rstsr_usz* shape, const rstsr_usz* strides, rstsr_usz base_offset,
+    int col_major) {
+    rstsr_usz off = base_offset;
+    if (col_major) {
+        for (int ax = 0; ax < rank; ++ax) {
+            off += (lin % shape[ax]) * strides[ax];
+            lin /= shape[ax];
+        }
+    } else {
+        for (int ax = rank - 1; ax >= 0; --ax) {
+            off += (lin % shape[ax]) * strides[ax];
+            lin /= shape[ax];
+        }
     }
     return off;
 }

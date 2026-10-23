@@ -15,7 +15,7 @@ use num::Complex;
 /// `CNAME` is the CUDA C type name used in generated kernel signatures and
 /// in the kernel-cache key. (i128/u128 have no portable CUDA C type and
 /// intentionally have no impl; they keep host round-trip paths.)
-pub trait CudaDType: Clone + Send + Sync + Debug + 'static {
+pub trait CudaDType: Copy + Send + Sync + Debug + 'static {
     /// CUDA C scalar name of this dtype.
     const CNAME: &'static str;
     /// Byte size of the on-device representation.
