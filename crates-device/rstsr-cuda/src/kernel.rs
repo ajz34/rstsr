@@ -27,7 +27,7 @@ use crate::stream::CudaStreamObj;
 use rstsr_core::prelude_dev::*;
 
 use cudarc::driver::sys::{CUevent, CUevent_flags, CUevent_wait_flags};
-use cudarc::driver::{result as dr, CudaFunction};
+use cudarc::driver::{result as dr, CudaFunction, CudaStream};
 use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
@@ -282,10 +282,9 @@ pub(crate) struct Event(CUevent);
 
 impl Event {
     pub fn create() -> Result<Self> {
-        // DISABLE_TIMING (2) | BLOCKING_SYNC (1); the enum has no BitOr.
-        let flags = 2u32 | 1u32;
-        let e = dr::event::create(unsafe { core::mem::transmute::<u32, CUevent_flags>(flags) })
-            .map_err(map_driver_error)?;
+        // no host-side synchronize on this event, so BLOCKING_SYNC is not
+        // needed; DISABLE_TIMING alone is a valid enum variant
+        let e = dr::event::create(CUevent_flags::CU_EVENT_DISABLE_TIMING).map_err(map_driver_error)?;
         Ok(Self(e))
     }
 
@@ -309,14 +308,20 @@ impl Drop for Event {
 /// Order `buf`'s allocation stream before execution on `exec` (no-op when
 /// they match). Returns the event guard; drop after the launch is enqueued.
 pub(crate) fn order_input<T>(buf: &CudaBuffer<T>, exec: &Arc<CudaStreamObj>) -> Result<Option<Event>> {
+    order_input_raw(buf, exec.inner())
+}
+
+/// `order_input` over a raw cudarc stream (for paths that only hold the
+/// buffer's own stream, e.g. the memcpy fast path).
+pub(crate) fn order_input_raw<T>(buf: &CudaBuffer<T>, exec: &Arc<CudaStream>) -> Result<Option<Event>> {
     let alloc_stream = buf.as_bytes().stream();
-    if alloc_stream.cu_stream() == exec.inner().cu_stream() {
+    if alloc_stream.cu_stream() == exec.cu_stream() {
         return Ok(None);
     }
     let event = Event::create()?;
     // SAFETY: both streams belong to this ordinal's context (buffers and
     // device values of one ordinal never mix contexts).
-    unsafe { event.order(alloc_stream.cu_stream(), exec.inner().cu_stream())? };
+    unsafe { event.order(alloc_stream.cu_stream(), exec.cu_stream())? };
     Ok(Some(event))
 }
 

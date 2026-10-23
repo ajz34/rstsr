@@ -360,21 +360,47 @@ pub fn sequence<T: CudaDType>(device: &DeviceCuda, n: usize, start: T, step: T) 
 }
 
 fn linspace_source(t: &str) -> String {
+    let f = if t == "float" || t == "rstsr_c32" { "float" } else { "double" };
+    // complex: component-wise arithmetic (C has no struct<->scalar casts);
+    // real: mirrors the CPU device's `start + i * step`, endpoint exact
+    let body = if t == "rstsr_c32" || t == "rstsr_c64" {
+        let make = if t == "rstsr_c32" { "make_c32" } else { "make_c64" };
+        format!(
+            r#"
+    if (n <= 1) {{ out[i] = start; return; }}
+    rstsr_usz denom = endpoint ? n - 1 : n;
+    {f} span_re = (end.re - start.re) / ({f}) denom;
+    {f} span_im = (end.im - start.im) / ({f}) denom;
+    {f} ii = ({f}) i;
+    out[i] = {make}(start.re + span_re * ii, start.im + span_im * ii);
+    if (endpoint && i == n - 1) out[i] = end;
+"#,
+            f = f,
+            make = make,
+        )
+    } else {
+        format!(
+            r#"
+    if (n <= 1) {{ out[i] = start; return; }}
+    rstsr_usz denom = endpoint ? n - 1 : n;
+    {t} step = ({t})(({f}) end - ({f}) start) / ({t}) denom;
+    out[i] = ({t})(({f}) start + ({f}) step * ({f}) i);
+    if (endpoint && i == n - 1) out[i] = end;
+"#,
+            t = t,
+            f = f,
+        )
+    };
     format!(
         r#"
 extern "C" __global__ void rstsr_linspace(
     {t}* out, rstsr_usz n, {t} start, {t} end, int endpoint)
 {{
     rstsr_usz i = (rstsr_usz)blockIdx.x * (rstsr_usz)blockDim.x + (rstsr_usz)threadIdx.x;
-    if (i >= n) return;
-    rstsr_usz denom = (endpoint || n <= 1) ? (n > 1 ? n - 1 : 1) : n;
-    {t} frac = ({t})(({f}) i / ({f}) denom);
-    {t} span = ({t})(({f}) end - ({f}) start);
-    out[i] = ({t})(({f}) start + ({f}) span * ({f}) frac);
-}}
+    if (i >= n) return;{body}}}
 "#,
         t = t,
-        f = if t == "float" { "float" } else { "double" },
+        body = body,
     )
 }
 
@@ -399,7 +425,7 @@ pub(crate) fn linspace<T: CudaDType>(device: &DeviceCuda, n: usize, start: T, en
         .arg_usize(n)
         .arg_bytes(&sbytes)
         .arg_bytes(&ebytes)
-        .arg_bytes(&(endpoint as u8).to_ne_bytes());
+        .arg_bytes(&(endpoint as i32).to_ne_bytes());
     launch.launch()?;
     Ok(buf)
 }
@@ -592,6 +618,10 @@ fn launch_binary<TOUT: CudaDType, TA: CudaDType, TB: CudaDType>(
         return Ok(());
     }
     let exec = device.stream();
+    // order foreign-stream inputs before the kernel; guards dropped after
+    // the launch below
+    let _ga = order_input(a, exec)?;
+    let _gb = order_input(b, exec)?;
     let includes = [TA::INCLUDES, TB::INCLUDES, TOUT::INCLUDES].concat();
     let src = assemble_source(
         &includes,
@@ -641,6 +671,8 @@ fn launch_unary<TOUT: CudaDType, TB: CudaDType>(
         return Ok(());
     }
     let exec = device.stream();
+    // order a foreign-stream input before the kernel
+    let _gb = order_input(b, exec)?;
     let includes = [TB::INCLUDES, TOUT::INCLUDES].concat();
     let src = assemble_source(&includes, &unary_source(TOUT::CNAME, TB::CNAME, expr));
     let key = make_key(device.ordinal_obj(), "rstsr_unary", &src, &[])?;

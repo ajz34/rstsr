@@ -255,3 +255,32 @@ fn faer_to_cuda_and_back() {
 }
 
 /* #endregion */
+
+#[test]
+fn linspace_endpoint_false_and_complex() {
+    require_cuda!();
+    let d = DeviceCuda::new(0);
+    let dcpu = DeviceCpuSerial::default();
+
+    // endpoint = false (and the n <= 1 boundary: output is just `start`)
+    let a: Tensor<f64, _, _> = rt::linspace((0., 1., 5, false, &d));
+    let a_cpu: Tensor<f64, _, _> = rt::linspace((0., 1., 5, false, &dcpu));
+    assert_eq!(host_vec1(&a), host_vec1(&a_cpu));
+    // exact-representable step so the literal is a readability check
+    let b: Tensor<f64, _, _> = rt::linspace((0., 1., 4, false, &d));
+    assert_eq!(host_vec1(&b), vec![0.0f64, 0.25, 0.5, 0.75]);
+    let one: Tensor<f64, _, _> = rt::linspace((3., 9., 1, false, &d));
+    assert_eq!(host_vec1(&one), vec![3.0f64]);
+
+    // complex linspace: component-wise kernel (no struct<->scalar casts)
+    let z0 = num::Complex::new(0.0f64, 1.0);
+    let z1 = num::Complex::new(1.0f64, 2.0);
+    let z = rt::linspace((z0, z1, 5, &d));
+    let z_cpu: Tensor<num::Complex<f64>, _, _> = rt::linspace((z0, z1, 5, &dcpu));
+    let got = host_vec1(&z);
+    let want = host_vec1(&z_cpu);
+    assert_eq!(got.len(), want.len());
+    for (g, w) in got.iter().zip(want.iter()) {
+        assert!((g.re - w.re).abs() < 1e-15 && (g.im - w.im).abs() < 1e-15, "{g} vs {w}");
+    }
+}
