@@ -1,0 +1,41 @@
+[package]
+name = "rstsr-cuda"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "CUDA backend for RSTSR"
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+license.workspace = true
+
+[dependencies]
+rstsr-core = { workspace = true, features = ["std"] }
+rstsr-common = { workspace = true, features = ["std"] }
+rstsr-dtype-traits = { workspace = true, features = ["half"] }
+duplicate = { workspace = true }
+num = { workspace = true }
+half = { workspace = true }
+cudarc = { version = "0.19", default-features = false, features = [
+    "std",
+    "driver",
+    "nvrtc",
+    "cuda-version-from-build-system",
+    "fallback-dynamic-loading",
+] }
+
+[dev-dependencies]
+rstsr = { path = "../../rstsr", default-features = false }
+
+[features]
+default = []
+# Pick an explicit CUDA version when the build system has no nvcc/nvcc is
+# unwanted; mutually exclusive with cuda-version-from-build-system (cudarc
+# enforces one version feature).
+cuda-12080 = ["cudarc/cuda-12080"]
+cuda-13020 = ["cudarc/cuda-13020"]
+cuda-version-from-build-system = ["cudarc/cuda-version-from-build-system"]
+# dynamic linking against the toolkit (requires LD_LIBRARY_PATH or rpath)
+dynamic-linking = ["cudarc/dynamic-linking"]
+static-linking = ["cudarc/static-linking"]
+dynamic-loading = ["cudarc/dynamic-loading"]

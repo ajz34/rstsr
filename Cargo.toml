@@ -10,6 +10,7 @@ members = [
     "rstsr-native-impl",
     "rstsr-sci-traits",
     "crates-device/rstsr-openblas",
+    "crates-device/rstsr-cuda",
     "crates-device/rstsr-mkl",
     "crates-device/rstsr-blis",
     "crates-device/rstsr-aocl",
