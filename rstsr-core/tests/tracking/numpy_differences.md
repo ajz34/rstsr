@@ -612,9 +612,11 @@ inputs with more than two axes are affected.
 rstsr's `astype` always returns a `TensorCow`: a view when the target dtype equals the
 input dtype (NumPy `copy=False`), otherwise a newly allocated dense copy in the input's
 memory order (NumPy `order='K'`). There is no `copy`, `order`, `casting` or `subok`
-argument. The cast is element-wise `DTypeCastAPI::into_cast`, so float-to-int follows
-Rust's saturating `as` semantics (NumPy leaves out-of-range float-to-int casts
-undefined under `casting='unsafe'`).
+argument (NumPy), nor a `copy` or `device` keyword (Array API); an explicit copy is
+`tensor.astype::<T>().into_owned()`. The cast is element-wise
+`DTypeCastAPI::into_cast`, so float-to-int follows Rust's saturating `as` semantics
+(NumPy leaves out-of-range float-to-int casts undefined under `casting='unsafe'`; the
+Array API also declares them implementation-defined).
 
 ## complex-to-real `astype` is unavailable
 
@@ -623,6 +625,7 @@ undefined under `casting='unsafe'`).
 - **tag:** intentional
 - **status:** open
 
-`DTypeCastAPI` implements real-to-complex and complex-to-complex casts but not
-complex-to-real ones, so `astype` from a complex tensor to a real dtype does not
-compile (NumPy allows it, discarding the imaginary part with a warning).
+`DTypeCastAPI` implements every real/bool/complex pair except complex-to-real, so
+`astype` from a complex tensor to a real dtype does not compile. NumPy allows it,
+discarding the imaginary part with a warning; the Array API explicitly forbids it, and
+the intended explicit form is `mapv` with `real` or `imag`.

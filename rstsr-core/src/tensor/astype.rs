@@ -52,10 +52,13 @@ where
 /// newly allocated dense tensor whose axes keep the input's memory order (the
 /// `order='K'` convention).
 ///
-/// The element conversion is provided by the device backend; the castable dtype
-/// pairs are the ones implemented for `DTypeCastAPI` (real-to-real,
-/// bool-to-real, real-to-complex, and complex-to-complex; complex-to-real is
-/// currently not implemented).
+/// The element conversion is provided by the device backend through
+/// `DTypeCastAPI`; every real/bool/complex pair is implemented except
+/// complex-to-real, which the Array API forbids outright (convert through
+/// `real` or `imag` first to state which component is meant). The cast follows
+/// Rust's `as` semantics: float-to-int saturates, integer-to-integer
+/// conversions wrap, and out-of-range values are implementation-defined by the
+/// Array API.
 ///
 /// This function behaves identically under [`RowMajor`] and [`ColMajor`] device default orders.
 ///
@@ -73,6 +76,9 @@ where
 ///     converted elements.
 ///
 /// # Examples
+///
+/// Cast an integer tensor to floating point; a same-dtype call returns a view
+/// without allocating:
 ///
 /// ```rust
 /// # use rstsr::prelude::*;
@@ -94,7 +100,7 @@ where
 ///
 /// # Notes of API accordance
 ///
-/// - Array-API: `astype(x, dtype, /, *, copy=True)` ([`astype`](https://data-apis.org/array-api/2024.12/API_specification/generated/array_api.astype.html))
+/// - Array-API: `astype(x, dtype, /, *, copy=True, device=None)` ([`astype`](https://data-apis.org/array-api/2024.12/API_specification/generated/array_api.astype.html))
 /// - NumPy: `ndarray.astype(dtype, order='K', casting='unsafe', subok=True, copy=True)` ([`numpy.ndarray.astype`](https://numpy.org/doc/stable/reference/generated/numpy.ndarray.astype.html))
 /// - RSTSR: `tensor.astype::<TOut>()`
 ///
@@ -102,11 +108,12 @@ where
 /// `rt::astype` takes the same generic parameters as this function, so the
 /// remaining ones have to be inferred or supplied explicitly.
 ///
-/// Please note this function does not support the `order`, `casting` and
-/// `subok` arguments of NumPy's `astype`, and there is no `copy` argument: a
-/// same-dtype conversion is always a view (NumPy's `copy=False`), while a
-/// dtype-changing conversion always allocates a dense copy in the input's
-/// memory order (NumPy's `order='K'`).
+/// This function takes no `copy` or `device` argument: a same-dtype conversion
+/// is always a view (NumPy's `copy=False`), while a dtype-changing conversion
+/// always allocates a dense copy in the input's memory order (NumPy's
+/// `order='K'`). If an explicit copy is required, call
+/// [`TensorAny::into_owned`] on the result. NumPy's `order`, `casting` and
+/// `subok` arguments are not supported.
 ///
 /// # Panics
 ///
@@ -124,7 +131,8 @@ where
 ///
 /// ## Related functions in RSTSR
 ///
-/// - [`TensorAny::mapv`]: element-wise mapping with a closure, which also allows a dtype change.
+/// - [`TensorAny::mapv`]: element-wise mapping with a closure; use it for conversions outside the
+///   cast matrix (for example complex-to-real via `real`).
 /// - [`to_contig`]: conditional copy without a dtype change.
 /// - [`reshape`]: another conversion returning [`TensorCow`], a view when the layout allows it.
 ///

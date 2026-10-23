@@ -22,7 +22,7 @@ mod doc_astype {
         //  [ 3 4 5]]
         assert!(b.is_owned());
         let expected = rt::tensor_from_nested!([[0f64, 1., 2.], [3., 4., 5.]], &device);
-        assert!(rt::allclose(&b, &expected, None));
+        crate::test_utils::assert_equal(&b, &expected, None);
         assert_eq!(format!("{b}"), "[[ 0 1 2]\n [ 3 4 5]]");
 
         // same dtype: a view, no allocation
