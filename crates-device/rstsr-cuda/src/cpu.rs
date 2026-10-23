@@ -33,9 +33,12 @@ where
     }
 }
 
+
 impl DeviceCuda {
-    /// Stage the visible elements with one batched gather + single D2H sync,
-    /// then print through the shared CPU walker on the original layout.
+    /// Fetch exactly the elements the CPU walker prints (one batched gather
+    /// and a single D2H sync), stage them compactly, and print through the
+    /// shared walker on the original layout. The host holds only the
+    /// printed subset — never a full-tensor copy.
     pub(crate) fn format_with<T, D>(
         &self,
         raw: &CudaBuffer<T>,
@@ -49,30 +52,32 @@ impl DeviceCuda {
     {
         let max_print = MAX_PRINT.load(core::sync::atomic::Ordering::Relaxed);
         let min_print = MIN_PRINT.load(core::sync::atomic::Ordering::Relaxed);
-        // Never a full-tensor D2H: fetch exactly the elements the walker
-        // touches (absolute buffer indices, offset included). The staged vec
-        // holds the FULL logical size so the walker's stride arithmetic lands
-        // on filled slots; untouched slots are seeded with one fetched element
-        // (never read by the walker, but keeps the vec sound).
         let idxs = crate::format::touched_element_indices(layout, max_print, min_print);
-        let size = layout.size();
-        let mut staged: Vec<T> = Vec::with_capacity(size);
-        if !idxs.is_empty() {
-            // one gather kernel + single blocking D2H of the gathered values
-            let fetched = match crate::kernels_ops::gather_to_host(self, raw, &idxs) {
-                Ok(v) => v,
-                Err(e) => {
-                    eprintln!("rstsr-cuda format gather error: {e}");
-                    return Err(core::fmt::Error);
-                }
-            };
-            staged.resize(size, fetched[0].clone());
-            for (slot, v) in fetched.into_iter().enumerate() {
-                staged[idxs[slot]] = v;
-            }
+        if idxs.is_empty() {
+            // zero-size tensor: the walker prints "[]" without reading data
+            return format_tensor_cpu_serial(f, &[] as &[T], layout, max_print, min_print, fmt_elem);
         }
-        let staged_layout = crate::format::staged_layout_of(layout);
-        format_tensor_cpu_serial(f, &staged, &staged_layout, max_print, min_print, fmt_elem)
+        // one gather kernel + single blocking D2H of the gathered values
+        let fetched = match crate::kernels_ops::gather_to_host(self, raw, &idxs) {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("rstsr-cuda format gather error: {e}");
+                return Err(core::fmt::Error);
+            }
+        };
+        let mut staged: std::collections::HashMap<usize, T> =
+            std::collections::HashMap::with_capacity(fetched.len());
+        for (slot, v) in fetched.into_iter().enumerate() {
+            staged.insert(idxs[slot], v);
+        }
+        format_tensor_with_getter(
+            f,
+            |i| staged.get(&i).expect("printed element was not gathered"),
+            layout,
+            max_print,
+            min_print,
+            fmt_elem,
+        )
     }
 }
 

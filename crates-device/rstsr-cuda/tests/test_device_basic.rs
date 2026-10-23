@@ -242,3 +242,65 @@ fn slice_and_ops_smoke() {
     let wide = one_view.to_broadcast(vec![2, 3]);
     assert_eq!(wide.shape(), &[2, 3]);
 }
+
+#[test]
+fn format_truncates_every_axis() {
+    require_cuda!();
+    let device = DeviceCuda::new(0);
+    let cpu = DeviceCpuSerial::default();
+    // every axis beyond MAX_PRINT (8): prefix axes truncate to head/tail 3
+    let host: Vec<f64> = (0..10 * 12 * 15).map(|i| i as f64).collect();
+    let cu = rt::asarray((host.clone(), &device)).into_shape([10, 12, 15]);
+    let cpu_t = rt::asarray((host.clone(), &cpu)).into_shape([10, 12, 15]);
+    assert_eq!(format!("{cu}"), format!("{cpu_t}"));
+    // strided (transposed) view of the same data
+    let cu_t = cu.swapaxes(0, 2);
+    let cpu_tt = cpu_t.swapaxes(0, 2);
+    assert_eq!(format!("{cu_t}"), format!("{cpu_tt}"));
+}
+
+#[test]
+fn format_strided_views_match_cpu() {
+    require_cuda!();
+    let device = DeviceCuda::new(0);
+    let cpu = DeviceCpuSerial::default();
+    let host: Vec<f64> = (0..10 * 12 * 15).map(|i| i as f64).collect();
+    let a = rt::asarray((host.clone(), &device)).into_shape([10, 12, 15]);
+    let a_cpu = rt::asarray((host.clone(), &cpu)).into_shape([10, 12, 15]);
+
+    let v = rt::arange((0., 50., 1., &device));
+    let v_cpu = rt::arange((0., 50., 1., &cpu));
+
+    // 1-D offset slice
+    assert_eq!(format!("{}", v.i(7..)), format!("{}", v_cpu.i(7..)));
+
+    // 1-D stepped slice (stride 2)
+    let s = SliceI::new(Some(0isize), None::<isize>, Some(2isize));
+    let vs = v.i(s);
+    assert_eq!(vs.layout().stride()[0], 2);
+    assert_eq!(format!("{vs}"), format!("{}", v_cpu.i(s)));
+
+    // 1-D reversed slice (negative stride)
+    let r = SliceI::new(None::<isize>, None::<isize>, Some(-1isize));
+    let vr = v.i(r);
+    assert_eq!(vr.layout().stride()[0], -1);
+    assert_eq!(format!("{vr}"), format!("{}", v_cpu.i(r)));
+
+    // 2-D slices with offsets on both axes
+    assert_eq!(format!("{}", a.i((5.., 3.., 8..))), format!("{}", a_cpu.i((5.., 3.., 8..))));
+
+    // transposed + offset
+    let at0 = a.swapaxes(0, 1);
+    assert_eq!(at0.layout().stride(), &[15, 180, 1]);
+    let at0_cpu = a_cpu.swapaxes(0, 1);
+    let at = at0.i((2.., 4..));
+    let at_cpu = at0_cpu.i((2.., 4..));
+    assert_eq!(format!("{at}"), format!("{at_cpu}"));
+
+    // permuted + offset
+    let ap0 = a.permute_dims([2, 0, 1]);
+    let ap0_cpu = a_cpu.permute_dims([2, 0, 1]);
+    let ap = ap0.i(1..);
+    let ap_cpu = ap0_cpu.i(1..);
+    assert_eq!(format!("{ap}"), format!("{ap_cpu}"));
+}

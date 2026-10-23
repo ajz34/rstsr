@@ -5,11 +5,13 @@
 
 use crate::prelude_dev::*;
 
-struct FnPrintVecWithLayout<'v, 'l, 'f1, 'f2, T, D>
+struct FnPrintVecWithLayout<'a, 'l, 'f1, 'f2, T, D, F>
 where
+    T: 'a,
     D: DimAPI,
+    F: Fn(usize) -> &'a T,
 {
-    vec: &'v [T],
+    get: F,
     layout: &'l Layout<D>,
     offset: usize,
     idx_prev: Vec<usize>,
@@ -19,11 +21,13 @@ where
     fmt_elem: fn(&T, &mut core::fmt::Formatter<'_>) -> core::fmt::Result,
 }
 
-fn print_vec_with_layout_dfs_inner<T, D>(c: &mut FnPrintVecWithLayout<T, D>) -> core::fmt::Result
+fn print_vec_with_layout_dfs_inner<'a, T, D, F>(c: &mut FnPrintVecWithLayout<'a, '_, '_, '_, T, D, F>) -> core::fmt::Result
 where
+    T: 'a,
     D: DimAPI,
+    F: Fn(usize) -> &'a T,
 {
-    let FnPrintVecWithLayout { vec, layout, offset, idx_prev, max_print, min_print, fmt, fmt_elem } = c;
+    let FnPrintVecWithLayout { get, layout, offset, idx_prev, max_print, min_print, fmt, fmt_elem } = c;
     let max_print = *max_print;
     let min_print = *min_print;
     let ndim = layout.ndim();
@@ -35,7 +39,7 @@ where
 
     // special case
     if ndim == 0 {
-        return fmt_elem(&vec[layout.offset()], fmt);
+        return fmt_elem(get(layout.offset()), fmt);
     }
 
     if idx_prev.last().is_some_and(|&v| v == shape[len_prev - 1]) {
@@ -114,20 +118,20 @@ where
                 for i in 0..nlast {
                     let offset_i = (offset as isize + i as isize * stride_last) as usize;
                     write!(fmt, " ")?;
-                    fmt_elem(&vec[offset_i], fmt)?;
+                    fmt_elem(get(offset_i), fmt)?;
                 }
             } else {
                 // only print the first/last min_print elements
                 for i in 0..min_print {
                     let offset_i = (offset as isize + i as isize * stride_last) as usize;
                     write!(fmt, " ")?;
-                    fmt_elem(&vec[offset_i], fmt)?;
+                    fmt_elem(get(offset_i), fmt)?;
                 }
                 write!(fmt, " ...")?;
                 for i in (nlast - min_print)..nlast {
                     let offset_i = (offset as isize + i as isize * stride_last) as usize;
                     write!(fmt, " ")?;
-                    fmt_elem(&vec[offset_i], fmt)?;
+                    fmt_elem(get(offset_i), fmt)?;
                 }
             };
 
@@ -186,6 +190,29 @@ where
     }
 }
 
+/// Print a tensor through `layout`, obtaining each element lazily from
+/// `get` by its absolute flat buffer index. Callers may therefore stage
+/// only the elements the walker visits (e.g. a fetched subset), not the
+/// whole buffer.
+pub fn format_tensor_with_getter<'a, T, D, F>(
+    fmt: &mut core::fmt::Formatter<'_>,
+    get: F,
+    layout: &Layout<D>,
+    max_print: usize,
+    min_print: usize,
+    fmt_elem: fn(&T, &mut core::fmt::Formatter<'_>) -> core::fmt::Result,
+) -> core::fmt::Result
+where
+    T: 'a,
+    D: DimAPI,
+    F: Fn(usize) -> &'a T,
+{
+    let idx_prev = vec![];
+    let offset = layout.offset();
+    let mut config = FnPrintVecWithLayout { get, layout, offset, idx_prev, max_print, min_print, fmt, fmt_elem };
+    print_vec_with_layout_dfs_inner(&mut config)
+}
+
 /// Print a host slice through `layout`, formatting each element with `fmt_elem`.
 pub fn format_tensor_cpu_serial<T, D>(
     fmt: &mut core::fmt::Formatter<'_>,
@@ -198,8 +225,5 @@ pub fn format_tensor_cpu_serial<T, D>(
 where
     D: DimAPI,
 {
-    let idx_prev = vec![];
-    let offset = layout.offset();
-    let mut config = FnPrintVecWithLayout { vec, layout, offset, idx_prev, max_print, min_print, fmt, fmt_elem };
-    print_vec_with_layout_dfs_inner(&mut config)
+    format_tensor_with_getter(fmt, |i| &vec[i], layout, max_print, min_print, fmt_elem)
 }
