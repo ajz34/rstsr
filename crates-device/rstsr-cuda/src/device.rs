@@ -22,11 +22,12 @@ use std::sync::Arc;
 ///
 /// `same_device` compares:
 /// - ordinal identity (Arc ptr-eq);
-/// - the execution stream;
 /// - flags **as stored** (`None` vs `Some(x)` differ even when the global is `x`);
 /// - `default_order` (the CPU-device precedent).
 ///
-/// Flags are compared as stored, never resolved.
+/// The execution stream is not compared: ops order foreign-stream inputs
+/// with event record/wait, so tensors on different streams of one ordinal
+/// interact correctly. Flags are compared as stored, never resolved.
 #[derive(Clone, Debug)]
 pub struct DeviceCuda {
     pub(crate) ordinal: Arc<CudaOrdinalObj>,
@@ -136,9 +137,11 @@ impl Default for DeviceCuda {
 }
 
 impl DeviceBaseAPI for DeviceCuda {
+    /// Same ordinal + flags-as-stored + order. The execution stream is NOT
+    /// compared: stream differences are an op-level ordering concern
+    /// (event record/wait on foreign-stream inputs), not a type-level gate.
     fn same_device(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.ordinal, &other.ordinal)
-            && self.stream == other.stream
             && self.flags == other.flags
             && self.default_order == other.default_order
     }
@@ -206,7 +209,9 @@ impl<T> DeviceStorageAPI<T> for DeviceCuda {
     }
 }
 
-impl<T> DeviceAPI<T> for DeviceCuda where T: Clone + Send + Sync + 'static {}
+// No bounds (CPU-device precedent): storage is byte-erased, so every type
+// is storable; capability gating lives on the op-impl level (`CudaDType`).
+impl<T> DeviceAPI<T> for DeviceCuda {}
 
 /// Display prints `cuda:<ordinal>`; `Debug` is the detailed form.
 impl core::fmt::Display for DeviceCuda {

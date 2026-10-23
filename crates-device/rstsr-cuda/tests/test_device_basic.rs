@@ -70,12 +70,13 @@ fn same_device_matrix() {
     let mut d_pin2 = d1.clone();
     d_pin2.set_flags_override(Some(CudaRuntimeFlags::default()));
     assert!(d_pin.same_device(&d_pin2));
-    // stream participates
+    // stream does NOT participate (kernel-round decision D8): different
+    // streams of one ordinal are same-device; ops order them via events.
     let s2 = d1.ordinal_obj().context().new_stream().unwrap();
     let s2obj = Arc::new(CudaStreamObj::wrap(d1.ordinal(), s2));
     let mut d_stream = d1.clone();
     d_stream.set_stream(s2obj);
-    assert!(!d1.same_device(&d_stream));
+    assert!(d1.same_device(&d_stream));
 }
 
 #[test]

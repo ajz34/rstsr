@@ -29,6 +29,8 @@ rstsr = { path = "../../rstsr", default-features = false }
 
 [features]
 default = []
+# CPU reference device interop (DeviceFaer <-> DeviceCuda conversions).
+faer = ["rstsr-core/faer"]
 # Pick an explicit CUDA version when the build system has no nvcc/nvcc is
 # unwanted; mutually exclusive with cuda-version-from-build-system (cudarc
 # enforces one version feature).
@@ -39,3 +41,8 @@ cuda-version-from-build-system = ["cudarc/cuda-version-from-build-system"]
 dynamic-linking = ["cudarc/dynamic-linking"]
 static-linking = ["cudarc/static-linking"]
 dynamic-loading = ["cudarc/dynamic-loading"]
+
+[[bench]]
+name = "bench_elementwise"
+harness = false
+required-features = []

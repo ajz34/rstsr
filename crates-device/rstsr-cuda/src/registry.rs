@@ -20,6 +20,11 @@ pub struct CudaOrdinalObj {
     /// The default execution stream of this ordinal (non-blocking; never the
     /// legacy null stream). New devices start on it.
     pub(crate) default_stream: Arc<CudaStreamObj>,
+    /// Per-ordinal compiled-kernel cache (lazily initialized).
+    pub(crate) kernel_cache_slot: OnceLock<crate::kernel::KernelCachePublic>,
+    /// Cached arch string (one driver query per ordinal).
+    pub(crate) arch_slot:
+        OnceLock<core::result::Result<String, rstsr_core::prelude_dev::Error>>,
 }
 
 impl CudaOrdinalObj {
@@ -27,7 +32,13 @@ impl CudaOrdinalObj {
     pub(crate) fn new(ordinal: usize) -> Result<Self> {
         let ctx = CudaContext::new(ordinal).map_err(map_driver_error)?;
         let default_stream = CudaStreamObj::new(&ctx)?;
-        Ok(Self { ordinal, ctx, default_stream: Arc::new(default_stream) })
+        Ok(Self {
+            ordinal,
+            ctx,
+            default_stream: Arc::new(default_stream),
+            kernel_cache_slot: OnceLock::new(),
+            arch_slot: OnceLock::new(),
+        })
     }
 
     /// The CUDA ordinal this object belongs to.

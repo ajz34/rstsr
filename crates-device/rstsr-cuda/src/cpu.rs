@@ -34,9 +34,8 @@ where
 }
 
 impl DeviceCuda {
-    /// Stage the visible elements one `d2h_scalar` at a time, then print
-    /// through the shared CPU walker on the original layout.
-    /// // DEFER: single gather kernel; correctness does not depend on this.
+    /// Stage the visible elements with one batched gather + single D2H sync,
+    /// then print through the shared CPU walker on the original layout.
     pub(crate) fn format_with<T, D>(
         &self,
         raw: &CudaBuffer<T>,
@@ -54,16 +53,22 @@ impl DeviceCuda {
         // touches (absolute buffer indices, offset included). The staged vec
         // holds the FULL logical size so the walker's stride arithmetic lands
         // on filled slots; untouched slots are seeded with one fetched element
-        // (never read by the walker, but keeps the vec sound). Printing then
-        // goes through the shared walker on the original layout.
+        // (never read by the walker, but keeps the vec sound).
         let idxs = crate::format::touched_element_indices(layout, max_print, min_print);
         let size = layout.size();
         let mut staged: Vec<T> = Vec::with_capacity(size);
         if !idxs.is_empty() {
-            let seed = transfer::d2h_scalar(raw, idxs[0]);
-            staged.resize(size, seed);
-            for &i in &idxs {
-                staged[i] = transfer::d2h_scalar(raw, i);
+            // one gather kernel + single blocking D2H of the gathered values
+            let fetched = match crate::kernels_ops::gather_to_host(self, raw, &idxs) {
+                Ok(v) => v,
+                Err(e) => {
+                    eprintln!("rstsr-cuda format gather error: {e}");
+                    return Err(core::fmt::Error);
+                }
+            };
+            staged.resize(size, fetched[0].clone());
+            for (slot, v) in fetched.into_iter().enumerate() {
+                staged[idxs[slot]] = v;
             }
         }
         let staged_layout = crate::format::staged_layout_of(layout);

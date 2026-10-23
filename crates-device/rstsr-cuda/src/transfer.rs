@@ -162,38 +162,7 @@ pub(crate) fn fill_naive<T: Clone>(raw: &mut CudaBuffer<T>, fill: &T) -> Result<
     map_driver_result(stream.synchronize())
 }
 
-/// Overwrite the contents of an existing (already-allocated) buffer from a
-/// compact host vector (blocking; used by the DEFER assign/fill paths).
-pub(crate) fn h2d_into<T>(buf: &mut CudaBuffer<T>, vec: Vec<T>) -> Result<()> {
-    rstsr_assert_eq!(buf.len(), vec.len(), InvalidValue)?;
-    let byte_len = vec.len() * core::mem::size_of::<T>();
-    if byte_len > 0 {
-        let bytes = unsafe { core::slice::from_raw_parts(vec.as_ptr() as *const u8, byte_len) };
-        let stream = buf.as_bytes().stream().clone();
-        let ptr = base_ptr_mut(buf);
-        unsafe {
-            map_driver_result_alloc(result::memcpy_htod_async(ptr, bytes, stream.cu_stream()), byte_len)?;
-            map_driver_result(stream.synchronize())?;
-        }
-    }
-    Ok(())
-}
-
-/// Overwrite an existing uninit-tagged buffer from a compact host vector.
-pub(crate) fn h2d_into_uninit<T>(
-    buf: &mut CudaBuffer<MaybeUninit<T>>,
-    vec: Vec<T>,
-) -> Result<()> {
-    rstsr_assert_eq!(buf.len(), vec.len(), InvalidValue)?;
-    let byte_len = vec.len() * core::mem::size_of::<T>();
-    if byte_len > 0 {
-        let bytes = unsafe { core::slice::from_raw_parts(vec.as_ptr() as *const u8, byte_len) };
-        let stream = buf.as_bytes().stream().clone();
-        let ptr = base_ptr_mut(buf);
-        unsafe {
-            map_driver_result_alloc(result::memcpy_htod_async(ptr, bytes, stream.cu_stream()), byte_len)?;
-            map_driver_result(stream.synchronize())?;
-        }
-    }
-    Ok(())
-}
+// DEFER: h2d_into / h2d_into_uninit (blocking overwrite of an existing
+// buffer from a host vector) were removed as orphaned by the kernel-based
+// assign/fill round; reintroduce with the DEFER-path retirement of any
+// remaining host round-trips if a caller appears.

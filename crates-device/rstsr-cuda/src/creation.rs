@@ -17,9 +17,21 @@ where
 
     fn full_impl(&self, len: usize, fill: T) -> Result<Storage<DataOwned<CudaBuffer<T>>, T, Self>>
     where
-        T: Clone,
+        T: Clone + Send + Sync + 'static,
     {
-        // DEFER: device fill kernel; correctness does not depend on this
+        // kernel path when T is a CudaDType (fill_dispatch, identity cast);
+        // the naive geometric-doubling path stays for other T
+        // fill via the byte-erased path: any T whose TypeId is in the
+        // CudaDType set (f32/f64/i32/i64/u8..u64/i16/u16/i8/u8/bool/half/
+        // complex) is fillable by the byte kernel; others keep the naive path
+        if crate::kernels_ops::is_fill_supported(&fill) {
+            let mut raw = CudaBuffer::new(self.stream(), len)?;
+            let layout = Layout::new(vec![len], vec![1_isize], 0)?;
+            crate::kernels_ops::fill_bytes_erased(self, &mut raw, &layout, &fill)?;
+            return Ok(Storage::new(DataOwned::from(raw), self.clone()));
+        }
+        // DEFER: extend the TypeId list to all CudaDType members or move the
+        // bound onto a dedicated creation trait fork
         let mut raw = CudaBuffer::new(self.stream(), len)?;
         transfer::fill_naive(&mut raw, &fill)?;
         Ok(Storage::new(DataOwned::from(raw), self.clone()))
@@ -59,6 +71,7 @@ where
     }
 }
 
+
 impl<T> DeviceCreationNumAPI<T> for DeviceCuda
 where
     Self: DeviceRawAPI<T, Raw = CudaBuffer<T>>,
@@ -75,5 +88,59 @@ where
         T: Clone,
     {
         self.full_impl(len, T::one())
+    }
+}
+
+impl<T> DeviceCreationArangeAPI<T> for DeviceCuda
+where
+    Self: DeviceRawAPI<T, Raw = CudaBuffer<T>>,
+    T: crate::dtype::CudaDType
+        + PartialOrd
+        + Clone
+        + core::ops::Add<Output = T>
+        + core::ops::Sub<Output = T>
+        + core::ops::Div<Output = T>
+        + num::ToPrimitive
+        + Send
+        + Sync
+        + 'static,
+{
+    fn arange_impl(&self, start: T, end: T, step: T) -> Result<Storage<DataOwned<CudaBuffer<T>>, T, Self>> {
+        // length: ceil((end - start) / step) in f64 — one division, matching
+        // the accelerated CPU path; elements [i] = start + step*i in-kernel
+        let n = {
+            let zero = start.clone() - start.clone();
+            rstsr_assert!(step != zero, InvalidValue, "arange step must be nonzero")?;
+            let fs = start.to_f64().unwrap_or(f64::NAN);
+            let fe = end.to_f64().unwrap_or(f64::NAN);
+            let fst = step.to_f64().unwrap_or(f64::NAN);
+            let span = (fe - fs) / fst;
+            if span <= 0.0 {
+                0usize
+            } else {
+                span.ceil() as usize
+            }
+        };
+        // DEFER: step sign/zero validation mirrors the tensor layer; the
+        // kernel writes start + step*i directly.
+        let buf = crate::kernels_ops::sequence(self, n, start, step)?;
+        Ok(Storage::new(DataOwned::from(buf), self.clone()))
+    }
+}
+
+impl<T> DeviceCreationComplexFloatAPI<T> for DeviceCuda
+where
+    Self: DeviceRawAPI<T, Raw = CudaBuffer<T>>,
+    T: crate::dtype::CudaDType + num::complex::ComplexFloat + Clone + Send + Sync + 'static,
+{
+    fn linspace_impl(
+        &self,
+        start: T,
+        end: T,
+        n: usize,
+        endpoint: bool,
+    ) -> Result<Storage<DataOwned<CudaBuffer<T>>, T, Self>> {
+        let buf = crate::kernels_ops::linspace(self, n, start, end, endpoint)?;
+        Ok(Storage::new(DataOwned::from(buf), self.clone()))
     }
 }
