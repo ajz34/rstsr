@@ -17,12 +17,12 @@ where
     D: DimAPI,
     B: DeviceAPI<T> + DeviceToCpuAPI<T> + DeviceCreationAnyAPI<T> + OpAssignAPI<T, Ix1>,
 {
-    let raw = t.to_raw_f().unwrap();
+    let raw = t.to_raw_f().rstsr_unwrap();
     DeviceToCpuAPI::<T>::to_cpu_vec::<DataOwned<<B as DeviceRawAPI<T>>::Raw>>(&Storage::new(
         DataOwned::from(raw),
         t.device().clone(),
     ))
-    .unwrap()
+    .rstsr_unwrap()
 }
 
 /// Layout-ordered host values of an f64 tensor (N-d safe: the D2H goes
@@ -34,7 +34,7 @@ where
     B: DeviceAPI<f64> + DeviceToCpuAPI<f64> + DeviceCreationAnyAPI<f64> + OpAssignArbitaryAPI<f64, D, D>,
 {
     let contig = t.to_contig(RowMajor);
-    DeviceToCpuAPI::<f64>::to_cpu_vec(contig.storage()).unwrap()
+    DeviceToCpuAPI::<f64>::to_cpu_vec(contig.storage()).rstsr_unwrap()
 }
 
 macro_rules! require_cuda {
@@ -54,7 +54,7 @@ fn assign_strided_view_sources() {
     let d = DeviceCuda::new(0);
     let a: Tensor<f64, _, _> = rt::arange((0., 12., 1., &d)).into_shape([3, 4]);
 
-    // transpose (strided view) -> to_contig: the D11 regression shape
+    // transpose (strided view) -> to_contig: the strided-source regression shape
     let at = a.swapaxes(0, 1);
     let at_contig = at.to_contig(RowMajor);
     let want = host_nd(&at);
@@ -185,10 +185,14 @@ fn unary_float_vs_cpu() {
     let a_cpu = a.to_device(&dcpu);
     let s = rt::sin(&a);
     let want: Vec<f64> = host_vec1(&rt::sin(&a_cpu));
-    assert!(host_vec1(&s).iter().zip(want.iter()).all(|(x, y)| (x - y).abs() < 1e-12));
+    let got = host_vec1(&s);
+    assert_eq!(got.len(), want.len());
+    assert!(got.iter().zip(want.iter()).all(|(x, y)| (x - y).abs() < 1e-12));
     let e = rt::exp(&a);
     let want_e: Vec<f64> = host_vec1(&rt::exp(&a_cpu));
-    assert!(host_vec1(&e).iter().zip(want_e.iter()).all(|(x, y)| (x - y).abs() < 1e-12));
+    let got_e = host_vec1(&e);
+    assert_eq!(got_e.len(), want_e.len());
+    assert!(got_e.iter().zip(want_e.iter()).all(|(x, y)| (x - y).abs() < 1e-12));
 }
 
 /* #endregion */
@@ -203,7 +207,7 @@ fn same_device_relaxed_streams() {
     let s2obj = Arc::new(CudaStreamObj::wrap(d1.ordinal(), s2));
     let mut d2 = d1.clone();
     d2.set_stream(s2obj);
-    // different streams, same ordinal: same-device (D8)
+    // different streams, same ordinal: same device
     assert!(d1.same_device(&d2));
     // a cross-stream op succeeds and orders correctly
     let a = rt::arange((0., 16., 1., &d1));
@@ -282,5 +286,76 @@ fn linspace_endpoint_false_and_complex() {
     assert_eq!(got.len(), want.len());
     for (g, w) in got.iter().zip(want.iter()) {
         assert!((g.re - w.re).abs() < 1e-15 && (g.im - w.im).abs() < 1e-15, "{g} vs {w}");
+    }
+}
+
+#[test]
+fn scalar_ops_and_inplace_unary() {
+    require_cuda!();
+    let d = DeviceCuda::new(0);
+    let dcpu = DeviceCpuSerial::default();
+    let a = rt::arange((0., 16., 1., &d)).into_shape([4, 4]);
+    let a_cpu = rt::arange((0., 16., 1., &dcpu)).into_shape([4, 4]);
+
+    // tensor-scalar arithmetic (scalar is a kernel argument, no staging sync)
+    assert_eq!(host_nd(&(&a + 1.5)), host_nd(&(&a_cpu + 1.5)));
+    assert_eq!(host_nd(&(2.0 - &a)), host_nd(&(2.0 - &a_cpu)));
+    assert_eq!(host_nd(&(&a * 3.0)), host_nd(&(&a_cpu * 3.0)));
+
+    // tensor-scalar comparisons, both orientations (1-D for to_vec)
+    let v = rt::arange((0., 16., 1., &d));
+    let v_cpu = rt::arange((0., 16., 1., &dcpu));
+    assert_eq!(host_vec1(&rt::lt(&v, 7.0)), host_vec1(&rt::lt(&v_cpu, 7.0)));
+    assert_eq!(host_vec1(&rt::gt(7.0, &v)), host_vec1(&rt::gt(7.0, &v_cpu)));
+    assert_eq!(host_vec1(&rt::eq(&v, 3.0)), host_vec1(&rt::eq(&v_cpu, 3.0)));
+
+    // in-place unary on an owned tensor
+    let b = rt::arange((0.1, 16.1, 1., &d)).into_shape([4, 4]);
+    let b_cpu = rt::arange((0.1, 16.1, 1., &dcpu)).into_shape([4, 4]);
+    let s = rt::sin(b);
+    let got = host_nd(&s);
+    let want = host_nd(&rt::sin(&b_cpu));
+    assert_eq!(got.len(), want.len());
+    assert!(got.iter().zip(want.iter()).all(|(x, y)| (x - y).abs() < 1e-12));
+}
+
+#[test]
+fn elementwise_negative_stride() {
+    require_cuda!();
+    let d = DeviceCuda::new(0);
+    let dcpu = DeviceCpuSerial::default();
+    let v = rt::arange((0., 32., 1., &d));
+    let v_cpu = rt::arange((0., 32., 1., &dcpu));
+    let r = SliceI::new(None::<isize>, None::<isize>, Some(-2isize));
+    let a = v.i(r);
+    let a_cpu = v_cpu.i(r);
+    assert_eq!(a.layout().stride()[0], -2);
+    assert_eq!(host_vec1(&rt::add(&a, &a)), host_vec1(&rt::add(&a_cpu, &a_cpu)));
+    let s_cuda: Vec<f64> = host_vec1(&rt::sin(&a));
+    let s_cpu: Vec<f64> = host_vec1(&rt::sin(&a_cpu));
+    assert_eq!(s_cuda.len(), s_cpu.len());
+    assert!(s_cuda.iter().zip(s_cpu.iter()).all(|(x, y)| (x - y).abs() < 1e-12));
+}
+
+#[test]
+fn cross_stream_ordering_loop() {
+    require_cuda!();
+    // produce on stream A, consume on stream B, every iteration; event
+    // ordering must make each read see the produced values
+    let d1 = DeviceCuda::new(0);
+    let s2 = d1.ordinal_obj().context().new_stream().unwrap();
+    let s2obj = Arc::new(CudaStreamObj::wrap(d1.ordinal(), s2));
+    let mut d2 = d1.clone();
+    d2.set_stream(s2obj);
+    for _ in 0..50 {
+        let a = rt::arange((0., 4096., 1., &d1));
+        let mut c: Tensor<f64, _, _> = rt::zeros(([4096], &d2));
+        c.assign(&a);
+        let r = rt::add(&c, &c);
+        let v = host_vec1(&r);
+        assert_eq!(v.len(), 4096);
+        assert_eq!(v[0], 0.0);
+        assert_eq!(v[1], 2.0);
+        assert_eq!(v[4095], 8190.0);
     }
 }

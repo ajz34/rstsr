@@ -45,4 +45,3 @@ dynamic-loading = ["cudarc/dynamic-loading"]
 [[bench]]
 name = "bench_elementwise"
 harness = false
-required-features = []

@@ -19,11 +19,8 @@ where
     where
         T: Clone + Send + Sync + 'static,
     {
-        // kernel path when T is a CudaDType (fill_dispatch, identity cast);
-        // the naive geometric-doubling path stays for other T
-        // fill via the byte-erased path: any T whose TypeId is in the
-        // CudaDType set (f32/f64/i32/i64/u8..u64/i16/u16/i8/u8/bool/half/
-        // complex) is fillable by the byte kernel; others keep the naive path
+        // kernel fill for the TypeIds `is_fill_supported` lists; other T
+        // (half, complex, i128/u128) keep the host geometric-doubling path
         if crate::kernels_ops::is_fill_supported(&fill) {
             let mut raw = CudaBuffer::new(self.stream(), len)?;
             let layout = Layout::new(vec![len], vec![1_isize], 0)?;

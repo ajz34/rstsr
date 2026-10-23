@@ -47,7 +47,7 @@ impl DeviceCuda {
         fmt_elem: fn(&T, &mut Formatter<'_>) -> core::fmt::Result,
     ) -> core::fmt::Result
     where
-        T: Clone,
+        T: Copy,
         D: DimAPI,
     {
         let max_print = MAX_PRINT.load(core::sync::atomic::Ordering::Relaxed);
@@ -58,12 +58,8 @@ impl DeviceCuda {
             return format_tensor_cpu_serial(f, &[] as &[T], layout, max_print, min_print, fmt_elem);
         }
         // one gather kernel + single blocking D2H of the gathered values
-        let fetched = match crate::kernels_ops::gather_to_host(self, raw, &idxs) {
-            Ok(v) => v,
-            Err(e) => {
-                eprintln!("rstsr-cuda format gather error: {e}");
-                return Err(core::fmt::Error);
-            }
+        let Ok(fetched) = crate::kernels_ops::gather_to_host(self, raw, &idxs) else {
+            return Err(core::fmt::Error);
         };
         let mut staged: std::collections::HashMap<usize, T> =
             std::collections::HashMap::with_capacity(fetched.len());

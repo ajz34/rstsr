@@ -161,8 +161,3 @@ pub(crate) fn fill_naive<T: Clone>(raw: &mut CudaBuffer<T>, fill: &T) -> Result<
     }
     map_driver_result(stream.synchronize())
 }
-
-// DEFER: h2d_into / h2d_into_uninit (blocking overwrite of an existing
-// buffer from a host vector) were removed as orphaned by the kernel-based
-// assign/fill round; reintroduce with the DEFER-path retirement of any
-// remaining host round-trips if a caller appears.

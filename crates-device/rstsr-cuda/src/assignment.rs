@@ -1,7 +1,7 @@
 //! `OpAssignAPI` / `OpAssignArbitaryAPI` for `DeviceCuda` — kernel-backed.
 //!
 //! Same-dtype assigns use the dtype-free byte-copy kernel; cross-dtype
-//! assigns generate a cast kernel per (TA, TC) pair (D6). Contiguous
+//! assigns generate a cast kernel per (TA, TC) pair. Contiguous
 //! whole-buffer pairs still take the `memcpy_dtod` fast path (async).
 
 use crate::buffer::CudaBuffer;
@@ -138,7 +138,7 @@ where
 /// # Safety
 /// `MaybeUninit<T>` and `T` have identical layout (standard library
 /// guarantee); the buffer wrapper adds no layout of its own.
-unsafe fn transmute_mut<T>(b: &mut CudaBuffer<MaybeUninit<T>>) -> &mut CudaBuffer<T> {
+pub(crate) unsafe fn transmute_mut<T>(b: &mut CudaBuffer<MaybeUninit<T>>) -> &mut CudaBuffer<T> {
     &mut *(b as *mut CudaBuffer<MaybeUninit<T>> as *mut CudaBuffer<T>)
 }
 

@@ -1,24 +1,12 @@
-//! Kernel compilation, caching, and launch (B1 infrastructure, D2–D4).
+//! Kernel compilation, caching, and launch.
 //!
-//! - Sources are Rust-generated CUDA C per kernel family with a shared
-//!   prelude; one NVRTC program per specialization, loaded lazily.
-//! - Compilation: PTX via the safe layer, `compute_<cc>` arch derived at
-//!   runtime from the device; strict library-fixed options.
-//! - Cache: per-ordinal in-memory `KernelKey -> Arc<CudaFunction>` plus an
-//!   on-disk cache of the **PTX text** (what `load_module` consumes).
-//! - `FlatLaunch`: raw `result::launch_kernel` with a hand-built `void*`
-//!   param array — marshaling is plain bytes (device pointers as u64,
-//!   lengths/strides as u64, fill scalars as little-endian bytes), so no
-//!   cudarc dtype trait is ever on our path. It is the **flat 1-D**
-//!   launcher (one element per thread); reductions (block reductions,
-//!   capped grid), GEMM (2-D tiles), and scans (multi-pass) need their
-//!   own launchers.
-//!
-//! Layout convention (D9 T0 floor): kernels are rank-generic, taking
-//! runtime shape/stride arrays (element units, pre-multiplied host-side)
-//! plus the base pointer and offset. Copy/fill-bytes/gather kernels work
-//! in bytes on `char*` and are dtype-free (one entry per arch); typed
-//! kernels generate from `CudaDType::CNAME`.
+//! Sources are generated CUDA C; compilation goes through NVRTC (PTX)
+//! with a runtime-derived arch, and compiled functions are cached per
+//! ordinal in memory and on disk. `FlatLaunch` is the flat
+//! one-element-per-thread launcher for elementwise/copy/gather/sequence
+//! kernels; other kernel classes (reductions, GEMM, scans) get their own
+//! geometry. Marshaling is plain bytes, so no cudarc dtype trait is on
+//! our path.
 
 use crate::buffer::CudaBuffer;
 use crate::error::{map_driver_error, map_driver_result};
@@ -32,7 +20,7 @@ use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
 /// Shared CUDA C prelude: fixed-width names, complex pairs, IEEE helpers.
 pub(crate) const CUDA_PRELUDE: &str = r#"
@@ -44,9 +32,6 @@ struct rstsr_c32 { float re, im; };
 struct rstsr_c64 { double re, im; };
 __device__ rstsr_c32 make_c32(float re, float im) { rstsr_c32 v; v.re = re; v.im = im; return v; }
 __device__ rstsr_c64 make_c64(double re, double im) { rstsr_c64 v; v.re = re; v.im = im; return v; }
-__device__ int rstsr_isnan_f(float x) { return x != x; }
-__device__ int rstsr_isnan_d(double x) { return x != x; }
-#define rstsr_isnan(x) _Generic((x), float: rstsr_isnan_f, double: rstsr_isnan_d, default: (int)(x != x))
 "#;
 
 /// Bump when generated-source semantics or the disk payload change.
@@ -76,7 +61,7 @@ impl KernelKey {
     }
 }
 
-/// Library-fixed compile options (D3). `arch` enters separately.
+/// Library-fixed compile options. `arch` enters separately.
 fn compile_options(extra: &[&str]) -> Vec<String> {
     let mut opts: Vec<String> = vec!["--std=c++17".into()];
     opts.extend(extra.iter().map(|s| s.to_string()));
@@ -100,7 +85,7 @@ fn cache_dir() -> Option<PathBuf> {
     Some(base.join("rstsr").join("cuda"))
 }
 
-/// Per-ordinal compiled-kernel cache (D4). Lives in `CudaOrdinalObj`'s
+/// Per-ordinal compiled-kernel cache. Lives in `CudaOrdinalObj`'s
 /// `OnceLock` slot; `pub(crate)` for the field type only.
 #[derive(Default)]
 pub(crate) struct KernelCachePublic {
@@ -155,14 +140,14 @@ impl CudaOrdinalObj {
 
     fn compile_now(&self, key: &KernelKey) -> Result<String> {
         let options: Vec<String> = key.options.split('\u{1}').map(|s| s.to_string()).collect();
-        let arch: &'static str = Box::leak(key.arch.clone().into_boxed_str());
+        let arch = arch_static(&key.arch);
         let opts = cudarc::nvrtc::CompileOptions { arch: Some(arch), options, ..Default::default() };
         let ptx = cudarc::nvrtc::compile_ptx_with_opts(&key.source, opts)
             .map_err(|e| rstsr_error!(DeviceError, "NVRTC compile failed for kernel `{}`: {e:?}", key.name))?;
         Ok(ptx.to_src())
     }
 
-    /// `compute_<major><minor>` arch string of this ordinal (D3); cached
+    /// `compute_<major><minor>` arch string of this ordinal; cached
     /// after the first driver query (launch-path hot).
     pub(crate) fn arch_string(&self) -> Result<String> {
         let cached = self.arch_slot.get_or_init(|| {
@@ -176,47 +161,35 @@ impl CudaOrdinalObj {
     }
 }
 
-/// Build a key for `name` compiled from `source` on `ordinal`. Memoized by
-/// hashing (source, arch, options) — sources are static strings per
-/// specialization, so repeat calls skip the String rebuild via a cheap hash
-/// lookup (launch-path hot). The full source still lives in the key.
+/// Build a key for `name` compiled from `source` on `ordinal`. Callers
+/// with static source pass a cached assembled string (see
+/// `kernels_ops::*_assembled`); dtype-specialized callers build it per call.
 pub(crate) fn make_key(ordinal: &CudaOrdinalObj, name: &str, source: &str, extra: &[&str]) -> Result<KernelKey> {
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
-    use std::sync::Mutex;
-    thread_local! {
-        static KEY_CACHE: Mutex<HashMap<(u64, KernelKey), ()>> = Mutex::new(HashMap::new());
-    }
     let arch = ordinal.arch_string()?;
     let options = compile_options(extra).join("\u{1}");
-    let mut h = DefaultHasher::new();
-    source.hash(&mut h);
-    arch.hash(&mut h);
-    options.hash(&mut h);
-    let digest = h.finish();
-    let key = KernelKey {
-        name: name.to_string(),
-        source: source.to_string(),
-        arch,
-        options,
-    };
-    // memo: skip the clone if this exact key was built before (rare re-use
-    // of an Arc'd CudaFunction still happens through the ordinal cache; this
-    // memo only avoids re-allocating key strings)
-    KEY_CACHE.with(|m| {
-        let mut guard = m.lock().unwrap_or_else(|e| e.into_inner());
-        guard.insert((digest, key.clone()), ());
-    });
-    Ok(key)
+    Ok(KernelKey { name: name.to_string(), source: source.to_string(), arch, options })
+}
+
+/// Intern one `&'static str` per distinct arch (the safe NVRTC layer
+/// takes `&'static str`; the set is bounded by the visible devices).
+fn arch_static(arch: &str) -> &'static str {
+    static ARCHES: OnceLock<Mutex<HashMap<String, &'static str>>> = OnceLock::new();
+    let mut guard = ARCHES.get_or_init(|| Mutex::new(HashMap::new())).lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(s) = guard.get(arch) {
+        return s;
+    }
+    let leaked: &'static str = Box::leak(arch.to_string().into_boxed_str());
+    guard.insert(arch.to_string(), leaked);
+    leaked
 }
 
 /// Flat launch geometry: one element per thread, 256-thread blocks (the
 /// kernel guards the tail). 256 divides every SM's thread capacity evenly
 /// and is supported by all CUDA GPUs; per-arch tuning is deferred to the
-/// multi-element/vectorized kernel round.
+/// future vectorized/multi-element kernels.
 const BLOCK: u32 = 256;
 
-/// Flat 1-D launcher (D2): one element per thread, `ceil(n / BLOCK)`
+/// Flat 1-D launcher: one element per thread, `ceil(n / BLOCK)`
 /// blocks, no shared memory; owns the param storage for one launch.
 /// Elementwise/gather/sequence kernels use this; other kernel classes
 /// (reductions, GEMM, scans) get their own launch geometry.
@@ -244,6 +217,11 @@ impl<'a> FlatLaunch<'a> {
 
     pub fn arg_usize(self, v: usize) -> Self {
         self.arg_u64(v as u64)
+    }
+
+    /// Push a 32-bit `int`/`unsigned` kernel parameter (exact width).
+    pub fn arg_i32(self, v: i32) -> Self {
+        self.arg_bytes(&v.to_ne_bytes())
     }
 
     /// Base device pointer of `buf` (null for empty buffers).
@@ -277,7 +255,7 @@ impl<'a> FlatLaunch<'a> {
     }
 }
 
-/// Blocking-sync event wrapper for cross-stream ordering (D8).
+/// Event wrapper for cross-stream ordering.
 pub(crate) struct Event(CUevent);
 
 impl Event {

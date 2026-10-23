@@ -6,6 +6,7 @@
 //! bound (compile error), matching the "omit" policy for host-closure ops.
 
 use core::fmt::Debug;
+use duplicate::duplicate_item;
 use half::{bf16, f16};
 use num::Complex;
 
@@ -23,46 +24,49 @@ pub trait CudaDType: Clone + Send + Sync + Debug + 'static {
     const INCLUDES: &'static [&'static str] = &[];
 }
 
-macro_rules! impl_cuda_dtype {
-    ($t: ty, $name: literal) => {
-        impl CudaDType for $t {
-            const CNAME: &'static str = $name;
-        }
-    };
-    ($t: ty, $name: literal, [$($inc: literal),*]) => {
-        impl CudaDType for $t {
-            const CNAME: &'static str = $name;
-            const INCLUDES: &'static [&'static str] = &[$($inc),*];
-        }
-    };
+#[duplicate_item(
+    T   name;
+    [bool]              ["bool"];
+    [i8]                ["signed char"];
+    [i16]               ["short"];
+    [i32]               ["int"];
+    [i64]               ["long long"];
+    [isize]             ["long long"];
+    [u8]                ["unsigned char"];
+    [u16]               ["unsigned short"];
+    [u32]               ["unsigned int"];
+    [u64]               ["unsigned long long"];
+    [usize]             ["unsigned long long"];
+    [f32]               ["float"];
+    [f64]               ["double"];
+    [Complex<f32>]      ["rstsr_c32"];
+    [Complex<f64>]      ["rstsr_c64"];
+)]
+impl CudaDType for T {
+    const CNAME: &'static str = name;
 }
 
-impl_cuda_dtype!(bool, "bool");
-impl_cuda_dtype!(i8, "signed char");
-impl_cuda_dtype!(i16, "short");
-impl_cuda_dtype!(i32, "int");
-impl_cuda_dtype!(i64, "long long");
-impl_cuda_dtype!(isize, "long long");
-impl_cuda_dtype!(u8, "unsigned char");
-impl_cuda_dtype!(u16, "unsigned short");
-impl_cuda_dtype!(u32, "unsigned int");
-impl_cuda_dtype!(u64, "unsigned long long");
-impl_cuda_dtype!(usize, "unsigned long long");
-impl_cuda_dtype!(f32, "float");
-impl_cuda_dtype!(f64, "double");
-impl_cuda_dtype!(f16, "__half", ["#include <cuda_fp16.h>"]);
-impl_cuda_dtype!(bf16, "__nv_bfloat16", ["#include <cuda_bf16.h>"]);
-impl_cuda_dtype!(Complex<f32>, "rstsr_c32");
-impl_cuda_dtype!(Complex<f64>, "rstsr_c64");
+#[duplicate_item(
+    T      name             inc;
+    [f16]  ["__half"]       ["#include <cuda_fp16.h>"];
+    [bf16] ["__nv_bfloat16"] ["#include <cuda_bf16.h>"];
+)]
+impl CudaDType for T {
+    const CNAME: &'static str = name;
+    const INCLUDES: &'static [&'static str] = &[inc];
+}
 
 /// Types with native CUDA C arithmetic (`+ - * /`); the fill/copy/free
 /// families do not need this, kernel math does. Half is excluded (needs
 /// explicit promotion wrappers; a later wave).
 pub trait CudaArith: CudaDType {}
-macro_rules! impl_cuda_arith {
-    ($($t: ty),*) => { $(impl CudaArith for $t {})* };
-}
-impl_cuda_arith!(i8, i16, i32, i64, isize, u8, u16, u32, u64, usize, f32, f64, Complex<f32>, Complex<f64>);
+#[duplicate_item(
+    T;
+    [i8]; [i16]; [i32]; [i64]; [isize];
+    [u8]; [u16]; [u32]; [u64]; [usize];
+    [f32]; [f64]; [Complex<f32>]; [Complex<f64>];
+)]
+impl CudaArith for T {}
 
 /// Float types with CUDA C transcendental functions (f32/f64; a later wave
 /// adds half via float promotion and complex via a complex-math prelude).
@@ -74,7 +78,10 @@ impl CudaFloat for f64 {}
 /// produce a scalar bool). Complex is excluded (component-wise comparisons
 /// are not orderings; rstsr declines them at the tensor layer as CPU does).
 pub trait CudaCmp: CudaDType {}
-macro_rules! impl_cuda_cmp {
-    ($($t: ty),*) => { $(impl CudaCmp for $t {})* };
-}
-impl_cuda_cmp!(bool, i8, i16, i32, i64, isize, u8, u16, u32, u64, usize, f32, f64, f16, bf16);
+#[duplicate_item(
+    T;
+    [bool]; [i8]; [i16]; [i32]; [i64]; [isize];
+    [u8]; [u16]; [u32]; [u64]; [usize];
+    [f32]; [f64]; [f16]; [bf16];
+)]
+impl CudaCmp for T {}
