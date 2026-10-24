@@ -108,19 +108,10 @@ __device__ double rstsr_frem(double x, double y) {
 }
 
 __device__ long long rstsr_ipow(long long base, long long exp) {
-    // exp >= 0 guaranteed by the tensor layer (CPU parity); wrapping
-    // arithmetic matches Rust release-mode mul wrapping
+    // Scalar exponents are checked on the host; a negative *tensor*
+    // exponent silently yields 1 here (documented divergence from the CPU
+    // InvalidValue). Wrapping matches Rust release-mode mul wrapping.
     long long result = 1;
-    while (exp > 0) {
-        if (exp & 1) result *= base;
-        base *= base;
-        exp >>= 1;
-    }
-    return result;
-}
-
-__device__ unsigned long long rstsr_ipowu(unsigned long long base, unsigned long long exp) {
-    unsigned long long result = 1;
     while (exp > 0) {
         if (exp & 1) result *= base;
         base *= base;
@@ -496,6 +487,7 @@ mod ptx_probe_tests {
     use super::*;
 
     #[test]
+    #[ignore = "manual NVRTC/driver probe: max.NaN.f64 support on the installed driver"]
     fn probe_maxnan_f64_jit() {
         if !crate::funcs::is_available() {
             return;

@@ -327,11 +327,9 @@ fn offset_ptr<T>(buf: &CudaBuffer<T>, offset: usize) -> u64 {
 // /* #region launchers */
 /// Interned compiled functions: `(ordinal, discriminator) -> function`.
 ///
-/// The discriminator is the small (family, dtype, expression) identity of
-/// a specialization; the full source is assembled and NVRTC-compiled only
-/// on the first use per process. Hot-path cost is one small-string hash
-/// lookup (the per-launch source assembly and full-source cache hash of
-/// `make_key` stay off the hot path; REVIEW-ee70fe4 #7's interning).
+/// The discriminator is the cheap (entry, includes, substitution) identity
+/// of a specialization; the full source is assembled and NVRTC-compiled
+/// only on an intern miss, so the hot path costs one small-string hash.
 type FnIntern =
     std::sync::Mutex<std::collections::HashMap<(usize, String), std::sync::Arc<cudarc::driver::CudaFunction>>>;
 static FN_INTERN: std::sync::OnceLock<FnIntern> = std::sync::OnceLock::new();
@@ -340,20 +338,33 @@ fn fn_intern() -> &'static FnIntern {
     FN_INTERN.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
 }
 
+/// Cheap discriminator of a specialization: every template substitution in
+/// order (the template itself is fixed by `name`).
+fn subs_disc(subs: &[(&str, &str)]) -> String {
+    let mut s = String::with_capacity(subs.len() * 24);
+    for (_, v) in subs {
+        s.push('|');
+        s.push_str(v);
+    }
+    s
+}
+
 /// Compile/fetch (interned) the entry `name` of a planned program.
-/// `entries`/`includes` are touched only on intern miss.
+/// `disc_extra` must name every substitution the rendered source depends on;
+/// the source is assembled and NVRTC-compiled only on an intern miss.
 fn planned_function(
     device: &DeviceCuda,
     name: &'static str,
     includes: &[&str],
-    entries: &str,
+    disc_extra: &str,
+    entries: impl FnOnce() -> String,
 ) -> Result<std::sync::Arc<cudarc::driver::CudaFunction>> {
-    let disc = format!("{name}|{}|{entries}", includes.concat());
+    let disc = format!("{name}|{}|{disc_extra}", includes.concat());
     let ordinal = device.ordinal();
     if let Some(f) = fn_intern().lock().unwrap_or_else(|e| e.into_inner()).get(&(ordinal, disc.clone())) {
         return Ok(f.clone());
     }
-    let src = assemble_planned(includes, entries);
+    let src = assemble_planned(includes, &entries());
     let key = make_key(device.ordinal_obj(), name, &src, &[])?;
     let f = device.ordinal_obj().kernel_function(&key)?;
     fn_intern().lock().unwrap_or_else(|e| e.into_inner()).insert((ordinal, disc), f.clone());
@@ -399,12 +410,8 @@ where
         PlanVariant::Wide => "rstsr_binary_p",
     };
     let includes = [TA::INCLUDES, TB::INCLUDES, TOUT::INCLUDES].concat();
-    let f = planned_function(
-        device,
-        entry,
-        &includes,
-        &render(BINARY_ENTRIES, &[("@TO@", TOUT::CNAME), ("@TA@", TA::CNAME), ("@TB@", TB::CNAME), ("@EXPR@", expr)]),
-    )?;
+    let subs = [("@TO@", TOUT::CNAME), ("@TA@", TA::CNAME), ("@TB@", TB::CNAME), ("@EXPR@", expr)];
+    let f = planned_function(device, entry, &includes, &subs_disc(&subs), || render(BINARY_ENTRIES, &subs))?;
     // SAFETY: MaybeUninit<TOUT> and TOUT are layout-identical; the kernel
     // writes every visited element
     let c_typed: &mut CudaBuffer<TOUT> =
@@ -480,12 +487,8 @@ where
         PlanVariant::Wide => "rstsr_unary_p",
     };
     let includes = [TB::INCLUDES, TOUT::INCLUDES].concat();
-    let f = planned_function(
-        device,
-        entry,
-        &includes,
-        &render(UNARY_ENTRIES, &[("@TO@", TOUT::CNAME), ("@TB@", TB::CNAME), ("@EXPR@", expr)]),
-    )?;
+    let subs = [("@TO@", TOUT::CNAME), ("@TB@", TB::CNAME), ("@EXPR@", expr)];
+    let f = planned_function(device, entry, &includes, &subs_disc(&subs), || render(UNARY_ENTRIES, &subs))?;
     // SAFETY: layout-identical MaybeUninit transmute (crate invariant)
     let c_typed: &mut CudaBuffer<TOUT> =
         unsafe { &mut *(c as *mut CudaBuffer<MaybeUninit<TOUT>> as *mut CudaBuffer<TOUT>) };
@@ -556,12 +559,8 @@ where
         },
         PlanVariant::Wide => "rstsr_unary_inplace",
     };
-    let f = planned_function(
-        device,
-        entry,
-        includes,
-        &render(UNARY_INPLACE_ENTRIES, &[("@T@", T::CNAME), ("@EXPR@", expr)]),
-    )?;
+    let subs = [("@T@", T::CNAME), ("@EXPR@", expr)];
+    let f = planned_function(device, entry, includes, &subs_disc(&subs), || render(UNARY_INPLACE_ENTRIES, &subs))?;
     let mut launch = FlatLaunch::new(exec, &f, n);
     match (variant, &pa) {
         (PlanVariant::Wide, _) | (PlanVariant::Flat, OperandPlan::Flat) => {
@@ -645,12 +644,8 @@ where
         PlanVariant::Wide => "rstsr_scalar_p",
     };
     let includes = [TT::INCLUDES, TS::INCLUDES, TOUT::INCLUDES].concat();
-    let f = planned_function(
-        device,
-        entry,
-        &includes,
-        &render(SCALAR_ENTRIES, &[("@TO@", TOUT::CNAME), ("@TT@", TT::CNAME), ("@TS@", TS::CNAME), ("@EXPR@", expr)]),
-    )?;
+    let subs = [("@TO@", TOUT::CNAME), ("@TT@", TT::CNAME), ("@TS@", TS::CNAME), ("@EXPR@", expr)];
+    let f = planned_function(device, entry, &includes, &subs_disc(&subs), || render(SCALAR_ENTRIES, &subs))?;
     // SAFETY: layout-identical MaybeUninit transmute (crate invariant)
     let c_typed: &mut CudaBuffer<TOUT> =
         unsafe { &mut *(c as *mut CudaBuffer<MaybeUninit<TOUT>> as *mut CudaBuffer<TOUT>) };
@@ -718,8 +713,8 @@ extern "C" __global__ void rstsr_fill_f(
     #undef RSTSR_STEP
 }
 
-// vector fill: 32-byte `double4`-class stores when TC is 64-bit (double2
-// pack on 32-bit dtypes), scalar remainder loop for the tail.
+// vector fill: a two-element struct store per pair (16 B for f64, 8 B for
+// f32, wider for complex), scalar remainder loop for the tail.
 extern "C" __global__ void rstsr_fill_v(
     @TC@* out, @TV@ v, rstsr_usz nv4, rstsr_usz n)
 {
@@ -767,7 +762,8 @@ where
     }
     let po = plan_operand(lc, device.default_order(), n);
     if po.is_generic() {
-        return kernels_ops::fill_dispatch_same(device, c, lc, v);
+        // rank-generic strided kernel; must not re-enter this function
+        return kernels_ops::fill_generic_same(device, c, lc, v);
     }
     let exec = device.stream();
     let _gc = order_input(c, exec)?;
@@ -781,12 +777,9 @@ where
         PlanVariant::Narrow => "rstsr_fill_pn",
         PlanVariant::Wide => "rstsr_fill_p",
     };
-    let f = planned_function(
-        device,
-        entry,
-        &[TC::INCLUDES, TV::INCLUDES].concat(),
-        &render(FILL_ENTRIES, &[("@TC@", TC::CNAME), ("@TV@", TV::CNAME)]),
-    )?;
+    let includes = [TC::INCLUDES, TV::INCLUDES].concat();
+    let subs = [("@TC@", TC::CNAME), ("@TV@", TV::CNAME)];
+    let f = planned_function(device, entry, &includes, &subs_disc(&subs), || render(FILL_ENTRIES, &subs))?;
     let nbytes = core::mem::size_of::<TV>();
     let mut vbytes = vec![0u8; nbytes];
     // SAFETY: TV is a plain scalar; its bytes are its on-device representation
@@ -795,7 +788,9 @@ where
     }
     #[cfg(feature = "launch_trace")]
     eprintln!("[rstsr-cuda] fill entry={entry} n={n}");
-    let mut launch = FlatLaunch::new(exec, &f, n);
+    // the vector entry works in pairs; size the grid from the pair count
+    let launch_n = if vec_fill { n / 2 } else { n };
+    let mut launch = FlatLaunch::new(exec, &f, launch_n);
     match variant {
         PlanVariant::Flat if vec_fill => {
             // one quad-store per thread slot; scalar remainder rides the tail loop
@@ -877,35 +872,28 @@ extern "C" __global__ void rstsr_copy_pn(
 const COPY_TRANSPOSE_ENTRIES: &str = r#"
 #define RSTSR_TILE 32
 extern "C" __global__ void rstsr_copy_transpose(
-    @TC@* out, const @TA@* in, rstsr_usz rows, rstsr_usz cols, rstsr_usz n)
+    @TC@* out, const @TA@* in, rstsr_usz rows, rstsr_usz cols, int col_major, rstsr_usz n)
 {
-    // out is [rows, cols] row-major contiguous; in is its transpose view
-    // (in[j * cols + i] is in(r=i, c=j) with stride pattern (1, cols))
+    // `in` is the contiguous buffer laid out as [rows, cols] in the device
+    // order; `out` is the same data as [cols, rows] in that order. Tile
+    // staging is order-independent; only the linear addresses change
+    // (row-major `r*ld + c`, column-major `r + c*ld`). The +1 tile column
+    // keeps the shared-memory bank layout conflict-free for both accesses.
     __shared__ @TA@ tile[RSTSR_TILE][RSTSR_TILE + 1];
     rstsr_usz c0 = (rstsr_usz)blockIdx.x * RSTSR_TILE;
     rstsr_usz r0 = (rstsr_usz)blockIdx.y * RSTSR_TILE;
     rstsr_usz tx = threadIdx.x, ty = threadIdx.y;
     rstsr_usz r = r0 + ty, c = c0 + tx;
-    if (r < rows && c < cols) tile[ty][tx] = in[r * cols + c];
+    if (r < rows && c < cols) {
+        rstsr_usz ii = col_major ? (r + c * rows) : (r * cols + c);
+        tile[ty][tx] = in[ii];
+    }
     __syncthreads();
     r = c0 + ty;
     c = r0 + tx;
-    rstsr_usz oo = r * rows + c;
-    if (r < cols && c < rows && oo < n) out[oo] = tile[tx][ty];
-}
-
-extern "C" __global__ void rstsr_copy_gather2d(
-    @TC@* out, const @TA@* in, rstsr_usz rows, rstsr_usz cols, rstsr_usz n)
-{
-    // out[ty-block] row-major; in read coalesced along its contiguous axis
-    // (gather form: out(r, c) = in(c, r) with in row-major [cols, rows])
-    rstsr_usz c0 = (rstsr_usz)blockIdx.x * RSTSR_TILE;
-    rstsr_usz r0 = (rstsr_usz)blockIdx.y * RSTSR_TILE;
-    rstsr_usz tx = threadIdx.x, ty = threadIdx.y;
-    rstsr_usz r = r0 + ty, c = c0 + tx;
-    rstsr_usz oo = r * cols + c;
-    if (r < rows && c < cols && oo < n) {
-        out[oo] = in[c * rows + r];
+    if (r < cols && c < rows) {
+        rstsr_usz oo = col_major ? (r + c * cols) : (r * rows + c);
+        if (oo < n) out[oo] = tile[tx][ty];
     }
 }
 #undef RSTSR_TILE
@@ -915,10 +903,10 @@ extern "C" __global__ void rstsr_copy_gather2d(
 /// rank/shape-changing positional-zip assigns stay on the generic kernel.
 /// `cast_expr` is the full element expression from `a[ia]` to TC.
 /// Orientation of a 2-D transpose copy. `OutContigInSwap`: the output
-/// layout is row-major contiguous and the input is its axis-swap (the
-/// `to_contig(T)` direction); `InContigOutSwap`: the mirror (assign-into-
-/// transposed-view direction). Both use one tiled kernel; the gather form
-/// covers non-multiple-of-32 margins.
+/// layout is contiguous in the device order and the input is its axis-swap
+/// (the `to_contig(T)` direction); `InContigOutSwap`: the mirror
+/// (assign-into-transposed-view direction). Both use one tiled kernel whose
+/// guards cover non-multiple-of-32 margins.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Transpose2D {
     OutContigInSwap { rows: usize, cols: usize },
@@ -943,13 +931,23 @@ fn transpose2d_plan<D1: DimAPI, D2: DimAPI>(lc: &Layout<D1>, la: &Layout<D2>, or
         ColMajor => st == [sh[1] as isize, 1],
     };
     let (r, c) = (sc[0], sc[1]);
-    if contig(tc, sc) && swapped(ta, sa) && c >= r {
-        Some(Transpose2D::OutContigInSwap { rows: r, cols: c })
+    let candidate = if contig(tc, sc) && swapped(ta, sa) && c >= r {
+        Transpose2D::OutContigInSwap { rows: r, cols: c }
     } else if swapped(tc, sc) && contig(ta, sa) {
-        Some(Transpose2D::InContigOutSwap { rows: r, cols: c })
+        Transpose2D::InContigOutSwap { rows: r, cols: c }
     } else {
-        None
+        return None;
+    };
+    // grid.y is capped at 65535 tiles of 32 rows; taller cases fall back
+    // to the planned copy rather than fail the launch
+    let t_rows = match candidate {
+        Transpose2D::OutContigInSwap { cols, .. } => cols,
+        Transpose2D::InContigOutSwap { rows, .. } => rows,
+    };
+    if t_rows > 65535 * 32 {
+        return None;
     }
+    Some(candidate)
 }
 
 /// Tiled 2-D transpose copy launch (both orientations; grid over output
@@ -986,19 +984,20 @@ where
             (rows, cols, offset_ptr(c, lc.offset()), offset_ptr(a, la.offset()))
         },
     };
-    let f = planned_function(
-        device,
-        "rstsr_copy_transpose",
-        &[TC::INCLUDES, TA::INCLUDES].concat(),
-        &render(COPY_TRANSPOSE_ENTRIES, &[("@TC@", TC::CNAME), ("@TA@", TA::CNAME)]),
-    )?;
+    let includes = [TC::INCLUDES, TA::INCLUDES].concat();
+    let subs = [("@TC@", TC::CNAME), ("@TA@", TA::CNAME)];
+    let f = planned_function(device, "rstsr_copy_transpose", &includes, &subs_disc(&subs), || {
+        render(COPY_TRANSPOSE_ENTRIES, &subs)
+    })?;
     let grid = (t_cols.div_ceil(32) as u32, t_rows.div_ceil(32) as u32, 1);
+    let col_major = (device.default_order() == ColMajor) as i32;
     let launch = FlatLaunch::new(exec, &f, 0)
         .explicit_shape(grid, (32, 32, 1))
         .arg_u64(out_ptr)
         .arg_u64(in_ptr)
         .arg_usize(t_rows)
         .arg_usize(t_cols)
+        .arg_i32(col_major)
         .arg_usize(n);
     launch.launch()?;
     let _go = crate::kernel::order_output(c, exec)?;
@@ -1053,12 +1052,9 @@ where
         PlanVariant::Narrow => "rstsr_copy_pn",
         PlanVariant::Wide => "rstsr_copy_p",
     };
-    let f = planned_function(
-        device,
-        entry,
-        &[TC::INCLUDES, TA::INCLUDES].concat(),
-        &render(COPY_ENTRIES, &[("@TC@", TC::CNAME), ("@TA@", TA::CNAME), ("@CAST@", cast_expr)]),
-    )?;
+    let includes = [TC::INCLUDES, TA::INCLUDES].concat();
+    let subs = [("@TC@", TC::CNAME), ("@TA@", TA::CNAME), ("@CAST@", cast_expr)];
+    let f = planned_function(device, entry, &includes, &subs_disc(&subs), || render(COPY_ENTRIES, &subs))?;
     let mut launch = FlatLaunch::new(exec, &f, n);
     match variant {
         PlanVariant::Flat => {
@@ -1099,21 +1095,21 @@ extern "C" __global__ void rstsr_where_sc_p(
     @TD@* d, rstsr_plan dp,
     const bool* a, rstsr_plan ap,
     const @TB@* b, rstsr_plan bp,
-    @TC@ v, rstsr_usz n)
+    @TC@ v, int inv, rstsr_usz n)
 {
     rstsr_usz lin = (rstsr_usz)blockIdx.x * (rstsr_usz)blockDim.x + (rstsr_usz)threadIdx.x;
     if (lin >= n) return;
     rstsr_usz id = rstsr_plan_offset(lin, dp, 0);
     rstsr_usz ia = rstsr_plan_offset(lin, ap, 0);
     rstsr_usz ib = rstsr_plan_offset(lin, bp, 0);
-    d[id] = a[ia] ? b[ib] : v;
+    d[id] = (a[ia] ^ inv) ? b[ib] : v;
 }
 
 extern "C" __global__ void rstsr_where_sc_pn(
     @TD@* d, rstsr_plan_n dp,
     const bool* a, rstsr_plan_n ap,
     const @TB@* b, rstsr_plan_n bp,
-    @TC@ v, int n)
+    @TC@ v, int inv, int n)
 {
     int lin = (int)blockIdx.x * (int)blockDim.x + (int)threadIdx.x;
     int w = gridDim.x * blockDim.x;
@@ -1122,15 +1118,27 @@ extern "C" __global__ void rstsr_where_sc_pn(
             rstsr_isz id = rstsr_plan_offset_n(lin, dp);
             rstsr_isz ia = rstsr_plan_offset_n(lin, ap);
             rstsr_isz ib = rstsr_plan_offset_n(lin, bp);
-            d[id] = a[ia] ? b[ib] : v;
+            d[id] = (a[ia] ^ inv) ? b[ib] : v;
         }
         lin += gridDim.x * blockDim.x;
     }
 }
+
+extern "C" __global__ void rstsr_where_sc_f(
+    @TD@* d, const bool* a, const @TB@* b, @TC@ v, int inv, rstsr_usz n)
+{
+    rstsr_usz g = (rstsr_usz)blockIdx.x * (rstsr_usz)blockDim.x + (rstsr_usz)threadIdx.x;
+    rstsr_usz w = (rstsr_usz)gridDim.x * (rstsr_usz)blockDim.x;
+    #define RSTSR_STEP(I) { rstsr_usz id = g + (I) * w; if (id < n) { d[id] = (a[id] ^ inv) ? b[id] : v; } }
+    RSTSR_STEP(0) RSTSR_STEP(1) RSTSR_STEP(2) RSTSR_STEP(3)
+    #undef RSTSR_STEP
+}
 "#;
 
-/// Where with tensor-tensor arms but scalar `c` (the tensor tier promotes
-/// the scalar to TX; the kernel reads it from the parameter list).
+/// Where with a tensor `b` and scalar `c` (same dtype; the scalar rides in
+/// the parameter list). `invert` flips the condition in-kernel, which
+/// serves the scalar-`b` arm (`d = cond ? b : c` becomes
+/// `d = !cond ? c : b`) without a scratch mask.
 pub(crate) fn where_launch_sc<TD, TB, TC>(
     device: &DeviceCuda,
     d: &mut CudaBuffer<MaybeUninit<TD>>,
@@ -1140,6 +1148,7 @@ pub(crate) fn where_launch_sc<TD, TB, TC>(
     b: &CudaBuffer<TB>,
     lb: &Layout<impl DimAPI>,
     c: &TC,
+    invert: bool,
 ) -> Result<()>
 where
     TD: CudaDType,
@@ -1153,29 +1162,20 @@ where
     let order = device.default_order();
     let (pd, pa, pb) = (plan_operand(ld, order, n), plan_operand(la, order, n), plan_operand(lb, order, n));
     if pd.is_generic() || pa.is_generic() || pb.is_generic() {
-        return kernels_ops::where_sc_generic(device, d, ld, a, la, b, lb, c);
+        return kernels_ops::where_sc_generic(device, d, ld, a, la, b, lb, c, invert);
     }
     let exec = device.stream();
     let _ga = order_input(a, exec)?;
     let _gb = order_input(b, exec)?;
     let variant = plan_variant(&[&pd, &pa, &pb]);
     let entry = match variant {
-        PlanVariant::Flat | PlanVariant::Narrow => {
-            if matches!(pd, OperandPlan::Flat) && matches!(pa, OperandPlan::Flat) && matches!(pb, OperandPlan::Flat) {
-                "rstsr_where_sc_p"
-            } else {
-                "rstsr_where_sc_pn"
-            }
-        },
+        PlanVariant::Flat => "rstsr_where_sc_f",
+        PlanVariant::Narrow => "rstsr_where_sc_pn",
         PlanVariant::Wide => "rstsr_where_sc_p",
     };
     let includes = [TB::INCLUDES, TC::INCLUDES, TD::INCLUDES].concat();
-    let f = planned_function(
-        device,
-        entry,
-        &includes,
-        &render(WHERE_SC_ENTRIES, &[("@TD@", TD::CNAME), ("@TB@", TB::CNAME), ("@TC@", TC::CNAME)]),
-    )?;
+    let subs = [("@TD@", TD::CNAME), ("@TB@", TB::CNAME), ("@TC@", TC::CNAME)];
+    let f = planned_function(device, entry, &includes, &subs_disc(&subs), || render(WHERE_SC_ENTRIES, &subs))?;
     // SAFETY: layout-identical MaybeUninit transmute (crate invariant)
     let d_typed: &mut CudaBuffer<TD> = unsafe { &mut *(d as *mut CudaBuffer<MaybeUninit<TD>> as *mut CudaBuffer<TD>) };
     let nb = core::mem::size_of::<TC>();
@@ -1184,25 +1184,24 @@ where
     unsafe {
         core::ptr::copy_nonoverlapping(core::ptr::addr_of!(*c) as *const u8, cb.as_mut_ptr(), nb);
     }
+    let inv = invert as i32;
     let mut launch = FlatLaunch::new(exec, &f, n);
-    match (variant, &pd, &pa, &pb) {
-        (PlanVariant::Wide, _, _, _) | (PlanVariant::Flat, OperandPlan::Flat, OperandPlan::Flat, OperandPlan::Flat) => {
-            let zero = PlanBytes::zeroed();
+    match variant {
+        PlanVariant::Flat => {
             launch = launch
                 .elems_per_thread(4)
                 .arg_u64(offset_ptr(d_typed, ld.offset()))
-                .arg_bytes(plan_bytes(&pd).as_ref().unwrap_or(&zero).bytes())
                 .arg_u64(offset_ptr(a, la.offset()))
-                .arg_bytes(plan_bytes(&pa).as_ref().unwrap_or(&zero).bytes())
                 .arg_u64(offset_ptr(b, lb.offset()))
-                .arg_bytes(plan_bytes(&pb).as_ref().unwrap_or(&zero).bytes())
                 .arg_bytes(&cb)
+                .arg_i32(inv)
                 .arg_usize(n);
         },
-        _ => {
+        PlanVariant::Narrow => {
             let zn = PlanBytesN::zeroed();
             let (ndp, nap, nbp) = (plan_bytes_n(&pd), plan_bytes_n(&pa), plan_bytes_n(&pb));
             launch = launch
+                .elems_per_thread(4)
                 .arg_u64(offset_ptr(d_typed, ld.offset()))
                 .arg_bytes(ndp.as_ref().unwrap_or(&zn).bytes())
                 .arg_u64(offset_ptr(a, la.offset()))
@@ -1210,7 +1209,21 @@ where
                 .arg_u64(offset_ptr(b, lb.offset()))
                 .arg_bytes(nbp.as_ref().unwrap_or(&zn).bytes())
                 .arg_bytes(&cb)
+                .arg_i32(inv)
                 .arg_i32(n as i32);
+        },
+        PlanVariant::Wide => {
+            let zero = PlanBytes::zeroed();
+            launch = launch
+                .arg_u64(offset_ptr(d_typed, ld.offset()))
+                .arg_bytes(plan_bytes(&pd).as_ref().unwrap_or(&zero).bytes())
+                .arg_u64(offset_ptr(a, la.offset()))
+                .arg_bytes(plan_bytes(&pa).as_ref().unwrap_or(&zero).bytes())
+                .arg_u64(offset_ptr(b, lb.offset()))
+                .arg_bytes(plan_bytes(&pb).as_ref().unwrap_or(&zero).bytes())
+                .arg_bytes(&cb)
+                .arg_i32(inv)
+                .arg_usize(n);
         },
     }
     launch.launch()
@@ -1220,6 +1233,8 @@ where
 fn plan_bytes(plan: &OperandPlan) -> Option<PlanBytes> {
     match plan {
         OperandPlan::Params(pack) => Some(PlanBytes::of_params(pack)),
+        // a wide launch may mix widths; the narrow form widens exactly
+        OperandPlan::ParamsN(pack) => Some(PlanBytes::of_params(&super::plan::widen_pack(pack))),
         _ => None,
     }
 }
@@ -1267,6 +1282,16 @@ extern "C" __global__ void rstsr_scalar_assign_p(
     if (lin >= n) return;
     rstsr_usz it = rstsr_plan_offset(lin, tp, 0);
     t[it] = @EXPR@;
+}
+
+extern "C" __global__ void rstsr_scalar_assign_f(
+    @T@* t, @TB@ v, rstsr_usz n)
+{
+    rstsr_usz g = (rstsr_usz)blockIdx.x * (rstsr_usz)blockDim.x + (rstsr_usz)threadIdx.x;
+    rstsr_usz w = (rstsr_usz)gridDim.x * (rstsr_usz)blockDim.x;
+    #define RSTSR_STEP(I) { rstsr_usz oo = g + (I) * w; rstsr_usz it = oo; if (oo < n) { t[it] = @EXPR@; } }
+    RSTSR_STEP(0) RSTSR_STEP(1) RSTSR_STEP(2) RSTSR_STEP(3)
+    #undef RSTSR_STEP
 }
 
 extern "C" __global__ void rstsr_scalar_assign_pn(
@@ -1324,25 +1349,11 @@ where
         PlanVariant::Wide => "rstsr_binary_assign_p",
     };
     let includes = [TA::INCLUDES, TB::INCLUDES].concat();
-    let f = planned_function(
-        device,
-        entry,
-        &includes,
-        &render(BINARY_ASSIGN_ENTRIES, &[("@T@", TA::CNAME), ("@TB@", TB::CNAME), ("@EXPR@", expr)]),
-    )?;
+    let subs = [("@T@", TA::CNAME), ("@TB@", TB::CNAME), ("@EXPR@", expr)];
+    let f = planned_function(device, entry, &includes, &subs_disc(&subs), || render(BINARY_ASSIGN_ENTRIES, &subs))?;
     let mut launch = FlatLaunch::new(exec, &f, n);
-    match (variant, &pa, &pb) {
-        (PlanVariant::Wide, _, _) => {
-            let zero = PlanBytes::zeroed();
-            launch = launch
-                .elems_per_thread(4)
-                .arg_u64(offset_ptr(a, la.offset()))
-                .arg_bytes(plan_bytes(&pa).as_ref().unwrap_or(&zero).bytes())
-                .arg_u64(offset_ptr(b, lb.offset()))
-                .arg_bytes(plan_bytes(&pb).as_ref().unwrap_or(&zero).bytes())
-                .arg_usize(n);
-        },
-        (_, OperandPlan::Flat, OperandPlan::Flat) => {
+    match variant {
+        PlanVariant::Wide => {
             let zero = PlanBytes::zeroed();
             launch = launch
                 .arg_u64(offset_ptr(a, la.offset()))
@@ -1351,10 +1362,20 @@ where
                 .arg_bytes(plan_bytes(&pb).as_ref().unwrap_or(&zero).bytes())
                 .arg_usize(n);
         },
-        _ => {
+        PlanVariant::Flat => {
+            let zero = PlanBytes::zeroed();
+            launch = launch
+                .arg_u64(offset_ptr(a, la.offset()))
+                .arg_bytes(plan_bytes(&pa).as_ref().unwrap_or(&zero).bytes())
+                .arg_u64(offset_ptr(b, lb.offset()))
+                .arg_bytes(plan_bytes(&pb).as_ref().unwrap_or(&zero).bytes())
+                .arg_usize(n);
+        },
+        PlanVariant::Narrow => {
             let zn = PlanBytesN::zeroed();
             let (nap, nbp) = (plan_bytes_n(&pa), plan_bytes_n(&pb));
             launch = launch
+                .elems_per_thread(4)
                 .arg_u64(offset_ptr(a, la.offset()))
                 .arg_bytes(nap.as_ref().unwrap_or(&zn).bytes())
                 .arg_u64(offset_ptr(b, lb.offset()))
@@ -1392,22 +1413,13 @@ where
     let _ga = order_input(a, exec)?;
     let variant = plan_variant(&[&pa]);
     let entry = match variant {
-        PlanVariant::Flat | PlanVariant::Narrow => {
-            if matches!(pa, OperandPlan::Flat) {
-                "rstsr_scalar_assign_p"
-            } else {
-                "rstsr_scalar_assign_pn"
-            }
-        },
+        PlanVariant::Flat => "rstsr_scalar_assign_f",
+        PlanVariant::Narrow => "rstsr_scalar_assign_pn",
         PlanVariant::Wide => "rstsr_scalar_assign_p",
     };
     let includes = [TA::INCLUDES, TB::INCLUDES].concat();
-    let f = planned_function(
-        device,
-        entry,
-        &includes,
-        &render(SCALAR_ASSIGN_ENTRIES, &[("@T@", TA::CNAME), ("@TB@", TB::CNAME), ("@EXPR@", expr)]),
-    )?;
+    let subs = [("@T@", TA::CNAME), ("@TB@", TB::CNAME), ("@EXPR@", expr)];
+    let f = planned_function(device, entry, &includes, &subs_disc(&subs), || render(SCALAR_ASSIGN_ENTRIES, &subs))?;
     let nbytes = core::mem::size_of::<TB>();
     let mut bbytes = vec![0u8; nbytes];
     // SAFETY: TB is a plain scalar; its bytes are its on-device representation
@@ -1415,23 +1427,26 @@ where
         core::ptr::copy_nonoverlapping(core::ptr::addr_of!(*b) as *const u8, bbytes.as_mut_ptr(), nbytes);
     }
     let mut launch = FlatLaunch::new(exec, &f, n);
-    match (variant, &pa) {
-        (PlanVariant::Wide, _) | (PlanVariant::Flat, OperandPlan::Flat) => {
-            let zero = PlanBytes::zeroed();
-            launch = launch
-                .elems_per_thread(4)
-                .arg_u64(offset_ptr(a, la.offset()))
-                .arg_bytes(plan_bytes(&pa).as_ref().unwrap_or(&zero).bytes())
-                .arg_bytes(&bbytes)
-                .arg_usize(n);
+    match variant {
+        PlanVariant::Flat => {
+            launch = launch.elems_per_thread(4).arg_u64(offset_ptr(a, la.offset())).arg_bytes(&bbytes).arg_usize(n);
         },
-        _ => {
+        PlanVariant::Narrow => {
             let zn = PlanBytesN::zeroed();
             launch = launch
+                .elems_per_thread(4)
                 .arg_u64(offset_ptr(a, la.offset()))
                 .arg_bytes(plan_bytes_n(&pa).as_ref().unwrap_or(&zn).bytes())
                 .arg_bytes(&bbytes)
                 .arg_i32(n as i32);
+        },
+        PlanVariant::Wide => {
+            let zero = PlanBytes::zeroed();
+            launch = launch
+                .arg_u64(offset_ptr(a, la.offset()))
+                .arg_bytes(plan_bytes(&pa).as_ref().unwrap_or(&zero).bytes())
+                .arg_bytes(&bbytes)
+                .arg_usize(n);
         },
     }
     launch.launch()?;
@@ -1534,12 +1549,8 @@ where
         PlanVariant::Wide => "rstsr_where_p",
     };
     let includes = [TB::INCLUDES, TC::INCLUDES, TD::INCLUDES].concat();
-    let f = planned_function(
-        device,
-        entry,
-        &includes,
-        &render(WHERE_ENTRIES, &[("@TD@", TD::CNAME), ("@TB@", TB::CNAME), ("@TC@", TC::CNAME)]),
-    )?;
+    let subs = [("@TD@", TD::CNAME), ("@TB@", TB::CNAME), ("@TC@", TC::CNAME)];
+    let f = planned_function(device, entry, &includes, &subs_disc(&subs), || render(WHERE_ENTRIES, &subs))?;
     // SAFETY: layout-identical MaybeUninit transmute (crate invariant)
     let d_typed: &mut CudaBuffer<TD> = unsafe { &mut *(d as *mut CudaBuffer<MaybeUninit<TD>> as *mut CudaBuffer<TD>) };
     let mut launch = FlatLaunch::new(exec, &f, n);
@@ -1604,16 +1615,16 @@ extern "C" __global__ void rstsr_clip_ss_pn(
     @TD@* out, rstsr_plan_n op, const @TD@* a, rstsr_plan_n ap, @TD@ lo, @TD@ hi, int n)
 {
     int lin = (int)blockIdx.x * (int)blockDim.x + (int)threadIdx.x;
+    int w = gridDim.x * blockDim.x;
     for (int rep = 0; rep < 4; ++rep) {
         if (lin < n) {
-                        rstsr_isz io = rstsr_plan_offset_n(lin, op);
+            rstsr_isz io = rstsr_plan_offset_n(lin, op);
             rstsr_isz ia = rstsr_plan_offset_n(lin, ap);
             @TD@ val = a[ia];
             val = @MAXEXPR@;
             out[io] = @MINEXPR@;
-            lin += gridDim.x * blockDim.x;
         }
-        lin += gridDim.x * blockDim.x;
+        lin += w;
     }
 }
 "#;
@@ -1706,6 +1717,10 @@ where
     if n == 0 {
         return Ok(());
     }
+    // the device op admits same-dtype bounds only (CPU-side promotion is
+    // not mirrored on this backend)
+    debug_assert_eq!(core::mem::size_of::<TB>(), core::mem::size_of::<TD>());
+    debug_assert_eq!(core::mem::size_of::<TC>(), core::mem::size_of::<TD>());
     let order = device.default_order();
     let (pd, pa) = (plan_operand(ld, order, n), plan_operand(la, order, n));
     let (pb, pc) = match (&lo, &hi) {
@@ -1720,19 +1735,22 @@ where
         return kernels_ops::clip_generic(device, d, ld, a, la, lo, hi, max_expr, min_expr);
     }
     // lean both-scalar path (no bound plans, no kinds; ILP4 on the flat arm).
-    // Scalar bytes marshal as TD-sized (the tensor tier promotes scalars to
-    // the same dtype as the value operand before reaching here).
-    if let (ClipBound::Scalar(lo_v), ClipBound::Scalar(hi_v)) = (&lo, &hi) {
-        let nb = core::mem::size_of::<TD>();
-        let mut lob = vec![0u8; nb];
-        let mut hib = vec![0u8; nb];
-        // SAFETY: same-dtype scalar promotion is a tensor-tier invariant;
-        // the byte copies below read TD-sized representations
-        unsafe {
-            core::ptr::copy_nonoverlapping(*lo_v as *const TB as *const u8, lob.as_mut_ptr(), nb);
-            core::ptr::copy_nonoverlapping(*hi_v as *const TC as *const u8, hib.as_mut_ptr(), nb);
+    // Bounds are TD-sized (the device op admits same-dtype bounds only).
+    // Wide plans take the general `_p` entry below, which carries the width
+    // that `rstsr_clip_ss_pn` cannot.
+    let lean_ok = matches!(plan_variant(&[&pd, &pa]), PlanVariant::Flat | PlanVariant::Narrow);
+    if lean_ok {
+        if let (ClipBound::Scalar(lo_v), ClipBound::Scalar(hi_v)) = (&lo, &hi) {
+            let nb = core::mem::size_of::<TD>();
+            let mut lob = vec![0u8; nb];
+            let mut hib = vec![0u8; nb];
+            // SAFETY: the device op admits same-dtype bounds (TB = TC = TD)
+            unsafe {
+                core::ptr::copy_nonoverlapping(*lo_v as *const TB as *const u8, lob.as_mut_ptr(), nb);
+                core::ptr::copy_nonoverlapping(*hi_v as *const TC as *const u8, hib.as_mut_ptr(), nb);
+            }
+            return clip2s_out_launch::<TD, LD, LA>(device, d, ld, a, la, lob, hib, max_expr, min_expr);
         }
-        return clip2s_out_launch::<TD, LD, LA>(device, d, ld, a, la, lob, hib, max_expr, min_expr);
     }
     let exec = device.stream();
     let _ga = order_input(a, exec)?;
@@ -1767,18 +1785,15 @@ where
         },
         PlanVariant::Wide => "rstsr_clip_p",
     };
-    let f = planned_function(
-        device,
-        entry,
-        &[TD::INCLUDES, TB::INCLUDES, TC::INCLUDES].concat(),
-        &render(CLIP_ENTRIES, &[
-            ("@TD@", TD::CNAME),
-            ("@TB@", TB::CNAME),
-            ("@TC@", TC::CNAME),
-            ("@MAXEXPR@", max_expr),
-            ("@MINEXPR@", min_expr),
-        ]),
-    )?;
+    let includes = [TD::INCLUDES, TB::INCLUDES, TC::INCLUDES].concat();
+    let subs = [
+        ("@TD@", TD::CNAME),
+        ("@TB@", TB::CNAME),
+        ("@TC@", TC::CNAME),
+        ("@MAXEXPR@", max_expr),
+        ("@MINEXPR@", min_expr),
+    ];
+    let f = planned_function(device, entry, &includes, &subs_disc(&subs), || render(CLIP_ENTRIES, &subs))?;
     // SAFETY: layout-identical MaybeUninit transmute (crate invariant)
     let d_typed: &mut CudaBuffer<TD> = unsafe { &mut *(d as *mut CudaBuffer<MaybeUninit<TD>> as *mut CudaBuffer<TD>) };
     let nb = core::mem::size_of::<TD>();
@@ -1851,8 +1866,8 @@ where
     Ok(())
 }
 
-/// NaN-ness of TD-sized scalar bytes (f32/f64 only; other float classes
-/// keep the full guard).
+/// NaN-ness of an 8-byte f64 scalar's bytes (the lean f64 clip path's host
+/// check; integer-width inputs are not classified here).
 fn scalar_bytes_nan(bytes: &[u8]) -> bool {
     match bytes.len() {
         4 => {
@@ -1902,30 +1917,29 @@ where
     let _ = entry;
     // both stages read/write the local `val` (sequential in the template);
     // textual nesting would duplicate the max stage 4x with control flow
-    // the compiler cannot CSE. Non-NaN bounds (host-checked) need only the
-    // x-NaN guard: bounds cannot inject NaN, matching np.clip/torch.clamp.
-    let bounds_nan = scalar_bytes_nan(&lo) || scalar_bytes_nan(&hi);
-    let (max_stage, min_stage) = if bounds_nan {
-        (max_expr.to_string(), crate::kernels::exprs::minimum(TD::CNAME, "val", "hi"))
+    // the compiler cannot CSE. f32 stages are single PTX max/min.NaN
+    // instructions; f64 falls back to a select chain, where non-NaN bounds
+    // (host-checked) let the max stage skip the bound-side check. The min
+    // stage always keeps the x-NaN guard: `fmin(NaN, hi)` is `hi`.
+    let (max_stage, min_stage) = if TD::CNAME == "double" {
+        if scalar_bytes_nan(&lo) || scalar_bytes_nan(&hi) {
+            (max_expr.to_string(), min_expr.to_string())
+        } else {
+            ("(isnan(val) ? val : fmax(val, lo))".to_string(), "(isnan(val) ? val : fmin(val, hi))".to_string())
+        }
     } else {
-        // non-NaN bounds cannot inject NaN: the x-guard + plain fmax/fmin
-        // chain equals np.clip/torch.clamp exactly
-        ("(isnan(val) ? val : fmax(val, lo))".to_string(), "fmin(val, hi)".to_string())
+        // f32: single-instruction NaN-propagating PTX helpers; integers:
+        // plain comparisons (no NaN class)
+        (max_expr.to_string(), min_expr.to_string())
     };
-    let _ = min_expr;
-    let f = planned_function(
-        device,
-        entry,
-        TD::INCLUDES,
-        &render(CLIP_SS_ENTRIES, &[("@TD@", TD::CNAME), ("@MAXEXPR@", &max_stage), ("@MINEXPR@", &min_stage)]),
-    )?;
+    let subs = [("@TD@", TD::CNAME), ("@MAXEXPR@", &max_stage), ("@MINEXPR@", &min_stage)];
+    let f = planned_function(device, entry, TD::INCLUDES, &subs_disc(&subs), || render(CLIP_SS_ENTRIES, &subs))?;
     // SAFETY: layout-identical MaybeUninit transmute (crate invariant)
     let d_typed: &mut CudaBuffer<TD> = unsafe { &mut *(d as *mut CudaBuffer<MaybeUninit<TD>> as *mut CudaBuffer<TD>) };
     let mut launch = FlatLaunch::new(exec, &f, n);
     match (variant, &po, &pa) {
         (PlanVariant::Flat, _, _) => {
             launch = launch
-                .elems_per_thread(4)
                 .elems_per_thread(4)
                 .arg_u64(offset_ptr(d_typed, ld.offset()))
                 .arg_u64(offset_ptr(a, la.offset()))
@@ -1966,18 +1980,3 @@ fn zeroed_plan_bytes_as_slice() -> &'static [u8] {
 }
 
 // /* #endregion */
-/// Device scratch holding a boolean-inverted copy of `a` (used by the
-/// where scalar-b form to swap arms without a host round-trip).
-pub(crate) fn bool_not_scratch(
-    device: &DeviceCuda,
-    a: &CudaBuffer<bool>,
-    la: &Layout<impl DimAPI>,
-) -> Result<CudaBuffer<bool>> {
-    let n = la.size();
-    let mut out_mu = CudaBuffer::<MaybeUninit<bool>>::new(device.stream(), n)?;
-    if n > 0 {
-        unary_launch::<bool, bool>(device, &mut out_mu, la, a, la, "(!b[ib])")?;
-    }
-    // SAFETY: fresh MaybeUninit buffer fully written by the kernel above
-    Ok(unsafe { std::mem::transmute::<CudaBuffer<MaybeUninit<bool>>, CudaBuffer<bool>>(out_mu) })
-}

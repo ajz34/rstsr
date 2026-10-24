@@ -55,6 +55,47 @@ __device__ float rstsr_rcopysign(float x, float y) { return copysignf(x, y); }
 __device__ double rstsr_rcopysign(double x, double y) { return copysign(x, y); }
 __device__ float rstsr_rhypot(float x, float y) { return hypotf(x, y); }
 __device__ double rstsr_rhypot(double x, double y) { return hypot(x, y); }
+__device__ float rstsr_rfmod(float x, float y) { return fmodf(x, y); }
+__device__ double rstsr_rfmod(double x, double y) { return fmod(x, y); }
+
+// NaN/inf constants local to this header (NVRTC has no <math.h> on the
+// include path, and the header may splice before MATH_HELPER's helpers).
+template <typename T>
+__device__ T rstsr_cnan_t();
+template <>
+__device__ float rstsr_cnan_t<float>() { return __int_as_float(0x7fffffff); }
+template <>
+__device__ double rstsr_cnan_t<double>() { return __longlong_as_double(0x7fffffffffffffffLL); }
+template <typename T>
+__device__ T rstsr_cinf_t();
+template <>
+__device__ float rstsr_cinf_t<float>() { return __int_as_float(0x7f800000); }
+template <>
+__device__ double rstsr_cinf_t<double>() { return __longlong_as_double(0x7ff0000000000000LL); }
+
+// width-class constants (msun thresholds differ between float and double)
+template <typename T>
+struct rstsr_cw;
+template <>
+struct rstsr_cw<float> {
+    static constexpr float eps = 1.1920929e-7f;
+    static constexpr float ln2 = 0.6931472f;
+    static constexpr float pio2 = 1.5707964f;
+    static constexpr float sqrt_min = 1.0842021e-19f; // sqrt(FLT_MIN)
+    static constexpr float t_max = 3.4028235e38f;
+    static constexpr float e_base = 2.7182818f;
+    static constexpr float ctanh_huge = 11.0f; // |x| scale for ctanh's exp form
+};
+template <>
+struct rstsr_cw<double> {
+    static constexpr double eps = 2.220446049250313e-16;
+    static constexpr double ln2 = 0.6931471805599453;
+    static constexpr double pio2 = 1.5707963267948966;
+    static constexpr double sqrt_min = 1.4916681462400413e-154; // sqrt(DBL_MIN)
+    static constexpr double t_max = 1.7976931348623157e308;
+    static constexpr double e_base = 2.718281828459045;
+    static constexpr double ctanh_huge = 22.0;
+};
 
 // --- component-wise basics -------------------------------------------------
 
@@ -80,7 +121,8 @@ __device__ rstsr_complex<T> rstsr_cconj(rstsr_complex<T> a) {
 
 template <typename T>
 __device__ T rstsr_cabs(rstsr_complex<T> a) {
-    return rstsr_rsqrt(a.re * a.re + a.im * a.im);
+    // CPU reference: num-complex `norm()` = hypot (overflow-safe)
+    return rstsr_rhypot(a.re, a.im);
 }
 
 template <typename T>
@@ -110,9 +152,10 @@ __device__ rstsr_complex<T> rstsr_cdiv(rstsr_complex<T> a, rstsr_complex<T> b) {
 template <typename T>
 __device__ rstsr_complex<T> rstsr_crem(rstsr_complex<T> x, rstsr_complex<T> m) {
     // Gaussian-integer remainder, matching num-complex `Rem`:
-    // q = trunc(x/m) per component, r = x - m*q
+    // q = trunc(x/m) per component (`re - re % 1`, not an int cast),
+    // r = x - m*q
     rstsr_complex<T> d = rstsr_cdiv(x, m);
-    rstsr_complex<T> q = rstsr_complex<T>((T)(int)(d.re), (T)(long long)(d.im));
+    rstsr_complex<T> q = rstsr_complex<T>(d.re - rstsr_rfmod(d.re, (T)1.0), d.im - rstsr_rfmod(d.im, (T)1.0));
     return rstsr_csub(x, rstsr_cmul(m, q));
 }
 
@@ -120,8 +163,20 @@ __device__ rstsr_complex<T> rstsr_crem(rstsr_complex<T> x, rstsr_complex<T> m) {
 
 template <typename T>
 __device__ rstsr_complex<T> rstsr_cexp(rstsr_complex<T> a) {
-    T e = rstsr_rexp(a.re);
-    return rstsr_complex<T>(e * rstsr_rcos(a.im), e * rstsr_rsin(a.im));
+    // num-complex `exp` corner cases (the CPU reference)
+    T re = a.re, im = a.im;
+    if (isinf(re)) {
+        if (re < (T)0.0) {
+            if (!isfinite(im)) return rstsr_complex<T>((T)0.0, (T)0.0);
+        } else if (im == (T)0.0 || !isfinite(im)) {
+            if (isinf(im)) im = im - im; // NaN
+            return rstsr_complex<T>(re, im);
+        }
+    } else if (isnan(re) && im == (T)0.0) {
+        return a;
+    }
+    T e = rstsr_rexp(re);
+    return rstsr_complex<T>(e * rstsr_rcos(im), e * rstsr_rsin(im));
 }
 
 template <typename T>
@@ -131,20 +186,39 @@ __device__ rstsr_complex<T> rstsr_clog(rstsr_complex<T> a) {
 
 template <typename T>
 __device__ rstsr_complex<T> rstsr_csqrt(rstsr_complex<T> z) {
-    // principal branch: sqrt(r) * (cos(t/2), sin(t/2)) via half-angle
-    // identities (CuPy complex.cuh csqrt)
-    if (z.re == (T)0.0 && z.im == (T)0.0) {
-        return rstsr_complex<T>((T)0.0, (T)0.0);
+    // C99 / msun csqrt (the CPU reference in rstsr-dtype-traits c99_complex.rs)
+    T a = z.re, b = z.im;
+    const T zero = (T)0.0, two = (T)2.0;
+    if (a == zero && b == zero) return rstsr_complex<T>(zero, b);
+    if (isinf(b)) return rstsr_complex<T>(rstsr_cinf_t<T>(), b);
+    if (isnan(a)) {
+        T n = (b - b) / (b - b);
+        return rstsr_complex<T>(n, n);
     }
-    T mag = rstsr_cabs(z);
+    if (isinf(a)) {
+        T n = b - b;
+        if (signbit(a)) return rstsr_complex<T>(rstsr_rabs(n), rstsr_rcopysign(a, b));
+        return rstsr_complex<T>(a, rstsr_rcopysign(n, b));
+    }
+
+    // scale away overflow in a*a / b*b (Algorithm 312, CACM 1967)
+    const T thresh = rstsr_cw<T>::t_max / ((T)1.0 + (T)1.4142135623730950488016887242096981);
+    bool scale = rstsr_rabs(a) >= thresh || rstsr_rabs(b) >= thresh;
+    if (scale) {
+        a *= (T)0.25;
+        b *= (T)0.25;
+    }
     T re, im;
-    if (z.re >= (T)0.0) {
-        re = rstsr_rsqrt((T)0.5 * (mag + z.re));
-        im = z.im / ((T)2.0 * re);
+    if (a >= zero) {
+        T t = rstsr_rsqrt((a + rstsr_rhypot(a, b)) * (T)0.5);
+        re = t;
+        im = b / (two * t);
     } else {
-        im = rstsr_rcopysign(rstsr_rsqrt((T)0.5 * (mag - z.re)), z.im);
-        re = z.im / ((T)2.0 * im);
+        T t = rstsr_rsqrt((-a + rstsr_rhypot(a, b)) * (T)0.5);
+        re = rstsr_rabs(b) / (two * t);
+        im = rstsr_rcopysign(t, b);
     }
+    if (scale) re *= two;
     return rstsr_complex<T>(re, im);
 }
 
@@ -160,30 +234,12 @@ __device__ rstsr_complex<T> rstsr_ccos(rstsr_complex<T> z) {
     return rstsr_complex<T>(rstsr_rcos(z.re) * rstsr_rcosh(z.im), -rstsr_rsin(z.re) * rstsr_rsinh(z.im));
 }
 
-template <typename T>
-__device__ rstsr_complex<T> rstsr_ctan(rstsr_complex<T> z) {
-    // tan = sin/cos via the exponential definitions (CuPy complex.cuh)
-    T a = (T)2.0 * z.re;
-    T b = (T)2.0 * z.im;
-    T denom = rstsr_rcos(a) + rstsr_rcosh(b);
-    return rstsr_complex<T>(rstsr_rsin(a) / denom, rstsr_rsinh(b) / denom);
-}
-
 // --- inverse trigonometry / hyperbolic (C99 Annex G) -------------------------
 //
 // FreeBSD msun algorithms (Stephen Montgomery-Smith), the same source as
 // NumPy's npy_math_complex.c, rstsr's c99_complex.rs, and cupy's
 // catrig.h/catrigf.h. Component-pair form. Python translation source:
 // rstsr-dtype-traits/src/c99_complex.rs.
-
-// NaN constants local to this header (it may splice before MATH_HELPER's
-// rstsr_nan helpers; NVRTC has no <math.h> on the include path).
-template <typename T>
-__device__ T rstsr_cnan_t();
-template <>
-__device__ float rstsr_cnan_t<float>() { return __int_as_float(0x7fffffff); }
-template <>
-__device__ double rstsr_cnan_t<double>() { return __longlong_as_double(0x7fffffffffffffffLL); }
 
 template <typename T>
 __device__ T rstsr_f_hypot_minus(T a, T b, T hab) {
@@ -200,28 +256,6 @@ struct rstsr_hard_work {
     T b;
     T sa2my2;
     T ny;
-};
-
-// width-class constants (msun thresholds differ between float and double)
-template <typename T>
-struct rstsr_cw;
-template <>
-struct rstsr_cw<float> {
-    static constexpr float eps = 1.1920929e-7f;
-    static constexpr float ln2 = 0.6931472f;
-    static constexpr float pio2 = 1.5707964f;
-    static constexpr float sqrt_min = 1.0842021e-19f; // sqrt(FLT_MIN)
-    static constexpr float t_max = 3.4028235e38f;
-    static constexpr float e_base = 2.7182818f;
-};
-template <>
-struct rstsr_cw<double> {
-    static constexpr double eps = 2.220446049250313e-16;
-    static constexpr double ln2 = 0.6931471805599453;
-    static constexpr double pio2 = 1.5707963267948966;
-    static constexpr double sqrt_min = 1.4916681462400413e-154; // sqrt(DBL_MIN)
-    static constexpr double t_max = 1.7976931348623157e308;
-    static constexpr double e_base = 2.718281828459045;
 };
 
 template <typename T>
@@ -411,38 +445,148 @@ __device__ rstsr_complex<T> rstsr_catan(rstsr_complex<T> z) {
     return rstsr_complex<T>(w.im, -w.re);
 }
 
-// --- hyperbolic --------------------------------------------------------------
-
-template <typename T>
-__device__ rstsr_complex<T> rstsr_csinh(rstsr_complex<T> z) {
-    // sinh = (e^z - e^-z)/2 (CuPy csinh)
-    rstsr_complex<T> e = rstsr_cexp(z);
-    rstsr_complex<T> emd = rstsr_cdiv(rstsr_complex<T>((T)1.0, (T)0.0), e);
-    return rstsr_complex<T>((T)0.5 * (e.re - emd.re), (T)0.5 * (e.im - emd.im));
-}
+// --- hyperbolic (C99 / msun, as in rstsr-dtype-traits c99_complex.rs) --------
 
 template <typename T>
 __device__ rstsr_complex<T> rstsr_ccosh(rstsr_complex<T> z) {
-    rstsr_complex<T> e = rstsr_cexp(z);
-    rstsr_complex<T> emd = rstsr_cdiv(rstsr_complex<T>((T)1.0, (T)0.0), e);
-    return rstsr_complex<T>((T)0.5 * (e.re + emd.re), (T)0.5 * (e.im + emd.im));
+    T x = z.re, y = z.im;
+    const T zero = (T)0.0, half = (T)0.5, big = (T)22.0;
+    bool xf = isfinite(x), yf = isfinite(y);
+
+    if (xf && yf) {
+        if (y == zero) return rstsr_complex<T>(rstsr_rcosh(x), x * y);
+        if (rstsr_rabs(x) < big) {
+            return rstsr_complex<T>(rstsr_rcosh(x) * rstsr_rcos(y), rstsr_rsinh(x) * rstsr_rsin(y));
+        }
+        T h = rstsr_rexp(rstsr_rabs(x)) * half;
+        return rstsr_complex<T>(h * rstsr_rcos(y), rstsr_rcopysign(h, x) * rstsr_rsin(y));
+    }
+    if (x == zero && !yf) {
+        T n = y - y;
+        return rstsr_complex<T>(n, rstsr_rcopysign(zero, x * n));
+    }
+    if (y == zero && !xf) return rstsr_complex<T>(x * x, rstsr_rcopysign(zero, x) * y);
+    if (xf && !yf) {
+        T n = y - y;
+        return rstsr_complex<T>(n, x * n);
+    }
+    if (isinf(x)) {
+        if (!yf) {
+            T n = y - y;
+            return rstsr_complex<T>(x * x, x * n);
+        }
+        return rstsr_complex<T>((x * x) * rstsr_rcos(y), x * rstsr_rsin(y));
+    }
+    T n = y - y;
+    return rstsr_complex<T>((x * x) * n, (x + x) * n);
+}
+
+template <typename T>
+__device__ rstsr_complex<T> rstsr_csinh(rstsr_complex<T> z) {
+    T x = z.re, y = z.im;
+    const T zero = (T)0.0, half = (T)0.5, big = (T)22.0;
+    bool xf = isfinite(x), yf = isfinite(y);
+
+    if (xf && yf) {
+        if (y == zero) return rstsr_complex<T>(rstsr_rsinh(x), y);
+        if (rstsr_rabs(x) < big) {
+            return rstsr_complex<T>(rstsr_rsinh(x) * rstsr_rcos(y), rstsr_rcosh(x) * rstsr_rsin(y));
+        }
+        T h = rstsr_rexp(rstsr_rabs(x)) * half;
+        return rstsr_complex<T>(rstsr_rcopysign(h, x) * rstsr_rcos(y), h * rstsr_rsin(y));
+    }
+    if (x == zero && !yf) {
+        T n = y - y;
+        return rstsr_complex<T>(rstsr_rcopysign(zero, x * n), n);
+    }
+    if (y == zero && !xf) {
+        if (isnan(x)) return rstsr_complex<T>(x, y);
+        return rstsr_complex<T>(x, rstsr_rcopysign(zero, y));
+    }
+    if (xf && !yf) {
+        T n = y - y;
+        return rstsr_complex<T>(n, x * n);
+    }
+    if (!xf && !isnan(x)) {
+        if (!yf) {
+            T n = y - y;
+            return rstsr_complex<T>(x * x, x * n);
+        }
+        return rstsr_complex<T>(x * rstsr_rcos(y), rstsr_cinf_t<T>() * rstsr_rsin(y));
+    }
+    T n = y - y;
+    return rstsr_complex<T>((x * x) * n, (x + x) * n);
 }
 
 template <typename T>
 __device__ rstsr_complex<T> rstsr_ctanh(rstsr_complex<T> z) {
-    // tanh = sinh/cosh (CuPy ctanh; finite-z branch)
-    rstsr_complex<T> s = rstsr_csinh(z);
-    rstsr_complex<T> c = rstsr_ccosh(z);
-    return rstsr_cdiv(s, c);
+    // C99 / msun ctanh (Kahan's algorithm)
+    T x = z.re, y = z.im;
+    const T zero = (T)0.0, one = (T)1.0, four = (T)4.0;
+
+    if (!isfinite(x)) {
+        if (isnan(x)) return rstsr_complex<T>(x, (y == zero) ? y : x * y);
+        return rstsr_complex<T>(rstsr_rcopysign(one, x), rstsr_rcopysign(zero, y));
+    }
+    if (!isfinite(y)) {
+        if (x == zero) return rstsr_complex<T>(x, y - y);
+        T n = y - y;
+        return rstsr_complex<T>(n, n);
+    }
+    if (rstsr_rabs(x) >= rstsr_cw<T>::ctanh_huge) {
+        T e = rstsr_rexp(-rstsr_rabs(x));
+        return rstsr_complex<T>(rstsr_rcopysign(one, x), four * rstsr_rsin(y) * rstsr_rcos(y) * e * e);
+    }
+    T t = rstsr_rtan(y);
+    T beta = one + t * t;
+    T s = rstsr_rsinh(x);
+    T rho = rstsr_rsqrt(one + s * s);
+    T denom = one + beta * s * s;
+    return rstsr_complex<T>((beta * rho * s) / denom, t / denom);
+}
+
+template <typename T>
+__device__ rstsr_complex<T> rstsr_ctan(rstsr_complex<T> z) {
+    // ctan(z) = -i ctanh(i z)
+    rstsr_complex<T> w = rstsr_ctanh(rstsr_complex<T>(-z.im, z.re));
+    return rstsr_complex<T>(w.im, -w.re);
+}
+
+// --- expm1 / log1p (cancellation-free forms mirrored from the CPU) -----------
+
+template <typename T>
+__device__ rstsr_complex<T> rstsr_cexpm1(rstsr_complex<T> z) {
+    const T zero = (T)0.0, one = (T)1.0, half = (T)0.5, two = (T)2.0;
+    if (z.re == zero && z.im == zero) return rstsr_complex<T>(zero, zero);
+    if (isfinite(z.re) && isfinite(z.im) && rstsr_cabs(z) < half) {
+        // exp(z) - 1 = 2 exp(z/2) sinh(z/2)
+        rstsr_complex<T> h = rstsr_complex<T>(z.re * half, z.im * half);
+        rstsr_complex<T> p = rstsr_cmul(rstsr_cexp(h), rstsr_csinh(h));
+        return rstsr_complex<T>(two * p.re, two * p.im);
+    }
+    return rstsr_csub(rstsr_cexp(z), rstsr_complex<T>(one, zero));
+}
+
+template <typename T>
+__device__ rstsr_complex<T> rstsr_clog1p(rstsr_complex<T> z) {
+    const T zero = (T)0.0, one = (T)1.0;
+    rstsr_complex<T> u = rstsr_cadd(rstsr_complex<T>(one, zero), z);
+    if (!isfinite(u.re) || !isfinite(u.im) || (u.re == zero && u.im == zero)) {
+        return rstsr_clog(u);
+    }
+    // u = fl(1 + z); rho = u - (1 + z) is exact (Sterbenz)
+    rstsr_complex<T> rho = rstsr_csub(rstsr_csub(u, rstsr_complex<T>(one, zero)), z);
+    return rstsr_csub(rstsr_clog(u), rstsr_cdiv(rho, u));
 }
 
 // --- pow / sign (z/|z|) ------------------------------------------------------
 
 template <typename T>
 __device__ rstsr_complex<T> rstsr_cpow(rstsr_complex<T> x, rstsr_complex<T> y) {
-    // exp(y * log x) with the 0-pow-0 special case (CuPy cpow / std::pow)
-    if (x.re == (T)0.0 && x.im == (T)0.0) {
-        return rstsr_complex<T>((T)0.0, (T)0.0);
+    // num-complex `powc`: y == 0 -> 1, else exp(y log x). Zero base then
+    // follows the log limit (0^positive -> 0, 0^negative -> NaN).
+    if (y.re == (T)0.0 && y.im == (T)0.0) {
+        return rstsr_complex<T>((T)1.0, (T)0.0);
     }
     return rstsr_cexp(rstsr_cmul(y, rstsr_clog(x)));
 }
@@ -454,3 +598,54 @@ __device__ rstsr_complex<T> rstsr_csign(rstsr_complex<T> z) {
     if (z.re == (T)0.0 && z.im == (T)0.0) return z;
     return rstsr_cdiv(z, rstsr_complex<T>(rstsr_cabs(z), (T)0.0));
 }
+
+// --- C++ operators -----------------------------------------------------------
+// The arithmetic families, square, ext_neg and compound assigns emit plain
+// C++ operators; they route through the Smith/naive helpers above so the
+// nvcc/C++ overload resolution sees them.
+
+template <typename T>
+__device__ rstsr_complex<T> operator+(rstsr_complex<T> a, rstsr_complex<T> b) { return rstsr_cadd(a, b); }
+template <typename T>
+__device__ rstsr_complex<T> operator-(rstsr_complex<T> a, rstsr_complex<T> b) { return rstsr_csub(a, b); }
+template <typename T>
+__device__ rstsr_complex<T> operator*(rstsr_complex<T> a, rstsr_complex<T> b) { return rstsr_cmul(a, b); }
+template <typename T>
+__device__ rstsr_complex<T> operator/(rstsr_complex<T> a, rstsr_complex<T> b) { return rstsr_cdiv(a, b); }
+template <typename T>
+__device__ rstsr_complex<T> operator-(rstsr_complex<T> a) { return rstsr_cneg(a); }
+
+// mixed complex/real scalar forms (compound assigns with a real RHS)
+template <typename T>
+__device__ rstsr_complex<T> operator+(rstsr_complex<T> a, T b) { return rstsr_cadd(a, rstsr_complex<T>(b, (T)0.0)); }
+template <typename T>
+__device__ rstsr_complex<T> operator+(T a, rstsr_complex<T> b) { return rstsr_cadd(rstsr_complex<T>(a, (T)0.0), b); }
+template <typename T>
+__device__ rstsr_complex<T> operator-(rstsr_complex<T> a, T b) { return rstsr_csub(a, rstsr_complex<T>(b, (T)0.0)); }
+template <typename T>
+__device__ rstsr_complex<T> operator-(T a, rstsr_complex<T> b) { return rstsr_csub(rstsr_complex<T>(a, (T)0.0), b); }
+template <typename T>
+__device__ rstsr_complex<T> operator*(rstsr_complex<T> a, T b) { return rstsr_cmul(a, rstsr_complex<T>(b, (T)0.0)); }
+template <typename T>
+__device__ rstsr_complex<T> operator*(T a, rstsr_complex<T> b) { return rstsr_cmul(rstsr_complex<T>(a, (T)0.0), b); }
+template <typename T>
+__device__ rstsr_complex<T> operator/(rstsr_complex<T> a, T b) { return rstsr_cdiv(a, rstsr_complex<T>(b, (T)0.0)); }
+template <typename T>
+__device__ rstsr_complex<T> operator/(T a, rstsr_complex<T> b) { return rstsr_cdiv(rstsr_complex<T>(a, (T)0.0), b); }
+
+template <typename T>
+__device__ rstsr_complex<T>& operator+=(rstsr_complex<T>& a, rstsr_complex<T> b) { a = rstsr_cadd(a, b); return a; }
+template <typename T>
+__device__ rstsr_complex<T>& operator-=(rstsr_complex<T>& a, rstsr_complex<T> b) { a = rstsr_csub(a, b); return a; }
+template <typename T>
+__device__ rstsr_complex<T>& operator*=(rstsr_complex<T>& a, rstsr_complex<T> b) { a = rstsr_cmul(a, b); return a; }
+template <typename T>
+__device__ rstsr_complex<T>& operator/=(rstsr_complex<T>& a, rstsr_complex<T> b) { a = rstsr_cdiv(a, b); return a; }
+template <typename T>
+__device__ rstsr_complex<T>& operator+=(rstsr_complex<T>& a, T b) { a = rstsr_cadd(a, rstsr_complex<T>(b, (T)0.0)); return a; }
+template <typename T>
+__device__ rstsr_complex<T>& operator-=(rstsr_complex<T>& a, T b) { a = rstsr_csub(a, rstsr_complex<T>(b, (T)0.0)); return a; }
+template <typename T>
+__device__ rstsr_complex<T>& operator*=(rstsr_complex<T>& a, T b) { a = rstsr_cmul(a, rstsr_complex<T>(b, (T)0.0)); return a; }
+template <typename T>
+__device__ rstsr_complex<T>& operator/=(rstsr_complex<T>& a, T b) { a = rstsr_cdiv(a, rstsr_complex<T>(b, (T)0.0)); return a; }

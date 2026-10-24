@@ -187,6 +187,19 @@ pub(crate) fn plan_operand<D: DimAPI>(layout: &Layout<D>, order: FlagOrder, n: u
     }
 }
 
+/// Widen a 32-bit pack to the 64-bit form. The 32-bit magic multiplier is
+/// not valid for `__umul64hi`, so the magic is recomputed; strides are
+/// sign-extended from their `i32` representation.
+pub(crate) fn widen_pack(pack: &AxesPackN) -> AxesPack {
+    let mut axes = [AxisPlan { d: 1, s: 0, m: 0, sh: 0 }; 4];
+    for (i, &src) in pack.axes[..pack.rank].iter().enumerate() {
+        let mut plan = AxisPlan::new(src.d as u64);
+        plan.s = src.s as i64 as u64;
+        axes[i] = plan;
+    }
+    AxesPack { axes, rank: pack.rank }
+}
+
 /// Narrow-pack construction: every divisor < 2^31, strides fit `i32`, and
 /// the whole offset walk (including base offsets of at most `n` elements)
 /// stays within `i32` so signed 32-bit accumulation is exact (negative
@@ -377,6 +390,27 @@ mod test {
         let (rank, strides, _) = pack_view(&p);
         assert_eq!(rank, 1);
         assert_eq!(strides, [-1]);
+    }
+
+    #[test]
+    fn widen_pack_rematches_wide_plan() {
+        // a narrow plan and its 64-bit re-plan agree on divisors, strides,
+        // and magic quotients across the narrow numerator range
+        let sq = [(10u64, 30u64), (30, 1)];
+        let narrow = narrow_pack(&sq).expect("narrow pack");
+        let wide = widen_pack(&narrow);
+        assert_eq!(wide.rank, narrow.rank);
+        for (w, n) in wide.axes[..wide.rank].iter().zip(&narrow.axes[..narrow.rank]) {
+            assert_eq!(w.d, n.d as u64);
+            assert_eq!(w.s, n.s as i64 as u64);
+            for lin in [0u32, 1, 7, 29, 300, 999, (1 << 30) + 3] {
+                assert_eq!(w.div(lin as u64), n.div(lin) as u64, "lin={lin}");
+            }
+        }
+        // negative strides sign-extend into the wrapping 64-bit form
+        let neg = narrow_pack(&[(10, (-6isize) as u64), (30, 1)]).expect("narrow pack");
+        let wide = widen_pack(&neg);
+        assert_eq!(wide.axes[0].s as i64, -6);
     }
 
     #[test]

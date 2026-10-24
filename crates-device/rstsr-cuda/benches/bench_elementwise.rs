@@ -49,7 +49,7 @@ fn bench_cell<F: FnMut()>(d: &DeviceCuda, name: &str, n_iter: usize, repeat: usi
         funcs::synchronize(d).unwrap();
         samples.push(t0.elapsed().as_secs_f64() / n_iter as f64);
     }
-    samples.sort_by(|x, y| x.partial_cmp(y).unwrap());
+    samples.sort_by(|x, y| x.total_cmp(y));
     let med = samples[samples.len() / 2];
     println!("{name},{:.6}", med * 1e3);
     med
@@ -61,8 +61,10 @@ fn main() {
         return;
     }
     let d = DeviceCuda::new(0);
-    let n_iter: usize = std::env::var("RSTSR_BENCH_ITER").ok().and_then(|v| v.parse().ok()).unwrap_or(200);
-    let repeat: usize = std::env::var("RSTSR_BENCH_REPEAT").ok().and_then(|v| v.parse().ok()).unwrap_or(5);
+    // at least one iteration/repeat: zero would divide by zero or index an
+    // empty sample vector
+    let n_iter: usize = std::env::var("RSTSR_BENCH_ITER").ok().and_then(|v| v.parse().ok()).unwrap_or(200).max(1);
+    let repeat: usize = std::env::var("RSTSR_BENCH_REPEAT").ok().and_then(|v| v.parse().ok()).unwrap_or(5).max(1);
     let n = 2048usize; // 2-D operand: 32 MiB f64
 
     println!("cell,median_ms");

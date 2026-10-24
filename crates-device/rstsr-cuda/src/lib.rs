@@ -12,6 +12,17 @@
 //! returns immediately; host reads (`to_vec`, `to_scalar`, `Display`, ...)
 //! synchronize explicitly. Buffer frees are stream-ordered on the buffer's
 //! allocation stream.
+//!
+//! # Divergences from the CPU reference devices
+//!
+//! - `where` and `clip` are same-dtype only; the CPU devices promote scalar and mixed tensor
+//!   operands through `DTypePromoteAPI`.
+//! - The promoting binaries (`maximum`, `minimum`, `pow`, `atan2`, ...) are same-dtype only for the
+//!   same reason.
+//! - Transcendental unaries accept `f32`/`f64`/complex only; the CPU devices widen integer inputs
+//!   to float.
+//! - Integer `pow` rejects a negative scalar exponent (CPU parity) but a negative *tensor* exponent
+//!   is not checked and evaluates to 1.
 
 #![allow(clippy::needless_return)]
 
@@ -26,9 +37,9 @@ pub mod error;
 pub mod flags;
 pub mod format;
 pub mod kernel;
-pub mod kernels;
+pub(crate) mod kernels;
 
-pub mod kernels_ops;
+pub(crate) mod kernels_ops;
 pub mod operators;
 pub mod registry;
 pub mod stream;

@@ -72,6 +72,15 @@ pub trait CudaFloat: CudaArith {}
 impl CudaFloat for f32 {}
 impl CudaFloat for f64 {}
 
+/// Types with built-in transcendental kernels: the float widths and the
+/// complex pairs. Integer operands are not widened to float here (the CPU
+/// devices promote them; documented backend divergence).
+pub trait CudaTranscend: CudaDType {}
+impl CudaTranscend for f32 {}
+impl CudaTranscend for f64 {}
+impl CudaTranscend for Complex<f32> {}
+impl CudaTranscend for Complex<f64> {}
+
 /// Types with native CUDA C ordering/equality comparisons (`< > <= >= == !=`
 /// produce a scalar bool). Complex is excluded (component-wise comparisons
 /// are not orderings; rstsr declines them at the tensor layer as CPU does).
@@ -97,12 +106,12 @@ pub trait CudaInt: CudaDType {}
 impl CudaInt for T {}
 
 /// Real types with CUDA C `<`/`>` and `fmin`/`fmax`-class ordering
-/// (everything CudaCmp covers minus the halfs, whose device min/max
-/// compare through float promotion in the op expressions).
+/// (everything CudaCmp covers minus bool and the halfs; bool is not
+/// ordered/`ExtReal` on the CPU devices, so it stays out here too).
 pub trait CudaReal: CudaDType {}
 #[duplicate_item(
     T;
-    [bool]; [i8]; [i16]; [i32]; [i64]; [isize];
+    [i8]; [i16]; [i32]; [i64]; [isize];
     [u8]; [u16]; [u32]; [u64]; [usize];
     [f32]; [f64];
 )]

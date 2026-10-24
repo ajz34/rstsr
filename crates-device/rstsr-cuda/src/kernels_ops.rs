@@ -315,10 +315,39 @@ where
         let c_typed: &mut CudaBuffer<TA> = unsafe { transmute_ref_cross_mut(c) };
         return crate::kernels::elementwise::fill_launch::<TA, TA>(device, c_typed, lc, &fill);
     }
-    let exec = device.stream();
-    let _gc = order_input(c, exec)?;
     let expr = cast_expr::<TA, TC>()?;
     let scalar_c = format!("({expr})").replace("in[io]", "v_in");
+    let includes = [TA::INCLUDES, TC::INCLUDES].concat();
+    let bytes = scalar_bytes_of(&fill);
+    fill_generic_kernel::<TC, D>(device, c, lc, TA::CNAME, &includes, &scalar_c, &bytes)
+}
+
+/// Marshal a plain scalar in its on-device representation.
+fn scalar_bytes_of<T: CudaDType>(v: &T) -> Vec<u8> {
+    let mut b = vec![0u8; core::mem::size_of::<T>()];
+    // SAFETY: plain scalar; its bytes are its device representation
+    unsafe { core::ptr::copy_nonoverlapping(core::ptr::addr_of!(*v) as *const u8, b.as_mut_ptr(), b.len()) };
+    b
+}
+
+/// Generic strided fill (runtime-rank index path). `scalar_c` is a C
+/// expression yielding `TC` from the value parameter `v_in` (whose C type
+/// is `ta_cname`); `scalar_bytes` marshal that value.
+fn fill_generic_kernel<TC, D>(
+    device: &DeviceCuda,
+    c: &mut CudaBuffer<TC>,
+    lc: &Layout<D>,
+    ta_cname: &str,
+    includes: &[&str],
+    scalar_c: &str,
+    scalar_bytes: &[u8],
+) -> Result<()>
+where
+    TC: CudaDType,
+    D: DimAPI,
+{
+    let exec = device.stream();
+    let _gc = order_input(c, exec)?;
     let src = format!(
         r#"
 extern "C" __global__ void rstsr_fill_cast(
@@ -333,21 +362,11 @@ extern "C" __global__ void rstsr_fill_cast(
 }}
 "#,
         tc = TC::CNAME,
-        ta = TA::CNAME,
+        ta = ta_cname,
     );
-    let includes = [TA::INCLUDES, TC::INCLUDES].concat();
-    let key = make_key(device.ordinal_obj(), "rstsr_fill_cast", &assemble_source(&includes, &src), &[])?;
+    let key = make_key(device.ordinal_obj(), "rstsr_fill_cast", &assemble_source(includes, &src), &[])?;
     let f = device.ordinal_obj().kernel_function(&key)?;
     let lo = FlatLayout::of(lc);
-    // marshal the scalar in TA's representation (host struct layout for
-    // complex is {re, im} = the Rust Complex layout)
-    let nbytes = core::mem::size_of::<TA>();
-    let mut scalar_bytes = vec![0u8; nbytes];
-    // SAFETY: TA is a plain scalar; reading its bytes into a byte buffer is
-    // valid (Complex is repr(C) {re, im}, matching the kernel struct)
-    unsafe {
-        core::ptr::copy_nonoverlapping(core::ptr::addr_of!(fill) as *const u8, scalar_bytes.as_mut_ptr(), nbytes);
-    }
     let pack = LayoutPack::new(exec, &[(&lo, true)])?;
     let launch = FlatLaunch::new(exec, &f, lc.size())
         .arg_buf(c)
@@ -356,10 +375,29 @@ extern "C" __global__ void rstsr_fill_cast(
         .arg_u64(pack.strides[0])
         .arg_usize(lo.offset)
         .arg_usize(lc.size())
-        .arg_bytes(&scalar_bytes);
+        .arg_bytes(scalar_bytes);
     launch.launch()?;
     let _go = order_output(c, exec)?;
     Ok(())
+}
+
+/// Generic strided fill of a same-or-castable value into a layout the
+/// planned walk cannot represent (rank > 4, exotic strides).
+pub(crate) fn fill_generic_same<TC, TV, D>(
+    device: &DeviceCuda,
+    c: &mut CudaBuffer<TC>,
+    lc: &Layout<D>,
+    v: &TV,
+) -> Result<()>
+where
+    TC: CudaDType,
+    TV: CudaDType,
+    D: DimAPI,
+{
+    let scalar_c = cast_expr_c(TV::CNAME, TC::CNAME, "v_in")?;
+    let includes = [TV::INCLUDES, TC::INCLUDES].concat();
+    let bytes = scalar_bytes_of(v);
+    fill_generic_kernel::<TC, D>(device, c, lc, TV::CNAME, &includes, &scalar_c, &bytes)
 }
 
 // /* #endregion */
@@ -932,25 +970,6 @@ where
     rstsr_raise!(InvalidValue, "fill dtype not supported by the CUDA fill kernel")?
 }
 
-/// Identity-dtype fill through the generic strided fill kernel (planned
-/// path fallback; caller proved TypeId(TA) == TypeId(TC)).
-pub(crate) fn fill_dispatch_same<TA, TC, D>(
-    device: &DeviceCuda,
-    c: &mut CudaBuffer<TC>,
-    lc: &Layout<D>,
-    v: &TA,
-) -> Result<()>
-where
-    TA: CudaDType,
-    TC: CudaDType,
-    D: DimAPI,
-{
-    // SAFETY: caller proved TypeId equality (buffers layout-identical)
-    let c_typed: &mut CudaBuffer<TA> = unsafe { transmute_ref_cross_mut(c) };
-    let v_typed: TA = unsafe { core::ptr::read(v as *const TA) };
-    fill_dispatch(device, c_typed, lc, v_typed)
-}
-
 /// Generic strided copy with a caller-provided element expression (the
 /// planned copy's fallback when plans would be Generic; shape-equality is
 /// the caller's contract, cast_expr reads `a[ia]` and yields TC).
@@ -969,7 +988,9 @@ where
     let exec = device.stream();
     let _gc = order_input(c, exec)?;
     let _ga = order_input(a, exec)?;
-    let body = cast_source(TC::CNAME, TA::CNAME, cast_expr);
+    // the kernel names its input `in` at offset `io`
+    let expr = cast_expr.replace("a[ia]", "in[io]");
+    let body = cast_source(TC::CNAME, TA::CNAME, &expr);
     let includes = [TA::INCLUDES, TC::INCLUDES].concat();
     let key = make_key(device.ordinal_obj(), "rstsr_cast", &assemble_source(&includes, &body), &[])?;
     let f = device.ordinal_obj().kernel_function(&key)?;
@@ -1189,6 +1210,7 @@ pub(crate) fn where_sc_generic<TD, TB, TC>(
     b: &CudaBuffer<TB>,
     lb: &Layout<impl DimAPI>,
     c: &TC,
+    invert: bool,
 ) -> Result<()>
 where
     TD: CudaDType,
@@ -1207,14 +1229,14 @@ extern "C" __global__ void rstsr_where_sc_g(
     {td}* d, int rank, const rstsr_usz* shape, const rstsr_usz* dstr, rstsr_usz doff,
     const bool* a, const rstsr_usz* astr, rstsr_usz aoff,
     const {tb}* b, const rstsr_usz* bstr, rstsr_usz boff,
-    {tc} v, rstsr_usz n)
+    {tc} v, int inv, rstsr_usz n)
 {{
     rstsr_usz lin = (rstsr_usz)blockIdx.x * (rstsr_usz)blockDim.x + (rstsr_usz)threadIdx.x;
     if (lin >= n) return;
     rstsr_usz id = rstsr_index_to_offset(lin, rank, shape, dstr, doff);
     rstsr_usz ia = rstsr_index_to_offset(lin, rank, shape, astr, aoff);
     rstsr_usz ib = rstsr_index_to_offset(lin, rank, shape, bstr, boff);
-    d[id] = a[ia] ? b[ib] : v;
+    d[id] = (a[ia] ^ inv) ? b[ib] : v;
 }}
 "#,
         td = TD::CNAME,
@@ -1244,6 +1266,7 @@ extern "C" __global__ void rstsr_where_sc_g(
         .arg_u64(pack.strides[2])
         .arg_usize(lob.offset)
         .arg_bytes(&cb)
+        .arg_i32(invert as i32)
         .arg_usize(ld.size());
     launch.launch()?;
     let _go = order_output(d, exec)?;

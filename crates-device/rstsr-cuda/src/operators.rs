@@ -3,7 +3,7 @@
 //! device impls (`CudaDType` sub-traits), not on the tensor tier.
 
 use crate::buffer::CudaBuffer;
-use crate::dtype::{CudaArith, CudaCmp, CudaComplexFrom, CudaDType, CudaFloat, CudaReal};
+use crate::dtype::{CudaArith, CudaCmp, CudaComplexFrom, CudaDType, CudaFloat, CudaReal, CudaTranscend};
 use crate::kernels::elementwise;
 use crate::prelude_dev::*;
 
@@ -124,8 +124,8 @@ where
 /// Real transcendentals use CUDA libdevice (`sinf`/`sin`, ...); complex
 /// ones use the rstsr_complex.cuh functions (Smith/Hull-Tenan formulas
 /// as in CuPy complex.cuh and pytorch ComplexMath.cuh; see the header).
-/// Bound is `CudaArith` (f32/f64/complex); other dtypes are rejected at
-/// source-gen (same omit behavior as before).
+/// Bound is `CudaTranscend` (f32/f64/complex); integer inputs are rejected
+/// at compile time (the CPU devices widen them to float — divergence).
 #[duplicate_item(
     OpAPI        fn_base  is_recip  cfn        compose;
     [OpSinAPI     ] ["sin"]   [false] ["csin"]   [""];
@@ -153,7 +153,7 @@ where
 impl<T, D> OpAPI<T, D> for DeviceCuda
 where
     Self: DeviceRawAPI<T, Raw = CudaBuffer<T>> + DeviceRawAPI<MaybeUninit<T>, Raw = CudaBuffer<MaybeUninit<T>>>,
-    T: CudaDType + CudaArith,
+    T: CudaDType + CudaTranscend,
     D: DimAPI,
 {
     type TOut = T;
@@ -206,20 +206,21 @@ fn transc_expr(t: &str, fn_base: &str, cfn: &str, compose: &str, is_recip: bool,
         return Ok(if complex { format!("rstsr_{cfn}({x})") } else { format!("{fn_base}{s}({x})") });
     }
     if !complex {
-        // real composed forms via libdevice
+        // real forms: libdevice provides the stable expm1/log1p and the
+        // base-2/base-10 logarithms directly (no exp(x)-1 composition)
         return Ok(match compose {
-            "sub_one" => format!("(exp{s}({x}) - 1.0{s})"),
-            "add_one" => format!("log{s}(1.0{s} + {x})"),
-            "div_ln2" => format!("(log{s}({x}) / 0.693147180559945309417232121458{s})"),
-            "div_ln10" => format!("(log{s}({x}) / 2.302585092994045684017991454684{s})"),
+            "sub_one" => format!("expm1{s}({x})"),
+            "add_one" => format!("log1p{s}({x})"),
+            "div_ln2" => format!("log2{s}({x})"),
+            "div_ln10" => format!("log10{s}({x})"),
             other => rstsr_raise!(UnImplemented, "compose form {other} unknown")?,
         });
     }
     let r = t_real(t);
-    let one = format!("rstsr_make_complex(({})1.0, ({})0.0)", r, r);
     Ok(match compose {
-        "sub_one" => format!("rstsr_csub(rstsr_cexp({x}), {one})"),
-        "add_one" => format!("rstsr_clog(rstsr_cadd({one}, {x}))"),
+        // cancellation-free forms mirrored from the CPU's ExtComplexFloat
+        "sub_one" => format!("rstsr_cexpm1({x})"),
+        "add_one" => format!("rstsr_clog1p({x})"),
         "div_ln2" => {
             let ln2 = format!("rstsr_make_complex(({})0.693147180559945309417232121458, ({})0.0)", r, r);
             format!("rstsr_cdiv(rstsr_clog({x}), {ln2})")
@@ -235,18 +236,36 @@ fn transc_expr(t: &str, fn_base: &str, cfn: &str, compose: &str, is_recip: bool,
 // /* #endregion */
 // /* #region promoting binaries (B4) */
 /// The promoting-binary traits are `OpAPI<TA, TB, D>` with associated
-/// `TOut`: the tensor tier resolves promotion (`DTypePromoteAPI`) and
-/// instantiates the device op at the promoted dtype, so the device sees
-/// TA = TB = TC = TOut for same-dtype-operand calls (mixed int/float
-/// operands arrive pre-promoted). Float-only families bound `CudaFloat`;
-/// real families bound `CudaReal`; pow bounds `CudaArith` (complex
-/// included). (CPU reference: op_ternary_common.rs promotion tables.)
+/// `TOut`: this backend implements the same-dtype form only. The CPU devices
+/// promote mixed operands inside the device op (`TOut = TA::Res`); that
+/// promotion is a documented divergence and not mirrored here yet. Float-only
+/// families bound `CudaFloat`; real families bound `CudaReal`; pow bounds
+/// `CudaArith` (complex included). (CPU reference:
+/// op_ternary_common.rs promotion tables.)
 ///
 /// `f_suffix` aliases the exprs helper (real-math suffix by C type).
 use crate::kernels::exprs::f as f_suffix;
 
+/// Reject a negative scalar exponent for integer `pow` (CPU parity). Tensor
+/// exponents stay unchecked on this backend (documented divergence).
+fn check_int_pow_exponent<T: CudaDType>(v: &T) -> Result<()> {
+    // SAFETY: `CNAME` names the C representation of `T`, so the signed
+    // integer views below match T's layout.
+    let neg = unsafe {
+        match T::CNAME {
+            "signed char" => (*(v as *const T as *const i8)) < 0,
+            "short" => (*(v as *const T as *const i16)) < 0,
+            "int" => (*(v as *const T as *const i32)) < 0,
+            "long long" => (*(v as *const T as *const i64)) < 0,
+            _ => false,
+        }
+    };
+    rstsr_assert!(!neg, InvalidValue, "integer power requires a non-negative exponent")?;
+    Ok(())
+}
+
 macro_rules! impl_promoting_binary {
-    ($OpAPI:ident, $bound:ident, |$a:ident, $b:ident, $t:ident| $expr:expr) => {
+    ($OpAPI:ident, $bound:ident, $int_exp_check:expr, |$a:ident, $b:ident, $t:ident| $expr:expr) => {
         impl<T, D> $OpAPI<T, T, D> for DeviceCuda
         where
             Self: DeviceRawAPI<T, Raw = CudaBuffer<T>> + DeviceRawAPI<MaybeUninit<T>, Raw = CudaBuffer<MaybeUninit<T>>>,
@@ -279,6 +298,9 @@ macro_rules! impl_promoting_binary {
                 la: &Layout<D>,
                 b: T,
             ) -> Result<()> {
+                if $int_exp_check {
+                    check_int_pow_exponent(&b)?;
+                }
                 let expr = {
                     let ($a, $b, $t) = ("t[it]", "v", T::CNAME);
                     $expr.to_string()
@@ -294,6 +316,9 @@ macro_rules! impl_promoting_binary {
                 b: &CudaBuffer<T>,
                 lb: &Layout<D>,
             ) -> Result<()> {
+                if $int_exp_check {
+                    check_int_pow_exponent(&a)?;
+                }
                 let expr = {
                     let ($a, $b, $t) = ("v", "t[it]", T::CNAME);
                     $expr.to_string()
@@ -304,14 +329,14 @@ macro_rules! impl_promoting_binary {
     };
 }
 
-impl_promoting_binary!(OpATan2API, CudaFloat, |a, b, t| format!("atan2{}({}, {})", f_suffix(t), a, b));
-impl_promoting_binary!(OpCopySignAPI, CudaFloat, |a, b, t| format!("copysign{}({}, {})", f_suffix(t), a, b));
-impl_promoting_binary!(OpHypotAPI, CudaFloat, |a, b, t| format!("hypot{}({}, {})", f_suffix(t), a, b));
-impl_promoting_binary!(OpNextAfterAPI, CudaFloat, |a, b, t| format!("nextafter{}({}, {})", f_suffix(t), a, b));
+impl_promoting_binary!(OpATan2API, CudaFloat, false, |a, b, t| format!("atan2{}({}, {})", f_suffix(t), a, b));
+impl_promoting_binary!(OpCopySignAPI, CudaFloat, false, |a, b, t| format!("copysign{}({}, {})", f_suffix(t), a, b));
+impl_promoting_binary!(OpHypotAPI, CudaFloat, false, |a, b, t| format!("hypot{}({}, {})", f_suffix(t), a, b));
+impl_promoting_binary!(OpNextAfterAPI, CudaFloat, false, |a, b, t| format!("nextafter{}({}, {})", f_suffix(t), a, b));
 // CPU: (a.exp() + b.exp()).ln() — CUDA libdevice has no logaddexp; emit
 // the same formula (fmax inside for stability is a numerical upgrade we
 // do NOT take: CPU parity rules).
-impl_promoting_binary!(OpLogAddExpAPI, CudaFloat, |a, b, t| format!(
+impl_promoting_binary!(OpLogAddExpAPI, CudaFloat, false, |a, b, t| format!(
     "log{s}((exp{s}({a}) + exp{s}({b})))",
     s = f_suffix(t)
 ));
@@ -328,12 +353,14 @@ fn floor_divide_expr(tc: &str, x: &str, y: &str) -> String {
     }
 }
 
-impl_promoting_binary!(OpFloorDivideAPI, CudaReal, |a, b, t| floor_divide_expr(t, a, b));
-impl_promoting_binary!(OpMaximumAPI, CudaReal, |a, b, t| crate::kernels::exprs::maximum(t, a, b));
-impl_promoting_binary!(OpMinimumAPI, CudaReal, |a, b, t| crate::kernels::exprs::minimum(t, a, b));
+impl_promoting_binary!(OpFloorDivideAPI, CudaReal, false, |a, b, t| floor_divide_expr(t, a, b));
+impl_promoting_binary!(OpMaximumAPI, CudaReal, false, |a, b, t| crate::kernels::exprs::maximum(t, a, b));
+impl_promoting_binary!(OpMinimumAPI, CudaReal, false, |a, b, t| crate::kernels::exprs::minimum(t, a, b));
 
 // `pow`: float powf / int ipow / complex cpow (exprs::pow dispatches).
-impl_promoting_binary!(OpPowAPI, CudaArith, |a, b, t| crate::kernels::exprs::pow(t, t, t, a, b));
+// Scalar integer exponents are validated on the host; tensor exponents are
+// not (documented divergence from the CPU error).
+impl_promoting_binary!(OpPowAPI, CudaArith, true, |a, b, t| crate::kernels::exprs::pow(t, t, t, a, b));
 
 // /* #endregion */
 // /* #region non-transcendental unaries (B5) */
@@ -356,15 +383,8 @@ macro_rules! impl_rounding_unary {
                 b: &CudaBuffer<T>,
                 lb: &Layout<D>,
             ) -> Result<()> {
-                let expr = if crate::dtype::is_half_cname(T::CNAME) {
-                    let l = crate::kernels::exprs::load(T::CNAME, "b[ib]");
-                    let s = crate::kernels::exprs::store(T::CNAME, &format!("{}f({l})", $fnbase));
-                    if T::CNAME == "double" {
-                        format!("{}(b[ib])", $fnbase)
-                    } else {
-                        s
-                    }
-                } else if T::CNAME == "float" {
+                // `CudaReal` excludes half; the float suffix is enough
+                let expr = if T::CNAME == "float" {
                     format!("{}f(b[ib])", $fnbase)
                 } else if T::CNAME == "double" {
                     format!("{}(b[ib])", $fnbase)
@@ -656,10 +676,7 @@ where
 
     fn op_muta(&self, a: &mut CudaBuffer<T>, la: &Layout<D>) -> Result<()> {
         let expr = if T::CNAME == "bool" { "(!a[io])" } else { "(~a[io])" };
-        // SAFETY: layout-identical MaybeUninit transmute (crate invariant)
-        let a_mu: &mut CudaBuffer<MaybeUninit<T>> =
-            unsafe { &mut *(a as *mut CudaBuffer<T> as *mut CudaBuffer<MaybeUninit<T>>) };
-        elementwise::unary_launch::<T, T>(self, a_mu, la, a, la, expr)
+        elementwise::unary_launch_inplace::<T>(self, a, la, expr)
     }
 }
 
@@ -683,11 +700,12 @@ macro_rules! impl_query_unary {
                 b: &CudaBuffer<T>,
                 lb: &Layout<D>,
             ) -> Result<()> {
+                // NVRTC defines the unsuffixed overloads only; float and
+                // half promote implicitly (there is no `isnanf`/`isinff`)
                 let expr = match T::CNAME {
-                    "float" => format!("{}f(b[ib])", $real),
-                    "double" => format!("{}(b[ib])", $real),
-                    "__half" => format!("{}f(__half2float(b[ib]))", $real),
-                    "__nv_bfloat16" => format!("{}f(__nv_bfloat162float(b[ib]))", $real),
+                    "float" | "double" => format!("{}(b[ib])", $real),
+                    "__half" => format!("{}(__half2float(b[ib]))", $real),
+                    "__nv_bfloat16" => format!("{}(__nv_bfloat162float(b[ib]))", $real),
                     "rstsr_c32" => $c32.to_string(),
                     "rstsr_c64" => $c64.to_string(),
                     other => rstsr_raise!(UnImplemented, "query unary dtype {other} not covered")?,
@@ -703,12 +721,7 @@ macro_rules! impl_query_unary {
     };
 }
 
-impl_query_unary!(
-    OpIsNanAPI,
-    "isnan",
-    "(isnanf(b[ib].re) || isnanf(b[ib].im))",
-    "(isnan(b[ib].re) || isnan(b[ib].im))"
-);
+impl_query_unary!(OpIsNanAPI, "isnan", "(isnan(b[ib].re) || isnan(b[ib].im))", "(isnan(b[ib].re) || isnan(b[ib].im))");
 impl_query_unary!(OpIsInfAPI, "isinf", "(isinf(b[ib].re) || isinf(b[ib].im))", "(isinf(b[ib].re) || isinf(b[ib].im))");
 impl_query_unary!(
     OpIsFiniteAPI,

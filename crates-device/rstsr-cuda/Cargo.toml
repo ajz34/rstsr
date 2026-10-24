@@ -47,7 +47,3 @@ dynamic-loading = ["cudarc/dynamic-loading"]
 [[bench]]
 name = "bench_elementwise"
 harness = false
-
-[[test]]
-name = "test_ops_wave"
-required-features = []

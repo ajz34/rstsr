@@ -133,22 +133,16 @@ pub(crate) fn minimum(tc: &str, x: &str, y: &str) -> String {
 }
 
 /// NaN-propagating fmax/fmin pair (the CPU float semantics); `max`
-/// selects the direction.
+/// selects the direction. Callers admit float/double only.
 fn nan_max_min(tc: &str, x: &str, y: &str, max: bool) -> String {
-    // Either-operand NaN propagation via the single-instruction PTX
-    // helpers (rstsr_maxnan*); the three-arm select is the portable floor
-    // for other float classes.
-    let s = f(tc);
-    if tc == "double" {
-        let op = if max { "rstsr_maxnand" } else { "rstsr_minnand" };
-        return format!("{op}({x}, {y})");
-    }
-    if tc == "float" {
-        let op = if max { "rstsr_maxnanf" } else { "rstsr_minnanf" };
-        return format!("{op}({x}, {y})");
-    }
-    let op = if max { "fmax" } else { "fmin" };
-    format!("(isnan{s}({x}) ? ({x}) : (isnan{s}({y}) ? ({y}) : {op}{s}({x}, {y})))")
+    let op = match (tc, max) {
+        ("double", true) => "rstsr_maxnand",
+        ("double", false) => "rstsr_minnand",
+        ("float", true) => "rstsr_maxnanf",
+        ("float", false) => "rstsr_minnanf",
+        _ => unreachable!("nan_max_min is float-only"),
+    };
+    format!("{op}({x}, {y})")
 }
 
 /* #endregion */
@@ -181,8 +175,9 @@ pub(crate) fn sign(tc: &str, x: &str) -> String {
         return store(tc, &format!("(isnan({lx}) ? ({lx}) : (({lx}) > 0.0f ? 1.0f : (({lx}) < 0.0f ? -1.0f : 0.0f)))"));
     }
     if tc == "float" || tc == "double" {
-        let s = f(tc);
-        return format!("(isnan{s}({x}) ? ({x}) : (({x}) > 0 ? ({tc})1 : (({x}) < 0 ? ({tc})-1 : ({tc})0)))");
+        // `isnan` is overloaded for float and double in NVRTC; the
+        // f-suffixed spelling does not exist
+        return format!("(isnan({x}) ? ({x}) : (({x}) > 0 ? ({tc})1 : (({x}) < 0 ? ({tc})-1 : ({tc})0)))");
     }
     // integers: CPU ext_sign for ints is -1/0/1 by comparison
     format!("((({x}) > 0) - (({x}) < 0))")
@@ -203,8 +198,6 @@ pub(crate) fn signbit(tc: &str, x: &str) -> String {
     format!("(signbit({}))", x)
 }
 
-/// `abs` into the output C type `tout` (complex -> magnitude (real),
-/// half -> half, ints/floats -> same-type abs).
 /// The real component C type of a (possibly complex) C type name.
 pub(crate) fn t_real(t: &str) -> &'static str {
     if t == "rstsr_c32" {
@@ -214,6 +207,8 @@ pub(crate) fn t_real(t: &str) -> &'static str {
     }
 }
 
+/// `abs` into the output C type `tout` (complex -> magnitude (real),
+/// half -> half, ints/floats -> same-type abs).
 pub(crate) fn abs(tx: &str, tout: &str, x: &str) -> String {
     if is_complex_cname(tx) {
         let v = format!("rstsr_cabs({x})");
@@ -231,7 +226,13 @@ pub(crate) fn abs(tx: &str, tout: &str, x: &str) -> String {
         // unsigned abs is identity on CPU
         return format!("({x})");
     }
-    format!("abs{}({})", f(tx), x)
+    match tx {
+        // NVRTC has no `absf`; float abs is `fabsf`
+        "float" => format!("fabsf({x})"),
+        "double" => format!("fabs({x})"),
+        // `abs` is defined for every CUDA integer width
+        _ => format!("abs({x})"),
+    }
 }
 
 /* #endregion */
