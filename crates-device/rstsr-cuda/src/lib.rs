@@ -26,6 +26,8 @@ pub mod error;
 pub mod flags;
 pub mod format;
 pub mod kernel;
+pub mod kernels;
+
 pub mod kernels_ops;
 pub mod operators;
 pub mod registry;

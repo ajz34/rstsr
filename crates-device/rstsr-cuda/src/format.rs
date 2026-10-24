@@ -19,7 +19,11 @@ fn prefix_axis_visited(n: usize, max_print: usize, min_print: usize) -> Vec<usiz
     loop {
         out.push(p);
         let next = if n < max_print || p + min_print >= n || p + 1 < min_print {
-            if p + 1 < n { Some(p + 1) } else { None }
+            if p + 1 < n {
+                Some(p + 1)
+            } else {
+                None
+            }
         } else {
             Some(n - min_print)
         };

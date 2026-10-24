@@ -29,6 +29,8 @@ rstsr = { path = "../../rstsr", default-features = false }
 
 [features]
 default = []
+# eprintln the planned entry/plan choice per launch (hot-path debug only)
+launch_trace = []
 # CPU reference device interop (DeviceFaer <-> DeviceCuda conversions).
 faer = ["rstsr-core/faer"]
 # Pick an explicit CUDA version when the build system has no nvcc/nvcc is
@@ -45,3 +47,7 @@ dynamic-loading = ["cudarc/dynamic-loading"]
 [[bench]]
 name = "bench_elementwise"
 harness = false
+
+[[test]]
+name = "test_ops_wave"
+required-features = []

@@ -39,8 +39,6 @@ pub trait CudaDType: Copy + Send + Sync + Debug + 'static {
     [usize]             ["unsigned long long"];
     [f32]               ["float"];
     [f64]               ["double"];
-    [Complex<f32>]      ["rstsr_c32"];
-    [Complex<f64>]      ["rstsr_c64"];
 )]
 impl CudaDType for T {
     const CNAME: &'static str = name;
@@ -85,3 +83,65 @@ pub trait CudaCmp: CudaDType {}
     [f32]; [f64]; [f16]; [bf16];
 )]
 impl CudaCmp for T {}
+
+/// Integer types with CUDA C bitwise/shift operators (`& | ^ << >>`).
+/// Bool is excluded here (its bitwise ops are emitted as logical `&&/||`
+/// and `!`-based xor by the op layer); shifts are only generated for
+/// these types.
+pub trait CudaInt: CudaDType {}
+#[duplicate_item(
+    T;
+    [i8]; [i16]; [i32]; [i64]; [isize];
+    [u8]; [u16]; [u32]; [u64]; [usize];
+)]
+impl CudaInt for T {}
+
+/// Real types with CUDA C `<`/`>` and `fmin`/`fmax`-class ordering
+/// (everything CudaCmp covers minus the halfs, whose device min/max
+/// compare through float promotion in the op expressions).
+pub trait CudaReal: CudaDType {}
+#[duplicate_item(
+    T;
+    [bool]; [i8]; [i16]; [i32]; [i64]; [isize];
+    [u8]; [u16]; [u32]; [u64]; [usize];
+    [f32]; [f64];
+)]
+impl CudaReal for T {}
+
+/// Complex-capable types for the mixed complex kernels
+/// (primitive→complex promotion expressions exist in `cast_expr_c`).
+pub trait CudaComplexFrom: CudaDType {}
+#[duplicate_item(
+    T;
+    [i8]; [i16]; [i32]; [i64]; [isize];
+    [u8]; [u16]; [u32]; [u64]; [usize];
+    [f32]; [f64];
+)]
+impl CudaComplexFrom for T {}
+impl CudaComplexFrom for Complex<f32> {}
+impl CudaComplexFrom for Complex<f64> {}
+
+// complex dtypes: the INCLUDES marker is replaced by the complex-math
+// header content at source-assembly time (a custom .cuh cannot ride the
+// NVRTC builtin include path; see kernels/mod.rs COMPLEX_HEADER).
+impl CudaDType for Complex<f32> {
+    const CNAME: &'static str = "rstsr_c32";
+    const INCLUDES: &'static [&'static str] = &["//@RSTSR_COMPLEX_HEADER@//"];
+}
+impl CudaDType for Complex<f64> {
+    const CNAME: &'static str = "rstsr_c64";
+    const INCLUDES: &'static [&'static str] = &["//@RSTSR_COMPLEX_HEADER@//"];
+}
+
+/// C names of the complex dtypes (expression-level dispatch).
+pub const COMPLEX_CNAMES: [&str; 2] = ["rstsr_c32", "rstsr_c64"];
+
+/// Whether a C type name is a rstsr complex pair.
+pub fn is_complex_cname(t: &str) -> bool {
+    COMPLEX_CNAMES.contains(&t)
+}
+
+/// Whether a C type name is a half dtype.
+pub fn is_half_cname(t: &str) -> bool {
+    t == "__half" || t == "__nv_bfloat16"
+}

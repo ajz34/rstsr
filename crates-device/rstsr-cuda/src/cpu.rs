@@ -36,7 +36,6 @@ where
     }
 }
 
-
 impl DeviceCuda {
     /// Fetch exactly the elements the CPU walker prints (one batched gather
     /// and a single D2H sync), stage them compactly, and print through the
@@ -64,8 +63,7 @@ impl DeviceCuda {
         let Ok(fetched) = crate::kernels_ops::gather_to_host(self, raw, &idxs) else {
             return Err(core::fmt::Error);
         };
-        let mut staged: std::collections::HashMap<usize, T> =
-            std::collections::HashMap::with_capacity(fetched.len());
+        let mut staged: std::collections::HashMap<usize, T> = std::collections::HashMap::with_capacity(fetched.len());
         for (slot, v) in fetched.into_iter().enumerate() {
             staged.insert(idxs[slot], v);
         }

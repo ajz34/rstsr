@@ -28,14 +28,107 @@ typedef signed char rstsr_i8; typedef short rstsr_i16; typedef int rstsr_i32;
 typedef long long rstsr_i64; typedef long long rstsr_isz;
 typedef unsigned char rstsr_u8; typedef unsigned short rstsr_u16; typedef unsigned int rstsr_u32;
 typedef unsigned long long rstsr_u64; typedef unsigned long long rstsr_usz;
-struct rstsr_c32 { float re, im; };
-struct rstsr_c64 { double re, im; };
-__device__ rstsr_c32 make_c32(float re, float im) { rstsr_c32 v; v.re = re; v.im = im; return v; }
-__device__ rstsr_c64 make_c64(double re, double im) { rstsr_c64 v; v.re = re; v.im = im; return v; }
+// One template serves both complex widths; the aliases keep the CNAME
+// strings (and cache keys) stable. Layout {re, im} is byte-identical to
+// the previous plain structs.
+template <typename T>
+struct rstsr_complex {
+    T re, im;
+    __device__ rstsr_complex() {}
+    __device__ rstsr_complex(T r, T i) : re(r), im(i) {}
+};
+template <typename T>
+__device__ rstsr_complex<T> rstsr_make_complex(T re, T im) { return rstsr_complex<T>(re, im); }
+using rstsr_c32 = rstsr_complex<float>;
+using rstsr_c64 = rstsr_complex<double>;
 "#;
 
 /// Bump when generated-source semantics or the disk payload change.
-const FORMAT_VERSION: u32 = 3;
+const FORMAT_VERSION: u32 = 4;
+
+/// Math helpers shared by elementwise kernels: NumPy-parity remainder
+/// (CPU `ExtReal::ext_rem` semantics) and shift-square integer pow
+/// (CPU `ExtNum::ext_pow` for ints; the tensor layer rejects negative
+/// exponents before the device call).
+pub(crate) const MATH_HELPER: &str = r#"
+// NVRTC provides the isnan/isinf/signbit/copysign overloads implicitly
+// (cuda_fp16.h-style device intrinsics); no host math headers are on the
+// include path, so NaN is a bit-pattern constant.
+__device__ float rstsr_nanf() { return __int_as_float(0x7fffffff); }
+
+// Either-operand NaN propagation in one instruction (PTX max/min with the
+// NaN override; returns the NaN operand, matching ext_max/ext_min).
+// .NaN override is f32-only on this driver's JIT for f64; either-operand
+// NaN propagation falls back to selects around the plain max/min.
+__device__ double rstsr_maxnand(double x, double y) {
+    double r = fmax(x, y);
+    return (isnan(x) ? x : (isnan(y) ? y : r));
+}
+__device__ double rstsr_minnand(double x, double y) {
+    double r = fmin(x, y);
+    return (isnan(x) ? x : (isnan(y) ? y : r));
+}
+__device__ float rstsr_maxnanf(float x, float y) {
+    float r; asm("max.NaN.f32 %0, %1, %2;" : "=f"(r) : "f"(x), "f"(y)); return r;
+}
+__device__ float rstsr_minnanf(float x, float y) {
+    float r; asm("min.NaN.f32 %0, %1, %2;" : "=f"(r) : "f"(x), "f"(y)); return r;
+}
+__device__ double rstsr_nan() { return __longlong_as_double(0x7fffffffffffffffLL); }
+
+__device__ float rstsr_fremf(float x, float y) {
+    // CPU ExtReal::ext_rem: NaN propagation, inf-dividend NaN, inf-divisor
+    // sign rule, divisor-signed zero on exact multiples, else fmod
+    // adjusted toward the divisor's sign.
+    if (isnan(x) || isnan(y)) return rstsr_nanf();
+    if (isinf(x)) return rstsr_nanf();
+    if (isinf(y)) {
+        if (x == 0.0f) return copysignf(0.0f, y);
+        return (signbit(x) == signbit(y)) ? x : y;
+    }
+    if (y == 0.0f) return rstsr_nanf();
+    float r = fmodf(x, y);
+    if (r == 0.0f) return copysignf(0.0f, y);
+    if (signbit(r) != signbit(y)) r += y;
+    return r;
+}
+
+__device__ double rstsr_frem(double x, double y) {
+    if (isnan(x) || isnan(y)) return rstsr_nan();
+    if (isinf(x)) return rstsr_nan();
+    if (isinf(y)) {
+        if (x == 0.0) return copysign(0.0, y);
+        return (signbit(x) == signbit(y)) ? x : y;
+    }
+    if (y == 0.0) return rstsr_nan();
+    double r = fmod(x, y);
+    if (r == 0.0) return copysign(0.0, y);
+    if (signbit(r) != signbit(y)) r += y;
+    return r;
+}
+
+__device__ long long rstsr_ipow(long long base, long long exp) {
+    // exp >= 0 guaranteed by the tensor layer (CPU parity); wrapping
+    // arithmetic matches Rust release-mode mul wrapping
+    long long result = 1;
+    while (exp > 0) {
+        if (exp & 1) result *= base;
+        base *= base;
+        exp >>= 1;
+    }
+    return result;
+}
+
+__device__ unsigned long long rstsr_ipowu(unsigned long long base, unsigned long long exp) {
+    unsigned long long result = 1;
+    while (exp > 0) {
+        if (exp & 1) result *= base;
+        base *= base;
+        exp >>= 1;
+    }
+    return result;
+}
+"#;
 
 /// Cache key of one compiled kernel specialization.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
@@ -108,10 +201,7 @@ impl CudaOrdinalObj {
             return Ok(f);
         }
         let ptx_src = self.load_or_compile_ptx(key)?;
-        let module = self
-            .context()
-            .load_module(cudarc::nvrtc::Ptx::from_src(ptx_src))
-            .map_err(map_driver_error)?;
+        let module = self.context().load_module(cudarc::nvrtc::Ptx::from_src(ptx_src)).map_err(map_driver_error)?;
         let function = Arc::new(module.load_function(&key.name).map_err(map_driver_error)?);
         let cache = self.kernel_cache();
         let mut entries = cache.entries.lock().unwrap_or_else(|e| e.into_inner());
@@ -150,10 +240,8 @@ impl CudaOrdinalObj {
     /// `compute_<major><minor>` arch string of this ordinal; cached
     /// after the first driver query (launch-path hot).
     pub(crate) fn arch_string(&self) -> Result<String> {
-        let cached = self.arch_slot.get_or_init(|| {
-            self.compute_capability()
-                .map(|(maj, min)| format!("compute_{maj}{min}"))
-        });
+        let cached =
+            self.arch_slot.get_or_init(|| self.compute_capability().map(|(maj, min)| format!("compute_{maj}{min}")));
         match cached {
             Ok(s) => Ok(s.clone()),
             Err(e) => Err(rstsr_error!(DeviceError, "arch query failed: {e}")),
@@ -193,16 +281,36 @@ const BLOCK: u32 = 256;
 /// blocks, no shared memory; owns the param storage for one launch.
 /// Elementwise/gather/sequence kernels use this; other kernel classes
 /// (reductions, GEMM, scans) get their own launch geometry.
+/// Explicit grid/block dims for a launch (tiled 2-D kernels).
+pub(crate) type LaunchShape = ((u32, u32, u32), (u32, u32, u32));
+
 pub(crate) struct FlatLaunch<'a> {
     stream: &'a Arc<CudaStreamObj>,
     function: &'a CudaFunction,
     n: usize,
+    elems_per_thread: u32,
+    /// Explicit `(grid, block)` overrides for non-1-D geometries (tiled
+    /// kernels); when set, `n`/`elems_per_thread` are ignored.
+    explicit_shape: Option<LaunchShape>,
     params: Vec<Vec<u8>>,
 }
 
 impl<'a> FlatLaunch<'a> {
     pub fn new(stream: &'a Arc<CudaStreamObj>, function: &'a CudaFunction, n: usize) -> Self {
-        Self { stream, function, n, params: Vec::with_capacity(8) }
+        Self { stream, function, n, elems_per_thread: 1, explicit_shape: None, params: Vec::with_capacity(8) }
+    }
+
+    /// Grid covers `elems_per_thread` consecutive elements per thread
+    /// (flat ILP entries); `n` stays the launch element count.
+    pub fn elems_per_thread(mut self, ept: u32) -> Self {
+        self.elems_per_thread = ept;
+        self
+    }
+
+    /// Launch with an explicit grid/block shape (tiled 2-D kernels).
+    pub fn explicit_shape(mut self, grid: (u32, u32, u32), block: (u32, u32, u32)) -> Self {
+        self.explicit_shape = Some((grid, block));
+        self
     }
 
     /// Push a raw byte scalar (fixed-size `Pod`-like value).
@@ -232,8 +340,13 @@ impl<'a> FlatLaunch<'a> {
 
     /// Enqueue the kernel (async; host sync happens only at host reads).
     pub fn launch(mut self) -> Result<()> {
-        let grid = self.n.div_ceil(BLOCK as usize) as u32;
-        if grid == 0 {
+        let (grid, block): LaunchShape = if let Some(sh) = self.explicit_shape {
+            sh
+        } else {
+            let work = (BLOCK as usize) * self.elems_per_thread as usize;
+            ((self.n.div_ceil(work) as u32, 1, 1), (BLOCK, 1, 1))
+        };
+        if grid.0 == 0 {
             return Ok(());
         }
         let mut ptrs: Vec<*mut core::ffi::c_void> =
@@ -244,8 +357,8 @@ impl<'a> FlatLaunch<'a> {
             self.stream.inner().context().bind_to_thread().map_err(map_driver_error)?;
             map_driver_result(dr::launch_kernel(
                 self.function.cu_function(),
-                (grid, 1, 1),
-                (BLOCK, 1, 1),
+                grid,
+                block,
                 0,
                 self.stream.inner().cu_stream(),
                 &mut ptrs,
@@ -270,7 +383,11 @@ impl Event {
     ///
     /// # Safety
     /// Both streams must belong to the same context.
-    pub unsafe fn order(&self, stream: cudarc::driver::sys::CUstream, wait_stream: cudarc::driver::sys::CUstream) -> Result<()> {
+    pub unsafe fn order(
+        &self,
+        stream: cudarc::driver::sys::CUstream,
+        wait_stream: cudarc::driver::sys::CUstream,
+    ) -> Result<()> {
         map_driver_result(dr::event::record(self.0, stream))?;
         map_driver_result(dr::stream::wait_event(wait_stream, self.0, CUevent_wait_flags::CU_EVENT_WAIT_DEFAULT))
     }
@@ -363,14 +480,37 @@ __device__ rstsr_usz rstsr_iter_offset(rstsr_usz lin, int rank,
 }
 "#;
 
-/// Build the full source: prelude + dtype includes + index helper + kernel
-/// body.
+/// Build the full source: prelude + dtype includes + index/math helpers +
+/// kernel body.
 pub(crate) fn assemble_source(includes: &[&str], body: &str) -> String {
     let mut s = String::from(CUDA_PRELUDE);
-    for inc in includes {
-        let _ = writeln!(s, "{inc}");
-    }
+    s.push_str(&crate::kernels::splice_includes(includes));
     let _ = write!(s, "\n{INDEX_HELPER}");
+    let _ = write!(s, "\n{MATH_HELPER}");
     let _ = write!(s, "\n{body}");
     s
+}
+
+#[cfg(test)]
+mod ptx_probe_tests {
+    use super::*;
+
+    #[test]
+    fn probe_maxnan_f64_jit() {
+        if !crate::funcs::is_available() {
+            return;
+        }
+        let dev = crate::device::DeviceCuda::new(0);
+        let src = r#"
+__global__ void k(double* o) {
+    double r; asm("max.NaN.f64 %0, %1, %2;" : "=d"(r) : "d"(o[1]), "d"(o[2]));
+    o[0] = r;
+}
+"#;
+        let key = make_key(dev.ordinal_obj(), "probe_maxnan_f64", src, &[]).unwrap();
+        match dev.ordinal_obj().kernel_function(&key) {
+            Ok(_) => println!("max.NaN.f64 via NVRTC+JIT: OK"),
+            Err(e) => println!("max.NaN.f64 via NVRTC+JIT: FAILED {e:?}"),
+        }
+    }
 }

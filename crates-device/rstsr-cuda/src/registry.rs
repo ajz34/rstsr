@@ -23,8 +23,7 @@ pub struct CudaOrdinalObj {
     /// Per-ordinal compiled-kernel cache (lazily initialized).
     pub(crate) kernel_cache_slot: OnceLock<crate::kernel::KernelCachePublic>,
     /// Cached arch string (one driver query per ordinal).
-    pub(crate) arch_slot:
-        OnceLock<core::result::Result<String, rstsr_core::prelude_dev::Error>>,
+    pub(crate) arch_slot: OnceLock<core::result::Result<String, rstsr_core::prelude_dev::Error>>,
 }
 
 impl CudaOrdinalObj {

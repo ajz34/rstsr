@@ -68,7 +68,6 @@ where
     }
 }
 
-
 impl<T> DeviceCreationNumAPI<T> for DeviceCuda
 where
     Self: DeviceRawAPI<T, Raw = CudaBuffer<T>>,

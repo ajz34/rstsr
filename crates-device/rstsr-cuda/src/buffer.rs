@@ -18,8 +18,8 @@ use std::sync::Arc;
 /// - Layout-identical to `CudaBuffer<MaybeUninit<T>>` (all `T`-dependence is behind `PhantomData`),
 ///   so the tensor layer's `Raw<T> <-> Raw<MaybeUninit<T>>` transmutes and the hand-written
 ///   `assume_init_impl` are sound.
-/// - Allocation is byte-based through `CudaSlice<u8>`; the POD (`Copy`)
-///   restriction is enforced where bytes cross the host boundary, not here.
+/// - Allocation is byte-based through `CudaSlice<u8>`; the POD (`Copy`) restriction is enforced
+///   where bytes cross the host boundary, not here.
 pub struct CudaBuffer<T> {
     pub(crate) slice: CudaSlice<u8>,
     pub(crate) len: usize,

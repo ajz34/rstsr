@@ -7,8 +7,6 @@ use rstsr_cuda::funcs;
 use rstsr_cuda::prelude_dev::*;
 use std::sync::Arc;
 
-
-
 /// D2H of a tensor's visible elements by layout gather (house helper).
 fn host_vec1<T, B, D, R>(t: &TensorAny<R, T, B, D>) -> Vec<T>
 where
@@ -93,7 +91,8 @@ fn assign_cast_pairs() {
     // bool -> f32
     // (pin the host device: DeviceCpu resolves to DeviceFaer under
     // faer_as_default, whose conversion impls are feature-gated)
-    let b_cpu: Tensor<bool, DeviceCpuSerial, _> = rt::asarray((vec![true, false, true, true], &DeviceCpuSerial::default()));
+    let b_cpu: Tensor<bool, DeviceCpuSerial, _> =
+        rt::asarray((vec![true, false, true, true], &DeviceCpuSerial::default()));
     let b = b_cpu.to_device(&d);
     let mut c3: Tensor<f32, _, _> = rt::zeros(([4], &d));
     c3.assign(&b);
@@ -235,8 +234,6 @@ fn mixed_stream_assign() {
 }
 
 /* #endregion */
-
-
 
 /* #region DeviceFaer interop (feature = "faer") */
 
