@@ -47,22 +47,16 @@ where
         return Some(Vec::new());
     }
     let n = span.ceil().to_usize()?;
-    // NumPy fills from the second element: `delta = (start + step) - start`
+    // NumPy fills from the second element: `delta = (start + step) - start`;
+    // slots 0/1 are `start` and `start + step` verbatim
     let next = start_ + step_;
     let delta = next - start_;
-    Some(
-        (0..n)
-            .into_par_iter()
-            .map(|i| {
-                let v = match i {
-                    0 => start_,
-                    1 => next,
-                    _ => start_ + i as f64 * delta,
-                };
-                T::from_f64(v).unwrap()
-            })
-            .collect(),
-    )
+    let mut result: Vec<T> = (0..n).into_par_iter().map(|i| T::from_f64(start_ + i as f64 * delta).unwrap()).collect();
+    result[0] = T::from_f64(start_).unwrap();
+    if n > 1 {
+        result[1] = T::from_f64(next).unwrap();
+    }
+    Some(result)
 }
 
 /// `f32` variant: length and elements computed in `f32` (NumPy's
@@ -79,19 +73,12 @@ where
     let n = span.ceil().to_usize()?;
     let next = start_ + step_;
     let delta = next - start_;
-    Some(
-        (0..n)
-            .into_par_iter()
-            .map(|i| {
-                let v = match i {
-                    0 => start_,
-                    1 => next,
-                    _ => start_ + i as f32 * delta,
-                };
-                T::from_f32(v).unwrap()
-            })
-            .collect(),
-    )
+    let mut result: Vec<T> = (0..n).into_par_iter().map(|i| T::from_f32(start_ + i as f32 * delta).unwrap()).collect();
+    result[0] = T::from_f32(start_).unwrap();
+    if n > 1 {
+        result[1] = T::from_f32(next).unwrap();
+    }
+    Some(result)
 }
 
 /// Half-width variant: mirrors NumPy `HALF_fill` (the quotient is rounded in
@@ -117,16 +104,12 @@ where
     let start_ = start.to_f32()?;
     let next = start.clone() + step;
     let delta = next.to_f32()? - start_;
-    Some(
-        (0..n)
-            .into_par_iter()
-            .map(|i| match i {
-                0 => start.clone(),
-                1 => next.clone(),
-                _ => T::from_f32(start_ + i as f32 * delta).unwrap(),
-            })
-            .collect(),
-    )
+    let mut result: Vec<T> = (0..n).into_par_iter().map(|i| T::from_f32(start_ + i as f32 * delta).unwrap()).collect();
+    result[0] = start;
+    if n > 1 {
+        result[1] = next;
+    }
+    Some(result)
 }
 
 /// Create a 1-D array of evenly spaced values within a given interval, using CPU rayon

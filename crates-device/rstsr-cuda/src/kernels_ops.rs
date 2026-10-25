@@ -4,7 +4,7 @@
 //! dtype-free, typed kernels generate from `CudaDType::CNAME`.
 
 use crate::buffer::CudaBuffer;
-use crate::dtype::CudaDType;
+use crate::dtype::{is_int_cname, CudaDType};
 
 /// `&mut CudaBuffer<TA> -> &mut CudaBuffer<TC>` after a TypeId equality check.
 ///
@@ -407,35 +407,31 @@ where
 fn sequence_source(t: &str) -> String {
     // NumPy fills from the second element (`<dtype>_fill`: delta = (start +
     // step) - start) and writes `start + i*delta`; the first two slots are
-    // `start` and `start + step` verbatim. Floats use the non-contracted
+    // `start` and `start + step` verbatim. `next` and `delta` are computed on
+    // the host (the arithmetic is the same IEEE operation), keeping the
+    // per-element cost at one multiply-add. Floats use the non-contracted
     // intrinsics so the separate multiply-then-add matches the CPU bit for
     // bit. The linear index is widened before the integer multiply: a narrow
     // dtype would otherwise truncate `i`.
     let body = match t {
         "float" => r#"
-    float next = __fadd_rn(start, step);
-    float delta = __fsub_rn(next, start);
     out[i] = (i == 0) ? start : ((i == 1) ? next : __fadd_rn(start, __fmul_rn(delta, (float) i)));
 "#
         .to_string(),
         "double" => r#"
-    double next = __dadd_rn(start, step);
-    double delta = __dsub_rn(next, start);
     out[i] = (i == 0) ? start : ((i == 1) ? next : __dadd_rn(start, __dmul_rn(delta, (double) i)));
 "#
         .to_string(),
         "__half" => r#"
-    __half next = __hadd(start, step);
-    float s = __half2float(start);
-    float delta = __half2float(next) - s;
-    out[i] = (i == 0) ? start : ((i == 1) ? next : __float2half(__fadd_rn(s, __fmul_rn(delta, (float) i))));
+    out[i] = (i == 0)
+        ? start
+        : ((i == 1) ? next : __float2half(__fadd_rn(__half2float(start), __fmul_rn(delta, (float) i))));
 "#
         .to_string(),
         "__nv_bfloat16" => r#"
-    __nv_bfloat16 next = __hadd(start, step);
-    float s = __bfloat162float(start);
-    float delta = __bfloat162float(next) - s;
-    out[i] = (i == 0) ? start : ((i == 1) ? next : __float2bfloat16(__fadd_rn(s, __fmul_rn(delta, (float) i))));
+    out[i] = (i == 0)
+        ? start
+        : ((i == 1) ? next : __float2bfloat16(__fadd_rn(__bfloat162float(start), __fmul_rn(delta, (float) i))));
 "#
         .to_string(),
         a if a.starts_with("unsigned") => {
@@ -443,10 +439,17 @@ fn sequence_source(t: &str) -> String {
         },
         _ => "    out[i] = (rstsr_i64) start + (rstsr_i64) step * (rstsr_i64) i;".to_string(),
     };
+    let params = if is_int_cname(t) {
+        format!("{t}* out, rstsr_usz n, {t} start, {t} step")
+    } else {
+        // half widths evaluate the delta in f32, the wider floats in their own
+        let delta_ty = if t == "double" { "double" } else { "float" };
+        format!("{t}* out, rstsr_usz n, {t} start, {t} next, {delta_ty} delta")
+    };
     format!(
         r#"
 extern "C" __global__ void rstsr_sequence(
-    {t}* out, rstsr_usz n, {t} start, {t} step)
+    {params})
 {{
     rstsr_usz i = (rstsr_usz)blockIdx.x * (rstsr_usz)blockDim.x + (rstsr_usz)threadIdx.x;
     if (i >= n) return;
@@ -457,7 +460,10 @@ extern "C" __global__ void rstsr_sequence(
 }
 
 /// Contiguous `arange`-style sequence into a fresh buffer.
-pub(crate) fn sequence<T: CudaDType>(device: &DeviceCuda, n: usize, start: T, step: T) -> Result<CudaBuffer<T>> {
+pub(crate) fn sequence<T>(device: &DeviceCuda, n: usize, start: T, step: T) -> Result<CudaBuffer<T>>
+where
+    T: CudaDType + core::ops::Add<Output = T> + num::ToPrimitive,
+{
     let buf = CudaBuffer::<T>::new_f(device.stream(), n)?;
     if n == 0 {
         return Ok(buf);
@@ -470,65 +476,73 @@ pub(crate) fn sequence<T: CudaDType>(device: &DeviceCuda, n: usize, start: T, st
         &[],
     )?;
     let f = device.ordinal_obj().kernel_function(&key)?;
-    let nbytes = core::mem::size_of::<T>();
-    let mut sbytes = vec![0u8; nbytes];
-    let mut stbytes = vec![0u8; nbytes];
-    // SAFETY: T is a plain scalar; its bytes are its on-device representation
-    unsafe {
-        core::ptr::copy_nonoverlapping(core::ptr::addr_of!(start) as *const u8, sbytes.as_mut_ptr(), nbytes);
-        core::ptr::copy_nonoverlapping(core::ptr::addr_of!(step) as *const u8, stbytes.as_mut_ptr(), nbytes);
+    let mut launch = FlatLaunch::new(exec, &f, n).arg_buf(&buf).arg_usize(n).arg_bytes(&scalar_bytes_of(&start));
+    if is_int_cname(T::CNAME) {
+        launch = launch.arg_bytes(&scalar_bytes_of(&step));
+    } else {
+        // NumPy `<dtype>_fill`: `next = start + step` in the dtype, then
+        // `delta = next - start` (evaluated in f32 for the half widths)
+        let next = start + step;
+        let dbytes: Vec<u8> = match T::CNAME {
+            "double" => {
+                let d = next.to_f64().ok_or_else(|| rstsr_error!(InvalidValue, "sequence delta conversion"))?
+                    - start.to_f64().ok_or_else(|| rstsr_error!(InvalidValue, "sequence delta conversion"))?;
+                d.to_ne_bytes().to_vec()
+            },
+            _ => {
+                let d = next.to_f32().ok_or_else(|| rstsr_error!(InvalidValue, "sequence delta conversion"))?
+                    - start.to_f32().ok_or_else(|| rstsr_error!(InvalidValue, "sequence delta conversion"))?;
+                d.to_ne_bytes().to_vec()
+            },
+        };
+        launch = launch.arg_bytes(&scalar_bytes_of(&next)).arg_bytes(&dbytes);
     }
-    let launch = FlatLaunch::new(exec, &f, n).arg_buf(&buf).arg_usize(n).arg_bytes(&sbytes).arg_bytes(&stbytes);
     launch.launch()?;
     Ok(buf)
 }
 
 fn linspace_source(t: &str) -> String {
     let f = if t == "float" || t == "rstsr_c32" { "float" } else { "double" };
-    // complex: component-wise arithmetic (C has no struct<->scalar casts);
-    // real: mirrors the CPU device's `start + i * step`, endpoint exact
+    let (add, mul) = if f == "float" { ("__fadd_rn", "__fmul_rn") } else { ("__dadd_rn", "__dmul_rn") };
+    // `step` is computed on the host (same IEEE division as the CPU); the
+    // per-element work is one multiply-add. Complex is component-wise (C has
+    // no struct<->scalar casts); the endpoint is written exactly.
     let body = if t == "rstsr_c32" || t == "rstsr_c64" {
         let make = "rstsr_make_complex";
         format!(
             r#"
     if (n <= 1) {{ out[i] = start; return; }}
-    rstsr_usz denom = endpoint ? n - 1 : n;
-    {f} span_re = (end.re - start.re) / ({f}) denom;
-    {f} span_im = (end.im - start.im) / ({f}) denom;
     {f} ii = ({f}) i;
-    out[i] = {make}(start.re + span_re * ii, start.im + span_im * ii);
+    out[i] = {make}({add}(start.re, {mul}(step.re, ii)), {add}(start.im, {mul}(step.im, ii)));
     if (endpoint && i == n - 1) out[i] = end;
 "#,
             f = f,
             make = make,
+            add = add,
+            mul = mul,
         )
     } else {
         // non-contracted intrinsics: the CPU reference computes
         // `start + i*step` as a separate multiply and add
-        let lin = if t == "float" {
-            "__fadd_rn(start, __fmul_rn(step, (float) i))"
-        } else if t == "double" {
-            "__dadd_rn(start, __dmul_rn(step, (double) i))"
+        let lin = if t == "float" || t == "double" {
+            format!("{add}(start, {mul}(step, ({f}) i))")
         } else {
-            "start + step * i"
+            "start + step * i".to_string()
         };
         format!(
             r#"
     if (n <= 1) {{ out[i] = start; return; }}
-    rstsr_usz denom = endpoint ? n - 1 : n;
-    {t} step = ({t})(({f}) end - ({f}) start) / ({t}) denom;
     out[i] = ({t})({lin});
     if (endpoint && i == n - 1) out[i] = end;
 "#,
             t = t,
-            f = f,
             lin = lin,
         )
     };
     format!(
         r#"
 extern "C" __global__ void rstsr_linspace(
-    {t}* out, rstsr_usz n, {t} start, {t} end, int endpoint)
+    {t}* out, rstsr_usz n, {t} start, {t} step, {t} end, int endpoint)
 {{
     rstsr_usz i = (rstsr_usz)blockIdx.x * (rstsr_usz)blockDim.x + (rstsr_usz)threadIdx.x;
     if (i >= n) return;{body}}}
@@ -539,17 +553,23 @@ extern "C" __global__ void rstsr_linspace(
 }
 
 /// Contiguous linspace into a fresh buffer (endpoint per NumPy semantics).
-pub(crate) fn linspace<T: CudaDType>(
-    device: &DeviceCuda,
-    n: usize,
-    start: T,
-    end: T,
-    endpoint: bool,
-) -> Result<CudaBuffer<T>> {
+pub(crate) fn linspace<T>(device: &DeviceCuda, n: usize, start: T, end: T, endpoint: bool) -> Result<CudaBuffer<T>>
+where
+    T: CudaDType + num::complex::ComplexFloat,
+{
     let buf = CudaBuffer::<T>::new_f(device.stream(), n)?;
     if n == 0 {
         return Ok(buf);
     }
+    // the CPU reference's step: `(end - start) / T::from(denominator)`
+    let step: T = if n <= 1 {
+        start
+    } else {
+        let denom = if endpoint { n - 1 } else { n };
+        let denom = <T as num::NumCast>::from(denom)
+            .ok_or_else(|| rstsr_error!(InvalidValue, "linspace denominator conversion"))?;
+        (end - start) / denom
+    };
     let exec = device.stream();
     let key = make_key(
         device.ordinal_obj(),
@@ -558,19 +578,12 @@ pub(crate) fn linspace<T: CudaDType>(
         &[],
     )?;
     let f = device.ordinal_obj().kernel_function(&key)?;
-    let nbytes = core::mem::size_of::<T>();
-    let mut sbytes = vec![0u8; nbytes];
-    let mut ebytes = vec![0u8; nbytes];
-    // SAFETY: T is a plain scalar; its bytes are its on-device representation
-    unsafe {
-        core::ptr::copy_nonoverlapping(core::ptr::addr_of!(start) as *const u8, sbytes.as_mut_ptr(), nbytes);
-        core::ptr::copy_nonoverlapping(core::ptr::addr_of!(end) as *const u8, ebytes.as_mut_ptr(), nbytes);
-    }
     let launch = FlatLaunch::new(exec, &f, n)
         .arg_buf(&buf)
         .arg_usize(n)
-        .arg_bytes(&sbytes)
-        .arg_bytes(&ebytes)
+        .arg_bytes(&scalar_bytes_of(&start))
+        .arg_bytes(&scalar_bytes_of(&step))
+        .arg_bytes(&scalar_bytes_of(&end))
         .arg_bytes(&(endpoint as i32).to_ne_bytes());
     launch.launch()?;
     Ok(buf)
