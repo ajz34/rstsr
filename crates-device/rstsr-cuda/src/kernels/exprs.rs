@@ -8,7 +8,7 @@
 //! CUDA-native functions are used where CPU and CUDA semantics
 //! coincide (`fmax/fmin` + explicit NaN guards, `rint`, `trunc`, ...).
 
-use crate::dtype::{is_complex_cname, is_half_cname};
+use crate::dtype::{is_complex_cname, is_half_cname, is_int_cname, is_unsigned_cname};
 
 /// The compute-type C name an operand computes in (half promotes to
 /// float, complex stays complex, everything else is itself).
@@ -23,7 +23,7 @@ pub(crate) fn compute_type(cname: &str) -> String {
 pub(crate) fn load(t: &str, x: &str) -> String {
     match t {
         "__half" => format!("__half2float({x})"),
-        "__nv_bfloat16" => format!("__nv_bfloat162float({x})"),
+        "__nv_bfloat16" => format!("__bfloat162float({x})"),
         _ => x.to_string(),
     }
 }
@@ -48,28 +48,55 @@ pub(crate) fn f(compute: &str) -> &'static str {
 
 /* #region remainder */
 
+/// Widen a non-complex operand expression to the complex C type `tc`.
+fn to_complex(tc: &str, t: &str, x: &str) -> String {
+    if is_complex_cname(t) {
+        x.to_string()
+    } else {
+        let r = t_real(tc);
+        format!("rstsr_make_complex(({r})({}), ({r})0.0)", load(t, x))
+    }
+}
+
 /// `rem` element expression on operands `x` (dividend) and `y` (divisor)
 /// of C types `tx`/`ty`, output type `tc`.
 ///
-/// - ints: Rust `%` (truncating) with the CPU guard `0 % x == 0` for a zero divisor (NumPy parity;
-///   a plain `%` traps/UBs);
+/// - complex output (any operand complex): Gaussian-integer remainder (num-complex `Rem`), the real
+///   side widened to complex;
+/// - ints: truncated `%` with a zero-divisor result of 0 (NumPy; a plain `%` traps/UBs);
 /// - floats: CPU `ExtReal::ext_rem` = fmod then sign-fix toward the divisor (`rstsr_frem` device
 ///   helper below);
-/// - half: round-trips through f32 (CPU does the same);
-/// - complex: Gaussian-integer remainder (num-complex `Rem`).
+/// - half: round-trips through f32 (CPU does the same).
 pub(crate) fn rem(tx: &str, ty: &str, tc: &str, x: &str, y: &str) -> String {
-    if is_complex_cname(tx) {
+    if is_complex_cname(tc) {
+        return format!("rstsr_crem({}, {})", to_complex(tc, tx, x), to_complex(tc, ty, y));
+    }
+    if is_complex_cname(tx) || is_complex_cname(ty) {
+        // a real output with a complex operand has no CPU promotion; emit
+        // an expression NVRTC rejects rather than a silent component drop
         return format!("rstsr_crem({x}, {y})");
     }
-    if is_half_cname(tx) {
+    if is_half_cname(tx) || is_half_cname(ty) {
         let (lx, ly) = (load(tx, x), load(ty, y));
-        return store(tx, &format!("rstsr_fremf({lx}, {ly})"));
+        return store(tc, &format!("rstsr_fremf({lx}, {ly})"));
     }
-    if tx.contains("char") || tx.contains("short") || tx.contains("int") || tx.contains("long") {
+    if is_int_cname(tx) || is_int_cname(ty) {
         return format!("({y} == 0 ? ({tc})0 : ({tc})(({x}) % ({y})))");
     }
     let s = f(&compute_type(tc));
     format!("rstsr_frem{s}({x}, {y})")
+}
+
+/// Binary arithmetic expression for `x op y` stored as `tc`.
+///
+/// Integer division by zero yields 0 (NumPy; the CPU reference device
+/// panics on Rust's `/`, a documented divergence); every other case is the
+/// plain C operator (float division by zero stays IEEE).
+pub(crate) fn arith_bin(op: char, tc: &str, x: &str, y: &str) -> String {
+    if op == '/' && is_int_cname(tc) {
+        return format!("(({y}) == 0 ? ({tc})0 : (({tc})(({x}) / ({y}))))");
+    }
+    format!("(({x}) {op} ({y}))")
 }
 
 /// `pow` element expression; ints use the shift-square `rstsr_ipow`
@@ -101,10 +128,9 @@ pub(crate) fn maximum(tc: &str, x: &str, y: &str) -> String {
     }
     if is_half_cname(tc) {
         let (lx, ly) = (load(tc, x), load(tc, y));
-        let isnan = if tc == "__half" { "__hisnan" } else { "__nv_isnanbf" };
         return store(
             tc,
-            &format!("({isnan}({lx}) ? ({lx}) : ({isnan}({ly}) ? ({ly}) : ({lx} > {ly} ? ({lx}) : ({ly}))))"),
+            &format!("(__hisnan({lx}) ? ({lx}) : (__hisnan({ly}) ? ({ly}) : ({lx} > {ly} ? ({lx}) : ({ly}))))"),
         );
     }
     if tc == "float" || tc == "double" {
@@ -120,10 +146,9 @@ pub(crate) fn minimum(tc: &str, x: &str, y: &str) -> String {
     }
     if is_half_cname(tc) {
         let (lx, ly) = (load(tc, x), load(tc, y));
-        let isnan = if tc == "__half" { "__hisnan" } else { "__nv_isnanbf" };
         return store(
             tc,
-            &format!("({isnan}({lx}) ? ({lx}) : ({isnan}({ly}) ? ({ly}) : ({lx} < {ly} ? ({lx}) : ({ly}))))"),
+            &format!("(__hisnan({lx}) ? ({lx}) : (__hisnan({ly}) ? ({ly}) : ({lx} < {ly} ? ({lx}) : ({ly}))))"),
         );
     }
     if tc == "float" || tc == "double" {
@@ -149,7 +174,8 @@ fn nan_max_min(tc: &str, x: &str, y: &str, max: bool) -> String {
 
 /* #region unary float-class helpers */
 
-/// `round` = ties-to-even: CUDA `rint` (both f32/f64, half via float).
+/// `round` = ties-to-even: CUDA `rint` (f32/f64; half via float; integers
+/// are the identity, as on the CPU).
 pub(crate) fn round_even(tc: &str, x: &str) -> String {
     if is_complex_cname(tc) {
         let r = t_real(tc);
@@ -160,6 +186,9 @@ pub(crate) fn round_even(tc: &str, x: &str) -> String {
     }
     if is_half_cname(tc) {
         return store(tc, &format!("rintf({})", load(tc, x)));
+    }
+    if is_int_cname(tc) {
+        return x.to_string();
     }
     format!("rint{}({})", f(tc), x)
 }
@@ -183,17 +212,22 @@ pub(crate) fn sign(tc: &str, x: &str) -> String {
     format!("((({x}) > 0) - (({x}) < 0))")
 }
 
-/// `signbit` element expression into bool.
+/// `signbit` element expression into bool (integers compare against zero;
+/// unsigned is always false, as on the CPU `ExtReal`).
 pub(crate) fn signbit(tc: &str, x: &str) -> String {
     if is_complex_cname(tc) {
         // declined on CPU (signbit of complex is not ExtReal); unreachable
         return "false".to_string();
     }
     if is_half_cname(tc) {
-        let isnan = if tc == "__half" { "__hisnan" } else { "__nv_isnanbf" };
-        let _ = isnan;
         // sign bit test through float conversion preserves -0.0
-        return format!("(signbitf({}))", load(tc, x));
+        return format!("(signbit({}))", load(tc, x));
+    }
+    if is_unsigned_cname(tc) {
+        return "false".to_string();
+    }
+    if is_int_cname(tc) {
+        return format!("((({x}) < 0))");
     }
     format!("(signbit({}))", x)
 }

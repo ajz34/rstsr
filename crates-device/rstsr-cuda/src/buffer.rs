@@ -27,8 +27,14 @@ pub struct CudaBuffer<T> {
 }
 
 impl<T> CudaBuffer<T> {
-    /// Allocate an uninitialized buffer of `len` elements on `stream`.
-    pub fn new(stream: &Arc<CudaStreamObj>, len: usize) -> Result<Self> {
+    /// Allocate an uninitialized buffer of `len` elements on `stream`
+    /// (infallible: driver failure panics through the RSTSR error mapping).
+    pub fn new(stream: &Arc<CudaStreamObj>, len: usize) -> Self {
+        Self::new_f(stream, len).rstsr_unwrap()
+    }
+
+    /// Fallible allocation of an uninitialized buffer.
+    pub fn new_f(stream: &Arc<CudaStreamObj>, len: usize) -> Result<Self> {
         let byte_len = len
             .checked_mul(core::mem::size_of::<T>())
             .ok_or_else(|| rstsr_error!(MemoryError, "CUDA buffer length overflow: {len} elements"))?;
@@ -60,6 +66,21 @@ impl<T> CudaBuffer<T> {
     /// the address device kernels and `get_index_ptr` operate on.
     pub fn device_ptr(&self) -> *const T {
         let (ptr, _record) = DevicePtr::<u8>::device_ptr(self.as_bytes(), self.slice.stream());
+        ptr as *const T
+    }
+
+    /// Base device pointer with the read event recorded on `exec` — the
+    /// stream that will actually read the buffer. Kernel argument paths
+    /// must use this form so the allocation stream's free waits for the
+    /// consuming launch (the plain accessor records on the allocation
+    /// stream, which does not cover cross-stream readers).
+    pub fn device_ptr_on(&self, exec: &Arc<CudaStreamObj>) -> *const T {
+        self.device_ptr_raw_on(exec.inner())
+    }
+
+    /// `device_ptr_on` over a raw cudarc stream (memcpy fast paths).
+    pub(crate) fn device_ptr_raw_on(&self, stream: &Arc<cudarc::driver::CudaStream>) -> *const T {
+        let (ptr, _record) = DevicePtr::<u8>::device_ptr(self.as_bytes(), stream);
         ptr as *const T
     }
 

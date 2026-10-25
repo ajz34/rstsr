@@ -135,43 +135,80 @@ pub(crate) fn plan_operand<D: DimAPI>(layout: &Layout<D>, order: FlagOrder, n: u
     }
     let shape = layout.shape().as_ref();
     let stride = layout.stride().as_ref();
-    // decomposition order, innermost first
-    let range: Box<dyn Iterator<Item = usize>> = match order {
-        RowMajor => Box::new((0..shape.len()).rev()),
-        ColMajor => Box::new(0..shape.len()),
-    };
-    // squashed walk, innermost first
-    let mut sq: Vec<(u64, u64)> = Vec::with_capacity(shape.len());
-    for ax in range {
-        let (sh, st) = (shape[ax] as u64, stride[ax] as u64);
+    // squashed walk, innermost first (fixed stack buffer: a fifth level can
+    // never fall back to <= 4, so it returns Generic immediately)
+    let mut sq = [(0u64, 0u64); 4];
+    let mut sq_len = 0usize;
+    let mut push = |sh: u64, st: u64| -> bool {
         if sh == 1 {
-            continue;
+            return true;
         }
         let (mut csh, mut cst) = (sh, st);
-        while let Some(&(lsh, lst)) = sq.last() {
+        while sq_len > 0 {
+            let (lsh, lst) = sq[sq_len - 1];
             // merged walk stays a valid divmod level: (d0,s0)+(d1,s1) ->
             // (d0*d1, s0) iff s1 == d0*s0, i.e. the outer stride continues
             // the inner run; both-zero strides (broadcast pairs) merge too.
             // The merged level keeps the INNER stride.
             if cst == lst.wrapping_mul(lsh) || (cst == 0 && lst == 0) {
-                sq.pop();
+                sq_len -= 1;
                 csh = lsh.wrapping_mul(csh);
                 cst = lst;
             } else {
                 break;
             }
         }
-        sq.push((csh, cst));
+        if sq_len == 4 {
+            return false;
+        }
+        sq[sq_len] = (csh, cst);
+        sq_len += 1;
+        true
+    };
+    let fits = match order {
+        RowMajor => {
+            let mut ok = true;
+            for ax in (0..shape.len()).rev() {
+                if !push(shape[ax] as u64, stride[ax] as u64) {
+                    ok = false;
+                    break;
+                }
+            }
+            ok
+        },
+        ColMajor => {
+            let mut ok = true;
+            for ax in 0..shape.len() {
+                if !push(shape[ax] as u64, stride[ax] as u64) {
+                    ok = false;
+                    break;
+                }
+            }
+            ok
+        },
+    };
+    if !fits {
+        return OperandPlan::Generic;
     }
+    let sq = &sq[..sq_len];
     match sq.len() {
-        0 => OperandPlan::Flat, // n == 1: every axis dropped
+        0 => {
+            // every axis was shape-1: the operand holds one element, so only
+            // n == 1 is a flat match; a broader output needs the generic walk
+            // (which always indexes element 0)
+            if n == 1 {
+                OperandPlan::Flat
+            } else {
+                OperandPlan::Generic
+            }
+        },
         // genuinely flat: a single stride-1 run spanning exactly n elements
         // (a broadcast operand keeps its divmod level even when stride == 1;
         // the walk discards the top quotient, implementing the broadcast)
         1 if sq[0].1 == 1 && sq[0].0 == n as u64 => OperandPlan::Flat,
         rank if rank <= 4 => {
             if n < (1 << 31) {
-                if let Some(pack) = narrow_pack(&sq) {
+                if let Some(pack) = narrow_pack(sq) {
                     return OperandPlan::ParamsN(pack);
                 }
             }

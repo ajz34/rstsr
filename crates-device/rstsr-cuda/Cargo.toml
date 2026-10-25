@@ -33,16 +33,16 @@ default = []
 launch_trace = []
 # CPU reference device interop (DeviceFaer <-> DeviceCuda conversions).
 faer = ["rstsr-core/faer"]
-# Pick an explicit CUDA version when the build system has no nvcc/nvcc is
-# unwanted; mutually exclusive with cuda-version-from-build-system (cudarc
-# enforces one version feature).
-cuda-12080 = ["cudarc/cuda-12080"]
-cuda-13020 = ["cudarc/cuda-13020"]
-cuda-version-from-build-system = ["cudarc/cuda-version-from-build-system"]
-# dynamic linking against the toolkit (requires LD_LIBRARY_PATH or rpath)
+# CUDA version resolution: cudarc detects the toolkit version from the build
+# system by default. Without nvcc, set the `CUDARC_CUDA_VERSION` environment
+# variable instead of enabling a per-version feature (cudarc cannot compile
+# with two version features active, which `--all-features` would do).
+# Link against the installed toolkit (requires LD_LIBRARY_PATH or rpath).
+# Only the dynamic mode is exposed: cudarc's linking modes are mutually
+# exclusive and panic when combined, so forwarding more than one breaks the
+# workspace `--all-features` build. The default `fallback-dynamic-loading`
+# (set on the dependency) covers the runtime-dlopen case.
 dynamic-linking = ["cudarc/dynamic-linking"]
-static-linking = ["cudarc/static-linking"]
-dynamic-loading = ["cudarc/dynamic-loading"]
 
 [[bench]]
 name = "bench_elementwise"

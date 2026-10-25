@@ -39,19 +39,94 @@ pub fn arange_by_primitive_f64_cpu_rayon<T>(start: T, end: T, step: T) -> Option
 where
     T: PartialOrd + Clone + Add<Output = T> + ToPrimitive + FromPrimitive + Send + Sync,
 {
+    // NumPy `_calc_length`: no trailing pop (the endpoint stays when the
+    // arithmetic lands exactly on it)
     let (start_, end_, step_) = (start.to_f64()?, end.to_f64()?, step.to_f64()?);
-    let n = ((end_ - start_) / step_).ceil().to_usize()?;
-    let mut result: Vec<T> = (0..n).into_par_iter().map(|i| T::from_f64(start_ + i as f64 * step_).unwrap()).collect();
-
-    // the interval may be open on the right, so we need to pop the last element if it's out of
-    // range.
-    let last_val = result.last().cloned();
-    if (step_ > 0.0 && last_val.as_ref().is_some_and(|x| *x >= end))
-        || (step_ < 0.0 && last_val.as_ref().is_some_and(|x| *x <= end))
-    {
-        result.pop();
+    let span = (end_ - start_) / step_;
+    if span <= 0.0 {
+        return Some(Vec::new());
     }
-    Some(result)
+    let n = span.ceil().to_usize()?;
+    // NumPy fills from the second element: `delta = (start + step) - start`
+    let next = start_ + step_;
+    let delta = next - start_;
+    Some(
+        (0..n)
+            .into_par_iter()
+            .map(|i| {
+                let v = match i {
+                    0 => start_,
+                    1 => next,
+                    _ => start_ + i as f64 * delta,
+                };
+                T::from_f64(v).unwrap()
+            })
+            .collect(),
+    )
+}
+
+/// `f32` variant: length and elements computed in `f32` (NumPy's
+/// `_calc_length` runs in the scalar dtype).
+pub fn arange_by_primitive_f32_cpu_rayon<T>(start: T, end: T, step: T) -> Option<Vec<T>>
+where
+    T: PartialOrd + Clone + Add<Output = T> + ToPrimitive + FromPrimitive + Send + Sync,
+{
+    let (start_, end_, step_) = (start.to_f32()?, end.to_f32()?, step.to_f32()?);
+    let span = (end_ - start_) / step_;
+    if span <= 0.0 {
+        return Some(Vec::new());
+    }
+    let n = span.ceil().to_usize()?;
+    let next = start_ + step_;
+    let delta = next - start_;
+    Some(
+        (0..n)
+            .into_par_iter()
+            .map(|i| {
+                let v = match i {
+                    0 => start_,
+                    1 => next,
+                    _ => start_ + i as f32 * delta,
+                };
+                T::from_f32(v).unwrap()
+            })
+            .collect(),
+    )
+}
+
+/// Half-width variant: mirrors NumPy `HALF_fill` (the quotient is rounded in
+/// the scalar dtype, the elements are evaluated in `f32` with the
+/// second-element delta).
+pub fn arange_by_primitive_half_cpu_rayon<T>(start: T, end: T, step: T) -> Option<Vec<T>>
+where
+    T: PartialOrd
+        + Clone
+        + Add<Output = T>
+        + Sub<Output = T>
+        + Div<Output = T>
+        + ToPrimitive
+        + FromPrimitive
+        + Send
+        + Sync,
+{
+    let span = ((end - start.clone()) / step.clone()).to_f32()?;
+    if span <= 0.0 {
+        return Some(Vec::new());
+    }
+    let n = span.ceil().to_usize()?;
+    let start_ = start.to_f32()?;
+    let next = start.clone() + step;
+    let delta = next.to_f32()? - start_;
+    Some(
+        (0..n)
+            .into_par_iter()
+            .map(|i| match i {
+                0 => start.clone(),
+                1 => next.clone(),
+                _ => T::from_f32(start_ + i as f32 * delta).unwrap(),
+            })
+            .collect(),
+    )
 }
 
 /// Create a 1-D array of evenly spaced values within a given interval, using CPU rayon
@@ -66,6 +141,14 @@ where
     use core::any::TypeId;
     use core::mem::*;
 
+    #[derive(Clone, Copy)]
+    enum ArangeMode {
+        Int,
+        F64,
+        F32,
+        Half,
+    }
+
     // 1. transmute type without affecting input/output types
     #[inline]
     // SAFETY: `TypeId` equality (checked at the call site) proves `T == U`, so the
@@ -75,23 +158,33 @@ where
         start: &T,
         end: &T,
         step: &T,
-        int_mode: bool,
+        mode: ArangeMode,
         pool: Option<&ThreadPool>,
     ) -> Option<Vec<T>>
     where
-        U: PartialOrd + Clone + Add<Output = U> + ToPrimitive + FromPrimitive + Send + Sync,
+        U: PartialOrd
+            + Clone
+            + Add<Output = U>
+            + Sub<Output = U>
+            + Div<Output = U>
+            + ToPrimitive
+            + FromPrimitive
+            + Send
+            + Sync,
     {
         let (start, end, step) =
             (transmute_copy::<T, U>(start), transmute_copy::<T, U>(end), transmute_copy::<T, U>(step));
-        let task = || match int_mode {
-            true => arange_by_primitive_isize_cpu_rayon(start.clone(), end.clone(), step.clone()),
-            false => arange_by_primitive_f64_cpu_rayon(start.clone(), end.clone(), step.clone()),
+        let task = || match mode {
+            ArangeMode::Int => arange_by_primitive_isize_cpu_rayon(start.clone(), end.clone(), step.clone()),
+            ArangeMode::F64 => arange_by_primitive_f64_cpu_rayon(start.clone(), end.clone(), step.clone()),
+            ArangeMode::F32 => arange_by_primitive_f32_cpu_rayon(start.clone(), end.clone(), step.clone()),
+            ArangeMode::Half => arange_by_primitive_half_cpu_rayon(start.clone(), end.clone(), step.clone()),
         };
         pool.map_or_else(task, |pool| pool.install(task)).map(|result| transmute::<Vec<U>, Vec<T>>(result))
     }
 
     // 2. convenient macro in match definition
-    macro_rules! expand_accelerated { ($mode: ident, $($ty: ty),*) => {
+    macro_rules! expand_accelerated { ($mode: expr, $($ty: ty),*) => {
         match TypeId::of::<T>() {
             $(id if id == TypeId::of::<$ty>() => unsafe { transmute_accelerated::<T, $ty>(&start, &end, &step, $mode, pool) },)*
             _ => None
@@ -99,10 +192,13 @@ where
     }}
 
     // 3. execute accelerated implementation if possible
-    expand_accelerated!(false, f64, f32).unwrap_or_else(|| {
-        expand_accelerated!(true, usize, isize, i32, i64, u32, u64)
-            .unwrap_or_else(|| arange_by_partial_ord_cpu_serial(start, end, step))
-    })
+    expand_accelerated!(ArangeMode::F64, f64)
+        .or_else(|| expand_accelerated!(ArangeMode::F32, f32))
+        .or_else(|| expand_accelerated!(ArangeMode::Half, half::f16, half::bf16))
+        .unwrap_or_else(|| {
+            expand_accelerated!(ArangeMode::Int, usize, isize, i8, i16, i32, i64, u8, u16, u32, u64)
+                .unwrap_or_else(|| arange_by_partial_ord_cpu_serial(start, end, step))
+        })
 }
 
 /* #endregion */

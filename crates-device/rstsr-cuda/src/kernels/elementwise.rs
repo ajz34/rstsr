@@ -20,6 +20,7 @@ use crate::dtype::CudaDType;
 use crate::kernel::{make_key, order_input, FlatLaunch};
 use crate::kernels_ops;
 use crate::prelude_dev::*;
+use std::sync::Arc;
 
 /// Device-side plan accessors: `rank == 0` is the flat encoding (offset =
 /// linear id); division is the round-up magic (`__umul64hi` high word).
@@ -114,7 +115,7 @@ extern "C" __global__ void rstsr_binary_pn(
             rstsr_isz ib = rstsr_plan_offset_n(lin, bp);
             out[oo] = @EXPR@;
         }
-        lin += gridDim.x * blockDim.x;
+        lin += w;
     }
 }
 
@@ -155,7 +156,7 @@ extern "C" __global__ void rstsr_unary_pn(
             rstsr_isz ib = rstsr_plan_offset_n(lin, bp);
             out[oo] = @EXPR@;
         }
-        lin += gridDim.x * blockDim.x;
+        lin += w;
     }
 }
 
@@ -196,7 +197,7 @@ extern "C" __global__ void rstsr_scalar_pn(
             rstsr_isz it = rstsr_plan_offset_n(lin, tp);
             out[oo] = @EXPR@;
         }
-        lin += gridDim.x * blockDim.x;
+        lin += w;
     }
 }
 
@@ -315,29 +316,18 @@ fn plan_variant(plans: &[&OperandPlan]) -> PlanVariant {
 
 /// Pointer argument folded with the element-unit offset (planned kernels
 /// take no separate offset parameters).
-fn offset_ptr<T>(buf: &CudaBuffer<T>, offset: usize) -> u64 {
+fn offset_ptr<T>(exec: &Arc<CudaStreamObj>, buf: &CudaBuffer<T>, offset: usize) -> u64 {
     if buf.is_empty() {
         0
     } else {
-        (buf.device_ptr() as u64).wrapping_add(offset as u64 * core::mem::size_of::<T>() as u64)
+        // the read event must land on the launching stream (not the
+        // allocation stream), or a cross-stream free can race the kernel
+        (buf.device_ptr_on(exec) as u64).wrapping_add(offset as u64 * core::mem::size_of::<T>() as u64)
     }
 }
 
 // /* #endregion */
 // /* #region launchers */
-/// Interned compiled functions: `(ordinal, discriminator) -> function`.
-///
-/// The discriminator is the cheap (entry, includes, substitution) identity
-/// of a specialization; the full source is assembled and NVRTC-compiled
-/// only on an intern miss, so the hot path costs one small-string hash.
-type FnIntern =
-    std::sync::Mutex<std::collections::HashMap<(usize, String), std::sync::Arc<cudarc::driver::CudaFunction>>>;
-static FN_INTERN: std::sync::OnceLock<FnIntern> = std::sync::OnceLock::new();
-
-fn fn_intern() -> &'static FnIntern {
-    FN_INTERN.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
-}
-
 /// Cheap discriminator of a specialization: every template substitution in
 /// order (the template itself is fixed by `name`).
 fn subs_disc(subs: &[(&str, &str)]) -> String {
@@ -360,14 +350,14 @@ fn planned_function(
     entries: impl FnOnce() -> String,
 ) -> Result<std::sync::Arc<cudarc::driver::CudaFunction>> {
     let disc = format!("{name}|{}|{disc_extra}", includes.concat());
-    let ordinal = device.ordinal();
-    if let Some(f) = fn_intern().lock().unwrap_or_else(|e| e.into_inner()).get(&(ordinal, disc.clone())) {
+    let cache = device.ordinal_obj().planned_cache();
+    if let Some(f) = cache.entries.lock().unwrap_or_else(|e| e.into_inner()).get(&disc) {
         return Ok(f.clone());
     }
     let src = assemble_planned(includes, &entries());
     let key = make_key(device.ordinal_obj(), name, &src, &[])?;
     let f = device.ordinal_obj().kernel_function(&key)?;
-    fn_intern().lock().unwrap_or_else(|e| e.into_inner()).insert((ordinal, disc), f.clone());
+    cache.entries.lock().unwrap_or_else(|e| e.into_inner()).insert(disc, f.clone());
     Ok(f)
 }
 
@@ -421,9 +411,9 @@ where
         PlanVariant::Flat => {
             launch = launch
                 .elems_per_thread(4)
-                .arg_u64(offset_ptr(c_typed, lc.offset()))
-                .arg_u64(offset_ptr(a, la.offset()))
-                .arg_u64(offset_ptr(b, lb.offset()))
+                .arg_u64(offset_ptr(exec, c_typed, lc.offset()))
+                .arg_u64(offset_ptr(exec, a, la.offset()))
+                .arg_u64(offset_ptr(exec, b, lb.offset()))
                 .arg_usize(n);
         },
         PlanVariant::Narrow => {
@@ -431,11 +421,11 @@ where
             let (nop, nap, nbp) = (plan_bytes_n(&po), plan_bytes_n(&pa), plan_bytes_n(&pb));
             launch = launch
                 .elems_per_thread(4)
-                .arg_u64(offset_ptr(c_typed, lc.offset()))
+                .arg_u64(offset_ptr(exec, c_typed, lc.offset()))
                 .arg_bytes(nop.as_ref().unwrap_or(&zn).bytes())
-                .arg_u64(offset_ptr(a, la.offset()))
+                .arg_u64(offset_ptr(exec, a, la.offset()))
                 .arg_bytes(nap.as_ref().unwrap_or(&zn).bytes())
-                .arg_u64(offset_ptr(b, lb.offset()))
+                .arg_u64(offset_ptr(exec, b, lb.offset()))
                 .arg_bytes(nbp.as_ref().unwrap_or(&zn).bytes())
                 .arg_i32(n as i32);
         },
@@ -443,16 +433,19 @@ where
             let zero = PlanBytes::zeroed();
             let (bop, bap, bbp) = (plan_bytes(&po), plan_bytes(&pa), plan_bytes(&pb));
             launch = launch
-                .arg_u64(offset_ptr(c_typed, lc.offset()))
+                .arg_u64(offset_ptr(exec, c_typed, lc.offset()))
                 .arg_bytes(bop.as_ref().unwrap_or(&zero).bytes())
-                .arg_u64(offset_ptr(a, la.offset()))
+                .arg_u64(offset_ptr(exec, a, la.offset()))
                 .arg_bytes(bap.as_ref().unwrap_or(&zero).bytes())
-                .arg_u64(offset_ptr(b, lb.offset()))
+                .arg_u64(offset_ptr(exec, b, lb.offset()))
                 .arg_bytes(bbp.as_ref().unwrap_or(&zero).bytes())
                 .arg_usize(n);
         },
     }
-    launch.launch()
+    launch.launch()?;
+    // write ordering for an output buffer not allocated on this stream
+    let _go = crate::kernel::order_output(c, exec)?;
+    Ok(())
 }
 
 /// Planned unary elementwise launch.
@@ -497,8 +490,8 @@ where
         PlanVariant::Flat => {
             launch = launch
                 .elems_per_thread(4)
-                .arg_u64(offset_ptr(c_typed, lc.offset()))
-                .arg_u64(offset_ptr(b, lb.offset()))
+                .arg_u64(offset_ptr(exec, c_typed, lc.offset()))
+                .arg_u64(offset_ptr(exec, b, lb.offset()))
                 .arg_usize(n);
         },
         PlanVariant::Narrow => {
@@ -506,23 +499,25 @@ where
             let (nop, nbp) = (plan_bytes_n(&po), plan_bytes_n(&pb));
             launch = launch
                 .elems_per_thread(4)
-                .arg_u64(offset_ptr(c_typed, lc.offset()))
+                .arg_u64(offset_ptr(exec, c_typed, lc.offset()))
                 .arg_bytes(nop.as_ref().unwrap_or(&zn).bytes())
-                .arg_u64(offset_ptr(b, lb.offset()))
+                .arg_u64(offset_ptr(exec, b, lb.offset()))
                 .arg_bytes(nbp.as_ref().unwrap_or(&zn).bytes())
                 .arg_i32(n as i32);
         },
         PlanVariant::Wide => {
             let zero = PlanBytes::zeroed();
             launch = launch
-                .arg_u64(offset_ptr(c_typed, lc.offset()))
+                .arg_u64(offset_ptr(exec, c_typed, lc.offset()))
                 .arg_bytes(plan_bytes(&po).as_ref().unwrap_or(&zero).bytes())
-                .arg_u64(offset_ptr(b, lb.offset()))
+                .arg_u64(offset_ptr(exec, b, lb.offset()))
                 .arg_bytes(plan_bytes(&pb).as_ref().unwrap_or(&zero).bytes())
                 .arg_usize(n);
         },
     }
-    launch.launch()
+    launch.launch()?;
+    let _go = crate::kernel::order_output(c, exec)?;
+    Ok(())
 }
 
 /// Planned in-place unary launch: the buffer is both destination and
@@ -566,7 +561,7 @@ where
         (PlanVariant::Wide, _) | (PlanVariant::Flat, OperandPlan::Flat) => {
             let zero = PlanBytes::zeroed();
             launch = launch
-                .arg_u64(offset_ptr(a, la.offset()))
+                .arg_u64(offset_ptr(exec, a, la.offset()))
                 .arg_bytes(plan_bytes(&pa).as_ref().unwrap_or(&zero).bytes())
                 .arg_usize(n);
         },
@@ -574,7 +569,7 @@ where
             let zn = PlanBytesN::zeroed();
             launch = launch
                 .elems_per_thread(4)
-                .arg_u64(offset_ptr(a, la.offset()))
+                .arg_u64(offset_ptr(exec, a, la.offset()))
                 .arg_bytes(plan_bytes_n(&pa).as_ref().unwrap_or(&zn).bytes())
                 .arg_i32(n as i32);
         },
@@ -604,7 +599,7 @@ extern "C" __global__ void rstsr_unary_inplace_n(
             rstsr_isz io = rstsr_plan_offset_n(lin, ap);
             a[io] = @EXPR@;
         }
-        lin += gridDim.x * blockDim.x;
+        lin += w;
     }
 }
 "#;
@@ -660,8 +655,8 @@ where
         PlanVariant::Flat => {
             launch = launch
                 .elems_per_thread(4)
-                .arg_u64(offset_ptr(c_typed, lc.offset()))
-                .arg_u64(offset_ptr(t, lt.offset()))
+                .arg_u64(offset_ptr(exec, c_typed, lc.offset()))
+                .arg_u64(offset_ptr(exec, t, lt.offset()))
                 .arg_bytes(&sbytes)
                 .arg_usize(n);
         },
@@ -670,9 +665,9 @@ where
             let (nop, ntp) = (plan_bytes_n(&po), plan_bytes_n(&pt));
             launch = launch
                 .elems_per_thread(4)
-                .arg_u64(offset_ptr(c_typed, lc.offset()))
+                .arg_u64(offset_ptr(exec, c_typed, lc.offset()))
                 .arg_bytes(nop.as_ref().unwrap_or(&zn).bytes())
-                .arg_u64(offset_ptr(t, lt.offset()))
+                .arg_u64(offset_ptr(exec, t, lt.offset()))
                 .arg_bytes(ntp.as_ref().unwrap_or(&zn).bytes())
                 .arg_bytes(&sbytes)
                 .arg_i32(n as i32);
@@ -680,15 +675,17 @@ where
         PlanVariant::Wide => {
             let zero = PlanBytes::zeroed();
             launch = launch
-                .arg_u64(offset_ptr(c_typed, lc.offset()))
+                .arg_u64(offset_ptr(exec, c_typed, lc.offset()))
                 .arg_bytes(plan_bytes(&po).as_ref().unwrap_or(&zero).bytes())
-                .arg_u64(offset_ptr(t, lt.offset()))
+                .arg_u64(offset_ptr(exec, t, lt.offset()))
                 .arg_bytes(plan_bytes(&pt).as_ref().unwrap_or(&zero).bytes())
                 .arg_bytes(&sbytes)
                 .arg_usize(n);
         },
     }
-    launch.launch()
+    launch.launch()?;
+    let _go = crate::kernel::order_output(c, exec)?;
+    Ok(())
 }
 
 // /* #endregion */
@@ -739,7 +736,7 @@ extern "C" __global__ void rstsr_fill_pn(
             rstsr_isz oo = rstsr_plan_offset_n(lin, op);
             out[oo] = v;
         }
-        lin += gridDim.x * blockDim.x;
+        lin += w;
     }
 }
 "#;
@@ -796,19 +793,20 @@ where
             // one quad-store per thread slot; scalar remainder rides the tail loop
             launch = launch
                 .elems_per_thread(4)
-                .arg_u64(offset_ptr(c, lc.offset()))
+                .arg_u64(offset_ptr(exec, c, lc.offset()))
                 .arg_bytes(&vbytes)
                 .arg_usize(n / 2)
                 .arg_usize(n);
         },
         PlanVariant::Flat => {
-            launch = launch.elems_per_thread(4).arg_u64(offset_ptr(c, lc.offset())).arg_bytes(&vbytes).arg_usize(n);
+            launch =
+                launch.elems_per_thread(4).arg_u64(offset_ptr(exec, c, lc.offset())).arg_bytes(&vbytes).arg_usize(n);
         },
         PlanVariant::Narrow => {
             let zn = PlanBytesN::zeroed();
             launch = launch
                 .elems_per_thread(4)
-                .arg_u64(offset_ptr(c, lc.offset()))
+                .arg_u64(offset_ptr(exec, c, lc.offset()))
                 .arg_bytes(plan_bytes_n(&po).as_ref().unwrap_or(&zn).bytes())
                 .arg_bytes(&vbytes)
                 .arg_i32(n as i32);
@@ -816,7 +814,7 @@ where
         PlanVariant::Wide => {
             let zero = PlanBytes::zeroed();
             launch = launch
-                .arg_u64(offset_ptr(c, lc.offset()))
+                .arg_u64(offset_ptr(exec, c, lc.offset()))
                 .arg_bytes(plan_bytes(&po).as_ref().unwrap_or(&zero).bytes())
                 .arg_bytes(&vbytes)
                 .arg_usize(n);
@@ -859,7 +857,7 @@ extern "C" __global__ void rstsr_copy_pn(
             rstsr_isz ia = rstsr_plan_offset_n(lin, ap);
             out[oo] = (@CAST@);
         }
-        lin += gridDim.x * blockDim.x;
+        lin += w;
     }
 }
 "#;
@@ -978,10 +976,10 @@ where
     //     read row-major), out = c-buffer.
     let (t_rows, t_cols, out_ptr, in_ptr) = match plan {
         Transpose2D::OutContigInSwap { rows, cols } => {
-            (cols, rows, offset_ptr(c, lc.offset()), offset_ptr(a, la.offset()))
+            (cols, rows, offset_ptr(exec, c, lc.offset()), offset_ptr(exec, a, la.offset()))
         },
         Transpose2D::InContigOutSwap { rows, cols } => {
-            (rows, cols, offset_ptr(c, lc.offset()), offset_ptr(a, la.offset()))
+            (rows, cols, offset_ptr(exec, c, lc.offset()), offset_ptr(exec, a, la.offset()))
         },
     };
     let includes = [TC::INCLUDES, TA::INCLUDES].concat();
@@ -1019,6 +1017,19 @@ where
     let n = lc.size();
     if n == 0 {
         return Ok(());
+    }
+    // A non-identity copy into the same allocation (e.g. an in-place
+    // transpose) would let threads overwrite source elements other threads
+    // have not read yet; the safe tensor API cannot build this, but a raw /
+    // Cow repr can.
+    if !c.is_empty()
+        && !a.is_empty()
+        && std::ptr::eq(c.device_ptr() as *const (), a.device_ptr() as *const ())
+        && (lc.offset() != la.offset()
+            || lc.shape().as_ref() != la.shape().as_ref()
+            || lc.stride().as_ref() != la.stride().as_ref())
+    {
+        rstsr_raise!(InvalidValue, "copy source and destination alias with different layouts")?;
     }
     // positional zip is only guaranteed shape-equal here; everything else
     // (reshape-class assigns) belongs to the generic kernel
@@ -1060,8 +1071,8 @@ where
         PlanVariant::Flat => {
             launch = launch
                 .elems_per_thread(4)
-                .arg_u64(offset_ptr(c, lc.offset()))
-                .arg_u64(offset_ptr(a, la.offset()))
+                .arg_u64(offset_ptr(exec, c, lc.offset()))
+                .arg_u64(offset_ptr(exec, a, la.offset()))
                 .arg_usize(n);
         },
         PlanVariant::Narrow => {
@@ -1069,18 +1080,18 @@ where
             let (nop, nap) = (plan_bytes_n(&po), plan_bytes_n(&pa));
             launch = launch
                 .elems_per_thread(4)
-                .arg_u64(offset_ptr(c, lc.offset()))
+                .arg_u64(offset_ptr(exec, c, lc.offset()))
                 .arg_bytes(nop.as_ref().unwrap_or(&zn).bytes())
-                .arg_u64(offset_ptr(a, la.offset()))
+                .arg_u64(offset_ptr(exec, a, la.offset()))
                 .arg_bytes(nap.as_ref().unwrap_or(&zn).bytes())
                 .arg_i32(n as i32);
         },
         PlanVariant::Wide => {
             let zero = PlanBytes::zeroed();
             launch = launch
-                .arg_u64(offset_ptr(c, lc.offset()))
+                .arg_u64(offset_ptr(exec, c, lc.offset()))
                 .arg_bytes(plan_bytes(&po).as_ref().unwrap_or(&zero).bytes())
-                .arg_u64(offset_ptr(a, la.offset()))
+                .arg_u64(offset_ptr(exec, a, la.offset()))
                 .arg_bytes(plan_bytes(&pa).as_ref().unwrap_or(&zero).bytes())
                 .arg_usize(n);
         },
@@ -1120,7 +1131,7 @@ extern "C" __global__ void rstsr_where_sc_pn(
             rstsr_isz ib = rstsr_plan_offset_n(lin, bp);
             d[id] = (a[ia] ^ inv) ? b[ib] : v;
         }
-        lin += gridDim.x * blockDim.x;
+        lin += w;
     }
 }
 
@@ -1190,9 +1201,9 @@ where
         PlanVariant::Flat => {
             launch = launch
                 .elems_per_thread(4)
-                .arg_u64(offset_ptr(d_typed, ld.offset()))
-                .arg_u64(offset_ptr(a, la.offset()))
-                .arg_u64(offset_ptr(b, lb.offset()))
+                .arg_u64(offset_ptr(exec, d_typed, ld.offset()))
+                .arg_u64(offset_ptr(exec, a, la.offset()))
+                .arg_u64(offset_ptr(exec, b, lb.offset()))
                 .arg_bytes(&cb)
                 .arg_i32(inv)
                 .arg_usize(n);
@@ -1202,11 +1213,11 @@ where
             let (ndp, nap, nbp) = (plan_bytes_n(&pd), plan_bytes_n(&pa), plan_bytes_n(&pb));
             launch = launch
                 .elems_per_thread(4)
-                .arg_u64(offset_ptr(d_typed, ld.offset()))
+                .arg_u64(offset_ptr(exec, d_typed, ld.offset()))
                 .arg_bytes(ndp.as_ref().unwrap_or(&zn).bytes())
-                .arg_u64(offset_ptr(a, la.offset()))
+                .arg_u64(offset_ptr(exec, a, la.offset()))
                 .arg_bytes(nap.as_ref().unwrap_or(&zn).bytes())
-                .arg_u64(offset_ptr(b, lb.offset()))
+                .arg_u64(offset_ptr(exec, b, lb.offset()))
                 .arg_bytes(nbp.as_ref().unwrap_or(&zn).bytes())
                 .arg_bytes(&cb)
                 .arg_i32(inv)
@@ -1215,18 +1226,20 @@ where
         PlanVariant::Wide => {
             let zero = PlanBytes::zeroed();
             launch = launch
-                .arg_u64(offset_ptr(d_typed, ld.offset()))
+                .arg_u64(offset_ptr(exec, d_typed, ld.offset()))
                 .arg_bytes(plan_bytes(&pd).as_ref().unwrap_or(&zero).bytes())
-                .arg_u64(offset_ptr(a, la.offset()))
+                .arg_u64(offset_ptr(exec, a, la.offset()))
                 .arg_bytes(plan_bytes(&pa).as_ref().unwrap_or(&zero).bytes())
-                .arg_u64(offset_ptr(b, lb.offset()))
+                .arg_u64(offset_ptr(exec, b, lb.offset()))
                 .arg_bytes(plan_bytes(&pb).as_ref().unwrap_or(&zero).bytes())
                 .arg_bytes(&cb)
                 .arg_i32(inv)
                 .arg_usize(n);
         },
     }
-    launch.launch()
+    launch.launch()?;
+    let _go = crate::kernel::order_output(d, exec)?;
+    Ok(())
 }
 
 // /* #endregion */
@@ -1269,7 +1282,7 @@ extern "C" __global__ void rstsr_binary_assign_pn(
             rstsr_isz ib = rstsr_plan_offset_n(lin, bp);
             t[it] = @EXPR@;
         }
-        lin += gridDim.x * blockDim.x;
+        lin += w;
     }
 }
 "#;
@@ -1304,7 +1317,7 @@ extern "C" __global__ void rstsr_scalar_assign_pn(
             rstsr_isz it = rstsr_plan_offset_n(lin, tp);
             t[it] = @EXPR@;
         }
-        lin += gridDim.x * blockDim.x;
+        lin += w;
     }
 }
 "#;
@@ -1356,18 +1369,18 @@ where
         PlanVariant::Wide => {
             let zero = PlanBytes::zeroed();
             launch = launch
-                .arg_u64(offset_ptr(a, la.offset()))
+                .arg_u64(offset_ptr(exec, a, la.offset()))
                 .arg_bytes(plan_bytes(&pa).as_ref().unwrap_or(&zero).bytes())
-                .arg_u64(offset_ptr(b, lb.offset()))
+                .arg_u64(offset_ptr(exec, b, lb.offset()))
                 .arg_bytes(plan_bytes(&pb).as_ref().unwrap_or(&zero).bytes())
                 .arg_usize(n);
         },
         PlanVariant::Flat => {
             let zero = PlanBytes::zeroed();
             launch = launch
-                .arg_u64(offset_ptr(a, la.offset()))
+                .arg_u64(offset_ptr(exec, a, la.offset()))
                 .arg_bytes(plan_bytes(&pa).as_ref().unwrap_or(&zero).bytes())
-                .arg_u64(offset_ptr(b, lb.offset()))
+                .arg_u64(offset_ptr(exec, b, lb.offset()))
                 .arg_bytes(plan_bytes(&pb).as_ref().unwrap_or(&zero).bytes())
                 .arg_usize(n);
         },
@@ -1376,9 +1389,9 @@ where
             let (nap, nbp) = (plan_bytes_n(&pa), plan_bytes_n(&pb));
             launch = launch
                 .elems_per_thread(4)
-                .arg_u64(offset_ptr(a, la.offset()))
+                .arg_u64(offset_ptr(exec, a, la.offset()))
                 .arg_bytes(nap.as_ref().unwrap_or(&zn).bytes())
-                .arg_u64(offset_ptr(b, lb.offset()))
+                .arg_u64(offset_ptr(exec, b, lb.offset()))
                 .arg_bytes(nbp.as_ref().unwrap_or(&zn).bytes())
                 .arg_i32(n as i32);
         },
@@ -1429,13 +1442,14 @@ where
     let mut launch = FlatLaunch::new(exec, &f, n);
     match variant {
         PlanVariant::Flat => {
-            launch = launch.elems_per_thread(4).arg_u64(offset_ptr(a, la.offset())).arg_bytes(&bbytes).arg_usize(n);
+            launch =
+                launch.elems_per_thread(4).arg_u64(offset_ptr(exec, a, la.offset())).arg_bytes(&bbytes).arg_usize(n);
         },
         PlanVariant::Narrow => {
             let zn = PlanBytesN::zeroed();
             launch = launch
                 .elems_per_thread(4)
-                .arg_u64(offset_ptr(a, la.offset()))
+                .arg_u64(offset_ptr(exec, a, la.offset()))
                 .arg_bytes(plan_bytes_n(&pa).as_ref().unwrap_or(&zn).bytes())
                 .arg_bytes(&bbytes)
                 .arg_i32(n as i32);
@@ -1443,7 +1457,7 @@ where
         PlanVariant::Wide => {
             let zero = PlanBytes::zeroed();
             launch = launch
-                .arg_u64(offset_ptr(a, la.offset()))
+                .arg_u64(offset_ptr(exec, a, la.offset()))
                 .arg_bytes(plan_bytes(&pa).as_ref().unwrap_or(&zero).bytes())
                 .arg_bytes(&bbytes)
                 .arg_usize(n);
@@ -1500,7 +1514,7 @@ extern "C" __global__ void rstsr_where_pn(
             rstsr_isz ic = rstsr_plan_offset_n(lin, cp);
             d[id] = a[ia] ? b[ib] : c[ic];
         }
-        lin += gridDim.x * blockDim.x;
+        lin += w;
     }
 }
 "#;
@@ -1558,10 +1572,10 @@ where
         PlanVariant::Flat => {
             launch = launch
                 .elems_per_thread(4)
-                .arg_u64(offset_ptr(d_typed, ld.offset()))
-                .arg_u64(offset_ptr(a, la.offset()))
-                .arg_u64(offset_ptr(b, lb.offset()))
-                .arg_u64(offset_ptr(c, lc.offset()))
+                .arg_u64(offset_ptr(exec, d_typed, ld.offset()))
+                .arg_u64(offset_ptr(exec, a, la.offset()))
+                .arg_u64(offset_ptr(exec, b, lb.offset()))
+                .arg_u64(offset_ptr(exec, c, lc.offset()))
                 .arg_usize(n);
         },
         PlanVariant::Narrow => {
@@ -1569,31 +1583,33 @@ where
             let (ndp, nap, nbp, ncp) = (plan_bytes_n(&pd), plan_bytes_n(&pa), plan_bytes_n(&pb), plan_bytes_n(&pc));
             launch = launch
                 .elems_per_thread(4)
-                .arg_u64(offset_ptr(d_typed, ld.offset()))
+                .arg_u64(offset_ptr(exec, d_typed, ld.offset()))
                 .arg_bytes(ndp.as_ref().unwrap_or(&zn).bytes())
-                .arg_u64(offset_ptr(a, la.offset()))
+                .arg_u64(offset_ptr(exec, a, la.offset()))
                 .arg_bytes(nap.as_ref().unwrap_or(&zn).bytes())
-                .arg_u64(offset_ptr(b, lb.offset()))
+                .arg_u64(offset_ptr(exec, b, lb.offset()))
                 .arg_bytes(nbp.as_ref().unwrap_or(&zn).bytes())
-                .arg_u64(offset_ptr(c, lc.offset()))
+                .arg_u64(offset_ptr(exec, c, lc.offset()))
                 .arg_bytes(ncp.as_ref().unwrap_or(&zn).bytes())
                 .arg_i32(n as i32);
         },
         PlanVariant::Wide => {
             let zero = PlanBytes::zeroed();
             launch = launch
-                .arg_u64(offset_ptr(d_typed, ld.offset()))
+                .arg_u64(offset_ptr(exec, d_typed, ld.offset()))
                 .arg_bytes(plan_bytes(&pd).as_ref().unwrap_or(&zero).bytes())
-                .arg_u64(offset_ptr(a, la.offset()))
+                .arg_u64(offset_ptr(exec, a, la.offset()))
                 .arg_bytes(plan_bytes(&pa).as_ref().unwrap_or(&zero).bytes())
-                .arg_u64(offset_ptr(b, lb.offset()))
+                .arg_u64(offset_ptr(exec, b, lb.offset()))
                 .arg_bytes(plan_bytes(&pb).as_ref().unwrap_or(&zero).bytes())
-                .arg_u64(offset_ptr(c, lc.offset()))
+                .arg_u64(offset_ptr(exec, c, lc.offset()))
                 .arg_bytes(plan_bytes(&pc).as_ref().unwrap_or(&zero).bytes())
                 .arg_usize(n);
         },
     }
-    launch.launch()
+    launch.launch()?;
+    let _go = crate::kernel::order_output(d, exec)?;
+    Ok(())
 }
 
 // /* #endregion */
@@ -1686,7 +1702,7 @@ extern "C" __global__ void rstsr_clip_pn(
             }
             d[id] = val;
         }
-        lin += gridDim.x * blockDim.x;
+        lin += w;
     }
 }
 "#;
@@ -1815,25 +1831,24 @@ where
             _ => core::ptr::write_bytes(hib.as_mut_ptr(), 0, nb),
         }
     }
-    // unused scalar bytes for the non-scalar bounds (zero-filled)
-    let _ = (&blob, &hib);
-    let narrow = matches!(variant, PlanVariant::Narrow)
-        && !(matches!(pd, OperandPlan::Flat)
-            && matches!(pa, OperandPlan::Flat)
-            && matches!(pb, OperandPlan::Flat)
-            && matches!(pc, OperandPlan::Flat));
+    // the entry selection above already resolved the all-flat case to `_p`
+    let narrow = matches!(variant, PlanVariant::Narrow);
     let zero = PlanBytes::zeroed();
     let zn = PlanBytesN::zeroed();
     // pre-marshaled plan bytes (both widths; unused width stays zeroed)
     let (wd, wa, wb, wc) = (plan_bytes(&pd), plan_bytes(&pa), plan_bytes(&pb), plan_bytes(&pc));
     let (nd, na, nb_, nc) = (plan_bytes_n(&pd), plan_bytes_n(&pa), plan_bytes_n(&pb), plan_bytes_n(&pc));
-    let mut launch = FlatLaunch::new(exec, &f, n).arg_u64(offset_ptr(d_typed, ld.offset()));
+    let mut launch = FlatLaunch::new(exec, &f, n).arg_u64(offset_ptr(exec, d_typed, ld.offset()));
+    if narrow {
+        // the `_pn` entries are 4-step grid-stride loops
+        launch = launch.elems_per_thread(4);
+    }
     launch = if narrow {
         launch.arg_bytes(nd.as_ref().unwrap_or(&zn).bytes())
     } else {
         launch.arg_bytes(wd.as_ref().unwrap_or(&zero).bytes())
     };
-    launch = launch.arg_u64(offset_ptr(a, la.offset()));
+    launch = launch.arg_u64(offset_ptr(exec, a, la.offset()));
     launch = if narrow {
         launch.arg_bytes(na.as_ref().unwrap_or(&zn).bytes())
     } else {
@@ -1841,45 +1856,23 @@ where
     };
     launch = match &lo {
         ClipBound::Tensor(buf, lb) => launch
-            .arg_u64(offset_ptr(buf, lb.offset()))
+            .arg_u64(offset_ptr(exec, buf, lb.offset()))
             .arg_bytes(if narrow { nb_.as_ref().unwrap_or(&zn).bytes() } else { wb.as_ref().unwrap_or(&zero).bytes() })
             .arg_i32(b_kind),
-        _ => launch
-            .arg_u64(0)
-            .arg_bytes(if narrow { zn_zeroed_n() } else { zeroed_plan_bytes_as_slice() })
-            .arg_i32(b_kind),
+        _ => launch.arg_u64(0).arg_bytes(if narrow { zn.bytes() } else { zero.bytes() }).arg_i32(b_kind),
     };
     launch = match &hi {
         ClipBound::Tensor(buf, lc) => launch
-            .arg_u64(offset_ptr(buf, lc.offset()))
+            .arg_u64(offset_ptr(exec, buf, lc.offset()))
             .arg_bytes(if narrow { nc.as_ref().unwrap_or(&zn).bytes() } else { wc.as_ref().unwrap_or(&zero).bytes() })
             .arg_i32(c_kind),
-        _ => launch
-            .arg_u64(0)
-            .arg_bytes(if narrow { zn_zeroed_n() } else { zeroed_plan_bytes_as_slice() })
-            .arg_i32(c_kind),
+        _ => launch.arg_u64(0).arg_bytes(if narrow { zn.bytes() } else { zero.bytes() }).arg_i32(c_kind),
     };
     launch = launch.arg_bytes(&blob).arg_bytes(&hib);
     launch = if narrow { launch.arg_i32(n as i32) } else { launch.arg_usize(n) };
     launch.launch()?;
     let _go = crate::kernel::order_output(d, exec)?;
     Ok(())
-}
-
-/// NaN-ness of an 8-byte f64 scalar's bytes (the lean f64 clip path's host
-/// check; integer-width inputs are not classified here).
-fn scalar_bytes_nan(bytes: &[u8]) -> bool {
-    match bytes.len() {
-        4 => {
-            let v = u32::from_ne_bytes(bytes.try_into().unwrap());
-            (v >> 23) & 0xff == 0xff
-        },
-        8 => {
-            let v = u64::from_ne_bytes(bytes.try_into().unwrap());
-            (v >> 52) & 0x7ff == 0x7ff
-        },
-        _ => true,
-    }
 }
 
 /// Out-of-place both-scalar clip (lean `rstsr_clip_ss_f/pn` entries);
@@ -1916,23 +1909,12 @@ where
     #[cfg(feature = "launch_trace")]
     let _ = entry;
     // both stages read/write the local `val` (sequential in the template);
-    // textual nesting would duplicate the max stage 4x with control flow
-    // the compiler cannot CSE. f32 stages are single PTX max/min.NaN
-    // instructions; f64 falls back to a select chain, where non-NaN bounds
-    // (host-checked) let the max stage skip the bound-side check. The min
-    // stage always keeps the x-NaN guard: `fmin(NaN, hi)` is `hi`.
-    let (max_stage, min_stage) = if TD::CNAME == "double" {
-        if scalar_bytes_nan(&lo) || scalar_bytes_nan(&hi) {
-            (max_expr.to_string(), min_expr.to_string())
-        } else {
-            ("(isnan(val) ? val : fmax(val, lo))".to_string(), "(isnan(val) ? val : fmin(val, hi))".to_string())
-        }
-    } else {
-        // f32: single-instruction NaN-propagating PTX helpers; integers:
-        // plain comparisons (no NaN class)
-        (max_expr.to_string(), min_expr.to_string())
-    };
-    let subs = [("@TD@", TD::CNAME), ("@MAXEXPR@", &max_stage), ("@MINEXPR@", &min_stage)];
+    // textual nesting would duplicate the max stage 4x with control flow the
+    // compiler cannot CSE. The bound expressions already carry the CPU
+    // NaN/zero-tie semantics.
+    let max_stage = max_expr;
+    let min_stage = min_expr;
+    let subs = [("@TD@", TD::CNAME), ("@MAXEXPR@", max_stage), ("@MINEXPR@", min_stage)];
     let f = planned_function(device, entry, TD::INCLUDES, &subs_disc(&subs), || render(CLIP_SS_ENTRIES, &subs))?;
     // SAFETY: layout-identical MaybeUninit transmute (crate invariant)
     let d_typed: &mut CudaBuffer<TD> = unsafe { &mut *(d as *mut CudaBuffer<MaybeUninit<TD>> as *mut CudaBuffer<TD>) };
@@ -1941,8 +1923,8 @@ where
         (PlanVariant::Flat, _, _) => {
             launch = launch
                 .elems_per_thread(4)
-                .arg_u64(offset_ptr(d_typed, ld.offset()))
-                .arg_u64(offset_ptr(a, la.offset()))
+                .arg_u64(offset_ptr(exec, d_typed, ld.offset()))
+                .arg_u64(offset_ptr(exec, a, la.offset()))
                 .arg_bytes(&lo)
                 .arg_bytes(&hi)
                 .arg_usize(n);
@@ -1950,9 +1932,10 @@ where
         _ => {
             let zn = PlanBytesN::zeroed();
             launch = launch
-                .arg_u64(offset_ptr(d_typed, ld.offset()))
+                .elems_per_thread(4)
+                .arg_u64(offset_ptr(exec, d_typed, ld.offset()))
                 .arg_bytes(plan_bytes_n(&po).as_ref().unwrap_or(&zn).bytes())
-                .arg_u64(offset_ptr(a, la.offset()))
+                .arg_u64(offset_ptr(exec, a, la.offset()))
                 .arg_bytes(plan_bytes_n(&pa).as_ref().unwrap_or(&zn).bytes())
                 .arg_bytes(&lo)
                 .arg_bytes(&hi)
@@ -1962,21 +1945,6 @@ where
     launch.launch()?;
     let _go = crate::kernel::order_output(d, exec)?;
     Ok(())
-}
-
-/// Static zeroed narrow plan bytes (flat-bound placeholder for clip).
-fn zn_zeroed_n() -> &'static [u8] {
-    static ZERO: std::sync::OnceLock<[u8; core::mem::size_of::<PlanBytesN>()]> = std::sync::OnceLock::new();
-    let arr = ZERO.get_or_init(|| [0u8; core::mem::size_of::<PlanBytesN>()]);
-    &arr[..]
-}
-
-/// Static zeroed plan bytes (a thread-local is avoided; a const-like
-/// lazily-initialized buffer shared read-only).
-fn zeroed_plan_bytes_as_slice() -> &'static [u8] {
-    static ZERO: std::sync::OnceLock<[u8; core::mem::size_of::<PlanBytes>()]> = std::sync::OnceLock::new();
-    let arr = ZERO.get_or_init(|| [0u8; core::mem::size_of::<PlanBytes>()]);
-    &arr[..]
 }
 
 // /* #endregion */

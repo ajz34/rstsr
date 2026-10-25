@@ -13,6 +13,7 @@ license.workspace = true
 rstsr-common = { workspace = true }
 rstsr-dtype-traits = { workspace = true }
 num = { workspace = true }
+half = { workspace = true }
 rayon = { workspace = true, optional = true }
 
 [features]

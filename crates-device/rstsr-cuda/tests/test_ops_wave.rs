@@ -1,6 +1,9 @@
 //! New elementwise families (2026-10-23 wave): rem, bitwise, compound
 //! assigns, promoting binaries, non-transcendental unaries, complex
 //! transcendentals, where/clip — all against DeviceCpuSerial parity.
+//!
+//! The `regression_*` cases are pre-merge fixes of this branch's own bugs
+//! (no issue numbers yet); move them to `tests/issues/<n>` once filed.
 
 use rstsr::prelude::*;
 use rstsr_cuda::funcs;
@@ -746,8 +749,8 @@ fn regression_inplace_not() {
     assert_eq!(host(&rt::not(ig)), host(&rt::not(ic)), "int not in place");
 }
 
-/// A negative scalar integer exponent is rejected on both devices; a tensor
-/// exponent is a documented divergence (not exercised here).
+/// A negative integer exponent (scalar or tensor element) is rejected on
+/// both devices.
 #[test]
 fn regression_integer_pow_negative_scalar_exponent() {
     require_cuda!();
@@ -757,6 +760,24 @@ fn regression_integer_pow_negative_scalar_exponent() {
     let c = rt::asarray((vec![2i64, 3], &dc));
     assert!(rt::pow_f(&g, -1i64).is_err(), "cuda must reject a negative scalar exponent");
     assert!(rt::pow_f(&c, -1i64).is_err(), "cpu rejects a negative scalar exponent");
+
+    // tensor exponent: negative elements are rejected too
+    let eg = rt::asarray((vec![1i64, -2], &dg));
+    let ec = rt::asarray((vec![1i64, -2], &dc));
+    assert!(rt::pow_f(&g, &eg).is_err(), "cuda must reject a negative tensor exponent");
+    assert!(rt::pow_f(&c, &ec).is_err(), "cpu rejects a negative tensor exponent");
+
+    // scalar base, tensor exponent (the base may be negative)
+    let idxg = rt::arange((0i64, 4, 1, &dg));
+    let idxc = rt::arange((0i64, 4, 1, &dc));
+    assert_eq!(host(&rt::pow(-2i64, &idxg)), host(&rt::pow(-2i64, &idxc)), "pow(scalar, tensor)");
+
+    // the exponent is truncated to u32 as on the CPU
+    let big = rt::asarray((vec![4294967296i64], &dg));
+    let bigc = rt::asarray((vec![4294967296i64], &dc));
+    let twog = rt::asarray((vec![2i64], &dg));
+    let twoc = rt::asarray((vec![2i64], &dc));
+    assert_eq!(host(&rt::pow(&twog, &big)), host(&rt::pow(&twoc, &bigc)), "pow exponent width");
 }
 
 /// Column-major devices: the tiled transpose and elementwise paths agree
@@ -788,5 +809,289 @@ fn regression_col_major_transpose() {
         let mut dtvc = dstcv.into_permute_dims((1, 0));
         dtvc.assign(&basec);
         assert_eq!(host_nd(&dst), host_nd(&dstc), "col-major T-write {m}x{n}");
+    }
+}
+
+/// Integer `round`/`signbit` compile and match the CPU (integer round is
+/// the identity, unsigned signbit is always false).
+#[test]
+fn regression_integer_round_signbit() {
+    require_cuda!();
+    let dg = DeviceCuda::new(0);
+    let dc = DeviceCpuSerial::default();
+    let vals = vec![-3i64, -1, 0, 2, 5];
+    let g = rt::asarray((vals.clone(), &dg));
+    let c = rt::asarray((vals.clone(), &dc));
+    assert_eq!(host(&rt::round(&g)), host(&rt::round(&c)), "round i64");
+    assert_eq!(host(&rt::signbit(&g)), host(&rt::signbit(&c)), "signbit i64");
+
+    let u = rt::asarray((vec![0u32, 1, u32::MAX], &dg));
+    let uc = rt::asarray((vec![0u32, 1, u32::MAX], &dc));
+    assert_eq!(host(&rt::signbit(&u)), host(&rt::signbit(&uc)), "signbit u32");
+
+    let i8g = rt::asarray((vec![-2i8, 0, 3], &dg));
+    let i8c = rt::asarray((vec![-2i8, 0, 3], &dc));
+    assert_eq!(host(&rt::round(&i8g)), host(&rt::round(&i8c)), "round i8");
+    assert_eq!(host(&rt::signbit(&i8g)), host(&rt::signbit(&i8c)), "signbit i8");
+
+    // float signbit keeps the sign of -0.0
+    let fg = rt::asarray((vec![-0.0f32, 0.0], &dg));
+    let fc = rt::asarray((vec![-0.0f32, 0.0], &dc));
+    assert_eq!(host(&rt::signbit(&fg)), host(&rt::signbit(&fc)), "signbit f32");
+}
+
+/// Integer division families agree on the zero-divisor contract (0; the CPU
+/// device panics on Rust's `/` and `%`, a documented divergence).
+#[test]
+fn regression_int_div_zero_contract() {
+    require_cuda!();
+    let dg = DeviceCuda::new(0);
+    let g = rt::asarray((vec![7i32, -8, i32::MIN], &dg));
+    let z = rt::asarray((vec![0i32, 0, -1], &dg));
+    assert_eq!(host(&rt::div(&g, &z)), vec![0, 0, i32::MIN], "div by zero");
+    assert_eq!(host(&rt::rem(&g, &z)), vec![0, 0, 0], "rem by zero");
+    assert_eq!(host(&rt::floor_divide(&g, &z)), vec![0, 0, i32::MIN], "floor_divide by zero");
+    let mut accg = rt::asarray((vec![7i32, -8], &dg));
+    let z2 = rt::asarray((vec![0i32, 0], &dg));
+    rt::div_assign(&mut accg, &z2);
+    assert_eq!(host(&accg), vec![0, 0], "div assign by zero");
+}
+
+/// `maximum`/`minimum`/`clip` keep the NaN payload and the CPU/NumPy tie
+/// break for signed zero; `rem` returns the canonical NaN.
+#[test]
+fn regression_nan_payload_and_zero_ties() {
+    require_cuda!();
+    let dg = DeviceCuda::new(0);
+    let dc = DeviceCpuSerial::default();
+
+    let nan32 = f32::from_bits(0x7fc12345);
+    let ag = rt::asarray((vec![nan32], &dg));
+    let ac = rt::asarray((vec![nan32], &dc));
+    let oneg = rt::asarray((vec![1.0f32], &dg));
+    let onec = rt::asarray((vec![1.0f32], &dc));
+    assert_eq!(
+        host(&rt::maximum(&ag, &oneg))[0].to_bits(),
+        host(&rt::maximum(&ac, &onec))[0].to_bits(),
+        "f32 maximum NaN payload"
+    );
+    assert_eq!(
+        host(&rt::minimum(&oneg, &ag))[0].to_bits(),
+        host(&rt::minimum(&onec, &ac))[0].to_bits(),
+        "f32 minimum NaN payload"
+    );
+    let clip_g = rt::clip(&ag, (0.0f32, 1.0f32));
+    let clip_c = rt::clip(&ac, (0.0f32, 1.0f32));
+    assert_eq!(host(&clip_g)[0].to_bits(), host(&clip_c)[0].to_bits(), "f32 clip NaN payload");
+
+    macro_rules! zero_ties {
+        ($t:ty, $($x:expr, $y:expr);*) => {{
+            $(
+                let xg = rt::asarray((vec![$x as $t], &dg));
+                let yg = rt::asarray((vec![$y as $t], &dg));
+                let xc = rt::asarray((vec![$x as $t], &dc));
+                let yc = rt::asarray((vec![$y as $t], &dc));
+                let (mg, mc) = (host(&rt::maximum(&xg, &yg))[0], host(&rt::maximum(&xc, &yc))[0]);
+                let (ng, nc) = (host(&rt::minimum(&xg, &yg))[0], host(&rt::minimum(&xc, &yc))[0]);
+                assert_eq!(mg.to_bits(), mc.to_bits(), "maximum zero tie ({}, {})", $x, $y);
+                assert_eq!(ng.to_bits(), nc.to_bits(), "minimum zero tie ({}, {})", $x, $y);
+            )*
+        }};
+    }
+    zero_ties!(f32, 0.0, -0.0; -0.0, 0.0);
+    zero_ties!(f64, 0.0, -0.0; -0.0, 0.0);
+
+    let inf = rt::asarray((vec![f64::INFINITY], &dg));
+    let two = rt::asarray((vec![2.0f64], &dg));
+    assert_eq!(host(&rt::rem(&inf, &two))[0].to_bits(), f64::NAN.to_bits(), "rem(inf, 2) NaN pattern");
+}
+
+/// Bool bitwise ops and their compound assigns match the CPU.
+#[test]
+fn regression_bool_bitwise() {
+    require_cuda!();
+    let dg = DeviceCuda::new(0);
+    let dc = DeviceCpuSerial::default();
+    let av = vec![true, true, false, false];
+    let bv = vec![true, false, true, false];
+    let ag = rt::asarray((av.clone(), &dg));
+    let bg = rt::asarray((bv.clone(), &dg));
+    let ac = rt::asarray((av, &dc));
+    let bc = rt::asarray((bv, &dc));
+    assert_eq!(host(&rt::bitand(&ag, &bg)), host(&rt::bitand(&ac, &bc)), "bool bitand");
+    assert_eq!(host(&rt::bitor(&ag, &bg)), host(&rt::bitor(&ac, &bc)), "bool bitor");
+    assert_eq!(host(&rt::bitxor(&ag, &bg)), host(&rt::bitxor(&ac, &bc)), "bool bitxor");
+    let mut mg = rt::asarray((vec![true, false], &dg));
+    let mut mc = rt::asarray((vec![true, false], &dc));
+    let rhs_g = rt::asarray((vec![false, true], &dg));
+    let rhs_c = rt::asarray((vec![false, true], &dc));
+    rt::bitxor_assign(&mut mg, &rhs_g);
+    rt::bitxor_assign(&mut mc, &rhs_c);
+    assert_eq!(host(&mg), host(&mc), "bool bitxor assign");
+}
+
+/// Complex -> bool assign (nonzero test) and complex `==`/`!=`.
+#[test]
+fn regression_complex_bool_cast_and_equality() {
+    require_cuda!();
+    let dg = DeviceCuda::new(0);
+    let dc = DeviceCpuSerial::default();
+    let vals = vec![num::Complex::new(0.0f64, 0.0), num::Complex::new(1.0, 0.0), num::Complex::new(0.0, -2.0)];
+    let cg = rt::asarray((vals.clone(), &dg));
+    let cc = rt::asarray((vals, &dc));
+    let mut bg: Tensor<bool, _, _> = rt::full(([3], false, &dg));
+    let mut bc: Tensor<bool, _, _> = rt::full(([3], false, &dc));
+    bg.assign(&cg);
+    bc.assign(&cc);
+    assert_eq!(host(&bg), host(&bc), "complex -> bool cast");
+
+    let other = vec![num::Complex::new(0.0f64, 0.0), num::Complex::new(1.0, 0.0), num::Complex::new(3.0, 0.0)];
+    let og = rt::asarray((other.clone(), &dg));
+    let oc = rt::asarray((other, &dc));
+    assert_eq!(host(&rt::equal(&cg, &og)), host(&rt::equal(&cc, &oc)), "complex equal");
+    assert_eq!(host(&rt::not_equal(&cg, &og)), host(&rt::not_equal(&cc, &oc)), "complex not_equal");
+}
+
+/// `ext_add`/`ext_sub`/`ext_mul`/`ext_div` follow the CPU promotion table
+/// for integer/float and real/complex pairs.
+#[test]
+fn regression_mixed_ext_arithmetic() {
+    require_cuda!();
+    let dg = DeviceCuda::new(0);
+    let dc = DeviceCpuSerial::default();
+    let ig = rt::asarray((vec![1i32, 2, 3], &dg));
+    let ic = rt::asarray((vec![1i32, 2, 3], &dc));
+    let fg = rt::asarray((vec![0.5f64, 1.5, 2.5], &dg));
+    let fc = rt::asarray((vec![0.5f64, 1.5, 2.5], &dc));
+    assert_eq!(host(&rt::ext_add(&ig, &fg)), host(&rt::ext_add(&ic, &fc)), "ext_add i32+f64");
+    assert_eq!(host(&rt::ext_sub(&ig, &fg)), host(&rt::ext_sub(&ic, &fc)), "ext_sub i32-f64");
+    assert_eq!(host(&rt::ext_mul(&fg, &ig)), host(&rt::ext_mul(&fc, &ic)), "ext_mul f64*i32");
+    assert_eq!(host(&rt::ext_div(&fg, &ig)), host(&rt::ext_div(&fc, &ic)), "ext_div f64/i32");
+
+    // f32 with i8 promotes to f32
+    let f32g = rt::asarray((vec![0.5f32, 1.5], &dg));
+    let f32c = rt::asarray((vec![0.5f32, 1.5], &dc));
+    let i8g = rt::asarray((vec![2i8, 4], &dg));
+    let i8c = rt::asarray((vec![2i8, 4], &dc));
+    assert_eq!(host(&rt::ext_mul(&f32g, &i8g)), host(&rt::ext_mul(&f32c, &i8c)), "ext_mul f32*i8");
+
+    // real with complex promotes to complex
+    let cg = rt::asarray((vec![num::Complex::new(1.0f64, 2.0), num::Complex::new(3.0, 4.0)], &dg));
+    let cc = rt::asarray((vec![num::Complex::new(1.0f64, 2.0), num::Complex::new(3.0, 4.0)], &dc));
+    let rg = rt::asarray((vec![1.0f64, 2.0], &dg));
+    let rc = rt::asarray((vec![1.0f64, 2.0], &dc));
+    assert_eq!(host(&rt::ext_add(&cg, &rg)), host(&rt::ext_add(&cc, &rc)), "ext_add c64+f64");
+    assert_eq!(host(&rt::ext_div(&cg, &rg)), host(&rt::ext_div(&cc, &rc)), "ext_div c64/f64");
+}
+
+/// Kernel fills cover complex and half dtypes (no host round-trip), and
+/// half comparisons compile.
+#[test]
+fn regression_fill_complex_half_and_half_compare() {
+    require_cuda!();
+    let dg = DeviceCuda::new(0);
+    let dc = DeviceCpuSerial::default();
+    let cg: Tensor<num::Complex<f64>, _, _> = rt::full(([3], num::Complex::new(1.5, -2.0), &dg));
+    let cc: Tensor<num::Complex<f64>, _, _> = rt::full(([3], num::Complex::new(1.5, -2.0), &dc));
+    assert_eq!(host(&cg), host(&cc), "complex fill");
+
+    let hg: Tensor<half::f16, _, _> = rt::full(([4], half::f16::from_f32(2.5), &dg));
+    let hc: Tensor<half::f16, _, _> = rt::full(([4], half::f16::from_f32(2.5), &dc));
+    assert_eq!(host(&hg), host(&hc), "f16 fill");
+    let bg: Tensor<half::bf16, _, _> = rt::full(([4], half::bf16::from_f32(-1.5), &dg));
+    let bc: Tensor<half::bf16, _, _> = rt::full(([4], half::bf16::from_f32(-1.5), &dc));
+    assert_eq!(host(&bg), host(&bc), "bf16 fill");
+
+    let a: Tensor<half::f16, _, _> = rt::full(([4], half::f16::from_f32(1.0), &dg));
+    let b: Tensor<half::f16, _, _> = rt::full(([4], half::f16::from_f32(2.0), &dg));
+    let ac: Tensor<half::f16, _, _> = rt::full(([4], half::f16::from_f32(1.0), &dc));
+    let bc2: Tensor<half::f16, _, _> = rt::full(([4], half::f16::from_f32(2.0), &dc));
+    assert_eq!(host(&rt::greater(&a, &b)), host(&rt::greater(&ac, &bc2)), "f16 comparison");
+}
+
+/// `arange` length and elements match the CPU (and NumPy) across the float
+/// widths and large integer ranges.
+#[test]
+fn regression_arange_parity() {
+    require_cuda!();
+    let dg = DeviceCuda::new(0);
+    let dc = DeviceCpuSerial::default();
+    let cases: Vec<(f64, f64, f64)> = vec![(0.5, 0.51, 0.01), (0.0, 1.0, 0.1), (1.0, 0.0, -0.1), (0.0, 0.3, 0.1)];
+    for (s, e, st) in cases {
+        let g = rt::arange((s, e, st, &dg));
+        let c = rt::arange((s, e, st, &dc));
+        assert_eq!(g.size(), c.size(), "arange f64 len ({s}, {e}, {st})");
+        assert_eq!(host(&g), host(&c), "arange f64 values ({s}, {e}, {st})");
+    }
+    for (s, e, st) in [(0.0f32, 1.0f32, 0.01f32), (0.5f32, 0.51f32, 0.01f32), (0.0f32, 1.0f32, 0.1f32)] {
+        let g = rt::arange((s, e, st, &dg));
+        let c = rt::arange((s, e, st, &dc));
+        assert_eq!(g.size(), c.size(), "arange f32 len ({s}, {e}, {st})");
+        assert_eq!(host(&g), host(&c), "arange f32 values ({s}, {e}, {st})");
+    }
+    // NumPy lengths for the float cases above (pinned reference)
+    assert_eq!(rt::arange((0.5f64, 0.51, 0.01, &dc)).size(), 2);
+    assert_eq!(rt::arange((0.0f32, 1.0, 0.01f32, &dg)).size(), 100);
+
+    // large i64 ranges survive without the f64 round-trip
+    let big = rt::arange((i64::MAX - 5, i64::MAX, 1i64, &dg));
+    let bigc = rt::arange((i64::MAX - 5, i64::MAX, 1i64, &dc));
+    assert_eq!(host(&big), host(&bigc), "arange i64 near MAX");
+    let hi = rt::arange((1i64 << 60, (1i64 << 60) + 10, 1i64, &dg));
+    let hic = rt::arange((1i64 << 60, (1i64 << 60) + 10, 1i64, &dc));
+    assert_eq!(host(&hi), host(&hic), "arange i64 above 2^53");
+
+    // narrow integer dtypes span more than 127 elements without index truncation
+    let i8g = rt::arange((-128i8, 127i8, 1i8, &dg));
+    let i8c = rt::arange((-128i8, 127i8, 1i8, &dc));
+    assert_eq!(host(&i8g), host(&i8c), "arange i8 wide range");
+
+    // half widths follow NumPy `HALF_fill` (f32 evaluation, delta from the
+    // second element)
+    let h = half::f16::from_f32;
+    for (s, e, st) in [(h(0.0), h(1.0), h(0.1)), (h(0.5), h(10.5), h(0.1)), (h(0.0), h(65504.0), h(1000.0))] {
+        let g = rt::arange((s, e, st, &dg));
+        let c = rt::arange((s, e, st, &dc));
+        assert_eq!(g.size(), c.size(), "arange f16 len ({s}, {e}, {st})");
+        assert_eq!(host(&g), host(&c), "arange f16 values ({s}, {e}, {st})");
+    }
+    // np.arange(np.float16(0.5), np.float16(10.5), np.float16(0.1), dtype=np.float16)
+    let f16g = host(&rt::arange((h(0.5), h(10.5), h(0.1), &dg)));
+    let pinned: [half::f16; 5] = [0x3800u16, 0x38cd, 0x399a, 0x490e, 0x491b].map(half::f16::from_bits);
+    assert_eq!(&f16g[..3], &pinned[..3], "arange f16 head (NumPy pinned)");
+    assert_eq!(&f16g[96..98], &pinned[3..], "arange f16 tail (NumPy pinned)");
+
+    // bf16 has no NumPy counterpart; it must still agree with the CPU
+    let b = half::bf16::from_f32;
+    let (s, e, st) = (b(0.5), b(10.5), b(0.1));
+    let g = rt::arange((s, e, st, &dg));
+    let c = rt::arange((s, e, st, &dc));
+    assert_eq!(host(&g), host(&c), "arange bf16");
+}
+
+/// Empty-tensor host reads take the zero-length safe path.
+#[test]
+fn regression_zero_length_host_read() {
+    require_cuda!();
+    let dg = DeviceCuda::new(0);
+    let e: Tensor<f64, _, _> = rt::zeros(([0], &dg));
+    assert!(host(&e).is_empty(), "zero-length D2H");
+}
+
+/// `linspace` is bitwise identical to the CPU for both float widths.
+#[test]
+fn regression_linspace_bitwise() {
+    require_cuda!();
+    let dg = DeviceCuda::new(0);
+    let dc = DeviceCpuSerial::default();
+    for (s, e, n) in [(0.0f64, 1.0, 17usize), (0.1, 0.9, 10), (-2.5, 3.7, 33)] {
+        let g = host(&rt::linspace((s, e, n, &dg)));
+        let c = host(&rt::linspace((s, e, n, &dc)));
+        assert!(g.iter().zip(&c).all(|(x, y)| x.to_bits() == y.to_bits()), "linspace f64 ({s}, {e}, {n})");
+    }
+    for (s, e, n) in [(0.0f32, 1.0, 17usize), (0.1, 0.9, 10), (-2.5, 3.7, 33)] {
+        let g = host(&rt::linspace((s, e, n, &dg)));
+        let c = host(&rt::linspace((s, e, n, &dc)));
+        assert!(g.iter().zip(&c).all(|(x, y)| x.to_bits() == y.to_bits()), "linspace f32 ({s}, {e}, {n})");
     }
 }

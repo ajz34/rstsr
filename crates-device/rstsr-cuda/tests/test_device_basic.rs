@@ -100,7 +100,7 @@ fn buffer_basics() {
     require_cuda!();
     let d = DeviceCuda::new(0);
     // alloc + free of a nonzero buffer
-    let mut buf = CudaBuffer::<f64>::new(d.stream(), 1024).unwrap();
+    let mut buf = CudaBuffer::<f64>::new_f(d.stream(), 1024).unwrap();
     assert_eq!(buf.len(), 1024);
     assert!(!buf.device_ptr().is_null());
     // truncate shrinks logical len only
@@ -111,7 +111,7 @@ fn buffer_basics() {
     assert_ne!(clone.device_ptr(), buf.device_ptr());
     assert_eq!(clone.len(), buf.len());
     // empty buffer is the null slice
-    let empty = CudaBuffer::<f64>::new(d.stream(), 0).unwrap();
+    let empty = CudaBuffer::<f64>::new_f(d.stream(), 0).unwrap();
     assert!(empty.is_empty());
 }
 

@@ -30,18 +30,20 @@ pub(crate) fn base_ptr_mut<T>(raw: &mut CudaBuffer<T>) -> CUdeviceptr {
 pub(crate) fn d2h_scalar<T: Copy>(raw: &CudaBuffer<T>, index: usize) -> T {
     let esz = core::mem::size_of::<T>();
     let stream = raw.slice.stream();
-    let mut host = vec![0u8; esz];
+    let mut host = core::mem::MaybeUninit::<T>::uninit();
+    // SAFETY: the destination is a T-aligned, esz-byte writable slot
+    let host_bytes = unsafe { core::slice::from_raw_parts_mut(host.as_mut_ptr() as *mut u8, esz) };
     unsafe {
         map_driver_result(result::memcpy_dtoh_async(
-            &mut host,
+            host_bytes,
             base_ptr(raw) + (index * esz) as u64,
             stream.cu_stream(),
         ))
         .rstsr_unwrap();
         map_driver_result(stream.synchronize()).rstsr_unwrap();
     }
-    rstsr_assert_eq!(host.len(), esz, InvalidValue).rstsr_unwrap();
-    unsafe { core::ptr::read(host.as_ptr() as *const T) }
+    // SAFETY: the driver wrote all esz bytes of the slot (T is a POD copy dtype)
+    unsafe { host.assume_init() }
 }
 
 /// H2D of one element (used by `set_index`).
@@ -66,19 +68,19 @@ pub(crate) fn h2d_scalar<T: Copy>(raw: &mut CudaBuffer<T>, index: usize, value: 
 pub(crate) fn d2h_full<T: Copy>(raw: &CudaBuffer<T>) -> Result<Vec<T>> {
     let esz = core::mem::size_of::<T>();
     let byte_len = raw.len * esz;
-    let mut bytes = vec![0u8; byte_len];
+    // stage into the destination's spare capacity as bytes: `Vec<u8>` would
+    // not be guaranteed `align_of::<T>()`-aligned for the T reinterpretation
+    let mut vec: Vec<T> = Vec::with_capacity(raw.len);
     if byte_len > 0 {
+        // SAFETY: the spare capacity holds `raw.len` T-aligned elements
+        let bytes = unsafe { core::slice::from_raw_parts_mut(vec.as_mut_ptr() as *mut u8, byte_len) };
         let stream = raw.slice.stream();
         unsafe {
-            map_driver_result(result::memcpy_dtoh_async(&mut bytes, base_ptr(raw), stream.cu_stream()))?;
+            map_driver_result(result::memcpy_dtoh_async(bytes, base_ptr(raw), stream.cu_stream()))?;
             map_driver_result(stream.synchronize())?;
         }
-    }
-    // reinterpret the staged bytes as `T` (POD dtypes only reach storage)
-    let mut vec: Vec<T> = Vec::with_capacity(raw.len);
-    unsafe {
-        core::ptr::copy_nonoverlapping(bytes.as_ptr() as *const T, vec.as_mut_ptr(), raw.len);
-        vec.set_len(raw.len);
+        // SAFETY: every element was written by the driver (POD dtypes only)
+        unsafe { vec.set_len(raw.len) };
     }
     Ok(vec)
 }
@@ -88,7 +90,7 @@ pub(crate) fn h2d_full<T: Copy>(device: &DeviceCuda, vec: Vec<T>) -> Result<Cuda
     let len = vec.len();
     let esz = core::mem::size_of::<T>();
     let byte_len = len * esz;
-    let mut buf = CudaBuffer::<T>::new(device.stream(), len)?;
+    let mut buf = CudaBuffer::<T>::new_f(device.stream(), len)?;
     if byte_len > 0 {
         let bytes = unsafe { core::slice::from_raw_parts(vec.as_ptr() as *const u8, byte_len) };
         let stream = buf.slice.stream().clone();

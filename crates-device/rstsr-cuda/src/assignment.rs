@@ -19,7 +19,7 @@ fn memcpy_fast<TC, TA>(c: &mut CudaBuffer<TC>, a: &CudaBuffer<TA>) -> Result<()>
     // order a foreign-stream source before the copy (the raw accessor below
     // bypasses cudarc's own cross-stream event)
     let _guard = crate::kernel::order_input_raw(a, &stream)?;
-    let sptr = a.device_ptr() as u64;
+    let sptr = a.device_ptr_raw_on(&stream) as u64;
     let dptr = {
         let c_bytes = c.as_mut_bytes();
         let (ptr, _record) = DevicePtrMut::<u8>::device_ptr_mut(c_bytes, &stream);

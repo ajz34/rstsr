@@ -224,7 +224,7 @@ where
         if same_ordinal {
             return Ok(TensorAny::new_f(Storage::new(DataOwned::from(owned), device.clone()), layout).rstsr_unwrap());
         }
-        let mut raw = CudaBuffer::<T>::new(device.stream(), owned.len())?;
+        let mut raw = CudaBuffer::<T>::new_f(device.stream(), owned.len())?;
         transfer::dtod_full(&owned, &mut raw)?;
         Ok(TensorAny::new_f(Storage::new(DataOwned::from(raw), device.clone()), layout).rstsr_unwrap())
     }
@@ -241,7 +241,7 @@ where
             return Ok(TensorAny::new_f(storage, layout).rstsr_unwrap());
         }
         let src = tensor.raw();
-        let mut raw = CudaBuffer::<T>::new(device.stream(), src.len())?;
+        let mut raw = CudaBuffer::<T>::new_f(device.stream(), src.len())?;
         transfer::dtod_full(src, &mut raw)?;
         let storage = Storage::new(DataCow::Owned(DataOwned::from(raw)), device.clone());
         Ok(TensorAny::new_f(storage, layout).rstsr_unwrap())

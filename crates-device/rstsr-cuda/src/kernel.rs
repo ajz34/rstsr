@@ -48,33 +48,33 @@ const FORMAT_VERSION: u32 = 4;
 
 /// Math helpers shared by elementwise kernels: NumPy-parity remainder
 /// (CPU `ExtReal::ext_rem` semantics) and shift-square integer pow
-/// (CPU `ExtNum::ext_pow` for ints; the tensor layer rejects negative
-/// exponents before the device call).
+/// (CPU `ExtNum::ext_pow` for ints; the device op rejects negative
+/// exponents before the launch).
 pub(crate) const MATH_HELPER: &str = r#"
 // NVRTC provides the isnan/isinf/signbit/copysign overloads implicitly
 // (cuda_fp16.h-style device intrinsics); no host math headers are on the
-// include path, so NaN is a bit-pattern constant.
-__device__ float rstsr_nanf() { return __int_as_float(0x7fffffff); }
+// include path, so NaN is a bit-pattern constant (Rust's canonical quiet
+// NaN, matching the CPU devices).
+__device__ float rstsr_nanf() { return __int_as_float(0x7fc00000); }
 
-// Either-operand NaN propagation in one instruction (PTX max/min with the
-// NaN override; returns the NaN operand, matching ext_max/ext_min).
-// .NaN override is f32-only on this driver's JIT for f64; either-operand
-// NaN propagation falls back to selects around the plain max/min.
+// Either-operand NaN propagation and the zero tie-break of the CPU
+// ext_max/ext_min (and NumPy): the second operand is returned when the
+// values compare equal, which fixes the sign of a 0.0/-0.0 tie. The plain
+// select chain (no PTX max.NaN, which needs sm_80 and canonicalizes the
+// payload) keeps NaN payloads and runs on every arch.
 __device__ double rstsr_maxnand(double x, double y) {
-    double r = fmax(x, y);
-    return (isnan(x) ? x : (isnan(y) ? y : r));
+    return (isnan(x) ? x : (isnan(y) ? y : (x > y ? x : y)));
 }
 __device__ double rstsr_minnand(double x, double y) {
-    double r = fmin(x, y);
-    return (isnan(x) ? x : (isnan(y) ? y : r));
+    return (isnan(x) ? x : (isnan(y) ? y : (x < y ? x : y)));
 }
 __device__ float rstsr_maxnanf(float x, float y) {
-    float r; asm("max.NaN.f32 %0, %1, %2;" : "=f"(r) : "f"(x), "f"(y)); return r;
+    return (isnan(x) ? x : (isnan(y) ? y : (x > y ? x : y)));
 }
 __device__ float rstsr_minnanf(float x, float y) {
-    float r; asm("min.NaN.f32 %0, %1, %2;" : "=f"(r) : "f"(x), "f"(y)); return r;
+    return (isnan(x) ? x : (isnan(y) ? y : (x < y ? x : y)));
 }
-__device__ double rstsr_nan() { return __longlong_as_double(0x7fffffffffffffffLL); }
+__device__ double rstsr_nan() { return __longlong_as_double(0x7ff8000000000000LL); }
 
 __device__ float rstsr_fremf(float x, float y) {
     // CPU ExtReal::ext_rem: NaN propagation, inf-dividend NaN, inf-divisor
@@ -107,17 +107,20 @@ __device__ double rstsr_frem(double x, double y) {
     return r;
 }
 
-__device__ long long rstsr_ipow(long long base, long long exp) {
-    // Scalar exponents are checked on the host; a negative *tensor*
-    // exponent silently yields 1 here (documented divergence from the CPU
-    // InvalidValue). Wrapping matches Rust release-mode mul wrapping.
-    long long result = 1;
+__device__ long long rstsr_ipow(long long base, long long exp_in) {
+    // Exponent width follows the CPU ext_pow (`other as u32`); the device
+    // op rejects negative exponents on the host. Unsigned accumulation
+    // makes the wrapping multiplication well defined (Rust release-mode
+    // wrap; the store truncates to the output width).
+    unsigned int exp = (unsigned int)exp_in;
+    unsigned long long b = (unsigned long long)base;
+    unsigned long long result = 1ULL;
     while (exp > 0) {
-        if (exp & 1) result *= base;
-        base *= base;
+        if (exp & 1U) result *= b;
+        b *= b;
         exp >>= 1;
     }
-    return result;
+    return (long long)result;
 }
 "#;
 
@@ -145,9 +148,35 @@ impl KernelKey {
     }
 }
 
+/// NVRTC search path for the toolkit headers our dtype includes need
+/// (`cuda_fp16.h` / `cuda_bf16.h`; NVRTC has no builtin copy). Resolved
+/// once: the paths enter the cache key, so the lookup must also be cheap.
+fn nvrtc_include_dirs() -> &'static [String] {
+    static DIRS: OnceLock<Vec<String>> = OnceLock::new();
+    DIRS.get_or_init(|| {
+        let mut candidates: Vec<PathBuf> = Vec::new();
+        if let Some(p) = std::env::var_os("RSTSR_CUDA_INCLUDE") {
+            candidates.push(PathBuf::from(p));
+        }
+        for key in ["CUDA_HOME", "CUDA_PATH", "CUDA_ROOT", "CUDA_TOOLKIT_ROOT_DIR"] {
+            if let Some(p) = std::env::var_os(key) {
+                candidates.push(PathBuf::from(p).join("include"));
+            }
+        }
+        candidates.push(PathBuf::from("/usr/local/cuda/include"));
+        candidates.push(PathBuf::from("/usr/include"));
+        candidates
+            .into_iter()
+            .filter(|d| d.join("cuda_fp16.h").is_file())
+            .map(|d| d.to_string_lossy().into_owned())
+            .collect()
+    })
+}
+
 /// Library-fixed compile options. `arch` enters separately.
 fn compile_options(extra: &[&str]) -> Vec<String> {
     let mut opts: Vec<String> = vec!["--std=c++17".into()];
+    opts.extend(nvrtc_include_dirs().iter().map(|d| format!("--include-path={d}")));
     opts.extend(extra.iter().map(|s| s.to_string()));
     #[cfg(debug_assertions)]
     opts.push("-lineinfo".into());
@@ -177,9 +206,22 @@ pub(crate) struct KernelCachePublic {
 }
 type KernelCache = KernelCachePublic;
 
+/// Per-ordinal intern map of the *planned* elementwise functions, keyed by
+/// the specialization discriminator (entry + includes + substitutions).
+/// Lives on the ordinal object so it shares the kernel cache's lifetime
+/// (no process-global pinning of a retired context's modules).
+#[derive(Default)]
+pub(crate) struct PlannedCache {
+    pub(crate) entries: Mutex<HashMap<String, Arc<CudaFunction>>>,
+}
+
 impl CudaOrdinalObj {
     fn kernel_cache(&self) -> &KernelCache {
         self.kernel_cache_slot.get_or_init(KernelCache::default)
+    }
+
+    pub(crate) fn planned_cache(&self) -> &PlannedCache {
+        self.planned_cache_slot.get_or_init(PlannedCache::default)
     }
 
     /// Compile (or fetch) the function for `key` on this ordinal.
@@ -323,9 +365,10 @@ impl<'a> FlatLaunch<'a> {
         self.arg_bytes(&v.to_ne_bytes())
     }
 
-    /// Base device pointer of `buf` (null for empty buffers).
+    /// Base device pointer of `buf` (null for empty buffers). The read
+    /// event is recorded on this launch's stream.
     pub fn arg_buf<T>(self, buf: &CudaBuffer<T>) -> Self {
-        let ptr = if buf.is_empty() { 0 } else { buf.device_ptr() as u64 };
+        let ptr = if buf.is_empty() { 0 } else { buf.device_ptr_on(self.stream) as u64 };
         self.arg_u64(ptr)
     }
 
@@ -480,29 +523,4 @@ pub(crate) fn assemble_source(includes: &[&str], body: &str) -> String {
     let _ = write!(s, "\n{MATH_HELPER}");
     let _ = write!(s, "\n{body}");
     s
-}
-
-#[cfg(test)]
-mod ptx_probe_tests {
-    use super::*;
-
-    #[test]
-    #[ignore = "manual NVRTC/driver probe: max.NaN.f64 support on the installed driver"]
-    fn probe_maxnan_f64_jit() {
-        if !crate::funcs::is_available() {
-            return;
-        }
-        let dev = crate::device::DeviceCuda::new(0);
-        let src = r#"
-__global__ void k(double* o) {
-    double r; asm("max.NaN.f64 %0, %1, %2;" : "=d"(r) : "d"(o[1]), "d"(o[2]));
-    o[0] = r;
-}
-"#;
-        let key = make_key(dev.ordinal_obj(), "probe_maxnan_f64", src, &[]).unwrap();
-        match dev.ordinal_obj().kernel_function(&key) {
-            Ok(_) => println!("max.NaN.f64 via NVRTC+JIT: OK"),
-            Err(e) => println!("max.NaN.f64 via NVRTC+JIT: FAILED {e:?}"),
-        }
-    }
 }

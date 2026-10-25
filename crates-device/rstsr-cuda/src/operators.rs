@@ -7,9 +7,7 @@ use crate::dtype::{CudaArith, CudaCmp, CudaComplexFrom, CudaDType, CudaFloat, Cu
 use crate::kernels::elementwise;
 use crate::prelude_dev::*;
 
-/// CUDA C call expression `name<suffix>(arg)`.
 // /* #region binary arithmetic */
-
 #[duplicate_item(
     OpAPI   opchar;
     [OpAddAPI] ['+'];
@@ -36,7 +34,8 @@ where
         b: &CudaBuffer<TB>,
         lb: &Layout<D>,
     ) -> Result<()> {
-        elementwise::binary_launch::<TC, TA, TB>(self, c, lc, a, la, b, lb, &format!("(a[ia] {} b[ib])", opchar))
+        let expr = crate::kernels::exprs::arith_bin(opchar, TC::CNAME, "a[ia]", "b[ib]");
+        elementwise::binary_launch::<TC, TA, TB>(self, c, lc, a, la, b, lb, &expr)
     }
 
     fn op_mutc_refa_numb(
@@ -47,7 +46,8 @@ where
         la: &Layout<D>,
         b: TB,
     ) -> Result<()> {
-        elementwise::scalar_launch::<TC, TA, TB>(self, c, lc, a, la, &b, &format!("(t[it] {} v)", opchar))
+        let expr = crate::kernels::exprs::arith_bin(opchar, TC::CNAME, "t[it]", "v");
+        elementwise::scalar_launch::<TC, TA, TB>(self, c, lc, a, la, &b, &expr)
     }
 
     fn op_mutc_numa_refb(
@@ -58,7 +58,8 @@ where
         b: &CudaBuffer<TB>,
         lb: &Layout<D>,
     ) -> Result<()> {
-        elementwise::scalar_launch::<TC, TB, TA>(self, c, lc, b, lb, &a, &format!("(v {} t[it])", opchar))
+        let expr = crate::kernels::exprs::arith_bin(opchar, TC::CNAME, "v", "t[it]");
+        elementwise::scalar_launch::<TC, TB, TA>(self, c, lc, b, lb, &a, &expr)
     }
 }
 
@@ -68,6 +69,55 @@ where
     OpAPI        opstr;
     [OpEqualAPI        ] ["=="];
     [OpNotEqualAPI     ] ["!="];
+)]
+impl<TA, TB, D> OpAPI<TA, TB, D> for DeviceCuda
+where
+    Self: DeviceRawAPI<TA, Raw = CudaBuffer<TA>>
+        + DeviceRawAPI<TB, Raw = CudaBuffer<TB>>
+        + DeviceRawAPI<MaybeUninit<bool>, Raw = CudaBuffer<MaybeUninit<bool>>>,
+    TA: CudaDType + crate::dtype::CudaEqCmp,
+    TB: CudaDType + crate::dtype::CudaEqCmp,
+    D: DimAPI,
+{
+    type TOut = bool;
+
+    fn op_mutc_refa_refb(
+        &self,
+        c: &mut CudaBuffer<MaybeUninit<bool>>,
+        lc: &Layout<D>,
+        a: &CudaBuffer<TA>,
+        la: &Layout<D>,
+        b: &CudaBuffer<TB>,
+        lb: &Layout<D>,
+    ) -> Result<()> {
+        elementwise::binary_launch::<bool, TA, TB>(self, c, lc, a, la, b, lb, &format!("(a[ia] {} b[ib])", opstr))
+    }
+
+    fn op_mutc_refa_numb(
+        &self,
+        c: &mut CudaBuffer<MaybeUninit<bool>>,
+        lc: &Layout<D>,
+        a: &CudaBuffer<TA>,
+        la: &Layout<D>,
+        b: TB,
+    ) -> Result<()> {
+        elementwise::scalar_launch::<bool, TA, TB>(self, c, lc, a, la, &b, &format!("(t[it] {} v)", opstr))
+    }
+
+    fn op_mutc_numa_refb(
+        &self,
+        c: &mut CudaBuffer<MaybeUninit<bool>>,
+        lc: &Layout<D>,
+        a: TA,
+        b: &CudaBuffer<TB>,
+        lb: &Layout<D>,
+    ) -> Result<()> {
+        elementwise::scalar_launch::<bool, TB, TA>(self, c, lc, b, lb, &a, &format!("(v {} t[it])", opstr))
+    }
+}
+
+#[duplicate_item(
+    OpAPI        opstr;
     [OpGreaterAPI      ] [">" ];
     [OpGreaterEqualAPI ] [">="];
     [OpLessAPI         ] ["<" ];
@@ -177,15 +227,6 @@ where
     }
 }
 
-/// The real component C type of a (possibly complex) C type name.
-fn t_real(t: &str) -> &'static str {
-    if t == "rstsr_c32" {
-        "float"
-    } else {
-        "double"
-    }
-}
-
 /// Element expression of one transcendental at C type `t`, operand `x`.
 /// Real dtypes call libdevice (f-suffixed for float); complex calls the
 /// header function, composing expm1/log1p/log2/log10 from cexp/clog
@@ -197,7 +238,11 @@ fn transc_expr(t: &str, fn_base: &str, cfn: &str, compose: &str, is_recip: bool,
     // widths (overload resolution picks float/double real-math inside)
     if is_recip {
         return Ok(if complex {
-            format!("rstsr_cdiv(rstsr_make_complex(({})1.0, ({})0.0), {x})", t_real(t), t_real(t))
+            format!(
+                "rstsr_cdiv(rstsr_make_complex(({})1.0, ({})0.0), {x})",
+                crate::kernels::exprs::t_real(t),
+                crate::kernels::exprs::t_real(t)
+            )
         } else {
             format!("(1.0{s} / {x})")
         });
@@ -216,7 +261,7 @@ fn transc_expr(t: &str, fn_base: &str, cfn: &str, compose: &str, is_recip: bool,
             other => rstsr_raise!(UnImplemented, "compose form {other} unknown")?,
         });
     }
-    let r = t_real(t);
+    let r = crate::kernels::exprs::t_real(t);
     Ok(match compose {
         // cancellation-free forms mirrored from the CPU's ExtComplexFloat
         "sub_one" => format!("rstsr_cexpm1({x})"),
@@ -246,8 +291,7 @@ fn transc_expr(t: &str, fn_base: &str, cfn: &str, compose: &str, is_recip: bool,
 /// `f_suffix` aliases the exprs helper (real-math suffix by C type).
 use crate::kernels::exprs::f as f_suffix;
 
-/// Reject a negative scalar exponent for integer `pow` (CPU parity). Tensor
-/// exponents stay unchecked on this backend (documented divergence).
+/// Reject a negative scalar exponent for integer `pow` (CPU parity).
 fn check_int_pow_exponent<T: CudaDType>(v: &T) -> Result<()> {
     // SAFETY: `CNAME` names the C representation of `T`, so the signed
     // integer views below match T's layout.
@@ -261,6 +305,27 @@ fn check_int_pow_exponent<T: CudaDType>(v: &T) -> Result<()> {
         }
     };
     rstsr_assert!(!neg, InvalidValue, "integer power requires a non-negative exponent")?;
+    Ok(())
+}
+
+/// Reject a negative element in an integer tensor exponent (CPU parity:
+/// one D2H + sync on this rare path).
+fn check_int_pow_exponent_tensor<T: CudaDType, D: DimAPI>(
+    device: &DeviceCuda,
+    b: &CudaBuffer<T>,
+    lb: &Layout<D>,
+) -> Result<()> {
+    if !crate::dtype::is_signed_int_cname(T::CNAME) {
+        return Ok(());
+    }
+    let order = match device.default_order() {
+        RowMajor => TensorIterOrder::C,
+        ColMajor => TensorIterOrder::F,
+    };
+    let offsets: Vec<usize> = rstsr_common::layout::iterator::IterLayout::new(lb, order)?.collect();
+    for v in crate::kernels_ops::gather_to_host(device, b, &offsets)? {
+        check_int_pow_exponent(&v)?;
+    }
     Ok(())
 }
 
@@ -283,6 +348,9 @@ macro_rules! impl_promoting_binary {
                 b: &CudaBuffer<T>,
                 lb: &Layout<D>,
             ) -> Result<()> {
+                if $int_exp_check {
+                    check_int_pow_exponent_tensor(self, b, lb)?;
+                }
                 let expr = {
                     let ($a, $b, $t) = ("a[ia]", "b[ib]", T::CNAME);
                     $expr.to_string()
@@ -316,9 +384,6 @@ macro_rules! impl_promoting_binary {
                 b: &CudaBuffer<T>,
                 lb: &Layout<D>,
             ) -> Result<()> {
-                if $int_exp_check {
-                    check_int_pow_exponent(&a)?;
-                }
                 let expr = {
                     let ($a, $b, $t) = ("v", "t[it]", T::CNAME);
                     $expr.to_string()
@@ -358,8 +423,8 @@ impl_promoting_binary!(OpMaximumAPI, CudaReal, false, |a, b, t| crate::kernels::
 impl_promoting_binary!(OpMinimumAPI, CudaReal, false, |a, b, t| crate::kernels::exprs::minimum(t, a, b));
 
 // `pow`: float powf / int ipow / complex cpow (exprs::pow dispatches).
-// Scalar integer exponents are validated on the host; tensor exponents are
-// not (documented divergence from the CPU error).
+// Integer exponents are validated on the host (scalar value, or a one-pass
+// D2H scan of a tensor exponent) to match the CPU InvalidValue.
 impl_promoting_binary!(OpPowAPI, CudaArith, true, |a, b, t| crate::kernels::exprs::pow(t, t, t, a, b));
 
 // /* #endregion */
@@ -501,7 +566,10 @@ where
         elementwise::unary_launch::<T::AbsOut, T>(self, a, la, b, lb, &expr)
     }
     fn op_muta(&self, _a: &mut CudaBuffer<MaybeUninit<T::AbsOut>>, _la: &Layout<D>) -> Result<()> {
-        // real/imag of a real dtype is the identity (no-op in place)
+        if !<T as ExtNum>::ABS_SAME_TYPE {
+            rstsr_raise!(UnImplemented, "real in-place requires a same-type dtype")?;
+        }
+        // real of a real dtype is the identity (no-op in place)
         Ok(())
     }
 }
@@ -660,7 +728,7 @@ where
 impl<T, D> OpNotAPI<T, T, D> for DeviceCuda
 where
     Self: DeviceRawAPI<MaybeUninit<T>, Raw = CudaBuffer<MaybeUninit<T>>> + DeviceRawAPI<T, Raw = CudaBuffer<T>>,
-    T: CudaDType,
+    T: CudaDType + crate::dtype::CudaBitwise,
     D: DimAPI,
 {
     fn op_muta_refb(
@@ -688,7 +756,7 @@ macro_rules! impl_query_unary {
         where
             Self: DeviceRawAPI<T, Raw = CudaBuffer<T>>
                 + DeviceRawAPI<MaybeUninit<bool>, Raw = CudaBuffer<MaybeUninit<bool>>>,
-            T: CudaDType,
+            T: CudaDType + crate::dtype::CudaQuery,
             D: DimAPI,
         {
             type TOut = bool;
@@ -705,7 +773,7 @@ macro_rules! impl_query_unary {
                 let expr = match T::CNAME {
                     "float" | "double" => format!("{}(b[ib])", $real),
                     "__half" => format!("{}(__half2float(b[ib]))", $real),
-                    "__nv_bfloat16" => format!("{}(__nv_bfloat162float(b[ib]))", $real),
+                    "__nv_bfloat16" => format!("{}(__bfloat162float(b[ib]))", $real),
                     "rstsr_c32" => $c32.to_string(),
                     "rstsr_c64" => $c64.to_string(),
                     other => rstsr_raise!(UnImplemented, "query unary dtype {other} not covered")?,

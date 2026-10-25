@@ -614,6 +614,10 @@ template <typename T>
 __device__ rstsr_complex<T> operator/(rstsr_complex<T> a, rstsr_complex<T> b) { return rstsr_cdiv(a, b); }
 template <typename T>
 __device__ rstsr_complex<T> operator-(rstsr_complex<T> a) { return rstsr_cneg(a); }
+template <typename T>
+__device__ bool operator==(rstsr_complex<T> a, rstsr_complex<T> b) { return a.re == b.re && a.im == b.im; }
+template <typename T>
+__device__ bool operator!=(rstsr_complex<T> a, rstsr_complex<T> b) { return !(a == b); }
 
 // mixed complex/real scalar forms (compound assigns with a real RHS)
 template <typename T>

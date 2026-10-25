@@ -205,13 +205,13 @@ extern "C" __global__ void rstsr_cast(
 
 /// Cast expression from TA to TC in kernel C (host-side generated).
 /// `src` is the input C expression (e.g. `in[io]` or a scalar name).
-fn cast_expr_c(ta: &str, tc: &str, src: &str) -> Result<String> {
+pub(crate) fn cast_expr_c(ta: &str, tc: &str, src: &str) -> Result<String> {
     if ta == tc {
         return Ok(src.to_string());
     }
     let load = match ta {
         "__half" => format!("__half2float({src})"),
-        "__nv_bfloat16" => format!("__nv_bfloat162float({src})"),
+        "__nv_bfloat16" => format!("__bfloat162float({src})"),
         _ => src.to_string(),
     };
     Ok(match (ta, tc) {
@@ -223,6 +223,8 @@ fn cast_expr_c(ta: &str, tc: &str, src: &str) -> Result<String> {
         // primitive -> complex (half loads via float above)
         (_, "rstsr_c32") => format!("rstsr_make_complex((float)({load}), 0.0f)"),
         (_, "rstsr_c64") => format!("rstsr_make_complex((double)({load}), 0.0)"),
+        // complex -> bool: nonzero test (CPU `self != Complex::zero()`)
+        ("rstsr_c32" | "rstsr_c64", "bool") => format!("(({src}.re != 0) || ({src}.im != 0))"),
         // complex -> real is a lossy dtype conversion the crate does not do
         ("rstsr_c32" | "rstsr_c64", _) => return Err(rstsr_error!(InvalidValue, "complex-to-real cast has no kernel")),
         // T -> bool: nonzero test (half through float)
@@ -403,6 +405,44 @@ where
 // /* #endregion */
 // /* #region sequence (arange/linspace) */
 fn sequence_source(t: &str) -> String {
+    // NumPy fills from the second element (`<dtype>_fill`: delta = (start +
+    // step) - start) and writes `start + i*delta`; the first two slots are
+    // `start` and `start + step` verbatim. Floats use the non-contracted
+    // intrinsics so the separate multiply-then-add matches the CPU bit for
+    // bit. The linear index is widened before the integer multiply: a narrow
+    // dtype would otherwise truncate `i`.
+    let body = match t {
+        "float" => r#"
+    float next = __fadd_rn(start, step);
+    float delta = __fsub_rn(next, start);
+    out[i] = (i == 0) ? start : ((i == 1) ? next : __fadd_rn(start, __fmul_rn(delta, (float) i)));
+"#
+        .to_string(),
+        "double" => r#"
+    double next = __dadd_rn(start, step);
+    double delta = __dsub_rn(next, start);
+    out[i] = (i == 0) ? start : ((i == 1) ? next : __dadd_rn(start, __dmul_rn(delta, (double) i)));
+"#
+        .to_string(),
+        "__half" => r#"
+    __half next = __hadd(start, step);
+    float s = __half2float(start);
+    float delta = __half2float(next) - s;
+    out[i] = (i == 0) ? start : ((i == 1) ? next : __float2half(__fadd_rn(s, __fmul_rn(delta, (float) i))));
+"#
+        .to_string(),
+        "__nv_bfloat16" => r#"
+    __nv_bfloat16 next = __hadd(start, step);
+    float s = __bfloat162float(start);
+    float delta = __bfloat162float(next) - s;
+    out[i] = (i == 0) ? start : ((i == 1) ? next : __float2bfloat16(__fadd_rn(s, __fmul_rn(delta, (float) i))));
+"#
+        .to_string(),
+        a if a.starts_with("unsigned") => {
+            "    out[i] = (rstsr_u64) start + (rstsr_u64) step * (rstsr_u64) i;".to_string()
+        },
+        _ => "    out[i] = (rstsr_i64) start + (rstsr_i64) step * (rstsr_i64) i;".to_string(),
+    };
     format!(
         r#"
 extern "C" __global__ void rstsr_sequence(
@@ -410,8 +450,7 @@ extern "C" __global__ void rstsr_sequence(
 {{
     rstsr_usz i = (rstsr_usz)blockIdx.x * (rstsr_usz)blockDim.x + (rstsr_usz)threadIdx.x;
     if (i >= n) return;
-    // arithmetic in T's own type; integer steps wrap naturally
-    out[i] = ({t})(({t}) start + ({t}) step * ({t}) i);
+{body}
 }}
 "#
     )
@@ -419,7 +458,7 @@ extern "C" __global__ void rstsr_sequence(
 
 /// Contiguous `arange`-style sequence into a fresh buffer.
 pub(crate) fn sequence<T: CudaDType>(device: &DeviceCuda, n: usize, start: T, step: T) -> Result<CudaBuffer<T>> {
-    let buf = CudaBuffer::<T>::new(device.stream(), n)?;
+    let buf = CudaBuffer::<T>::new_f(device.stream(), n)?;
     if n == 0 {
         return Ok(buf);
     }
@@ -464,16 +503,26 @@ fn linspace_source(t: &str) -> String {
             make = make,
         )
     } else {
+        // non-contracted intrinsics: the CPU reference computes
+        // `start + i*step` as a separate multiply and add
+        let lin = if t == "float" {
+            "__fadd_rn(start, __fmul_rn(step, (float) i))"
+        } else if t == "double" {
+            "__dadd_rn(start, __dmul_rn(step, (double) i))"
+        } else {
+            "start + step * i"
+        };
         format!(
             r#"
     if (n <= 1) {{ out[i] = start; return; }}
     rstsr_usz denom = endpoint ? n - 1 : n;
     {t} step = ({t})(({f}) end - ({f}) start) / ({t}) denom;
-    out[i] = ({t})(({f}) start + ({f}) step * ({f}) i);
+    out[i] = ({t})({lin});
     if (endpoint && i == n - 1) out[i] = end;
 "#,
             t = t,
             f = f,
+            lin = lin,
         )
     };
     format!(
@@ -497,7 +546,7 @@ pub(crate) fn linspace<T: CudaDType>(
     end: T,
     endpoint: bool,
 ) -> Result<CudaBuffer<T>> {
-    let buf = CudaBuffer::<T>::new(device.stream(), n)?;
+    let buf = CudaBuffer::<T>::new_f(device.stream(), n)?;
     if n == 0 {
         return Ok(buf);
     }
@@ -565,7 +614,7 @@ pub(crate) fn gather_to_host<T: Copy>(device: &DeviceCuda, raw: &CudaBuffer<T>, 
     let f = device.ordinal_obj().kernel_function(&key)?;
     // staging: upload the index list, run the gather, download the values
     let idx_bytes: Vec<u8> = indices.iter().flat_map(|i| (*i as u64).to_ne_bytes()).collect();
-    let mut scratch = CudaBuffer::<u8>::new(exec, idx_bytes.len())?;
+    let mut scratch = CudaBuffer::<u8>::new_f(exec, idx_bytes.len())?;
     // SAFETY: upload of `idx_bytes` (host slice, len matches) into the
     // freshly allocated scratch on the launch stream
     unsafe {
@@ -573,7 +622,7 @@ pub(crate) fn gather_to_host<T: Copy>(device: &DeviceCuda, raw: &CudaBuffer<T>, 
         map_driver_result(cudarc::driver::result::memcpy_htod_async(ptr, &idx_bytes, exec.inner().cu_stream()))?;
     }
     let out_len = indices.len() * esz;
-    let out_buf = CudaBuffer::<u8>::new(exec, out_len)?;
+    let out_buf = CudaBuffer::<u8>::new_f(exec, out_len)?;
     let launch = FlatLaunch::new(exec, &f, indices.len())
         .arg_buf(&out_buf)
         .arg_buf(raw)
@@ -584,10 +633,12 @@ pub(crate) fn gather_to_host<T: Copy>(device: &DeviceCuda, raw: &CudaBuffer<T>, 
     // one sync + one D2H for the gathered bytes
     let bytes = crate::transfer::d2h_full(&out_buf)?;
     let mut vec: Vec<T> = Vec::with_capacity(indices.len());
-    // SAFETY: `bytes` holds `indices.len()` elements of T (the gather kernel
-    // copied esz bytes per index); T: Copy has no drop glue
+    // SAFETY: `bytes` holds `out_len` bytes (the gather kernel copied esz
+    // bytes per index); the copy is byte-wise into the T-aligned spare
+    // capacity, and T: Copy has no drop glue
     unsafe {
-        core::ptr::copy_nonoverlapping(bytes.as_ptr() as *const T, vec.as_mut_ptr(), indices.len());
+        let dst = core::slice::from_raw_parts_mut(vec.as_mut_ptr() as *mut u8, out_len);
+        core::ptr::copy_nonoverlapping(bytes.as_ptr(), dst.as_mut_ptr(), out_len);
         vec.set_len(indices.len());
     }
     Ok(vec)
@@ -605,7 +656,7 @@ struct KernelScratch {
 
 impl KernelScratch {
     fn new(exec: &Arc<CudaStreamObj>, bytes: &[u8]) -> Result<Self> {
-        let mut buf = CudaBuffer::<u8>::new(exec, bytes.len().max(1))?;
+        let mut buf = CudaBuffer::<u8>::new_f(exec, bytes.len().max(1))?;
         if !bytes.is_empty() {
             let stream = buf.as_bytes().stream().clone();
             let ptr = buf.device_ptr_mut() as u64;
@@ -907,6 +958,10 @@ pub(crate) fn is_fill_supported<T: 'static>(_v: &T) -> bool {
         || t == core::any::TypeId::of::<u64>()
         || t == core::any::TypeId::of::<usize>()
         || t == core::any::TypeId::of::<bool>()
+        || t == core::any::TypeId::of::<num::Complex<f32>>()
+        || t == core::any::TypeId::of::<num::Complex<f64>>()
+        || t == core::any::TypeId::of::<half::f16>()
+        || t == core::any::TypeId::of::<half::bf16>()
 }
 
 /// Byte-erased fill: dispatches on `T`'s TypeId and re-types the scalar
@@ -967,6 +1022,10 @@ where
     try_fill!(u64);
     try_fill!(usize);
     try_fill!(bool);
+    try_fill!(num::Complex<f32>);
+    try_fill!(num::Complex<f64>);
+    try_fill!(half::f16);
+    try_fill!(half::bf16);
     rstsr_raise!(InvalidValue, "fill dtype not supported by the CUDA fill kernel")?
 }
 
@@ -1387,7 +1446,7 @@ extern "C" __global__ void rstsr_clip_g(
         .arg_u64(match &lo {
             ClipBound::Tensor(buf, lb2) => {
                 let _ = lb2;
-                buf.device_ptr() as u64
+                buf.device_ptr_on(exec) as u64
             },
             _ => 0,
         })
@@ -1400,7 +1459,7 @@ extern "C" __global__ void rstsr_clip_g(
         .arg_u64(match &hi {
             ClipBound::Tensor(buf, lc2) => {
                 let _ = lc2;
-                buf.device_ptr() as u64
+                buf.device_ptr_on(exec) as u64
             },
             _ => 0,
         })

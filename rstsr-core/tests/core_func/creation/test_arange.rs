@@ -46,6 +46,60 @@ mod numpy_arange {
         assert!(rt::arange_f((0, 10, 0, &device)).is_err());
         assert!(rt::arange_f((0.0, 10.0, 0.0, &device)).is_err());
     }
+
+    #[test]
+    fn test_float_endpoint_rounding() {
+        // NumPy v2.4.6, checked locally: the length is
+        // ceil((stop - start) / step) computed in the scalar dtype, with no
+        // trailing-element pop (so a value landing exactly on `stop` stays).
+        crate::specify_test!("test_float_endpoint_rounding");
+
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        // np.arange(0.5, 0.51, 0.01) -> [0.5, 0.51] (2 elements)
+        let a = rt::arange((0.5f64, 0.51, 0.01, &device));
+        assert_eq!(a.shape()[0], 2);
+        assert_equal(&a, &rt::tensor_from_nested!([0.5, 0.51], &device), None);
+
+        // np.arange(0.1, 1.0, 0.1) -> 9 elements (100 * 0.1 overshoots 1.0)
+        assert_eq!(rt::arange((0.1f64, 1.0, 0.1, &device)).shape()[0], 9);
+
+        // np.arange(np.float32(0), np.float32(1), np.float32(0.01), dtype=float32)
+        // -> 100 elements (the f32 span rounds to exactly 100)
+        assert_eq!(rt::arange((0.0f32, 1.0f32, 0.01f32, &device)).shape()[0], 100);
+        // np.arange(np.float32(0.5), np.float32(0.51), np.float32(0.01)) -> 1
+        assert_eq!(rt::arange((0.5f32, 0.51f32, 0.01f32, &device)).shape()[0], 1);
+
+        // np.arange(0.0, 0.30000000000000004, 0.1) -> 4 elements, last is the stop
+        let b = rt::arange((0.0f64, 0.30000000000000004, 0.1, &device));
+        assert_eq!(b.shape()[0], 4);
+    }
+
+    #[test]
+    fn test_float_fill_values() {
+        // NumPy v2.4.6: the dtype fill loop starts from
+        // `delta = (start + step) - start` and writes `start + i*delta` (the
+        // first two slots are `start` and `start + step`), which differs from
+        // `start + i*step` in the last bits.
+        crate::specify_test!("test_float_fill_values");
+
+        let mut device = TESTCFG.device.clone();
+        device.set_default_order(RowMajor);
+
+        // np.arange(0.5, 2.0, 0.3)
+        let a = rt::arange((0.5f64, 2.0, 0.3, &device));
+        assert_equal(
+            &a,
+            &rt::tensor_from_nested!([0.5, 0.8, 1.1, 1.4000000000000001, 1.7000000000000002], &device),
+            None,
+        );
+
+        // np.arange(np.float32(0.5), np.float32(2.0), np.float32(0.3));
+        // 1.4 is one f32 ulp above the `1.4f32` literal
+        let b = rt::arange((0.5f32, 2.0f32, 0.3f32, &device));
+        assert_equal(&b, &rt::tensor_from_nested!([0.5f32, 0.8, 1.1, f32::from_bits(0x3fb33334), 1.7], &device), None);
+    }
 }
 
 #[cfg(test)]
@@ -100,5 +154,14 @@ mod custom_arange {
         );
         assert_eq!(rt::arange((0i64, 0, 1, &device)).shape()[0], 0);
         assert_eq!(rt::arange((0i64, 0, -1, &device)).shape()[0], 0);
+
+        // Exact integer spans above 2^53 (the length must not round-trip
+        // through f64); NumPy: 5 and 10 elements.
+        assert_eq!(rt::arange((i64::MAX - 5, i64::MAX, 1i64, &device)).shape()[0], 5);
+        assert_eq!(rt::arange((1i64 << 60, (1i64 << 60) + 10, 1i64, &device)).shape()[0], 10);
+
+        // Narrow-integer ranges wider than the dtype's positive half: the
+        // span is computed exactly (255), independent of the dtype width
+        assert_eq!(rt::arange((-128i8, 127i8, 1i8, &device)).shape()[0], 255);
     }
 }

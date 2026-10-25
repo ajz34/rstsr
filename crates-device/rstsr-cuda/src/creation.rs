@@ -11,7 +11,7 @@ where
     T: Copy + Send + Sync + 'static,
 {
     unsafe fn empty_impl(&self, len: usize) -> Result<Storage<DataOwned<CudaBuffer<T>>, T, Self>> {
-        let raw = CudaBuffer::new(self.stream(), len)?;
+        let raw = CudaBuffer::new_f(self.stream(), len)?;
         Ok(Storage::new(DataOwned::from(raw), self.clone()))
     }
 
@@ -22,14 +22,14 @@ where
         // kernel fill for the TypeIds `is_fill_supported` lists; other T
         // (half, complex, i128/u128) keep the host geometric-doubling path
         if crate::kernels_ops::is_fill_supported(&fill) {
-            let mut raw = CudaBuffer::new(self.stream(), len)?;
+            let mut raw = CudaBuffer::new_f(self.stream(), len)?;
             let layout = Layout::new(vec![len], vec![1_isize], 0)?;
             crate::kernels_ops::fill_bytes_erased(self, &mut raw, &layout, &fill)?;
             return Ok(Storage::new(DataOwned::from(raw), self.clone()));
         }
         // DEFER: extend the TypeId list to all CudaDType members or move the
         // bound onto a dedicated creation trait fork
-        let mut raw = CudaBuffer::new(self.stream(), len)?;
+        let mut raw = CudaBuffer::new_f(self.stream(), len)?;
         transfer::fill_naive(&mut raw, &fill)?;
         Ok(Storage::new(DataOwned::from(raw), self.clone()))
     }
@@ -47,7 +47,7 @@ where
     }
 
     fn uninit_impl(&self, len: usize) -> Result<Storage<DataOwned<CudaBuffer<MaybeUninit<T>>>, MaybeUninit<T>, Self>> {
-        let raw = CudaBuffer::<MaybeUninit<T>>::new(self.stream(), len)?;
+        let raw = CudaBuffer::<MaybeUninit<T>>::new_f(self.stream(), len)?;
         Ok(Storage::new(DataOwned::from(raw), self.clone()))
     }
 
@@ -74,7 +74,7 @@ where
     T: Num + Copy + Send + Sync + 'static,
 {
     fn zeros_impl(&self, len: usize) -> Result<Storage<DataOwned<CudaBuffer<T>>, T, Self>> {
-        let mut raw = CudaBuffer::new(self.stream(), len)?;
+        let mut raw = CudaBuffer::new_f(self.stream(), len)?;
         transfer::memset_zero(&mut raw)?;
         Ok(Storage::new(DataOwned::from(raw), self.clone()))
     }
@@ -103,25 +103,85 @@ where
         + 'static,
 {
     fn arange_impl(&self, start: T, end: T, step: T) -> Result<Storage<DataOwned<CudaBuffer<T>>, T, Self>> {
-        // length: ceil((end - start) / step) in f64 — one division, matching
-        // the accelerated CPU path; elements [i] = start + step*i in-kernel
-        let n = {
-            let zero = T::zero();
-            rstsr_assert!(step != zero, InvalidValue, "arange step must be nonzero")?;
-            let fs = start.to_f64().unwrap_or(f64::NAN);
-            let fe = end.to_f64().unwrap_or(f64::NAN);
-            let fst = step.to_f64().unwrap_or(f64::NAN);
-            let span = (fe - fs) / fst;
-            if span <= 0.0 {
-                0usize
-            } else {
-                span.ceil() as usize
-            }
-        };
-        // DEFER: step sign/zero validation mirrors the tensor layer; the
-        // kernel writes start + step*i directly.
+        // length: ceil((end - start) / step) computed in the operand dtype
+        // (NumPy `_calc_length`); elements [i] = start + step*i in-kernel
+        let n = arange_len(&start, &end, &step)?;
         let buf = crate::kernels_ops::sequence(self, n, start, step)?;
         Ok(Storage::new(DataOwned::from(buf), self.clone()))
+    }
+}
+
+/// NumPy `arange` length, computed without a widening round-trip: integer
+/// ranges use exact i128 ceil-division (f64 loses all precision above
+/// 2^53), float ranges use the operand width.
+fn arange_len<T>(start: &T, end: &T, step: &T) -> Result<usize>
+where
+    T: crate::dtype::CudaDType
+        + PartialOrd
+        + Clone
+        + core::ops::Sub<Output = T>
+        + core::ops::Div<Output = T>
+        + num::ToPrimitive
+        + num::Zero,
+{
+    rstsr_assert!(*step != T::zero(), InvalidValue, "arange step must be nonzero")?;
+    if crate::dtype::is_int_cname(T::CNAME) {
+        let (s, e, st) = match (start.to_i128(), end.to_i128(), step.to_i128()) {
+            (Some(s), Some(e), Some(st)) => (s, e, st),
+            _ => return Ok(0),
+        };
+        let span = e.wrapping_sub(s);
+        if span == 0 || (span > 0) != (st > 0) {
+            return Ok(0);
+        }
+        let n = (span.unsigned_abs() + st.unsigned_abs() - 1) / st.unsigned_abs();
+        return Ok(n.min(usize::MAX as u128) as usize);
+    }
+    let n = match T::CNAME {
+        "float" => {
+            let (s, e, st) = (start.to_f32(), end.to_f32(), step.to_f32());
+            match (s, e, st) {
+                (Some(s), Some(e), Some(st)) if st != 0.0 => float_len_f32((e - s) / st),
+                _ => 0,
+            }
+        },
+        // NumPy rounds the quotient in the scalar dtype before the ceil; a
+        // non-finite half quotient (NumPy raises) falls back to the widened
+        // span
+        "__half" | "__nv_bfloat16" => {
+            let span = (*end - *start) / *step;
+            match span.to_f32() {
+                Some(s) if s.is_finite() => float_len_f32(s),
+                _ => match (start.to_f32(), end.to_f32(), step.to_f32()) {
+                    (Some(s), Some(e), Some(st)) if st != 0.0 => float_len_f32((e - s) / st),
+                    _ => 0,
+                },
+            }
+        },
+        _ => {
+            let (s, e, st) = (start.to_f64(), end.to_f64(), step.to_f64());
+            match (s, e, st) {
+                (Some(s), Some(e), Some(st)) if st != 0.0 => float_len_f64((e - s) / st),
+                _ => 0,
+            }
+        },
+    };
+    Ok(n)
+}
+
+fn float_len_f32(span: f32) -> usize {
+    if span <= 0.0 {
+        0
+    } else {
+        span.ceil() as usize
+    }
+}
+
+fn float_len_f64(span: f64) -> usize {
+    if span <= 0.0 {
+        0
+    } else {
+        span.ceil() as usize
     }
 }
 

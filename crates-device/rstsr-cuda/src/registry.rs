@@ -22,6 +22,8 @@ pub struct CudaOrdinalObj {
     pub(crate) default_stream: Arc<CudaStreamObj>,
     /// Per-ordinal compiled-kernel cache (lazily initialized).
     pub(crate) kernel_cache_slot: OnceLock<crate::kernel::KernelCachePublic>,
+    /// Per-ordinal intern map of planned elementwise specializations.
+    pub(crate) planned_cache_slot: OnceLock<crate::kernel::PlannedCache>,
     /// Cached arch string (one driver query per ordinal).
     pub(crate) arch_slot: OnceLock<core::result::Result<String, rstsr_core::prelude_dev::Error>>,
 }
@@ -36,6 +38,7 @@ impl CudaOrdinalObj {
             ctx,
             default_stream: Arc::new(default_stream),
             kernel_cache_slot: OnceLock::new(),
+            planned_cache_slot: OnceLock::new(),
             arch_slot: OnceLock::new(),
         })
     }
