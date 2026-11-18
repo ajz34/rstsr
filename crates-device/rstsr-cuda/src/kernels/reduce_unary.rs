@@ -70,7 +70,9 @@ use crate::dtype::CudaDType;
 use super::reduce_plan::{ReducePlan, BLOCK};
 
 /// Largest number of warps a block can contain, assuming a warp is at least 32 lanes.
-const MAX_WARPS_PER_BLOCK: usize = BLOCK / 32;
+///
+/// Shared with [`super::reduce_arg`], which sizes its per-warp shared array with the same bound.
+pub(super) const MAX_WARPS_PER_BLOCK: usize = BLOCK / 32;
 
 /// The three strings the accumulator type contributes to the generated source.
 ///
@@ -307,7 +309,9 @@ pub(super) fn offset_ptr<T>(exec: &Arc<CudaStreamObj>, buf: &CudaBuffer<T>, offs
     }
 }
 
-fn render(template: &str, subs: &[(&str, &str)]) -> String {
+/// Token substitution, in the caller's order. Shared with [`super::reduce_arg`]: the ordering rule
+/// (producers before consumers) is the caller's problem, but the mechanics are not worth a copy.
+pub(super) fn render(template: &str, subs: &[(&str, &str)]) -> String {
     let mut s = template.to_string();
     for (name, text) in subs {
         s = s.replace(name, text);

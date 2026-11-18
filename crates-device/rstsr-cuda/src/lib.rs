@@ -30,6 +30,7 @@
 
 #![allow(clippy::needless_return)]
 
+pub mod arg_ops;
 pub mod assignment;
 pub mod buffer;
 pub mod conversion;
@@ -47,6 +48,7 @@ pub(crate) mod kernels;
 pub(crate) mod kernels_ops;
 pub mod operators;
 pub mod reduce_ops;
+pub mod scan_ops;
 pub mod registry;
 pub mod stream;
 pub mod transfer;

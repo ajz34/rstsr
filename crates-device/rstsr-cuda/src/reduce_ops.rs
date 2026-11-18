@@ -28,29 +28,25 @@
 //! two helpers and their generic bounds are ~350 lines of one subject, and they are the only thing in
 //! the crate with an accumulator type distinct from the operand type.
 //!
-//! # Why not the rest
+//! # The rest of the family, and where it lives
 //!
-//! Four families are still absent, and the reasons are no longer "not typed out yet":
+//! This module is only the *fold-shaped* rows. The others are implemented, but in modules of their
+//! own, because each needs something this one does not have:
 //!
-//! - **`OpArgMinAPI`, `OpArgMaxAPI`, `OpNanArgMin/MaxAPI`, `OpUnraveledArgMin/MaxAPI`**: the
-//!   accumulator carries an index beside the value, and the combine is **lexicographic** — the two
-//!   slots cannot be reduced independently the way `var`'s can. The tie-break is not a guess: the CPU
-//!   keeps the **smaller logical index** (`native_impl::cpu_serial::reduction::
-//!   reduce_all_unraveled_arg_fold_cpu_serial`, "return smaller index"), i.e. the smaller C-order
-//!   raveled index over the reduced axes, independent of memory layout. That means the kernel needs
-//!   the raveled index of each element, which the plan does not carry today: it enumerates the
-//!   contracted axes in stride order, not logical order. Same machinery as `var` (a second slot),
-//!   plus that index. Next.
-//! - **`OpCumSumAPI`, `OpCumProdAPI`** (+ dtype variants): a *scan*, not a reduction — every
-//!   intermediate value is an output, so the tree shape is different and the plan does not describe
-//!   it. Their traits also allocate and reshape (`include_initial` shifts the output extent).
-//! - **`OpVarDtypeAPI`, `OpStdDtypeAPI`**: the *device* trait is the same pair fold, but the public
-//!   `var_with_dtype`/`std_with_dtype` wrappers also require `Op_MutA_RefB_API` for the `correction`
-//!   rescale, and that trait takes a `dyn Fn(&mut T, &T)`. A closure cannot cross into a kernel, so
-//!   no GPU backend can implement it honestly. Options, for whoever needs the mixed-precision path:
-//!   implement `Op_MutA_RefB_API` to refuse at runtime (then `correction: None` works and `Some`
-//!   errors), or split `correction` out of the wrapper so the kernel path does not name a closure.
-//!   Not decided here, because either choice changes a core API for every backend.
+//! - **`OpArgMinAPI`, `OpArgMaxAPI`, `OpNanArgMinAPI`, `OpNanArgMaxAPI`** — [`crate::arg_ops`] on
+//!   top of `kernels::reduce_arg`. The accumulator is a `(value, index)` pair that must move
+//!   together, the empty state is not an identity value, and the index has to be raveled in the
+//!   *logical* order, which is a precondition this module never has to state.
+//! - **`OpCumSumAPI`, `OpCumProdAPI`** — [`crate::scan_ops`] on top of `kernels::scan`. A scan is not
+//!   a reduction: every prefix is an output, so there is no plan, no lane count and no reordering.
+//! - **`OpVarDtypeAPI`, `OpStdDtypeAPI`** — the two rows at the end of this file. They are the same
+//!   pair fold with `T` and `TOut` bound separately, which the kernel already supported.
+//!
+//! What is still absent, and why:
+//!
+//! - **`OpUnraveledArgMinAPI`, `OpUnraveledArgMaxAPI`**: the output is a tensor of index *tuples*
+//!   with its own layout rule, and nothing in REST calls them. Deferred by name rather than
+//!   half-implemented.
 //! - **`OpAllCloseAPI`**: `allclose_axes` is `unimplemented!()` on the CPU too, so implementing it
 //!   only here would be inventing semantics rather than porting them.
 //!
@@ -611,6 +607,45 @@ macro_rules! impl_var_std {
 
 impl_var_std!(OpVarAPI, PairOp::Var, var_all, var_axes);
 impl_var_std!(OpStdAPI, PairOp::Std, std_all, std_axes);
+
+/// `var_axes_dtype`/`std_axes_dtype`: the same pair fold with an **explicit accumulator type**.
+///
+/// The kernel already carries three type names (`@TIN@`, `@TACC@`, `@TOUT@`) and casts the element
+/// into the accumulator on every fold (`(@TACC@)(X)`), which is exactly `into_cast` on the CPU side.
+/// So the mixed-precision row needs no new kernel — only this impl, where `T` and `TOut` are bound
+/// separately. Until it existed, `var_with_dtype` did not exist for CUDA at all: the public wrapper
+/// names `OpVarDtypeAPI` in its `where` clause.
+macro_rules! impl_var_std_dtype {
+    ($tr:ident, $op:expr, $axes:ident) => {
+        impl<T, TOut, D> $tr<T, TOut, D> for DeviceCuda
+        where
+            Self: DeviceRawAPI<T, Raw = CudaBuffer<T>>
+                + DeviceRawAPI<TOut, Raw = CudaBuffer<TOut>>
+                + DeviceRawAPI<MaybeUninit<TOut>, Raw = CudaBuffer<MaybeUninit<TOut>>>
+                + DeviceCreationAnyAPI<TOut>,
+            T: CudaDType,
+            // The accumulator is the *output* type here, so it is the one that must be a real
+            // float: `Σx²` in an integer accumulator is not a variance.
+            TOut: CudaDType + ReduceAcc + num::Float,
+            D: DimAPI,
+        {
+            fn $axes(
+                &self,
+                a: &CudaBuffer<T>,
+                la: &Layout<D>,
+                axes: &[isize],
+            ) -> Result<(
+                Storage<DataOwned<<Self as DeviceRawAPI<TOut>>::Raw>, TOut, Self>,
+                Layout<IxD>,
+            )> {
+                reduce_pair_axes_impl(self, $op, TOut::SPEC, a, &la.to_dim::<IxD>()?, axes, TOut::nan())
+            }
+        }
+    };
+}
+
+impl_var_std_dtype!(OpVarDtypeAPI, PairOp::Var, var_axes_dtype);
+impl_var_std_dtype!(OpStdDtypeAPI, PairOp::Std, std_axes_dtype);
 
 /// `*_axes` for the two-slot family: the shared prelude, then the pair launcher.
 fn reduce_pair_axes_impl<TIn, TOut>(

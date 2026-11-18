@@ -16,8 +16,10 @@ pub(crate) mod ops_ternary;
 pub(crate) mod plan;
 pub(crate) mod reduce_plan;
 pub(crate) mod reduce;
+pub(crate) mod reduce_arg;
 pub(crate) mod reduce_pair;
 pub(crate) mod reduce_unary;
+pub(crate) mod scan;
 
 /// Complex-math device header (include_str! keeps it a real .cuh file).
 pub(crate) const COMPLEX_HEADER: &str = include_str!("rstsr_complex.cuh");

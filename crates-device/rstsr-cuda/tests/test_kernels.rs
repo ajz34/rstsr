@@ -1566,3 +1566,287 @@ fn tensordot_refuses_a_contraction_that_needs_a_pack() {
 }
 
 /* #endregion */
+
+/* #region arg reductions + scan + var_with_dtype */
+
+/// `var_with_dtype` and `std_with_dtype` on CUDA.
+///
+/// These could not be *called* before this round: the public wrappers carried a
+/// `for<'f> Op_MutA_RefB_API<TOut, TOut, IxD, dyn Fn(..)>` bound for the `correction` rescale, and a
+/// closure cannot cross into a kernel, so the bound was unsatisfiable on any accelerator — even for
+/// `correction: None`, where the rescale never runs, because a `where` clause is checked whether or
+/// not the branch is taken. The rescale was only ever `x * factor`; it is now a device multiply.
+///
+/// So the first assertion is the interesting one: `correction: None` compiles at all. The second
+/// pins the arithmetic of the `Some` path against the CPU's own `M/(M-correction)` factor.
+#[test]
+fn var_std_with_dtype_vs_cpu() {
+    require_cuda!();
+    let d = DeviceCuda::new(0);
+    let dcpu = DeviceCpuSerial::default();
+
+    let mut data = exact_data(6 * 8, 121);
+    for (i, v) in data.iter_mut().enumerate() {
+        *v += (i % 7) as f64 * 0.25; // keep the variance away from zero
+    }
+    let a_cpu: Tensor<f64, DeviceCpuSerial, _> = rt::asarray((data, &dcpu)).into_shape([6, 8]);
+    let a = a_cpu.to_device(&d);
+
+    // (1) no correction: this is the call that used to fail to compile
+    // The turbofish pins `TOut`: a `Tensor<f64, _, Ix1>` annotation would not, because the second
+    // parameter is the backend and `_` there leaves the whole type ambiguous.
+    let got_none = rt::var_with_dtype::<f64, f64, _, _>(&a, 1);
+    let want_none = rt::var_with_dtype::<f64, f64, _, _>(&a_cpu, 1);
+    assert_close(&host_nd(&got_none), &host_nd(&want_none), "var_with_dtype, correction None");
+
+    // (2) with a correction: `M / (M - 1)` rescale on the finished result
+    let args = |ap: AxesIndex<isize>| VarArgs { axes: ap, keepdims: false, correction: Some(1.0) };
+    let got = rt::var_with_dtype::<f64, f64, _, _>(&a, args(AxesIndex::Val(1)));
+    let want = rt::var_with_dtype::<f64, f64, _, _>(&a_cpu, args(AxesIndex::Val(1)));
+    assert_close(&host_nd(&got), &host_nd(&want), "var_with_dtype, correction Some(1.0)");
+
+    let got_std = rt::std_with_dtype::<f64, f64, _, _>(&a, args(AxesIndex::Val(1)));
+    let want_std = rt::std_with_dtype::<f64, f64, _, _>(&a_cpu, args(AxesIndex::Val(1)));
+    assert_close(&host_nd(&got_std), &host_nd(&want_std), "std_with_dtype, correction Some(1.0)");
+
+    // (3) an explicit narrower accumulator, which is the reason the API exists at all.
+    let got_f32 = rt::var_with_dtype::<f64, f32, _, _>(&a, 1);
+    let want_f32 = rt::var_with_dtype::<f64, f32, _, _>(&a_cpu, 1);
+    let got64: Vec<f64> = host_nd(&got_f32).into_iter().map(|v| v as f64).collect();
+    let want64: Vec<f64> = host_nd(&want_f32).into_iter().map(|v| v as f64).collect();
+    assert_close(&got64, &want64, "var_with_dtype<f32>");
+}
+
+/// `argmax`/`argmin`/`nanargmax`/`nanargmin`, compared against the CPU's own answer.
+///
+/// The comparison is the test: the index of an extremum is a *convention* (which of two equal values
+/// wins, what a NaN does), and the only authority is what the CPU device returns. Ties and NaNs are
+/// therefore placed deliberately rather than left to the data.
+#[test]
+fn arg_reductions_vs_cpu() {
+    require_cuda!();
+    let d = DeviceCuda::new(0);
+    let dcpu = DeviceCpuSerial::default();
+
+    // (1) plain data through both axes, plus the full reduction
+    let (m, k) = (6usize, 32usize);
+    let a_cpu: Tensor<f64, DeviceCpuSerial, _> = rt::asarray((exact_data(m * k, 131), &dcpu)).into_shape([m, k]);
+    let a = a_cpu.to_device(&d);
+    for (lbl, got, want) in [
+        ("argmax axis 1", rt::argmax_axes(&a, 1), rt::argmax_axes(&a_cpu, 1)),
+        ("argmax axis 0", rt::argmax_axes(&a, 0), rt::argmax_axes(&a_cpu, 0)),
+        ("argmin axis 1", rt::argmin_axes(&a, 1), rt::argmin_axes(&a_cpu, 1)),
+        ("argmin axis 0", rt::argmin_axes(&a, 0), rt::argmin_axes(&a_cpu, 0)),
+    ] {
+        assert_eq!(host_nd(&got), host_nd(&want), "{lbl}");
+    }
+    assert_eq!(rt::argmax(&a), rt::argmax(&a_cpu), "argmax over every axis");
+
+    // (2) ties. `[3, 3, 1, 3]` has its maximum at three positions; the CPU keeps the smallest index,
+    // and the kernel's lexicographic combine has to agree even though the tree visits blocks in an
+    // order the fold never sees.
+    let tie_cpu: Tensor<f64, DeviceCpuSerial, _> = rt::asarray((
+        vec![3.0, 3.0, 1.0, 3.0, 1.0, 3.0, 3.0, 1.0, 2.0, 2.0, 2.0, 2.0],
+        &dcpu,
+    ))
+    .into_shape([3, 4]);
+    let tie = tie_cpu.to_device(&d);
+    assert_eq!(
+        host_nd(&rt::argmax_axes(&tie, 1)),
+        host_nd(&rt::argmax_axes(&tie_cpu, 1)),
+        "argmax must take the first of several equal maxima"
+    );
+    assert_eq!(
+        host_nd(&rt::argmin_axes(&tie, 0)),
+        host_nd(&rt::argmin_axes(&tie_cpu, 0)),
+        "argmin must take the first of several equal minima"
+    );
+
+    // (3) NaN. The two policies disagree *on purpose*: a leading NaN wins for `argmax` and is
+    // skipped for `nanargmax` (CPU: `f_comp_std_max` vs `f_comp_nan_max`). Both are pinned, because
+    // "do the sane thing" would silently differ from the CPU on one of them.
+    let nan_cpu: Tensor<f64, DeviceCpuSerial, _> = rt::asarray((
+        vec![f64::NAN, 5.0, 1.0, 9.0, 5.0, f64::NAN, 9.0, f64::NAN, 2.0, 2.0, f64::NAN, 2.0],
+        &dcpu,
+    ))
+    .into_shape([3, 4]);
+    let nan = nan_cpu.to_device(&d);
+    assert_eq!(
+        host_nd(&rt::argmax_axes(&nan, 1)),
+        host_nd(&rt::argmax_axes(&nan_cpu, 1)),
+        "argmax with NaNs (a leading NaN wins)"
+    );
+    assert_eq!(
+        host_nd(&rt::nanargmax_axes(&nan, 1)),
+        host_nd(&rt::nanargmax_axes(&nan_cpu, 1)),
+        "nanargmax with NaNs (NaN is skipped)"
+    );
+    assert_eq!(
+        host_nd(&rt::nanargmin_axes(&nan, 1)),
+        host_nd(&rt::nanargmin_axes(&nan_cpu, 1)),
+        "nanargmin with NaNs"
+    );
+
+    // (4) an all-NaN slice: the CPU raises, so the kernel writes an out-of-range index and the impl
+    // turns it into the same error.
+    let all_nan_cpu: Tensor<f64, DeviceCpuSerial, _> =
+        rt::asarray((vec![f64::NAN, f64::NAN, 1.0, 2.0], &dcpu)).into_shape([2, 2]);
+    let all_nan = all_nan_cpu.to_device(&d);
+    assert!(rt::nanargmax_axes_f(&all_nan_cpu, 1).is_err(), "cpu: all-NaN must raise");
+    match rt::nanargmax_axes_f(&all_nan, 1) {
+        Ok(_) => panic!("all-NaN slice should raise"),
+        Err(e) => assert!(format!("{e}").contains("All-NaN"), "unexpected error: {e}"),
+    }
+
+    // (5) a contraction long enough that one output spans several warps: `n_out = 4` pushes `lanes`
+    // to 256, which is the only way the shared-memory stage runs.
+    let (m2, k2) = (4usize, 4096usize);
+    let big_cpu: Tensor<f64, DeviceCpuSerial, _> = rt::asarray((exact_data(m2 * k2, 132), &dcpu)).into_shape([m2, k2]);
+    let big = big_cpu.to_device(&d);
+    assert_eq!(
+        host_nd(&rt::argmax_axes(&big, 1)),
+        host_nd(&rt::argmax_axes(&big_cpu, 1)),
+        "argmax across the multi-warp stage"
+    );
+}
+
+/// The index is raveled over the **logical** C-order of the contracted axes, so a contraction whose
+/// memory order is not its logical order is refused rather than answered wrongly.
+///
+/// The two halves are the point:
+///
+/// - a *single* axis is always in logical order, however strided it is — `argmax(t, 1)` on a
+///   transposed view has one contracted axis with stride 2, and must simply work;
+/// - a *multi-axis* contraction can be out of order. Over a transposed `[2, 3]` view (strides
+///   `[1, 2]`), the flat enumeration runs axis 0 fastest while the logical index runs axis 1
+///   fastest. The reduce plan merges it happily — it sorts by stride, and `1*2 == 2` is a clean
+///   arithmetic progression — so the step is 1 where the logical step is 2. Values would be right
+///   and every index wrong, which is why this is checked rather than assumed.
+#[test]
+fn arg_refuses_a_contraction_not_in_logical_order() {
+    require_cuda!();
+    let d = DeviceCuda::new(0);
+    let dcpu = DeviceCpuSerial::default();
+    let n = 6usize;
+    let base_cpu: Tensor<f64, DeviceCpuSerial, _> = rt::asarray((exact_data(n, 133), &dcpu)).into_shape([3, 2]);
+    let base = base_cpu.to_device(&d);
+    let (t_cpu, t) = (base_cpu.swapaxes(0, 1), base.swapaxes(0, 1));
+    assert_eq!(t.layout().stride()[0], 1, "fixture: axis 0 must be the fast axis");
+
+    // One contracted axis: strided, still logical. This is the case the first version of this test
+    // accidentally asserted (and so proved nothing about).
+    assert_eq!(
+        host_nd(&rt::argmax_axes(&t, 1)),
+        host_nd(&rt::argmax_axes(&t_cpu, 1)),
+        "a single contracted axis is in logical order whatever its stride"
+    );
+
+    // Both axes: the enumeration order is the transpose of the logical order.
+    match rt::argmax_f(&t) {
+        Ok(v) => panic!("a transposed multi-axis contraction should be refused, got {v}"),
+        Err(e) => {
+            let msg = format!("{e}");
+            assert!(msg.contains("not contiguous in C-order"), "unexpected error: {msg}");
+        },
+    }
+    // ... and the documented way out works.
+    let contig = t.to_contig(RowMajor);
+    assert_eq!(rt::argmax(&contig), rt::argmax(&t_cpu), "to_contig should make it answerable");
+}
+
+/// `cumulative_sum`/`cumulative_prod` against the CPU, over the shapes that exercise each part of the
+/// kernel:
+///
+/// - a 1-D scan, which is the trivial line split;
+/// - axis 1 and axis 0 of a 2-D array, i.e. the innermost and the outermost axis (different strides
+///   on both sides);
+/// - a **middle** axis of a 3-D array, where a line's base offset is neither a row nor a column —
+///   the case that only works because the kernel computes offsets from the rest layout instead of
+///   assuming a merged stride;
+/// - `include_initial`, which grows the axis and writes the identity at position 0;
+/// - a scan longer than one block (`600 > 256`), which is the only fixture that runs the chunk
+///   `carry` more than once;
+/// - a transposed input, to check the two rest layouts really are read independently.
+#[test]
+fn cumulative_sum_prod_vs_cpu() {
+    require_cuda!();
+    let d = DeviceCuda::new(0);
+    let dcpu = DeviceCpuSerial::default();
+
+    // 1-D
+    let v_cpu: Tensor<f64, DeviceCpuSerial, _> = rt::asarray((exact_data(9, 141), &dcpu));
+    let v = v_cpu.to_device(&d);
+    assert_close(
+        &host_nd(&rt::cumulative_sum(&v, 0)),
+        &host_nd(&rt::cumulative_sum(&v_cpu, 0)),
+        "cumsum 1-D",
+    );
+    assert_close(
+        &host_nd(&rt::cumulative_sum(&v, (0, true))),
+        &host_nd(&rt::cumulative_sum(&v_cpu, (0, true))),
+        "cumsum 1-D, include_initial",
+    );
+
+    // 2-D, both axes
+    let (m, n) = (5usize, 6usize);
+    let a_cpu: Tensor<f64, DeviceCpuSerial, _> = rt::asarray((exact_data(m * n, 142), &dcpu)).into_shape([m, n]);
+    let a = a_cpu.to_device(&d);
+    for axis in [0isize, 1] {
+        for init in [false, true] {
+            assert_close(
+                &host_nd(&rt::cumulative_sum(&a, (axis, init))),
+                &host_nd(&rt::cumulative_sum(&a_cpu, (axis, init))),
+                &format!("cumsum 2-D axis {axis} include_initial={init}"),
+            );
+        }
+    }
+
+    // 3-D, middle axis
+    let b_cpu: Tensor<f64, DeviceCpuSerial, _> = rt::asarray((exact_data(2 * 3 * 4, 143), &dcpu)).into_shape([2, 3, 4]);
+    let b = b_cpu.to_device(&d);
+    for axis in [0isize, 1, 2] {
+        assert_close(
+            &host_nd(&rt::cumulative_sum(&b, axis)),
+            &host_nd(&rt::cumulative_sum(&b_cpu, axis)),
+            &format!("cumsum 3-D axis {axis}"),
+        );
+    }
+
+    // longer than one block: the chunk carry must be right, or everything past element 256 drifts
+    let (m2, n2) = (3usize, 600usize);
+    let long_cpu: Tensor<f64, DeviceCpuSerial, _> = rt::asarray((exact_data(m2 * n2, 144), &dcpu)).into_shape([m2, n2]);
+    // scale down so the cumulative sum stays in a range where an f64 comparison is meaningful
+    let long_cpu = long_cpu / 8.0;
+    let long = long_cpu.to_device(&d);
+    assert_close(
+        &host_nd(&rt::cumulative_sum(&long, 1)),
+        &host_nd(&rt::cumulative_sum(&long_cpu, 1)),
+        "cumsum 600 elements (two chunks)",
+    );
+
+    // transposed input: the two rest layouts have different strides, so a shared assumption would fail
+    let t_cpu = a_cpu.swapaxes(0, 1);
+    let t = t_cpu.to_device(&d);
+    assert_close(
+        &host_nd(&rt::cumulative_sum(&t, 0)),
+        &host_nd(&rt::cumulative_sum(&t_cpu, 0)),
+        "cumsum of a transposed view",
+    );
+
+    // cumprod on small integers, so every partial product is exact
+    let p_cpu: Tensor<f64, DeviceCpuSerial, _> = rt::asarray((
+        (0..24).map(|i| 1.0 + (i % 3) as f64).collect::<Vec<f64>>(),
+        &dcpu,
+    ))
+    .into_shape([4, 6]);
+    let p = p_cpu.to_device(&d);
+    for init in [false, true] {
+        assert_close(
+            &host_nd(&rt::cumulative_prod(&p, (1, init))),
+            &host_nd(&rt::cumulative_prod(&p_cpu, (1, init))),
+            &format!("cumprod include_initial={init}"),
+        );
+    }
+}
+
+/* #endregion */
