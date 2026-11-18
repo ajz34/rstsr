@@ -1,5 +1,5 @@
-//! Unary reductions on the CUDA backend: the nine `OpReduce*API` traits that fit a
-//! single-accumulator associative fold.
+//! Unary reductions on the CUDA backend: eleven rows, of which nine fit a **single-accumulator**
+//! fold (kernel in `kernels::reduce_unary`) and two need a **pair** (`kernels::reduce_pair`).
 //!
 //! | trait | op | acc | identity | note |
 //! |---|---|---|---|---|
@@ -17,34 +17,50 @@
 //! | `OpCountNonZeroAPI` | `CountNonZero` | `u64` | `0` | `usize` out; real dtypes |
 //! | `OpSumBoolAPI` | `CountNonZero` | `u64` | `0` | `bool` in, `usize` out |
 //!
+//! and the pair rows:
+//!
+//! | trait | op | acc | identity | note |
+//! |---|---|---|---|---|
+//! | `OpVarAPI` | `Var` | `(Σx, Σx²)` in `T` | `(0, 0)` | real dtypes only; one-pass `Σx²/n − (Σx/n)²` |
+//! | `OpStdAPI` | `Std` | `(Σx, Σx²)` in `T` | `(0, 0)` | `sqrt` of the same expression |
+//!
 //! This is a sibling module to `operators.rs` rather than a block inside it: the nine impls, their
 //! two helpers and their generic bounds are ~350 lines of one subject, and they are the only thing in
 //! the crate with an accumulator type distinct from the operand type.
 //!
-//! # Why not the other six
+//! # Why not the rest
 //!
-//! Six rows of [`OpReduceAPI`]'s table are absent, and none of them is "not typed out yet":
+//! Four families are still absent, and the reasons are no longer "not typed out yet":
 //!
-//! - **`OpVarAPI`, `OpStdAPI`** (+ their dtype variants): the accumulator is a *pair*,
-//!   `(Σx, Σ|x|²)`, because the CPU computes `Σ|x|²/n − |mean|²` in one pass. One accumulator cannot
-//!   hold it, and two passes over the data would double the bytes read for an op that is
-//!   memory-bound. Needs a second register and a second shuffle, not a new plan.
-//! - **`OpArgMinAPI`, `OpArgMaxAPI`, `OpNanArgMinAPI`, `OpNanArgMaxAPI`**: the accumulator carries an
-//!   index alongside the value, and ties resolve to the *first* index. That is achievable by packing
-//!   `(value, index)` and comparing lexicographically, but "first" is first in the CPU's traversal
-//!   order, and `block_step` deliberately allows the contracted axes in any order — so the tie-break
-//!   would silently depend on memory layout. Needs a decision, not code.
-//! - **`OpCumSumAPI`, `OpCumProdAPI`** (+ dtype variants): a *scan*, not a reduction. Different
-//!   algorithm, different kernel, and the plan does not describe it.
-//! - **`OpAllCloseAPI`**: `allclose_axes` is `unimplemented!()` on the CPU too.
-//! - **`OpReduceCustomAPI`, `OpUnraveledArgMin/MaxAPI`**: closures, and an `IxD` output.
-
+//! - **`OpArgMinAPI`, `OpArgMaxAPI`, `OpNanArgMin/MaxAPI`, `OpUnraveledArgMin/MaxAPI`**: the
+//!   accumulator carries an index beside the value, and the combine is **lexicographic** — the two
+//!   slots cannot be reduced independently the way `var`'s can. The tie-break is not a guess: the CPU
+//!   keeps the **smaller logical index** (`native_impl::cpu_serial::reduction::
+//!   reduce_all_unraveled_arg_fold_cpu_serial`, "return smaller index"), i.e. the smaller C-order
+//!   raveled index over the reduced axes, independent of memory layout. That means the kernel needs
+//!   the raveled index of each element, which the plan does not carry today: it enumerates the
+//!   contracted axes in stride order, not logical order. Same machinery as `var` (a second slot),
+//!   plus that index. Next.
+//! - **`OpCumSumAPI`, `OpCumProdAPI`** (+ dtype variants): a *scan*, not a reduction — every
+//!   intermediate value is an output, so the tree shape is different and the plan does not describe
+//!   it. Their traits also allocate and reshape (`include_initial` shifts the output extent).
+//! - **`OpVarDtypeAPI`, `OpStdDtypeAPI`**: the *device* trait is the same pair fold, but the public
+//!   `var_with_dtype`/`std_with_dtype` wrappers also require `Op_MutA_RefB_API` for the `correction`
+//!   rescale, and that trait takes a `dyn Fn(&mut T, &T)`. A closure cannot cross into a kernel, so
+//!   no GPU backend can implement it honestly. Options, for whoever needs the mixed-precision path:
+//!   implement `Op_MutA_RefB_API` to refuse at runtime (then `correction: None` works and `Some`
+//!   errors), or split `correction` out of the wrapper so the kernel path does not name a closure.
+//!   Not decided here, because either choice changes a core API for every backend.
+//! - **`OpAllCloseAPI`**: `allclose_axes` is `unimplemented!()` on the CPU too, so implementing it
+//!   only here would be inventing semantics rather than porting them.
+//!
 #![allow(clippy::type_complexity)]
 
 use core::mem::MaybeUninit;
 
 use crate::dtype::CudaReal;
-use crate::kernels::reduce_plan::classify_reduce;
+use crate::kernels::reduce_pair::{reduce_pair_launch, PairOp};
+use crate::kernels::reduce_plan::{classify_reduce, ReducePlan};
 use crate::kernels::reduce_unary::{reduce_unary_launch, AccSpec, ReduceAcc, UnaryOp};
 use crate::prelude_dev::*;
 
@@ -77,6 +93,41 @@ where
         + DeviceRawAPI<MaybeUninit<TOut>, Raw = CudaBuffer<MaybeUninit<TOut>>>
         + DeviceCreationAnyAPI<TOut>,
 {
+    reduce_axes_setup(device, a, la, axes, empty_fill, |c, lc, a, las, plan| {
+        reduce_unary_launch(device, op, acc, c, lc, a, las, plan)
+    })
+}
+
+/// Everything [`reduce_axes_impl`] does *except* the launch: split, output layout, plan, the
+/// empty-input fill-versus-allocate decision.
+///
+/// Split out so the two-slot family ([`super::kernels::reduce_pair`]) reuses it verbatim. The plan
+/// is the same object — a reduction's geometry does not care how many accumulators the body keeps —
+/// and duplicating this prelude in a second helper is how the two would drift on the empty-input
+/// rule.
+fn reduce_axes_setup<TIn, TOut, F>(
+    device: &DeviceCuda,
+    a: &CudaBuffer<TIn>,
+    la: &Layout<IxD>,
+    axes: &[isize],
+    empty_fill: TOut,
+    launch: F,
+) -> Result<(Storage<DataOwned<CudaBuffer<TOut>>, TOut, DeviceCuda>, Layout<IxD>)>
+where
+    TIn: CudaDType,
+    TOut: CudaDType,
+    DeviceCuda: DeviceRawAPI<TIn, Raw = CudaBuffer<TIn>>
+        + DeviceRawAPI<TOut, Raw = CudaBuffer<TOut>>
+        + DeviceRawAPI<MaybeUninit<TOut>, Raw = CudaBuffer<MaybeUninit<TOut>>>
+        + DeviceCreationAnyAPI<TOut>,
+    F: FnOnce(
+        &mut CudaBuffer<MaybeUninit<TOut>>,
+        &Layout<IxD>,
+        &CudaBuffer<TIn>,
+        &Layout<IxD>,
+        &ReducePlan,
+    ) -> Result<()>,
+{
     let (las, lm) = la.dim_split_axes(axes)?;
     let lo = layout_for_array_copy(&lm, TensorIterOrder::K)?;
     let n_out = lo.size();
@@ -102,7 +153,7 @@ where
         let buf_uninit: &mut CudaBuffer<MaybeUninit<TOut>> =
             unsafe { &mut *(buf as *mut CudaBuffer<TOut> as *mut CudaBuffer<MaybeUninit<TOut>>) };
 
-        reduce_unary_launch(device, op, acc, buf_uninit, &lo, a, &las, &plan)?;
+        launch(buf_uninit, &lo, a, &las, &plan)?;
     }
 
     Ok((st, lo))
@@ -512,3 +563,103 @@ where
         )
     }
 }
+
+/* #region var / std */
+
+/// `var`/`std`: a two-slot fold, so they live in [`super::kernels::reduce_pair`] rather than in the
+/// single-accumulator table above.
+///
+/// The pair is `(Σx, Σx²)` and the writer forms `Σx²/n − (Σx/n)²`, which is the CPU's one-pass
+/// formula (`device_cpu_serial/reduction.rs`: `acc_2/size − mean*mean`). Both slots are the
+/// accumulator's own type, so `TOut = T` and `Real = Self`.
+///
+/// **Real dtypes only**, for the same reason as `l2_norm`: a complex operand needs `Σx` in `T` beside
+/// `Σ|x|²` in `T::Real`, i.e. two different accumulator types. `num::Float` is what excludes it.
+///
+/// `NaN` is the empty-input fill, matching the CPU: with `n = 0` the formula is `0/0 − 0`.
+macro_rules! impl_var_std {
+    ($tr:ident, $op:expr, $all:ident, $axes:ident) => {
+        impl<T, D> $tr<T, D> for DeviceCuda
+        where
+            Self: DeviceRawAPI<T, Raw = CudaBuffer<T>>
+                + DeviceRawAPI<MaybeUninit<T>, Raw = CudaBuffer<MaybeUninit<T>>>
+                + DeviceCreationAnyAPI<T>
+                + DeviceToCpuAPI<T>,
+            T: CudaDType + ReduceAcc + num::Float,
+            D: DimAPI,
+        {
+            type TOut = T;
+
+            fn $all(&self, a: &CudaBuffer<T>, la: &Layout<D>) -> Result<T> {
+                reduce_pair_all_impl(self, $op, T::SPEC, a, &la.to_dim::<IxD>()?, T::nan())
+            }
+
+            fn $axes(
+                &self,
+                a: &CudaBuffer<T>,
+                la: &Layout<D>,
+                axes: &[isize],
+            ) -> Result<(
+                Storage<DataOwned<<Self as DeviceRawAPI<Self::TOut>>::Raw>, Self::TOut, Self>,
+                Layout<IxD>,
+            )> {
+                reduce_pair_axes_impl(self, $op, T::SPEC, a, &la.to_dim::<IxD>()?, axes, T::nan())
+            }
+        }
+    };
+}
+
+impl_var_std!(OpVarAPI, PairOp::Var, var_all, var_axes);
+impl_var_std!(OpStdAPI, PairOp::Std, std_all, std_axes);
+
+/// `*_axes` for the two-slot family: the shared prelude, then the pair launcher.
+fn reduce_pair_axes_impl<TIn, TOut>(
+    device: &DeviceCuda,
+    op: PairOp,
+    acc: AccSpec,
+    a: &CudaBuffer<TIn>,
+    la: &Layout<IxD>,
+    axes: &[isize],
+    empty_fill: TOut,
+) -> Result<(Storage<DataOwned<CudaBuffer<TOut>>, TOut, DeviceCuda>, Layout<IxD>)>
+where
+    TIn: CudaDType,
+    TOut: CudaDType,
+    DeviceCuda: DeviceRawAPI<TIn, Raw = CudaBuffer<TIn>>
+        + DeviceRawAPI<TOut, Raw = CudaBuffer<TOut>>
+        + DeviceRawAPI<MaybeUninit<TOut>, Raw = CudaBuffer<MaybeUninit<TOut>>>
+        + DeviceCreationAnyAPI<TOut>,
+{
+    reduce_axes_setup(device, a, la, axes, empty_fill, |c, lc, a, las, plan| {
+        reduce_pair_launch(device, op, acc, c, lc, a, las, plan)
+    })
+}
+
+/// `*_all` for the two-slot family.
+fn reduce_pair_all_impl<TIn, TOut>(
+    device: &DeviceCuda,
+    op: PairOp,
+    acc: AccSpec,
+    a: &CudaBuffer<TIn>,
+    la: &Layout<IxD>,
+    empty_fill: TOut,
+) -> Result<TOut>
+where
+    TIn: CudaDType,
+    TOut: CudaDType,
+    DeviceCuda: DeviceRawAPI<TIn, Raw = CudaBuffer<TIn>>
+        + DeviceRawAPI<TOut, Raw = CudaBuffer<TOut>>
+        + DeviceRawAPI<MaybeUninit<TOut>, Raw = CudaBuffer<MaybeUninit<TOut>>>
+        + DeviceCreationAnyAPI<TOut>
+        + DeviceToCpuAPI<TOut>,
+{
+    let axes: Vec<isize> = (0..la.ndim() as isize).collect();
+    let (st, _lo) = reduce_pair_axes_impl(device, op, acc, a, la, &axes, empty_fill)?;
+    let host: Vec<TOut> = DeviceToCpuAPI::<TOut>::to_cpu_vec::<DataOwned<CudaBuffer<TOut>>>(&st)?;
+    match host.into_iter().next() {
+        Some(v) => Ok(v),
+        None => rstsr_raise!(InvalidValue, "cuda reduce: full reduction produced no element"),
+    }
+}
+
+/* #endregion */

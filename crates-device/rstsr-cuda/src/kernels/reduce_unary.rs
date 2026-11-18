@@ -298,7 +298,7 @@ extern "C" __global__ void @NAME@(
 "#;
 
 /// Fold an element offset into a base device pointer, in bytes.
-fn offset_ptr<T>(exec: &Arc<CudaStreamObj>, buf: &CudaBuffer<T>, offset: usize) -> u64 {
+pub(super) fn offset_ptr<T>(exec: &Arc<CudaStreamObj>, buf: &CudaBuffer<T>, offset: usize) -> u64 {
     if buf.is_empty() {
         0
     } else {
@@ -324,7 +324,10 @@ fn assemble(includes: &[&str], body: &str) -> String {
 
 /// Compile-or-fetch the entry. The discriminator carries the op, the three type names and the
 /// geometry, because all of them are baked into the source.
-fn reduce_unary_function(
+///
+/// Shared with [`super::reduce_pair`]: the cache, the key derivation and the include splice have
+/// nothing to do with how many accumulators the body uses.
+pub(super) fn reduce_unary_function(
     device: &DeviceCuda,
     name: &str,
     disc: &str,
