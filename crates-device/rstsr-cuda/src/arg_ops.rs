@@ -16,7 +16,7 @@
 //!    fill-versus-allocate decision.
 //! 2. **The index is raveled over the *logical* C-order of the reduced axes**, which the plan's
 //!    stride-sorted traversal does not necessarily enumerate in. The kernel is refused unless
-//!    [`contracted_is_logical`] holds — see `kernels::reduce_arg` — and that check has no analogue
+//!    `contracted_is_logical` holds — see `kernels::reduce_arg` — and that check has no analogue
 //!    in the value-only reductions, where summation order is not observable.
 //! 3. **The NaN policies have an error contract**, so their output is read back and checked. That is
 //!    the price of parity with the CPU, and it is paid only by the two `nan` rows.
