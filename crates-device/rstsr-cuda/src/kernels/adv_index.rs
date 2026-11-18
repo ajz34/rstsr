@@ -285,6 +285,8 @@ mod tests {
     fn kernels_render_completely() {
         let g = rendered(GATHER_ENTRY, &[("@NAME@", "rstsr_index_select"), ("@TO@", "double")]);
         assert!(!g.contains('@'), "gather: unsubstituted token");
+        // `make_key` checks this at launch; asserting it here means the check is verified without a GPU.
+        assert!(g.contains("void rstsr_index_select("), "gather: entry symbol missing");
         assert_eq!(g.matches("k = i;").count(), 1, "gather: axis capture");
         assert_eq!(g.matches("idx[k]").count(), 1, "gather: index read");
 
@@ -293,6 +295,7 @@ mod tests {
             &[("@NAME@", "rstsr_index_put"), ("@TC@", "double"), ("@TV@", "float"), ("@CAST@", "(double)(v[ov])")],
         );
         assert!(!s.contains('@'), "scatter: unsubstituted token");
+        assert!(s.contains("void rstsr_index_put("), "scatter: entry symbol missing");
         assert_eq!(s.matches("k = i;").count(), 1, "scatter: axis capture");
         assert!(s.contains("(double)(v[ov])"), "scatter: the value cast must be the emitted one");
     }
