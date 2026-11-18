@@ -1851,6 +1851,51 @@ fn cumulative_sum_prod_vs_cpu() {
 
 /* #endregion */
 
+/* #region owned binary operands (consume traits) */
+
+/// `a + b` on **owned** tensors — the `OpLConsume*`/`OpRConsume*` family.
+///
+/// These had no CUDA impls at all, and nothing caught it: `&a + &b` goes through the out-of-place
+/// traits and worked, so every existing test passed while the most natural expression in the crate
+/// failed to compile. The census missed it too, because the CPU device declares these traits through
+/// `#[duplicate_item]`, which hides both sides from a scan for `impl … for DeviceCpuSerial`.
+///
+/// The two directions are separate impls because they are not symmetric: the left-consuming form
+/// writes `a = a op b` (destination is the first operand) and the right-consuming form writes
+/// `b = a op b` (destination is the second). `sub` and `div` are the ones that expose a swap.
+#[test]
+fn owned_binary_operands_vs_cpu() {
+    require_cuda!();
+    let d = DeviceCuda::new(0);
+    let dcpu = DeviceCpuSerial::default();
+
+    let (m, n) = (5usize, 6usize);
+    let a_cpu: Tensor<f64, DeviceCpuSerial, _> = rt::asarray((exact_data(m * n, 161), &dcpu)).into_shape([m, n]);
+    let b_cpu: Tensor<f64, DeviceCpuSerial, _> = rt::asarray((exact_data(m * n, 162), &dcpu)).into_shape([m, n]);
+    let (a, b) = (a_cpu.to_device(&d), b_cpu.to_device(&d));
+
+    // left-consuming, commutative
+    assert_eq!(
+        host_nd(&(a.clone() + b.clone())),
+        host_nd(&(a_cpu.clone() + b_cpu.clone())),
+        "owned a + b"
+    );
+    // left-consuming, non-commutative: a swapped operand order would show here and nowhere else
+    assert_eq!(
+        host_nd(&(a.clone() - b.clone())),
+        host_nd(&(a_cpu.clone() - b_cpu.clone())),
+        "owned a - b"
+    );
+    // right-consuming: the scalar is the left operand, the tensor the destination
+    assert_eq!(host_nd(&(2.0 - a.clone())), host_nd(&(2.0 - a_cpu.clone())), "owned 2.0 - a");
+    assert_eq!(host_nd(&(3.0 * b.clone())), host_nd(&(3.0 * b_cpu.clone())), "owned 3.0 * b");
+    // and the borrowed forms must still work — they are a different trait, and the new impls must not
+    // have shadowed them
+    assert_eq!(host_nd(&(&a * &b)), host_nd(&(&a_cpu * &b_cpu)), "borrowed a * b");
+}
+
+/* #endregion */
+
 /* #region index_select + index_put */
 
 /// `index_select` and `index_put`: one axis addressed indirectly, everything else copied.

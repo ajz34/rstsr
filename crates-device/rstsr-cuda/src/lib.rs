@@ -71,6 +71,31 @@
 //! - `RSTSR_CUDA_DEBUG_GEMM=1` prints the resolved geometry, the cuBLAS arguments and the pointer
 //!   bases once per process. This is the instrument that turned a stride-units bug into a two-minute
 //!   read after three sessions of inference.
+//! - `RSTSR_CUDA_ARCH=compute_80` compiles for an arch other than the card's own. Diagnostic only:
+//!   PTX is forward-compatible, so an sm_86 card will host `compute_75`/`compute_80`/`compute_86`
+//!   and an sm_90 will host everything below it. That is what makes an arch matrix possible from a
+//!   single GPU — see below.
+//!
+//! # Kernel compilation has two accept/reject points, not one
+//!
+//! `NVRTC` compiles the generated source to PTX; the **driver** then loads that PTX and JITs it for
+//! the actual device. Both can refuse, independently, and only the first happens on the machine that
+//! wrote the kernel. Reference case: `max.NaN.f64` is accepted by NVRTC and rejected by one driver's
+//! JIT with `CUDA_ERROR_INVALID_PTX`.
+//!
+//! So "it compiled here" says nothing about the second gate, and the failure surfaces at first use,
+//! on the user's machine, as a launch error. The mitigation is to move the arch flag rather than the
+//! code: `RSTSR_CUDA_ARCH=compute_NN cargo test -p rstsr-cuda` exercises the whole suite — hence
+//! every kernel it touches — compiled for a different arch, with the disk cache keyed on that arch
+//! so the runs do not collide. Four runs on one card cover the four arches that card can host.
+//!
+//! What this does **not** cover: different driver versions (the driver JIT is host-side, so that
+//! needs a second host), and arches above the card's own (`compute_89`/`compute_90` need those
+//! cards).
+//!
+//! `scripts/arch-matrix.sh` runs that loop: it derives the arch list from the card, gives each run
+//! its own cache directory, and **refuses to report a pass that compiled nothing** — a run served
+//! from a stale cache would otherwise look exactly like a successful one.
 
 #![allow(clippy::needless_return)]
 
