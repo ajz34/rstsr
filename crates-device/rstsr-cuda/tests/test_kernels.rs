@@ -1292,4 +1292,56 @@ fn matmul_col_major_vs_cpu() {
     assert_eq!(got, want, "col-major ({m} x {k}) @ ({k} x {n})");
 }
 
+/// Several threads using one device at once, which is one stream and therefore one cuBLAS handle.
+///
+/// `cublasHandle_t` is not thread-safe, but `cudarc` declares `unsafe impl Sync for CudaBlas`, and
+/// the registry's one-stream-per-ordinal cache hands every `DeviceCuda::new(0)` the same handle. The
+/// lock inside `CublasHandle` is what makes this legal, and this is the test that exercises it: the
+/// library is expected to support several threads on one device, not merely to survive `cargo test`'s
+/// default parallelism.
+///
+/// Each thread uses its **own** data on purpose. An earlier version gave every thread the same
+/// matrices, which made the test blind to exactly what it should catch: if two threads' buffers or
+/// results were confused for one another, both would still compute the expected answer.
+#[test]
+fn matmul_from_several_threads_on_one_device() {
+    require_cuda!();
+    const THREADS: u64 = 4;
+    const ROUNDS: usize = 8;
+    let (m, k, n) = (24usize, 16usize, 20usize);
+    let dcpu = DeviceCpuSerial::default();
+
+    // (a, b, reference) per thread, all distinct.
+    let cases: Vec<(Vec<f64>, Vec<f64>, Vec<f64>)> = (0..THREADS)
+        .map(|t| {
+            let a_data = exact_data(m * k, 61 + 2 * t);
+            let b_data = exact_data(k * n, 62 + 2 * t);
+            let a_cpu: Tensor<f64, DeviceCpuSerial, _> =
+                rt::asarray((a_data.clone(), &dcpu)).into_shape([m, k]);
+            let b_cpu: Tensor<f64, DeviceCpuSerial, _> =
+                rt::asarray((b_data.clone(), &dcpu)).into_shape([k, n]);
+            let want = host_nd(&rt::matmul(&a_cpu, &b_cpu));
+            (a_data, b_data, want)
+        })
+        .collect();
+
+    std::thread::scope(|scope| {
+        for (t, (a_data, b_data, want)) in cases.iter().enumerate() {
+            scope.spawn(move || {
+                let d = DeviceCuda::new(0);
+                let a = rt::asarray((a_data.clone(), &d)).into_shape([m, k]);
+                let b = rt::asarray((b_data.clone(), &d)).into_shape([k, n]);
+                for round in 0..ROUNDS {
+                    assert_eq!(
+                        host_nd(&rt::matmul(&a, &b)),
+                        *want,
+                        "thread {t}, round {round}: a concurrent call on the shared stream returned \
+                         another thread's product"
+                    );
+                }
+            });
+        }
+    });
+}
+
 /* #endregion */
