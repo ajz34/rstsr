@@ -51,6 +51,42 @@
 //! - `mapv` and the `Op_Mut*_Ref*` closure traits: a host closure cannot cross into a kernel, so
 //!   these are unimplementable on any accelerator rather than missing here.
 //!
+//! # Numerics: what is guaranteed, and what is not
+//!
+//! A GPU backend owes the reader an answer to "will this match the CPU device?", and the honest
+//! answer has three tiers rather than one.
+//!
+//! **Bit-identical: elementwise arithmetic and comparisons.** One IEEE operation per element, in the
+//! same order, so `a * b` produces the same bits on every element whatever the device.
+//!
+//! **Deterministic, differently ordered: reductions.** A shuffle tree adds in a different order than
+//! a left-to-right loop, and float addition is not associative. Two things follow, and the second is
+//! the one worth stating:
+//!
+//! - The difference is *bounded*, not random. No kernel here uses an atomic, and the plan
+//!   (`kernels::reduce_plan`) is a pure function of shape, strides and the device's default order —
+//!   `MIN_BLOCKS` is a policy constant rather than a device query, so the tree does not change with
+//!   SM count, block count or occupancy. Two devices running the same plan produce **the same bits**,
+//!   which is a stronger promise than "reproducible on this machine".
+//! - Bit-identity with the CPU is *not worth buying*. It would mean one lane per output and a serial
+//!   walk over the contraction: the kernel's entire reason to exist, surrendered for a discrepancy
+//!   at the level of ordinary summation error. The trade is deliberate. What a caller gets instead is
+//!   a result that is stable across runs and across devices of the same capability.
+//!
+//! FMA contraction belongs to this tier too. `-fmad=true` is NVRTC's **default**, so `l2_norm`,
+//! `var` and `vecdot` may compute `fma(x, x, a)` where the CPU computes `fl(a + fl(x * x))` — one
+//! rounding instead of two. `RSTSR_CUDA_STRICT_FP=1` disables it at a throughput cost; the tree order
+//! stays different either way, so it narrows the gap rather than closing it.
+//!
+//! **Different implementation: transcendentals.** `sinf`/`expf`/`pow` are NVIDIA's implementations of
+//! the same mathematical function — accurate to the last ulp, by a different route than Rust's libm.
+//! No flag makes them bit-identical, and nothing here pretends otherwise.
+//!
+//! The practical rule: compare against the CPU with a **tolerance**, never with `==`. That is what
+//! this crate's tests do (`assert_close`, `ATOL 1e-9`), and what any cross-implementation comparison
+//! of floating point has to do. Reproducibility *across runs* is guaranteed; identity *with the CPU*
+//! is not, and buying it would cost the kernel.
+//!
 //! # Running the tests
 //!
 //! ```text
@@ -71,6 +107,9 @@
 //! - `RSTSR_CUDA_DEBUG_GEMM=1` prints the resolved geometry, the cuBLAS arguments and the pointer
 //!   bases once per process. This is the instrument that turned a stride-units bug into a two-minute
 //!   read after three sessions of inference.
+//! - `RSTSR_CUDA_STRICT_FP=1` compiles with `--fmad=false`, removing FMA contraction from the
+//!   kernels that can use it (`l2_norm`, `var`, `vecdot`). See the numerics section above for what
+//!   this does and does not recover.
 //! - `RSTSR_CUDA_ARCH=compute_80` compiles for an arch other than the card's own. Diagnostic only:
 //!   PTX is forward-compatible, so an sm_86 card will host `compute_75`/`compute_80`/`compute_86`
 //!   and an sm_90 will host everything below it. That is what makes an arch matrix possible from a
