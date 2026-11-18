@@ -63,15 +63,15 @@ fn shape_bytes(v: &[u64]) -> Vec<u8> {
 /// One scratch upload holding the packed layout arrays of a launch.
 /// `with_shape[i] == false` packs strides only (that shape pointer is 0
 /// and never passed to a kernel).
-struct LayoutPack {
+pub(crate) struct LayoutPack {
     /// Keeps the upload alive until the launch is enqueued.
     _scratch: KernelScratch,
-    shapes: Vec<u64>,
-    strides: Vec<u64>,
+    pub(crate) shapes: Vec<u64>,
+    pub(crate) strides: Vec<u64>,
 }
 
 impl LayoutPack {
-    fn new(exec: &Arc<CudaStreamObj>, layouts: &[(&FlatLayout, bool)]) -> Result<Self> {
+    pub(crate) fn new(exec: &Arc<CudaStreamObj>, layouts: &[(&FlatLayout, bool)]) -> Result<Self> {
         let mut bytes = Vec::new();
         let mut starts = Vec::with_capacity(layouts.len());
         for (l, with_shape) in layouts {

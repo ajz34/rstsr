@@ -878,12 +878,7 @@ macro_rules! trait_reduction_dtype_varstd {
             B: $OpReduceDtypeAPI<T, TOut, D>
                 + DeviceCreationAnyAPI<TOut>
                 + DeviceRawAPI<MaybeUninit<TOut>>
-                + for<'f> Op_MutA_RefB_API<
-                    TOut,
-                    TOut,
-                    IxD,
-                    dyn Fn(&mut MaybeUninit<TOut>, &TOut) + Send + Sync + 'f,
-                >,
+                + OpMulAPI<TOut, TOut, TOut, IxD>,
         {
             let VarArgs {
                 axes,
@@ -899,7 +894,7 @@ macro_rules! trait_reduction_dtype_varstd {
                 Some(correction) => {
                     let size = reduced_axes_size(&axes, tensor.layout())?;
                     let factor = <TOut as FromPrimitive>::from_f64(var_correction_factor(size, correction, $is_std)).unwrap();
-                    Ok(result.mapv(move |x| x * factor))
+                    rescale_var(result, factor)
                 },
             }
         }
@@ -914,12 +909,7 @@ macro_rules! trait_reduction_dtype_varstd {
             B: $OpReduceDtypeAPI<T, TOut, D>
                 + DeviceCreationAnyAPI<TOut>
                 + DeviceRawAPI<MaybeUninit<TOut>>
-                + for<'f> Op_MutA_RefB_API<
-                    TOut,
-                    TOut,
-                    IxD,
-                    dyn Fn(&mut MaybeUninit<TOut>, &TOut) + Send + Sync + 'f,
-                >,
+                + OpMulAPI<TOut, TOut, TOut, IxD>,
         {
             $fn_with_dtype_f(tensor, args).rstsr_unwrap()
         }
@@ -936,12 +926,7 @@ macro_rules! trait_reduction_dtype_varstd {
                 B: $OpReduceDtypeAPI<T, TOut, D>
                     + DeviceCreationAnyAPI<TOut>
                     + DeviceRawAPI<MaybeUninit<TOut>>
-                    + for<'f> Op_MutA_RefB_API<
-                        TOut,
-                        TOut,
-                        IxD,
-                        dyn Fn(&mut MaybeUninit<TOut>, &TOut) + Send + Sync + 'f,
-                    >,
+                    + OpMulAPI<TOut, TOut, TOut, IxD>,
             {
                 $fn_with_dtype_f(self, args)
             }
@@ -952,12 +937,7 @@ macro_rules! trait_reduction_dtype_varstd {
                 B: $OpReduceDtypeAPI<T, TOut, D>
                     + DeviceCreationAnyAPI<TOut>
                     + DeviceRawAPI<MaybeUninit<TOut>>
-                    + for<'f> Op_MutA_RefB_API<
-                        TOut,
-                        TOut,
-                        IxD,
-                        dyn Fn(&mut MaybeUninit<TOut>, &TOut) + Send + Sync + 'f,
-                    >,
+                    + OpMulAPI<TOut, TOut, TOut, IxD>,
             {
                 $fn_with_dtype(self, args)
             }
@@ -998,6 +978,36 @@ fn var_correction_factor(size: usize, correction: f64, is_std: bool) -> f64 {
     }
 }
 
+/// `t * factor`, out of place — the variance `correction` rescale, without a closure.
+///
+/// This exists because the obvious spelling, `t.mapv(move |x| x * factor)`, carries a
+/// `FnMut(&mut MaybeUninit<T>, &T)` bound. A closure is host *code*, and an accelerator backend
+/// cannot accept one: a CUDA kernel is a string compiled at launch, so there is nothing to pass.
+/// The bound is checked on the function, not on the branch, so `var_with_dtype(x, None)` — where
+/// the rescale never runs — failed to compile on CUDA for that reason alone.
+///
+/// The closure was only ever `x * factor`, i.e. a scalar multiply, which is a device operation:
+/// [`OpMulAPI`]'s `op_mutc_numa_refb` is exactly `c = a * b` with `a` a scalar. So the rescale is
+/// expressed as device work and the closure disappears from the signature.
+///
+/// It allocates the output rather than rescaling in place, because the in-place scalar family
+/// (`op_muta_numb`) is not implemented on every backend; the result is output-sized, so the copy is
+/// smaller than the reduction that produced it.
+fn rescale_var<T, B>(t: Tensor<T, B, IxD>, factor: T) -> Result<Tensor<T, B, IxD>>
+where
+    T: Clone + Send + Sync + 'static,
+    B: DeviceAPI<T> + DeviceCreationAnyAPI<T> + DeviceRawAPI<MaybeUninit<T>> + OpMulAPI<T, T, T, IxD>,
+{
+    let device = t.device().clone();
+    let lc = t.layout().clone();
+    let mut out = device.uninit_impl(lc.bounds_index()?.1)?;
+    device.op_mutc_numa_refb(out.raw_mut(), &lc, factor, t.raw(), &lc)?;
+    // SAFETY: `op_mutc_numa_refb` wrote every element of `lc`, which covers the fresh allocation
+    // exactly (same pattern as the arithmetic operator impls).
+    let out = unsafe { B::assume_init_impl(out) }?;
+    Tensor::new_f(out, lc)
+}
+
 /// Variance with [`VarArgs`] (fallible).
 ///
 /// See also [`var_with_args`].
@@ -1009,12 +1019,8 @@ where
     D: DimAPI,
     B: OpVarAPI<T, D>
         + DeviceCreationAnyAPI<B::TOut>
-        + Op_MutA_RefB_API<
-            B::TOut,
-            B::TOut,
-            IxD,
-            dyn for<'x, 'y> Fn(&'x mut MaybeUninit<B::TOut>, &'y B::TOut) + Send + Sync,
-        >,
+        + DeviceRawAPI<MaybeUninit<B::TOut>>
+        + OpMulAPI<B::TOut, B::TOut, B::TOut, IxD>,
     B::TOut: Float + FromPrimitive + Send + Sync + 'static,
 {
     let VarArgs { axes, keepdims, correction } = args.into();
@@ -1025,7 +1031,7 @@ where
     if let Some(correction) = correction {
         let size = reduced_axes_size(&axes, tensor.layout())?;
         let factor = B::TOut::from_f64(var_correction_factor(size, correction, false)).unwrap();
-        return Ok(result.mapv(move |x| x * factor));
+        return rescale_var(result, factor);
     }
     Ok(result)
 }
@@ -1150,12 +1156,8 @@ where
     D: DimAPI,
     B: OpVarAPI<T, D>
         + DeviceCreationAnyAPI<B::TOut>
-        + Op_MutA_RefB_API<
-            B::TOut,
-            B::TOut,
-            IxD,
-            dyn for<'x, 'y> Fn(&'x mut MaybeUninit<B::TOut>, &'y B::TOut) + Send + Sync,
-        >,
+        + DeviceRawAPI<MaybeUninit<B::TOut>>
+        + OpMulAPI<B::TOut, B::TOut, B::TOut, IxD>,
     B::TOut: Float + FromPrimitive + Send + Sync + 'static,
 {
     var_with_args_f(tensor, args).rstsr_unwrap()
@@ -1172,12 +1174,8 @@ where
     D: DimAPI,
     B: OpStdAPI<T, D>
         + DeviceCreationAnyAPI<B::TOut>
-        + Op_MutA_RefB_API<
-            B::TOut,
-            B::TOut,
-            IxD,
-            dyn for<'x, 'y> Fn(&'x mut MaybeUninit<B::TOut>, &'y B::TOut) + Send + Sync,
-        >,
+        + DeviceRawAPI<MaybeUninit<B::TOut>>
+        + OpMulAPI<B::TOut, B::TOut, B::TOut, IxD>,
     B::TOut: Float + FromPrimitive + Send + Sync + 'static,
 {
     let VarArgs { axes, keepdims, correction } = args.into();
@@ -1188,7 +1186,7 @@ where
     if let Some(correction) = correction {
         let size = reduced_axes_size(&axes, tensor.layout())?;
         let factor = B::TOut::from_f64(var_correction_factor(size, correction, true)).unwrap();
-        return Ok(result.mapv(move |x| x * factor));
+        return rescale_var(result, factor);
     }
     Ok(result)
 }
@@ -1307,12 +1305,8 @@ where
     D: DimAPI,
     B: OpStdAPI<T, D>
         + DeviceCreationAnyAPI<B::TOut>
-        + Op_MutA_RefB_API<
-            B::TOut,
-            B::TOut,
-            IxD,
-            dyn for<'x, 'y> Fn(&'x mut MaybeUninit<B::TOut>, &'y B::TOut) + Send + Sync,
-        >,
+        + DeviceRawAPI<MaybeUninit<B::TOut>>
+        + OpMulAPI<B::TOut, B::TOut, B::TOut, IxD>,
     B::TOut: Float + FromPrimitive + Send + Sync + 'static,
 {
     std_with_args_f(tensor, args).rstsr_unwrap()
@@ -1339,12 +1333,8 @@ where
     pub fn var_with_args_f(&self, args: impl Into<VarArgs>) -> Result<Tensor<B::TOut, B, IxD>>
     where
         B: DeviceCreationAnyAPI<B::TOut>
-            + Op_MutA_RefB_API<
-                B::TOut,
-                B::TOut,
-                IxD,
-                dyn for<'x, 'y> Fn(&'x mut MaybeUninit<B::TOut>, &'y B::TOut) + Send + Sync,
-            >,
+            + DeviceRawAPI<MaybeUninit<B::TOut>>
+            + OpMulAPI<B::TOut, B::TOut, B::TOut, IxD>,
         B::TOut: Float + FromPrimitive + Send + Sync + 'static,
     {
         var_with_args_f(self, args)
@@ -1353,12 +1343,8 @@ where
     pub fn var_with_args(&self, args: impl Into<VarArgs>) -> Tensor<B::TOut, B, IxD>
     where
         B: DeviceCreationAnyAPI<B::TOut>
-            + Op_MutA_RefB_API<
-                B::TOut,
-                B::TOut,
-                IxD,
-                dyn for<'x, 'y> Fn(&'x mut MaybeUninit<B::TOut>, &'y B::TOut) + Send + Sync,
-            >,
+            + DeviceRawAPI<MaybeUninit<B::TOut>>
+            + OpMulAPI<B::TOut, B::TOut, B::TOut, IxD>,
         B::TOut: Float + FromPrimitive + Send + Sync + 'static,
     {
         var_with_args(self, args)
@@ -1374,12 +1360,8 @@ where
     pub fn std_with_args_f(&self, args: impl Into<VarArgs>) -> Result<Tensor<B::TOut, B, IxD>>
     where
         B: DeviceCreationAnyAPI<B::TOut>
-            + Op_MutA_RefB_API<
-                B::TOut,
-                B::TOut,
-                IxD,
-                dyn for<'x, 'y> Fn(&'x mut MaybeUninit<B::TOut>, &'y B::TOut) + Send + Sync,
-            >,
+            + DeviceRawAPI<MaybeUninit<B::TOut>>
+            + OpMulAPI<B::TOut, B::TOut, B::TOut, IxD>,
         B::TOut: Float + FromPrimitive + Send + Sync + 'static,
     {
         std_with_args_f(self, args)
@@ -1388,12 +1370,8 @@ where
     pub fn std_with_args(&self, args: impl Into<VarArgs>) -> Tensor<B::TOut, B, IxD>
     where
         B: DeviceCreationAnyAPI<B::TOut>
-            + Op_MutA_RefB_API<
-                B::TOut,
-                B::TOut,
-                IxD,
-                dyn for<'x, 'y> Fn(&'x mut MaybeUninit<B::TOut>, &'y B::TOut) + Send + Sync,
-            >,
+            + DeviceRawAPI<MaybeUninit<B::TOut>>
+            + OpMulAPI<B::TOut, B::TOut, B::TOut, IxD>,
         B::TOut: Float + FromPrimitive + Send + Sync + 'static,
     {
         std_with_args(self, args)
