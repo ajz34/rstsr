@@ -8,9 +8,9 @@
 //!   uses — and the expression is `a[ia] * b[ib]`. No new kernel.
 //! - `cross` reads four elements and writes three per slot (`a` and `b` at the axis offsets +1 and
 //!   +2), which no one-value-per-operand template can express, so it has its own entry:
-//!   [`elementwise::cross_launch`]. The iteration, the three plan variants and the cache are shared.
+//!   `elementwise::cross_launch`. The iteration, the three plan variants and the cache are shared.
 //! - `matmul` is the only operation here whose *thread geometry* is the point: a tiled GEMM in
-//!   [`gemm`], where the block owns a tile of the output and the contraction streams through shared
+//!   `gemm`, where the block owns a tile of the output and the contraction streams through shared
 //!   memory. It is also the only one that needs the batch axes, which ride in `grid.z`.
 //! - `tensordot` owns no geometry at all: it is a *scheduler* over `matmul`. The axis reorder and the
 //!   block merges are a pure function of layouts shared with every other backend, so the impl is the

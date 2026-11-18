@@ -1850,3 +1850,116 @@ fn cumulative_sum_prod_vs_cpu() {
 }
 
 /* #endregion */
+
+/* #region index_select + index_put */
+
+/// `index_select` and `index_put`: one axis addressed indirectly, everything else copied.
+///
+/// The fixtures are chosen so that each part of the addressing is load-bearing:
+///
+/// - axis 1 and axis 0 of a 2-D array (different strides, different position in the index order);
+/// - a **middle** axis of a 3-D array, where the indirect axis is neither first nor last;
+/// - a transposed input, indexed along both its fast and its slow axis;
+/// - a repeated index for the select — legal, and the CPU does it too;
+/// - an in-place put, which must leave every unselected element untouched.
+///
+/// The error path is the other half of the contract: duplicate indices on a put are refused rather
+/// than raced, because the CPU's answer (last write wins) needs an order that threads do not have.
+#[test]
+fn index_select_and_put_vs_cpu() {
+    require_cuda!();
+    let d = DeviceCuda::new(0);
+    let dcpu = DeviceCpuSerial::default();
+
+    let (m, n) = (5usize, 6usize);
+    let a_cpu: Tensor<f64, DeviceCpuSerial, _> = rt::asarray((exact_data(m * n, 151), &dcpu)).into_shape([m, n]);
+    let a = a_cpu.to_device(&d);
+
+    // (1) along the inner axis, with a repeat and an out-of-order pick
+    let idx = vec![2isize, 0, 2, 5];
+    assert_eq!(
+        host_nd(&rt::index_select(&a, 1, idx.clone())),
+        host_nd(&rt::index_select(&a_cpu, 1, idx.clone())),
+        "index_select axis 1 (repeat + reorder)"
+    );
+
+    // (2) along the outer axis
+    let idx0 = vec![4isize, 1];
+    assert_eq!(
+        host_nd(&rt::index_select(&a, 0, idx0.clone())),
+        host_nd(&rt::index_select(&a_cpu, 0, idx0.clone())),
+        "index_select axis 0"
+    );
+
+    // (3) middle axis of a 3-D array
+    let b_cpu: Tensor<f64, DeviceCpuSerial, _> = rt::asarray((exact_data(2 * 3 * 4, 152), &dcpu)).into_shape([2, 3, 4]);
+    let b = b_cpu.to_device(&d);
+    assert_eq!(
+        host_nd(&rt::index_select(&b, 1, vec![2isize, 0])),
+        host_nd(&rt::index_select(&b_cpu, 1, vec![2isize, 0])),
+        "index_select, middle axis of a 3-D array"
+    );
+
+    // (4) a transposed source, indexed both ways. `t = aᵀ` has shape [n, m] and strides [1, n], so
+    // axis 0 is the fast one and axis 1 the slow one: the two calls below are the two possible
+    // orientations of an indirect axis over the same data.
+    let t_cpu = a_cpu.swapaxes(0, 1);
+    let t = t_cpu.to_device(&d);
+    assert_eq!(t.layout().stride(), &[1isize, n as isize], "fixture: t = aᵀ");
+    assert_eq!(
+        host_nd(&rt::index_select(&t, 0, vec![5isize, 0, 3])),
+        host_nd(&rt::index_select(&t_cpu, 0, vec![5isize, 0, 3])),
+        "index_select on a transposed view, indirect axis contiguous"
+    );
+    assert_eq!(
+        host_nd(&rt::index_select(&t, 1, vec![4isize, 1])),
+        host_nd(&rt::index_select(&t_cpu, 1, vec![4isize, 1])),
+        "index_select on a transposed view, indirect axis strided"
+    );
+
+    // (5) put: in place, and every unselected row must survive
+    let put_idx = vec![1isize, 4, 0];
+    let v_cpu: Tensor<f64, DeviceCpuSerial, _> = rt::asarray((exact_data(m * 3, 153), &dcpu)).into_shape([m, 3]);
+    let v = v_cpu.to_device(&d);
+    let mut want = a_cpu.clone();
+    rt::index_put(&mut want, 1, put_idx.clone(), &v_cpu);
+    let mut got = a_cpu.to_device(&d);
+    rt::index_put(&mut got, 1, put_idx.clone(), &v);
+    assert_eq!(host_nd(&got), host_nd(&want), "index_put axis 1");
+
+    // (6) put along axis 0 of the contiguous array ...
+    let v0_cpu: Tensor<f64, DeviceCpuSerial, _> = rt::asarray((exact_data(2 * n, 154), &dcpu)).into_shape([2, n]);
+    let v0 = v0_cpu.to_device(&d);
+    let mut want0 = a_cpu.clone();
+    rt::index_put(&mut want0, 0, vec![3isize, 0], &v0_cpu);
+    let mut got0 = a_cpu.to_device(&d);
+    rt::index_put(&mut got0, 0, vec![3isize, 0], &v0);
+    assert_eq!(host_nd(&got0), host_nd(&want0), "index_put axis 0");
+
+    // (6b) ... and one where the destination is itself a strided view, so every write offset comes
+    // from the view's strides instead of from a contiguous row. The previous fixture claimed this
+    // coverage and did not have it: `a` is C-contiguous, so the destination was contiguous too.
+    let v1_cpu: Tensor<f64, DeviceCpuSerial, _> = rt::asarray((exact_data(6 * 2, 156), &dcpu)).into_shape([6, 2]);
+    let v1 = v1_cpu.to_device(&d);
+    // `to_owned` gathers the visible elements, so the reference is contiguous — the *values* are
+    // what is being compared, and the device side is the one that must cope with the view's strides.
+    let mut want_t = t_cpu.to_owned();
+    rt::index_put(&mut want_t, 1, vec![4isize, 1], &v1_cpu);
+    let mut got_t = t_cpu.to_device(&d);
+    rt::index_put(&mut got_t, 1, vec![4isize, 1], &v1);
+    assert_eq!(host_nd(&got_t), host_nd(&want_t), "index_put into a strided destination");
+
+    // (7) duplicates on a put: refused, with the index named
+    let mut dup = a_cpu.to_device(&d);
+    let v2_cpu: Tensor<f64, DeviceCpuSerial, _> = rt::asarray((exact_data(m * 2, 155), &dcpu)).into_shape([m, 2]);
+    let v2 = v2_cpu.to_device(&d);
+    match rt::index_put_f(&mut dup, 1, vec![2isize, 2], &v2) {
+        Ok(()) => panic!("repeated indices should be refused"),
+        Err(e) => {
+            let msg = format!("{e}");
+            assert!(msg.contains("more than once"), "unexpected error: {msg}");
+        },
+    }
+}
+
+/* #endregion */

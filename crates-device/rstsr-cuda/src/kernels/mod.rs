@@ -7,6 +7,7 @@
 //! - `rstsr_complex.cuh`: complex-math device header (spliced into generated sources at the marker;
 //!   see dtype.rs complex INCLUDES).
 
+pub(crate) mod adv_index;
 pub(crate) mod cublas_gemm;
 pub(crate) mod elementwise;
 pub(crate) mod gemm;

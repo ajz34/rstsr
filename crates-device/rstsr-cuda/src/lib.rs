@@ -27,9 +27,54 @@
 //! - Integer division and remainder by zero yield `0` (NumPy); the CPU reference devices panic on
 //!   Rust's `/` and `%`.
 //! - `fill`/`ones`/`zeros` take the kernel path for every supported dtype (complex included).
+//!
+//! # What is implemented
+//!
+//! | family | coverage |
+//! |---|---|
+//! | storage / transfer | creation, fill, strided copy with cast, `to_device` both ways, streams |
+//! | elementwise | arithmetic, comparison, transcendentals, unary float families, `where`, `clip` (same dtype) |
+//! | reductions | `sum`/`prod`/`mean`/`l2_norm`/`min`/`max`/`all`/`any`/`count_nonzero` (+ dtype variants), `var`/`std` (+ dtype), `argmin`/`argmax`/`nanarg*` (raveled, all + axes), `cumsum`/`cumprod` (real dtypes) |
+//! | linalg | `outer`, `cross`, `matmul`/`matmul_uninit` (cuBLAS, tiled kernel as fallback), `tensordot` (view-only tier) |
+//! | indexing | `index_select`, `index_put` |
+//!
+//! **Absent, and why** — these are deliberate, not pending:
+//!
+//! - `take_along_axis`/`put_along_axis`, `mask_select`: the first two take a *device* index buffer,
+//!   so an out-of-range index cannot be caught without a read-back on every call; `mask_select` is a
+//!   compaction and needs a mask prefix sum to be deterministic. No caller in the current programs.
+//! - `sort`, `argsort`, `unique`, `searchsorted`, `isin`: no caller. A GPU sort is a bitonic or
+//!   radix kernel family, not an afternoon.
+//! - `nonzero`: compaction, same shape of work as `mask_select`.
+//! - `tril`/`triu`, `cumsum`/`cumprod` `_dtype`, `unraveled_arg*`: small, unimplemented, no caller.
+//! - `allclose`: `allclose_axes` is `unimplemented!()` on the CPU devices too.
+//! - `mapv` and the `Op_Mut*_Ref*` closure traits: a host closure cannot cross into a kernel, so
+//!   these are unimplementable on any accelerator rather than missing here.
+//!
+//! # Running the tests
+//!
+//! ```text
+//! CUDARC_CUDA_VERSION=12060 cargo test -p rstsr-cuda --lib            # no device needed
+//! CUDARC_CUDA_VERSION=12060 cargo test -p rstsr-cuda --test test_kernels
+//! CUDARC_CUDA_VERSION=12060 cargo test -p rstsr-cuda --test test_matmul_tiled
+//! ```
+//!
+//! Without a visible driver every hardware test prints `skipping: no CUDA device visible` and
+//! passes, so a green run on a machine without a GPU means *nothing ran*. `--lib` is the half that
+//! runs anywhere: the reduction plan, the kernel-token checks, the cuBLAS argument derivation and
+//! the addressing rules are all pure functions and are tested there.
+//!
+//! Environment knobs, both read once per process:
+//!
+//! - `RSTSR_CUDA_MATMUL=tiled` forces the tiled GEMM instead of cuBLAS. It exists so the fallback
+//!   keeps hardware coverage; `tests/test_matmul_tiled.rs` sets it.
+//! - `RSTSR_CUDA_DEBUG_GEMM=1` prints the resolved geometry, the cuBLAS arguments and the pointer
+//!   bases once per process. This is the instrument that turned a stride-units bug into a two-minute
+//!   read after three sessions of inference.
 
 #![allow(clippy::needless_return)]
 
+pub mod adv_index_ops;
 pub mod arg_ops;
 pub mod assignment;
 pub mod buffer;
