@@ -173,11 +173,30 @@ fn nvrtc_include_dirs() -> &'static [String] {
     })
 }
 
+/// `RSTSR_CUDA_STRICT_FP=1`: forbid FMA contraction (`-fmad=true` is NVRTC's **default**).
+///
+/// The default is what makes `l2_norm`/`var`/`vecdot` differ from the CPU in the last bits: the
+/// CPU computes `fl(x*x)` and then `fl(a + that)`, a contracted kernel computes `fma(x, x, a)`, and
+/// one rounding is not two. That is a legitimate speed/parity trade — FMA is free throughput on
+/// every NVIDIA part — but it should be a decision the caller can reverse rather than a property
+/// discovered by comparing results.
+///
+/// Note what this cannot fix: the reduction *tree* still adds in a different order than a
+/// sequential loop, and transcendentals are a different implementation (`sinf` is NVIDIA's, not
+/// Rust's). This knob removes exactly one of the three differences — see the crate docs.
+fn strict_fp() -> bool {
+    static F: OnceLock<bool> = OnceLock::new();
+    *F.get_or_init(|| matches!(std::env::var("RSTSR_CUDA_STRICT_FP").as_deref(), Ok("1") | Ok("true")))
+}
+
 /// Library-fixed compile options. `arch` enters separately.
 fn compile_options(extra: &[&str]) -> Vec<String> {
     let mut opts: Vec<String> = vec!["--std=c++17".into()];
     opts.extend(nvrtc_include_dirs().iter().map(|d| format!("--include-path={d}")));
     opts.extend(extra.iter().map(|s| s.to_string()));
+    if strict_fp() {
+        opts.push("--fmad=false".into());
+    }
     #[cfg(debug_assertions)]
     opts.push("-lineinfo".into());
     opts
