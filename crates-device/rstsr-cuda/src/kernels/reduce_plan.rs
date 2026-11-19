@@ -36,7 +36,7 @@
 //! # One linear run per part
 //!
 //! Both the contracted part and the output part are reduced to a single number: the element step per
-//! unit of the index. Two tests, because the two parts have different obligations: [`block_step`]
+//! unit of the index. Two tests, because the two parts have different obligations: [`block_run`]
 //! asks only that the contracted axes form one contiguous block *as a set* (axis order is free — no
 //! summation order is promised), while [`output_step`] additionally requires shape order, because
 //! `c[j]` counts in shape order.
@@ -45,6 +45,10 @@
 //! multi-axis contractions work at all: `(p, i, j)` contracted over `(i, j)` yields a `[i, j]` part
 //! with strides `[j, 1]`, step 1, and the kernel walks it with `m` exactly as it walks a single axis.
 //! A rank-0 output — a full reduction — is the same story with `n_out = 1` and no step.
+//!
+//! Axis order is free *per operand*, not *between* operands: a contraction hands one `m` to both, so
+//! the two permutations must agree or the kernel pairs elements that do not correspond. A reduction
+//! passes the same layout twice and cannot trip that check.
 //!
 //! # Lanes above a warp are allowed, and cost something
 //!
@@ -116,20 +120,25 @@ impl ReducePlan {
     }
 }
 
-/// Element step per unit of the **contracted** index, when those axes form one contiguous block as a
-/// set — in *any* axis order.
+/// Element step per unit of the **contracted** index, and the axis order that walk enumerates.
 ///
-/// Order is free here. A reduction makes no claim about summation order (see `reduce.rs`), so walking
-/// a column-major `[i, j]` block as `m = 0..i*j` with step 1 reads every element exactly once; only
-/// the accumulation order differs, and that is not part of the contract. So the test is "are the axes
-/// sorted by `|stride|` an arithmetic progression", not "are they row-major".
+/// The step is reported when those axes form one contiguous block as a set — in *any* axis order.
+/// Order is free for one operand: a reduction makes no claim about summation order (see `reduce.rs`),
+/// so walking a column-major `[i, j]` block as `m = 0..i*j` with step 1 reads every element exactly
+/// once; only the accumulation order differs, and that is not part of the contract. So the test is
+/// "are the axes sorted by `|stride|` an arithmetic progression", not "are they row-major".
+///
+/// The permutation travels back with the step because a *contraction* has a second obligation:
+/// [`classify_reduce`] gives both operands the same `m`, so two different permutations would pair
+/// elements that do not correspond. Size-1 axes are dropped from the comparison there — they impose
+/// no order.
 ///
 /// The step reported is the innermost one, so the block may be non-unit (`[64, 2]` over `[8, 8]`) —
 /// the caller only gets to assume *constant* stride, not unit stride.
 ///
 /// `None` when the block has a gap (strides `[16, 1]` over `[8, 8]`), a repeated stride, or when the
 /// axes disagree about direction.
-fn block_step(l: &Layout<IxD>) -> Option<isize> {
+fn block_run(l: &Layout<IxD>) -> Option<(isize, Vec<usize>)> {
     let n = l.ndim();
     if n == 0 {
         return None;
@@ -147,7 +156,13 @@ fn block_step(l: &Layout<IxD>) -> Option<isize> {
         }
         expect *= l.shape()[k] as isize;
     }
-    Some(step)
+    Some((step, order))
+}
+
+/// [`block_run`] without the permutation — the form the step tests are written against.
+#[cfg(test)]
+fn block_step(l: &Layout<IxD>) -> Option<isize> {
+    block_run(l).map(|(step, _)| step)
 }
 
 /// Element step per unit of the **output** index, when the axes are a row-major block in shape order.
@@ -243,12 +258,12 @@ pub(crate) fn classify_reduce(
     // --- one linear run per part ----------------------------------------------------------------
     // A rank-0 contracted part is *one element* — `axes` was empty, or the operand is 0-d — so there
     // is nothing to walk and any step is correct. This is `sum(t, &[])`, which reduces to a copy, and
-    // `sum` of a 0-d tensor. Without this, `block_step` answers "nothing to walk" and every such call
+    // `sum` of a 0-d tensor. Without this, `block_run` answers "nothing to walk" and every such call
     // is refused.
-    let step_a = if las.ndim() == 0 {
-        1
+    let (step_a, order_a) = if las.ndim() == 0 {
+        (1, Vec::new())
     } else {
-        let Some(step) = block_step(&las) else {
+        let Some(run) = block_run(&las) else {
             rstsr_raise!(
                 UnImplemented,
                 "cuda reduce: contracted part is not one contiguous block (shape {:?}, strides {:?})",
@@ -256,12 +271,12 @@ pub(crate) fn classify_reduce(
                 las.stride()
             )?
         };
-        step
+        run
     };
-    let step_b = if lbs.ndim() == 0 {
-        1
+    let (step_b, order_b) = if lbs.ndim() == 0 {
+        (1, Vec::new())
     } else {
-        let Some(step) = block_step(&lbs) else {
+        let Some(run) = block_run(&lbs) else {
             rstsr_raise!(
                 UnImplemented,
                 "cuda reduce: contracted part of b is not one contiguous block (shape {:?}, strides {:?})",
@@ -269,8 +284,25 @@ pub(crate) fn classify_reduce(
                 lbs.stride()
             )?
         };
-        step
+        run
     };
+
+    // One `m` serves both operands, so the two walks have to enumerate the contracted axes in the
+    // same order — otherwise the kernel would multiply elements that do not correspond, silently.
+    // The shapes are equal (checked above), so this is a permutation comparison; size-1 axes impose
+    // no order and are left out. A reduction passes one layout twice, so it cannot trip this.
+    let live = |order: &[usize], shape: &[usize]| -> Vec<usize> {
+        order.iter().copied().filter(|&k| shape[k] > 1).collect()
+    };
+    let (live_a, live_b) = (live(&order_a, las.shape()), live(&order_b, lbs.shape()));
+    if live_a != live_b {
+        rstsr_raise!(
+            UnImplemented,
+            "cuda reduce: the two operands enumerate the contracted axes in different memory orders \
+             ({live_a:?} vs {live_b:?}); the kernel pairs elements by position, so their contracted \
+             blocks must agree — bring one operand to the other's order (`to_contig`)"
+        )?;
+    }
 
     // A rank-0 output is one element; its step is never taken, and reporting 0 keeps the kernel's
     // address arithmetic well defined rather than something that could overflow.
@@ -376,6 +408,34 @@ mod tests {
         assert_eq!(block_step(&layout(&[8, 8], &[9, 1], 0)), None);
         // rank 0 has nothing to walk
         assert_eq!(block_step(&layout(&[], &[], 0)), None);
+    }
+
+    /// [`block_run`] reports the enumeration as well as the step: the axes in the order the walk
+    /// visits them, innermost first. This is the half a contraction compares between its operands.
+    #[test]
+    fn block_run_reports_step_and_order() {
+        struct Case<'a> {
+            shape: &'a [usize],
+            stride: &'a [isize],
+            /// `(step, order)`; `None` when the block is not one run. Order lists axis *indices*,
+            /// so `[1, 0]` means axis 1 is walked first — row-major, and the opposite of
+            /// column-major.
+            want: Option<(isize, &'a [usize])>,
+        }
+
+        let cases = [
+            Case { shape: &[64], stride: &[1], want: Some((1, &[0])) },
+            Case { shape: &[64], stride: &[1000], want: Some((1000, &[0])) },
+            Case { shape: &[8, 8], stride: &[8, 1], want: Some((1, &[1, 0])) },
+            Case { shape: &[8, 8], stride: &[1, 8], want: Some((1, &[0, 1])) },
+            Case { shape: &[8, 8], stride: &[16, 2], want: Some((2, &[1, 0])) },
+            Case { shape: &[8, 8], stride: &[16, 1], want: None },
+        ];
+
+        for c in &cases {
+            let want = c.want.map(|(step, order)| (step, order.to_vec()));
+            assert_eq!(block_run(&layout(c.shape, c.stride, 0)), want, "shape {:?}, stride {:?}", c.shape, c.stride);
+        }
     }
 
     /// The output part does require shape order: `c[j]` counts in shape order, so a column-major
@@ -504,6 +564,27 @@ mod tests {
         let plan = classify_reduce(&la, &la, &lc, &[1, 2], &[1, 2], RowMajor).unwrap();
         assert_eq!(plan.n_contract, 64);
         assert_eq!(plan.step_a, 1, "contiguous block; only the axis order differs");
+    }
+
+    /// A contraction gives both operands the same `m`, so they must enumerate the contracted axes in
+    /// the same order. Each operand alone is plannable; the pair is not.
+    #[test]
+    fn contraction_requires_one_enumeration_order() {
+        // Same logical tensor, two memory orders: (p, i, j) at p*64 + i*8 + j, and at p*64 + i + j*8.
+        let (p, i, j) = (4usize, 8usize, 8usize);
+        let c_order = layout(&[p, i, j], &[(i * j) as isize, j as isize, 1], 0);
+        let f_order = layout(&[p, i, j], &[(i * j) as isize, 1, j as isize], 0);
+        let lc = layout(&[p], &[1], 0);
+
+        let a = classify_reduce(&c_order, &c_order, &lc, &[1, 2], &[1, 2], RowMajor).unwrap();
+        assert_eq!((a.n_contract, a.step_a), (i * j, 1), "a C-order block is one run");
+        let b = classify_reduce(&f_order, &f_order, &lc, &[1, 2], &[1, 2], RowMajor).unwrap();
+        assert_eq!((b.n_contract, b.step_a), (i * j, 1), "a column-major block is one run too");
+
+        let e = classify_reduce(&c_order, &f_order, &lc, &[1, 2], &[1, 2], RowMajor).unwrap_err();
+        let msg = format!("{e}");
+        assert!(msg.contains("different memory orders"), "got: {msg}");
+        assert!(msg.contains("UnImplemented"), "got: {msg}");
     }
 
     /// A contracted block with a *gap* cannot be walked with one step: refused, because guessing

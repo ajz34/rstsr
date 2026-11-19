@@ -667,12 +667,13 @@ fn vecdot_offset_view() {
     assert_eq!(got, want, "offset view (97 x 10024, axis 0): exact data must agree bitwise");
 }
 
-/// The two shapes the backend refuses, each by name. Both are reachable through the public API, and
-/// both must fail rather than fall back to the host or silently pick a different kernel.
+/// The shapes the backend refuses, each by name. All are reachable through the public API, and all
+/// must fail rather than fall back to the host or silently pick a different kernel.
 #[test]
 fn vecdot_refuses_unplannable_shapes() {
     require_cuda!();
     let d = DeviceCuda::new(0);
+    let dcpu = DeviceCpuSerial::default();
 
     // Stepped on both axes: neither the contracted nor the output part has a unit-stride run, so
     // there is nothing to coalesce on. Packing is the eventual answer; until then, refuse.
@@ -688,12 +689,40 @@ fn vecdot_refuses_unplannable_shapes() {
         },
     }
 
+    // One `m` serves both operands, so a pair whose contracted blocks are enumerated in different
+    // axis orders would multiply elements that do not correspond — a wrong answer that looks like a
+    // number. The plan refuses; the fix is `to_contig` on one operand.
+    let (p, i, j) = (2usize, 2usize, 3usize);
+    let ac_cpu: Tensor<f64, DeviceCpuSerial, _> =
+        rt::asarray((exact_data(p * i * j, 17), &dcpu)).into_shape([p, i, j]);
+    let bj_cpu: Tensor<f64, DeviceCpuSerial, _> =
+        rt::asarray((exact_data(p * j * i, 18), &dcpu)).into_shape([p, j, i]);
+    let bt_cpu = bj_cpu.swapaxes(1, 2); // [p, i, j] with its (i, j) block F-ordered
+    assert_eq!(bt_cpu.layout().stride()[1], 1, "fixture: b's contracted block must be F-ordered");
+    let ac = ac_cpu.to_device(&d);
+    let bt = bt_cpu.to_device(&d);
+
+    let axes = || (AxesIndex::Vec(vec![1isize, 2]), AxesIndex::Vec(vec![1isize, 2]));
+    match rt::vecdot_f(&ac, &bt, axes()) {
+        Ok(_) => panic!("operands that enumerate the contraction differently should be refused"),
+        Err(e) => {
+            let msg = format!("{e}");
+            assert!(msg.contains("different memory orders"), "expected the enumeration reason, got: {msg}");
+        },
+    }
+    // ... while two operands that agree still work, F-ordered or not: the check is about agreement,
+    // not about row-major order.
+    let same: Vec<f64> = host_vec1(&rt::vecdot(&bt, &bt, axes()));
+    let same_cpu: Vec<f64> = host_vec1(&rt::vecdot(&bt_cpu, &bt_cpu, axes()));
+    assert_eq!(same, same_cpu, "(bt, bt): two equally-ordered blocks must agree with the CPU");
+
     // The second case this test used to assert — a rank-3 contraction leaving a two-axis output —
     // is no longer refused. `output_step` accepts any row-major run in shape order, not just a
     // single axis, so it is now planned and computed; `vecdot_multi_axis_output_vs_cpu` checks the
-    // answer instead. The two refusals that remain reachable through `rt::vecdot_f` are this one and
-    // a gapped contracted block, and `reduce_plan::tests` pins both on the host, so a classifier
-    // change fails in `cargo test --lib` rather than only on a machine with a GPU.
+    // answer instead. The refusals that remain reachable through `rt::vecdot_f` are the stepped one,
+    // a gapped contracted block and this enumeration mismatch, and `reduce_plan::tests` pins all
+    // three on the host, so a classifier change fails in `cargo test --lib` rather than only on a
+    // machine with a GPU.
 }
 
 /// Contracting the last axis of a rank-3 tensor leaves a **two-axis** output part.
