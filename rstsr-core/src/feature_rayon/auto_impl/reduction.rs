@@ -212,10 +212,11 @@ where
 {
     type TOut = T::Real;
 
-    fn var_all(&self, a: &Vec<T>, la: &Layout<D>) -> Result<T::Real> {
+    fn var_all(&self, a: &Vec<T>, la: &Layout<D>, correction: Option<f64>) -> Result<T::Real> {
         let pool = self.get_current_pool();
 
         let size = la.size();
+        let factor = correction.map(|c| T::Real::from_f64(var_correction_factor(size, c, false)).unwrap());
 
         let f_init = || (T::zero(), T::Real::zero());
         let f = |(acc_1, acc_2): (T, T::Real), x: T| (acc_1 + x, acc_2 + (x * x.conj()).re());
@@ -224,7 +225,11 @@ where
             let size_1 = T::from_usize(size).unwrap();
             let size_2 = T::Real::from_usize(size).unwrap();
             let mean = acc_1 / size_1;
-            acc_2 / size_2 - (mean * mean.conj()).re()
+            let var = acc_2 / size_2 - (mean * mean.conj()).re();
+            match factor {
+                Some(factor) => var * factor,
+                None => var,
+            }
         };
 
         let result = reduce_all_cpu_rayon(a, la, f_init, f, f_sum, f_out, pool)?;
@@ -236,11 +241,13 @@ where
         a: &Vec<T>,
         la: &Layout<D>,
         axes: &[isize],
+        correction: Option<f64>,
     ) -> Result<(Storage<DataOwned<Vec<T::Real>>, T::Real, Self>, Layout<IxD>)> {
         let pool = self.get_current_pool();
 
         let (layout_axes, _) = la.dim_split_axes(axes)?;
         let size = layout_axes.size();
+        let factor = correction.map(|c| T::Real::from_f64(var_correction_factor(size, c, false)).unwrap());
 
         let f_init = || (T::zero(), T::Real::zero());
         let f = |(acc_1, acc_2): (T, T::Real), x: T| (acc_1 + x, acc_2 + (x * x.conj()).re());
@@ -249,7 +256,11 @@ where
             let size_1 = T::from_usize(size).unwrap();
             let size_2 = T::Real::from_usize(size).unwrap();
             let mean = acc_1 / size_1;
-            acc_2 / size_2 - (mean * mean.conj()).re()
+            let var = acc_2 / size_2 - (mean * mean.conj()).re();
+            match factor {
+                Some(factor) => var * factor,
+                None => var,
+            }
         };
 
         let (out, layout_out) = reduce_axes_cpu_rayon(a, &la.to_dim()?, axes, f_init, f, f_sum, f_out, pool)?;
@@ -266,10 +277,11 @@ where
 {
     type TOut = T::Real;
 
-    fn std_all(&self, a: &Vec<T>, la: &Layout<D>) -> Result<T::Real> {
+    fn std_all(&self, a: &Vec<T>, la: &Layout<D>, correction: Option<f64>) -> Result<T::Real> {
         let pool = self.get_current_pool();
 
         let size = la.size();
+        let factor = correction.map(|c| T::Real::from_f64(var_correction_factor(size, c, true)).unwrap());
 
         let f_init = || (T::zero(), T::Real::zero());
         let f = |(acc_1, acc_2): (T, T::Real), x: T| (acc_1 + x, acc_2 + (x * x.conj()).re());
@@ -279,7 +291,11 @@ where
             let size_2 = T::Real::from_usize(size).unwrap();
             let mean = acc_1 / size_1;
             let var = acc_2 / size_2 - (mean * mean.conj()).re();
-            ComplexFloat::sqrt(var)
+            let std = ComplexFloat::sqrt(var);
+            match factor {
+                Some(factor) => std * factor,
+                None => std,
+            }
         };
 
         let result = reduce_all_cpu_rayon(a, la, f_init, f, f_sum, f_out, pool)?;
@@ -291,11 +307,13 @@ where
         a: &Vec<T>,
         la: &Layout<D>,
         axes: &[isize],
+        correction: Option<f64>,
     ) -> Result<(Storage<DataOwned<Vec<T::Real>>, T::Real, Self>, Layout<IxD>)> {
         let pool = self.get_current_pool();
 
         let (layout_axes, _) = la.dim_split_axes(axes)?;
         let size = layout_axes.size();
+        let factor = correction.map(|c| T::Real::from_f64(var_correction_factor(size, c, true)).unwrap());
 
         let f_init = || (T::zero(), T::Real::zero());
         let f = |(acc_1, acc_2): (T, T::Real), x: T| (acc_1 + x, acc_2 + (x * x.conj()).re());
@@ -305,7 +323,11 @@ where
             let size_2 = T::Real::from_usize(size).unwrap();
             let mean = acc_1 / size_1;
             let var = acc_2 / size_2 - (mean * mean.conj()).re();
-            ComplexFloat::sqrt(var)
+            let std = ComplexFloat::sqrt(var);
+            match factor {
+                Some(factor) => std * factor,
+                None => std,
+            }
         };
 
         let (out, layout_out) = reduce_axes_cpu_rayon(a, &la.to_dim()?, axes, f_init, f, f_sum, f_out, pool)?;
@@ -652,11 +674,14 @@ where
         a: &Vec<T>,
         la: &Layout<D>,
         axes: &[isize],
+        correction: Option<f64>,
     ) -> Result<(Storage<DataOwned<Vec<TOut>>, TOut, Self>, Layout<IxD>)> {
         let pool = self.get_current_pool();
 
         let (layout_axes, _) = la.dim_split_axes(axes)?;
-        let size_f = TOut::from_f64(layout_axes.size() as f64).unwrap();
+        let size = layout_axes.size();
+        let size_f = TOut::from_f64(size as f64).unwrap();
+        let factor = correction.map(|c| TOut::from_f64(var_correction_factor(size, c, false)).unwrap());
 
         let f_init = || (TOut::zero(), TOut::zero());
         let f = |(acc_1, acc_2): (TOut, TOut), x: T| {
@@ -666,7 +691,11 @@ where
         let f_sum = |(acc_1, acc_2): (TOut, TOut), (x_1, x_2)| (acc_1 + x_1, acc_2 + x_2);
         let f_out = |(acc_1, acc_2): (TOut, TOut)| {
             let mean = acc_1 / size_f;
-            acc_2 / size_f - mean * mean
+            let var = acc_2 / size_f - mean * mean;
+            match factor {
+                Some(factor) => var * factor,
+                None => var,
+            }
         };
 
         let (out, layout_out) = reduce_axes_cpu_rayon(a, &la.to_dim()?, axes, f_init, f, f_sum, f_out, pool)?;
@@ -685,11 +714,14 @@ where
         a: &Vec<T>,
         la: &Layout<D>,
         axes: &[isize],
+        correction: Option<f64>,
     ) -> Result<(Storage<DataOwned<Vec<TOut>>, TOut, Self>, Layout<IxD>)> {
         let pool = self.get_current_pool();
 
         let (layout_axes, _) = la.dim_split_axes(axes)?;
-        let size_f = TOut::from_f64(layout_axes.size() as f64).unwrap();
+        let size = layout_axes.size();
+        let size_f = TOut::from_f64(size as f64).unwrap();
+        let factor = correction.map(|c| TOut::from_f64(var_correction_factor(size, c, true)).unwrap());
 
         let f_init = || (TOut::zero(), TOut::zero());
         let f = |(acc_1, acc_2): (TOut, TOut), x: T| {
@@ -700,7 +732,11 @@ where
         let f_out = |(acc_1, acc_2): (TOut, TOut)| {
             let mean = acc_1 / size_f;
             let var = acc_2 / size_f - mean * mean;
-            <TOut as Float>::sqrt(var)
+            let std = <TOut as Float>::sqrt(var);
+            match factor {
+                Some(factor) => std * factor,
+                None => std,
+            }
         };
 
         let (out, layout_out) = reduce_axes_cpu_rayon(a, &la.to_dim()?, axes, f_init, f, f_sum, f_out, pool)?;
