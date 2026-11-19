@@ -8,8 +8,6 @@ use crate::prelude_dev::*;
    [OpMaxAPI   ] [max_axes    ] [max_all    ];
    [OpProdAPI  ] [prod_axes   ] [prod_all   ];
    [OpMeanAPI  ] [mean_axes   ] [mean_all   ];
-   [OpVarAPI   ] [var_axes    ] [var_all    ];
-   [OpStdAPI   ] [std_axes    ] [std_all    ];
    [OpL2NormAPI] [l2_norm_axes] [l2_norm_all];
    [OpArgMinAPI] [argmin_axes ] [argmin_all ];
    [OpArgMaxAPI] [argmax_axes ] [argmax_all ];
@@ -34,14 +32,63 @@ where
     ) -> Result<(Storage<DataOwned<<Self as DeviceRawAPI<Self::TOut>>::Raw>, Self::TOut, Self>, Layout<IxD>)>;
 }
 
+/// `var`/`std`: the same reduction, plus the Array-API `correction` (NumPy `ddof`). The device
+/// applies it as part of the fold: it knows `M` from the layout and computes the factor with
+/// [`var_correction_factor`]. `None` means population variance. Element-type requirements stay in
+/// the device impls, so the tensor layer needs no `TOut` bound.
+#[allow(clippy::type_complexity)]
+#[duplicate_item(
+    OpReduceCorrAPI  func       func_all  ;
+   [OpVarAPI      ] [var_axes ] [var_all  ];
+   [OpStdAPI      ] [std_axes ] [std_all  ];
+)]
+pub trait OpReduceCorrAPI<T, D>
+where
+    D: DimAPI,
+    Self: DeviceAPI<T> + DeviceAPI<Self::TOut>,
+{
+    type TOut;
+    fn func_all(
+        &self,
+        a: &<Self as DeviceRawAPI<T>>::Raw,
+        la: &Layout<D>,
+        correction: Option<f64>,
+    ) -> Result<Self::TOut>;
+    fn func(
+        &self,
+        a: &<Self as DeviceRawAPI<T>>::Raw,
+        la: &Layout<D>,
+        axes: &[isize],
+        correction: Option<f64>,
+    ) -> Result<(Storage<DataOwned<<Self as DeviceRawAPI<Self::TOut>>::Raw>, Self::TOut, Self>, Layout<IxD>)>;
+}
+
+/// Rescale from population to corrected variance (NumPy `ddof` / Array-API `correction`):
+/// `M / (M - correction)`, square-rooted for `std`; NaN when `M - correction <= 0`.
+///
+/// Device-layer helper: the `var`/`std` impls call it with the reduced size they already know, and
+/// own the conversion into their element type.
+pub fn var_correction_factor(size: usize, correction: f64, is_std: bool) -> f64 {
+    let m = size as f64;
+    let d = m - correction;
+    if d <= 0.0 {
+        f64::NAN
+    } else {
+        let factor = m / d;
+        if is_std {
+            factor.sqrt()
+        } else {
+            factor
+        }
+    }
+}
+
 #[allow(clippy::type_complexity)]
 #[duplicate_item(
     OpReduceDtypeAPI  func_axes_dtype  ;
    [OpSumDtypeAPI   ] [sum_axes_dtype  ];
    [OpProdDtypeAPI  ] [prod_axes_dtype ];
    [OpMeanDtypeAPI  ] [mean_axes_dtype ];
-   [OpVarDtypeAPI   ] [var_axes_dtype  ];
-   [OpStdDtypeAPI   ] [std_axes_dtype  ];
 )]
 pub trait OpReduceDtypeAPI<T, TOut, D>
 where
@@ -53,6 +100,28 @@ where
         a: &<Self as DeviceRawAPI<T>>::Raw,
         la: &Layout<D>,
         axes: &[isize],
+    ) -> Result<(Storage<DataOwned<<Self as DeviceRawAPI<TOut>>::Raw>, TOut, Self>, Layout<IxD>)>;
+}
+
+/// `var`/`std` with an explicit accumulator: same `correction` contract as [`OpVarAPI`] /
+/// [`OpStdAPI`].
+#[allow(clippy::type_complexity)]
+#[duplicate_item(
+    OpReduceDtypeCorrAPI  func_axes_dtype  ;
+   [OpVarDtypeAPI      ] [var_axes_dtype  ];
+   [OpStdDtypeAPI      ] [std_axes_dtype  ];
+)]
+pub trait OpReduceDtypeCorrAPI<T, TOut, D>
+where
+    D: DimAPI,
+    Self: DeviceAPI<T> + DeviceAPI<TOut>,
+{
+    fn func_axes_dtype(
+        &self,
+        a: &<Self as DeviceRawAPI<T>>::Raw,
+        la: &Layout<D>,
+        axes: &[isize],
+        correction: Option<f64>,
     ) -> Result<(Storage<DataOwned<<Self as DeviceRawAPI<TOut>>::Raw>, TOut, Self>, Layout<IxD>)>;
 }
 

@@ -173,14 +173,80 @@ fn nvrtc_include_dirs() -> &'static [String] {
     })
 }
 
+/// `RSTSR_CUDA_STRICT_FP=1`: forbid FMA contraction (`-fmad=true` is NVRTC's **default**).
+///
+/// The default is what makes `l2_norm`/`var`/`vecdot` differ from the CPU in the last bits: the
+/// CPU computes `fl(x*x)` and then `fl(a + that)`, a contracted kernel computes `fma(x, x, a)`, and
+/// one rounding is not two. That is a legitimate speed/parity trade — FMA is free throughput on
+/// every NVIDIA part — but it should be a decision the caller can reverse rather than a property
+/// discovered by comparing results.
+///
+/// Note what this cannot fix: the reduction *tree* still adds in a different order than a
+/// sequential loop, and transcendentals are a different implementation (`sinf` is NVIDIA's, not
+/// Rust's). This knob removes exactly one of the three differences — see the crate docs.
+fn strict_fp() -> bool {
+    static F: OnceLock<bool> = OnceLock::new();
+    *F.get_or_init(|| matches!(std::env::var("RSTSR_CUDA_STRICT_FP").as_deref(), Ok("1") | Ok("true")))
+}
+
 /// Library-fixed compile options. `arch` enters separately.
 fn compile_options(extra: &[&str]) -> Vec<String> {
     let mut opts: Vec<String> = vec!["--std=c++17".into()];
     opts.extend(nvrtc_include_dirs().iter().map(|d| format!("--include-path={d}")));
     opts.extend(extra.iter().map(|s| s.to_string()));
+    if strict_fp() {
+        opts.push("--fmad=false".into());
+    }
     #[cfg(debug_assertions)]
     opts.push("-lineinfo".into());
     opts
+}
+
+/// `RSTSR_CUDA_ARCH=compute_80`: compile for an arch other than the card's own.
+///
+/// Diagnostic only — it does not make a card run code it cannot. What it does is let **one** GPU
+/// stand in for the older ones, because PTX is forward-compatible: an sm_86 driver will JIT
+/// `compute_75`/`compute_80`/`compute_86` PTX, so a single A100 can be made to accept every arch at
+/// or below its own. That turns "we validated one arch" into "we validated the ones one card can
+/// host", which is the difference between an unknown and a known.
+///
+/// It must be read before anything is compiled, so it is a `OnceLock`: a process compiles for one
+/// arch. A malformed value is ignored with a warning rather than silently forcing something odd —
+/// a typo here would otherwise look like a driver bug.
+fn arch_override() -> Option<&'static str> {
+    static OV: OnceLock<Option<&'static str>> = OnceLock::new();
+    *OV.get_or_init(|| {
+        let raw = std::env::var("RSTSR_CUDA_ARCH").ok()?;
+        match parse_arch_override(&raw) {
+            // `Box::leak` because the value outlives this closure (an `OnceLock` payload); it is a
+            // handful of bytes, allocated at most once per process.
+            Some(_) => Some(Box::leak(raw.into_boxed_str())),
+            None => {
+                eprintln!(
+                    "rstsr-cuda: ignoring RSTSR_CUDA_ARCH={raw:?}; expected e.g. \"compute_80\" \
+                     (this knob exists so one GPU can be made to compile for older arches)"
+                );
+                None
+            },
+        }
+    })
+}
+
+/// `"compute_80"` -> `Some("compute_80")`; anything else -> `None`.
+///
+/// Split out from the env read so the rule is testable: the read happens once per process, the
+/// validation should not be untested because of that.
+pub(crate) fn parse_arch_override(raw: &str) -> Option<&str> {
+    let digits = raw.strip_prefix("compute_")?;
+    if digits.is_empty() || !digits.chars().all(|c| c.is_ascii_digit()) {
+        return None;
+    }
+    Some(raw)
+}
+
+/// `compute_80` -> `80`, for the "is this arch even hostable here" check.
+fn arch_number(arch: &str) -> Option<u32> {
+    arch.strip_prefix("compute_")?.parse().ok()
 }
 
 fn cache_dir() -> Option<PathBuf> {
@@ -273,6 +339,19 @@ impl CudaOrdinalObj {
     /// `compute_<major><minor>` arch string of this ordinal; cached
     /// after the first driver query (launch-path hot).
     pub(crate) fn arch_string(&self) -> Result<String> {
+        // One choke point: the returned string becomes the NVRTC flag, part of the key, and part of
+        // the disk-cache hash, so overriding it here cannot leave the three out of step.
+        if let Some(a) = arch_override() {
+            if let (Some(want), Ok((maj, min))) = (arch_number(a), self.compute_capability()) {
+                if want > (maj as u32) * 10 + (min as u32) {
+                    eprintln!(
+                        "rstsr-cuda: compiling for {a} on a compute_{maj}{min} device; PTX is only \
+                         forward-compatible, so loading it will fail. Use an arch at or below the card's."
+                    );
+                }
+            }
+            return Ok(a.to_string());
+        }
         let cached =
             self.arch_slot.get_or_init(|| self.compute_capability().map(|(maj, min)| format!("compute_{maj}{min}")));
         match cached {
@@ -286,6 +365,23 @@ impl CudaOrdinalObj {
 /// with static source pass a cached assembled string (see
 /// `kernels_ops::*_assembled`); dtype-specialized callers build it per call.
 pub(crate) fn make_key(ordinal: &CudaOrdinalObj, name: &str, source: &str, extra: &[&str]) -> Result<KernelKey> {
+    // `name` is the symbol `kernel_function` will look up in the module, so it has to appear in the
+    // source as a definition. Checked here because the alternative is discovering the mismatch as
+    // `CUDA_ERROR_NOT_FOUND, "named symbol not found"` on hardware, which names neither the kernel
+    // nor the caller: it cost a GPU round trip when the scan kernel was registered as `cumsum`
+    // instead of `rstsr_cumsum`. The source is right here, so the check is local and permanent
+    // rather than a `debug_assert!` that release builds skip.
+    //
+    // This is also the answer to "is the cache-key namespace complete?" for the *name* half: a key
+    // can no longer disagree with the entry it will load.
+    match source.find(&format!("void {name}(")) {
+        Some(_) => {}
+        None => rstsr_raise!(
+            DeviceError,
+            "kernel `{name}` is not defined as `void {name}(...)` in the source it was keyed with; \
+             the launch would fail with `named symbol not found`"
+        )?,
+    }
     let arch = ordinal.arch_string()?;
     let options = compile_options(extra).join("\u{1}");
     Ok(KernelKey { name: name.to_string(), source: source.to_string(), arch, options })
@@ -523,4 +619,33 @@ pub(crate) fn assemble_source(includes: &[&str], body: &str) -> String {
     let _ = write!(s, "\n{MATH_HELPER}");
     let _ = write!(s, "\n{body}");
     s
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The env read happens once per process, so the *rule* is what gets tested; without this split
+    /// the only untested part of the arch override would be the part that decides what it means.
+    #[test]
+    fn arch_override_accepts_only_compute_strings() {
+        assert_eq!(parse_arch_override("compute_80"), Some("compute_80"));
+        assert_eq!(parse_arch_override("compute_90"), Some("compute_90"));
+        assert_eq!(parse_arch_override("compute_120"), Some("compute_120"));
+        // Anything else must be refused, because a silently-forced bogus arch looks like a driver bug.
+        for bad in ["", "compute_", "compute_x", "sm_80", "compute_8o", " compute_80", "compute_-1"] {
+            assert_eq!(parse_arch_override(bad), None, "{bad:?} should be refused");
+        }
+    }
+
+    /// The parse that decides whether an override is even hostable: `compute_86` is `86`, and the
+    /// comparison against `maj * 10 + min` is what produces the "will fail to load" warning.
+    #[test]
+    fn arch_numbers_compare_like_capabilities() {
+        assert_eq!(arch_number("compute_80"), Some(80));
+        assert_eq!(arch_number("compute_120"), Some(120));
+        assert!(arch_number("compute_86") > arch_number("compute_80"));
+        assert!(arch_number("compute_86") < arch_number("compute_90"));
+        assert_eq!(arch_number("compute_x"), None);
+    }
 }

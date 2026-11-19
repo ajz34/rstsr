@@ -303,6 +303,102 @@ macro_rules! impl_assign_shift_cuda {
 impl_assign_shift_cuda!(OpShlAssignAPI, "<<");
 impl_assign_shift_cuda!(OpShrAssignAPI, ">>");
 
+// /* #region consuming binaries (a + b on owned tensors) */
+//
+// `OpLConsume*`/`OpRConsume*` are the traits behind `a + b` (as opposed to `&a + &b`), and they have
+// exactly the same *device* signature as the compound assigns: read the destination, apply, write it
+// back. The difference is only ownership at the tensor tier. So the three assign macros above are
+// reused verbatim for the left-consuming family, and mirrored once for the right-consuming family,
+// which is the one that differs — its destination is the *second* operand (`b = a op b`), so the
+// expression order and the result type both swap.
+//
+// This was a real hole until it was found by a compile probe rather than by the trait census: the
+// CPU device declares these traits through `#[duplicate_item]`, whose impl body is written against
+// the bare name `OpAPI`, so a scan for `impl … for DeviceCpuSerial` sees neither side. `a + b`
+// simply did not compile, while `&a + &b` did.
+impl_assign_arith_cuda!(OpLConsumeAddAPI, '+');
+impl_assign_arith_cuda!(OpLConsumeSubAPI, '-');
+impl_assign_arith_cuda!(OpLConsumeMulAPI, '*');
+impl_assign_arith_cuda!(OpLConsumeDivAPI, '/');
+impl_assign_int_cuda!(OpLConsumeBitOrAPI, '|');
+impl_assign_int_cuda!(OpLConsumeBitAndAPI, '&');
+impl_assign_int_cuda!(OpLConsumeBitXorAPI, '^');
+impl_assign_shift_cuda!(OpLConsumeShlAPI, "<<");
+impl_assign_shift_cuda!(OpLConsumeShrAPI, ">>");
+
+/// Right-consuming binaries: `b = a op b`, where `b` is the destination and `a` the left operand.
+///
+/// Same two kernels as the assign family, with the operand roles exchanged: the destination is the
+/// *second* type parameter and the expression reads the source first. `sub`/`div` are why this cannot
+/// just reuse the left-consuming macro — the two orders differ there.
+macro_rules! impl_rconsume_arith_cuda {
+    ($Trait:ident, $opchar:expr) => {
+        impl<TA, TB, D> $Trait<TA, TB, D> for DeviceCuda
+        where
+            Self: DeviceRawAPI<TA, Raw = CudaBuffer<TA>> + DeviceRawAPI<TB, Raw = CudaBuffer<TB>>,
+            TA: CudaDType + CudaArith,
+            TB: CudaDType + CudaArith,
+            D: DimAPI,
+        {
+            fn op_muta_refb(
+                &self,
+                b: &mut CudaBuffer<TB>,
+                lb: &Layout<D>,
+                a: &CudaBuffer<TA>,
+                la: &Layout<D>,
+            ) -> Result<()> {
+                let expr = crate::kernels::exprs::arith_bin($opchar, TB::CNAME, "b[ib]", "t[it]");
+                elementwise::binary_assign_launch::<TB, TA>(self, b, lb, a, la, &expr)
+            }
+
+            fn op_muta_numb(&self, b: &mut CudaBuffer<TB>, lb: &Layout<D>, a: TA) -> Result<()> {
+                let expr = crate::kernels::exprs::arith_bin($opchar, TB::CNAME, "v", "t[it]");
+                elementwise::scalar_assign_launch::<TB, TA>(self, b, lb, &a, &expr)
+            }
+        }
+    };
+}
+
+impl_rconsume_arith_cuda!(OpRConsumeAddAPI, '+');
+impl_rconsume_arith_cuda!(OpRConsumeSubAPI, '-');
+impl_rconsume_arith_cuda!(OpRConsumeMulAPI, '*');
+impl_rconsume_arith_cuda!(OpRConsumeDivAPI, '/');
+
+/// Right-consuming bitwise: same exemption as the assign family — `CudaBitwise`, `bool` included.
+macro_rules! impl_rconsume_int_cuda {
+    ($Trait:ident, $opchar:expr) => {
+        impl<TA, TB, D> $Trait<TA, TB, D> for DeviceCuda
+        where
+            Self: DeviceRawAPI<TA, Raw = CudaBuffer<TA>> + DeviceRawAPI<TB, Raw = CudaBuffer<TB>>,
+            TA: CudaDType + CudaBitwise,
+            TB: CudaDType + CudaBitwise,
+            D: DimAPI,
+        {
+            fn op_muta_refb(
+                &self,
+                b: &mut CudaBuffer<TB>,
+                lb: &Layout<D>,
+                a: &CudaBuffer<TA>,
+                la: &Layout<D>,
+            ) -> Result<()> {
+                let expr = crate::kernels::exprs::arith_bin($opchar, TB::CNAME, "b[ib]", "t[it]");
+                elementwise::binary_assign_launch::<TB, TA>(self, b, lb, a, la, &expr)
+            }
+
+            fn op_muta_numb(&self, b: &mut CudaBuffer<TB>, lb: &Layout<D>, a: TA) -> Result<()> {
+                let expr = crate::kernels::exprs::arith_bin($opchar, TB::CNAME, "v", "t[it]");
+                elementwise::scalar_assign_launch::<TB, TA>(self, b, lb, &a, &expr)
+            }
+        }
+    };
+}
+
+impl_rconsume_int_cuda!(OpRConsumeBitOrAPI, '|');
+impl_rconsume_int_cuda!(OpRConsumeBitAndAPI, '&');
+impl_rconsume_int_cuda!(OpRConsumeBitXorAPI, '^');
+
+// /* #endregion */
+
 // /* #endregion */
 // /* #region promoting arithmetic (ext_add/sub/mul/div) */
 /// Mixed-dtype arithmetic (`rt::ext_add` and friends): operands are cast to

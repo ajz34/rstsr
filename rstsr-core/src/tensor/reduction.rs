@@ -130,7 +130,6 @@
 //! ```
 
 use crate::prelude_dev::*;
-use num::{Float, FromPrimitive};
 
 /* #region reduce args */
 
@@ -554,14 +553,14 @@ fn reduce_layout_keepdims(
 /* #endregion */
 
 macro_rules! trait_reduction {
-    ([$($with_args: ident)?] $OpReduceAPI: ident, $fn: ident, $fn_f: ident, $fn_axes: ident, $fn_axes_f: ident, $fn_all: ident, $fn_all_f: ident, $fn_with_args: ident, $fn_with_args_f: ident) => {
+    ([$($with_args: ident)?] $OpReduceAPI: ident, $fn: ident, $fn_f: ident, $fn_axes: ident, $fn_axes_f: ident, $fn_all: ident, $fn_all_f: ident, $fn_with_args: ident, $fn_with_args_f: ident $(, $corr: expr)?) => {
         pub fn $fn_all_f<T, B, D>(tensor: impl TensorViewAPI<Type = T, Backend = B, Dim = D>) -> Result<B::TOut>
         where
             D: DimAPI,
             B: $OpReduceAPI<T, D>,
         {
             let tensor = tensor.view();
-            tensor.device().$fn_all(tensor.raw(), tensor.layout())
+            tensor.device().$fn_all(tensor.raw(), tensor.layout() $(, $corr)?)
         }
 
         pub fn $fn_axes_f<T, B, D>(
@@ -577,13 +576,13 @@ macro_rules! trait_reduction {
 
             match axes {
                 AxesIndex::None => {
-                    let sum = tensor.device().$fn_all(tensor.raw(), tensor.layout())?;
+                    let sum = tensor.device().$fn_all(tensor.raw(), tensor.layout() $(, $corr)?)?;
                     let storage = tensor.device().outof_cpu_vec(vec![sum])?;
                     let layout = Layout::new(vec![], vec![], 0)?;
                     Tensor::new_f(storage, layout)
                 },
                 _ => {
-                    let (storage, layout) = tensor.device().$fn_axes(tensor.raw(), tensor.layout(), axes.as_ref())?;
+                    let (storage, layout) = tensor.device().$fn_axes(tensor.raw(), tensor.layout(), axes.as_ref() $(, $corr)?)?;
                     Tensor::new_f(storage, layout)
                 },
             }
@@ -743,8 +742,8 @@ mod impl_trait_reduction {
     trait_reduction!([with_args] OpMaxAPI, max, max_f, max_axes, max_axes_f, max_all, max_all_f, max_with_args, max_with_args_f);
     trait_reduction!([with_args] OpProdAPI, prod, prod_f, prod_axes, prod_axes_f, prod_all, prod_all_f, prod_with_args, prod_with_args_f);
     trait_reduction!([with_args] OpMeanAPI, mean, mean_f, mean_axes, mean_axes_f, mean_all, mean_all_f, mean_with_args, mean_with_args_f);
-    trait_reduction!([] OpVarAPI, var, var_f, var_axes, var_axes_f, var_all, var_all_f, var_with_args, var_with_args_f);
-    trait_reduction!([] OpStdAPI, std, std_f, std_axes, std_axes_f, std_all, std_all_f, std_with_args, std_with_args_f);
+    trait_reduction!([] OpVarAPI, var, var_f, var_axes, var_axes_f, var_all, var_all_f, var_with_args, var_with_args_f, None);
+    trait_reduction!([] OpStdAPI, std, std_f, std_axes, std_axes_f, std_all, std_all_f, std_with_args, std_with_args_f, None);
     trait_reduction!([with_args] OpL2NormAPI, l2_norm, l2_norm_f, l2_norm_axes, l2_norm_axes_f, l2_norm_all, l2_norm_all_f, l2_norm_with_args, l2_norm_with_args_f);
     trait_reduction!([with_args] OpArgMinAPI, argmin, argmin_f, argmin_axes, argmin_axes_f, argmin_all, argmin_all_f, argmin_with_args, argmin_with_args_f);
     trait_reduction!([with_args] OpArgMaxAPI, argmax, argmax_f, argmax_axes, argmax_axes_f, argmax_all, argmax_all_f, argmax_with_args, argmax_with_args_f);
@@ -771,25 +770,25 @@ pub use impl_trait_reduction::*;
 /// Requires `tensor` in scope (a viewed `TensorAny`), plus device methods
 /// `$all` / `$axes`; expands to a `Result<Tensor<..>>`.
 macro_rules! reduce_dispatch_output {
-    ($tensor: ident, $all: ident, $axes: ident, $axes_val: expr, $keepdims: expr) => {{
+    ($tensor: ident, $all: ident, $axes: ident, $axes_val: expr, $keepdims: expr $(, $factor: expr)?) => {{
         let axes = $axes_val;
         let keepdims = $keepdims;
         let layout: Layout<IxD> = $tensor.layout().to_dim()?;
         match axes {
             AxesIndex::None => {
-                let val = $tensor.device().$all($tensor.raw(), $tensor.layout())?;
+                let val = $tensor.device().$all($tensor.raw(), $tensor.layout() $(, $factor)?)?;
                 let storage = $tensor.device().outof_cpu_vec(vec![val])?;
                 let out_layout = reduce_layout_whole(layout.ndim(), keepdims)?;
                 Tensor::new_f(storage, out_layout)
             },
             axes => {
-                let (storage, out_layout) = $tensor.device().$axes($tensor.raw(), $tensor.layout(), axes.as_ref())?;
+                let (storage, out_layout) = $tensor.device().$axes($tensor.raw(), $tensor.layout(), axes.as_ref() $(, $factor)?)?;
                 let out_layout = reduce_layout_keepdims(out_layout, &axes, layout.ndim(), keepdims)?;
                 Tensor::new_f(storage, out_layout)
             },
         }
     }};
-    ($tensor: ident, @axes_kernel $axes: ident, $axes_val: expr, $keepdims: expr) => {{
+    ($tensor: ident, @axes_kernel $axes: ident, $axes_val: expr, $keepdims: expr $(, $factor: expr)?) => {{
         let axes = $axes_val;
         let keepdims = $keepdims;
         let layout: Layout<IxD> = $tensor.layout().to_dim()?;
@@ -797,7 +796,7 @@ macro_rules! reduce_dispatch_output {
             AxesIndex::None => AxesIndex::Vec((0..layout.ndim() as isize).collect_vec()),
             axes => axes,
         };
-        let (storage, out_layout) = $tensor.device().$axes($tensor.raw(), $tensor.layout(), axes.as_ref())?;
+        let (storage, out_layout) = $tensor.device().$axes($tensor.raw(), $tensor.layout(), axes.as_ref() $(, $factor)?)?;
         let out_layout = reduce_layout_keepdims(out_layout, &axes, layout.ndim(), keepdims)?;
         Tensor::new_f(storage, out_layout)
     }};
@@ -859,8 +858,9 @@ macro_rules! trait_reduction_dtype {
 }
 
 /// var/std `*_with_dtype`: same dispatch as [`trait_reduction_dtype`], but
-/// consuming [`VarArgs`] and applying array-api `correction` to the finished
-/// result (output-sized rescale; no input-sized intermediate).
+/// consuming [`VarArgs`]. The array-api `correction` becomes an `f64` factor
+/// handed to the device, which folds it into the reduction; no input-sized
+/// intermediate is created.
 ///
 /// The fold accumulates `(sum, sum-of-squares)` in `TOut` (one-pass formula, same as NumPy). With
 /// a narrower accumulator than the input (e.g. `f64` input folded in `f32`) catastrophic
@@ -874,16 +874,7 @@ macro_rules! trait_reduction_dtype_varstd {
         ) -> Result<Tensor<TOut, B, IxD>>
         where
             D: DimAPI,
-            TOut: Float + FromPrimitive + Send + Sync + 'static,
-            B: $OpReduceDtypeAPI<T, TOut, D>
-                + DeviceCreationAnyAPI<TOut>
-                + DeviceRawAPI<MaybeUninit<TOut>>
-                + for<'f> Op_MutA_RefB_API<
-                    TOut,
-                    TOut,
-                    IxD,
-                    dyn Fn(&mut MaybeUninit<TOut>, &TOut) + Send + Sync + 'f,
-                >,
+            B: $OpReduceDtypeAPI<T, TOut, D>,
         {
             let VarArgs {
                 axes,
@@ -892,16 +883,7 @@ macro_rules! trait_reduction_dtype_varstd {
             } = args.into();
             let tensor = tensor.view();
 
-            let result = reduce_dispatch_output!(tensor, @axes_kernel $fn_axes_dtype, axes.clone(), keepdims)?;
-
-            match correction {
-                None => Ok(result),
-                Some(correction) => {
-                    let size = reduced_axes_size(&axes, tensor.layout())?;
-                    let factor = <TOut as FromPrimitive>::from_f64(var_correction_factor(size, correction, $is_std)).unwrap();
-                    Ok(result.mapv(move |x| x * factor))
-                },
-            }
+            reduce_dispatch_output!(tensor, @axes_kernel $fn_axes_dtype, axes, keepdims, correction)
         }
 
         pub fn $fn_with_dtype<T, TOut, B, D>(
@@ -910,16 +892,7 @@ macro_rules! trait_reduction_dtype_varstd {
         ) -> Tensor<TOut, B, IxD>
         where
             D: DimAPI,
-            TOut: Float + FromPrimitive + Send + Sync + 'static,
-            B: $OpReduceDtypeAPI<T, TOut, D>
-                + DeviceCreationAnyAPI<TOut>
-                + DeviceRawAPI<MaybeUninit<TOut>>
-                + for<'f> Op_MutA_RefB_API<
-                    TOut,
-                    TOut,
-                    IxD,
-                    dyn Fn(&mut MaybeUninit<TOut>, &TOut) + Send + Sync + 'f,
-                >,
+            B: $OpReduceDtypeAPI<T, TOut, D>,
         {
             $fn_with_dtype_f(tensor, args).rstsr_unwrap()
         }
@@ -932,32 +905,14 @@ macro_rules! trait_reduction_dtype_varstd {
         {
             pub fn $fn_with_dtype_f<TOut>(&self, args: impl Into<VarArgs>) -> Result<Tensor<TOut, B, IxD>>
             where
-                TOut: Float + FromPrimitive + Send + Sync + 'static,
-                B: $OpReduceDtypeAPI<T, TOut, D>
-                    + DeviceCreationAnyAPI<TOut>
-                    + DeviceRawAPI<MaybeUninit<TOut>>
-                    + for<'f> Op_MutA_RefB_API<
-                        TOut,
-                        TOut,
-                        IxD,
-                        dyn Fn(&mut MaybeUninit<TOut>, &TOut) + Send + Sync + 'f,
-                    >,
+                B: $OpReduceDtypeAPI<T, TOut, D>,
             {
                 $fn_with_dtype_f(self, args)
             }
 
             pub fn $fn_with_dtype<TOut>(&self, args: impl Into<VarArgs>) -> Tensor<TOut, B, IxD>
             where
-                TOut: Float + FromPrimitive + Send + Sync + 'static,
-                B: $OpReduceDtypeAPI<T, TOut, D>
-                    + DeviceCreationAnyAPI<TOut>
-                    + DeviceRawAPI<MaybeUninit<TOut>>
-                    + for<'f> Op_MutA_RefB_API<
-                        TOut,
-                        TOut,
-                        IxD,
-                        dyn Fn(&mut MaybeUninit<TOut>, &TOut) + Send + Sync + 'f,
-                    >,
+                B: $OpReduceDtypeAPI<T, TOut, D>,
             {
                 $fn_with_dtype(self, args)
             }
@@ -980,24 +935,6 @@ pub use impl_trait_reduction_dtype::*;
 
 /* #region var/std with args (correction) */
 
-/// Rescale factor from population variance to corrected variance
-/// (NumPy `ddof` / array-api `correction`): `M / (M - correction)`, `sqrt`'ed
-/// for std. NaN when `M - correction <= 0` (array-api contract).
-fn var_correction_factor(size: usize, correction: f64, is_std: bool) -> f64 {
-    let m = size as f64;
-    let d = m - correction;
-    if d <= 0.0 {
-        f64::NAN
-    } else {
-        let factor = m / d;
-        if is_std {
-            factor.sqrt()
-        } else {
-            factor
-        }
-    }
-}
-
 /// Variance with [`VarArgs`] (fallible).
 ///
 /// See also [`var_with_args`].
@@ -1007,36 +944,21 @@ pub fn var_with_args_f<T, B, D>(
 ) -> Result<Tensor<B::TOut, B, IxD>>
 where
     D: DimAPI,
-    B: OpVarAPI<T, D>
-        + DeviceCreationAnyAPI<B::TOut>
-        + Op_MutA_RefB_API<
-            B::TOut,
-            B::TOut,
-            IxD,
-            dyn for<'x, 'y> Fn(&'x mut MaybeUninit<B::TOut>, &'y B::TOut) + Send + Sync,
-        >,
-    B::TOut: Float + FromPrimitive + Send + Sync + 'static,
+    B: OpVarAPI<T, D> + DeviceCreationAnyAPI<B::TOut>,
 {
     let VarArgs { axes, keepdims, correction } = args.into();
     let tensor = tensor.view();
 
-    let result: Tensor<B::TOut, B, IxD> = reduce_dispatch_output!(tensor, var_all, var_axes, axes.clone(), keepdims)?;
-
-    if let Some(correction) = correction {
-        let size = reduced_axes_size(&axes, tensor.layout())?;
-        let factor = B::TOut::from_f64(var_correction_factor(size, correction, false)).unwrap();
-        return Ok(result.mapv(move |x| x * factor));
-    }
-    Ok(result)
+    reduce_dispatch_output!(tensor, var_all, var_axes, axes, keepdims, correction)
 }
 
 /// Variance with [`VarArgs`] (axes, keepdims, correction).
 ///
 /// The population variance is `mean((x - mean(x))²)` over the reduced axes;
 /// `correction` (Array-API) / `ddof` (NumPy) rescales it to `M / (M -
-/// correction)` times the population value, computed once on the
-/// (output-sized) result; if `M - correction <= 0` the result is NaN. No
-/// input-sized intermediate is created.
+/// correction)` times the population value; the device computes the factor in
+/// `f64` from the reduced size and folds it in. If `M - correction <= 0` the
+/// result is NaN. No input-sized intermediate is created.
 ///
 /// This function behaves identically under [`RowMajor`] and [`ColMajor`] device default orders.
 ///
@@ -1148,15 +1070,7 @@ pub fn var_with_args<T, B, D>(
 ) -> Tensor<B::TOut, B, IxD>
 where
     D: DimAPI,
-    B: OpVarAPI<T, D>
-        + DeviceCreationAnyAPI<B::TOut>
-        + Op_MutA_RefB_API<
-            B::TOut,
-            B::TOut,
-            IxD,
-            dyn for<'x, 'y> Fn(&'x mut MaybeUninit<B::TOut>, &'y B::TOut) + Send + Sync,
-        >,
-    B::TOut: Float + FromPrimitive + Send + Sync + 'static,
+    B: OpVarAPI<T, D> + DeviceCreationAnyAPI<B::TOut>,
 {
     var_with_args_f(tensor, args).rstsr_unwrap()
 }
@@ -1170,34 +1084,19 @@ pub fn std_with_args_f<T, B, D>(
 ) -> Result<Tensor<B::TOut, B, IxD>>
 where
     D: DimAPI,
-    B: OpStdAPI<T, D>
-        + DeviceCreationAnyAPI<B::TOut>
-        + Op_MutA_RefB_API<
-            B::TOut,
-            B::TOut,
-            IxD,
-            dyn for<'x, 'y> Fn(&'x mut MaybeUninit<B::TOut>, &'y B::TOut) + Send + Sync,
-        >,
-    B::TOut: Float + FromPrimitive + Send + Sync + 'static,
+    B: OpStdAPI<T, D> + DeviceCreationAnyAPI<B::TOut>,
 {
     let VarArgs { axes, keepdims, correction } = args.into();
     let tensor = tensor.view();
 
-    let result: Tensor<B::TOut, B, IxD> = reduce_dispatch_output!(tensor, std_all, std_axes, axes.clone(), keepdims)?;
-
-    if let Some(correction) = correction {
-        let size = reduced_axes_size(&axes, tensor.layout())?;
-        let factor = B::TOut::from_f64(var_correction_factor(size, correction, true)).unwrap();
-        return Ok(result.mapv(move |x| x * factor));
-    }
-    Ok(result)
+    reduce_dispatch_output!(tensor, std_all, std_axes, axes, keepdims, correction)
 }
 
 /// Standard deviation with [`VarArgs`] (axes, keepdims, correction).
 ///
 /// The square root of [`var_with_args`]; the same [`VarArgs`] overloads apply
 /// and `correction` is the Array-API / NumPy `ddof` rescale (`M / (M -
-/// correction)`, then `sqrt`), computed once on the (output-sized) result.
+/// correction)`, then `sqrt`), applied by the device.
 ///
 /// This function behaves identically under [`RowMajor`] and [`ColMajor`] device default orders.
 ///
@@ -1305,29 +1204,9 @@ pub fn std_with_args<T, B, D>(
 ) -> Tensor<B::TOut, B, IxD>
 where
     D: DimAPI,
-    B: OpStdAPI<T, D>
-        + DeviceCreationAnyAPI<B::TOut>
-        + Op_MutA_RefB_API<
-            B::TOut,
-            B::TOut,
-            IxD,
-            dyn for<'x, 'y> Fn(&'x mut MaybeUninit<B::TOut>, &'y B::TOut) + Send + Sync,
-        >,
-    B::TOut: Float + FromPrimitive + Send + Sync + 'static,
+    B: OpStdAPI<T, D> + DeviceCreationAnyAPI<B::TOut>,
 {
     std_with_args_f(tensor, args).rstsr_unwrap()
-}
-
-/// Number of elements each output cell aggregates: the product of the reduced
-/// axes' sizes (all axes when `AxesIndex::None`).
-fn reduced_axes_size<D: DimAPI>(axes: &AxesIndex<isize>, layout: &Layout<D>) -> Result<usize> {
-    match axes {
-        AxesIndex::None => Ok(layout.size()),
-        axes => {
-            let axes_norm = normalize_axes_index(axes.clone(), layout.ndim(), false, true)?;
-            Ok(axes_norm.iter().map(|&axis| layout.shape()[axis as usize]).product::<usize>())
-        },
-    }
 }
 
 impl<R, T, B, D> TensorAny<R, T, B, D>
@@ -1338,28 +1217,14 @@ where
 {
     pub fn var_with_args_f(&self, args: impl Into<VarArgs>) -> Result<Tensor<B::TOut, B, IxD>>
     where
-        B: DeviceCreationAnyAPI<B::TOut>
-            + Op_MutA_RefB_API<
-                B::TOut,
-                B::TOut,
-                IxD,
-                dyn for<'x, 'y> Fn(&'x mut MaybeUninit<B::TOut>, &'y B::TOut) + Send + Sync,
-            >,
-        B::TOut: Float + FromPrimitive + Send + Sync + 'static,
+        B: DeviceCreationAnyAPI<B::TOut>,
     {
         var_with_args_f(self, args)
     }
 
     pub fn var_with_args(&self, args: impl Into<VarArgs>) -> Tensor<B::TOut, B, IxD>
     where
-        B: DeviceCreationAnyAPI<B::TOut>
-            + Op_MutA_RefB_API<
-                B::TOut,
-                B::TOut,
-                IxD,
-                dyn for<'x, 'y> Fn(&'x mut MaybeUninit<B::TOut>, &'y B::TOut) + Send + Sync,
-            >,
-        B::TOut: Float + FromPrimitive + Send + Sync + 'static,
+        B: DeviceCreationAnyAPI<B::TOut>,
     {
         var_with_args(self, args)
     }
@@ -1373,28 +1238,14 @@ where
 {
     pub fn std_with_args_f(&self, args: impl Into<VarArgs>) -> Result<Tensor<B::TOut, B, IxD>>
     where
-        B: DeviceCreationAnyAPI<B::TOut>
-            + Op_MutA_RefB_API<
-                B::TOut,
-                B::TOut,
-                IxD,
-                dyn for<'x, 'y> Fn(&'x mut MaybeUninit<B::TOut>, &'y B::TOut) + Send + Sync,
-            >,
-        B::TOut: Float + FromPrimitive + Send + Sync + 'static,
+        B: DeviceCreationAnyAPI<B::TOut>,
     {
         std_with_args_f(self, args)
     }
 
     pub fn std_with_args(&self, args: impl Into<VarArgs>) -> Tensor<B::TOut, B, IxD>
     where
-        B: DeviceCreationAnyAPI<B::TOut>
-            + Op_MutA_RefB_API<
-                B::TOut,
-                B::TOut,
-                IxD,
-                dyn for<'x, 'y> Fn(&'x mut MaybeUninit<B::TOut>, &'y B::TOut) + Send + Sync,
-            >,
-        B::TOut: Float + FromPrimitive + Send + Sync + 'static,
+        B: DeviceCreationAnyAPI<B::TOut>,
     {
         std_with_args(self, args)
     }

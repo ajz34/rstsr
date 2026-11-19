@@ -841,4 +841,47 @@ where
     }
 }
 
+use crate::kernels::reduce;
+use crate::kernels::reduce_plan::classify_reduce;
+
+impl<T, D> DeviceVecdotAPI<T, T, T, D, D, D> for DeviceCuda
+where
+    Self: DeviceRawAPI<T, Raw = CudaBuffer<T>>
+        + DeviceRawAPI<MaybeUninit<T>, Raw = CudaBuffer<MaybeUninit<T>>>,
+    T: CudaDType,
+    D: DimAPI,
+{
+    fn vecdot(
+        &self,
+        c: &mut CudaBuffer<MaybeUninit<T>>,
+        lc: &Layout<D>,
+        a: &CudaBuffer<T>,
+        la: &Layout<D>,
+        b: &CudaBuffer<T>,
+        lb: &Layout<D>,
+        axes_a: &[isize],
+        axes_b: &[isize],
+    ) -> Result<()> {
+        // The trait takes no `order`: each device supplies its own default. This is the same value
+        // the CPU path receives from its caller.
+        let order: FlagOrder = self.default_order();
+
+        // Work on dynamic layouts: the split destroys static rank knowledge, and the classifier must
+        // see exactly the `Layout<IxD>` the CPU code sees so the port stays faithful.
+        let la_d = la.to_dim::<IxD>()?;
+        let lb_d = lb.to_dim::<IxD>()?;
+        let lc_d = lc.to_dim::<IxD>()?;
+
+        let plan = classify_reduce(&la_d, &lb_d, &lc_d, axes_a, axes_b, order)?;
+
+        // The plan already carries the strides, so the launcher needs the split layouts only for
+        // their base offsets. No broadcast-alignment here: the classifier aligns its own copy and
+        // the output's offset does not move under it.
+        let (las, _) = la_d.dim_split_axes(axes_a)?;
+        let (lbs, _) = lb_d.dim_split_axes(axes_b)?;
+
+        reduce::vecdot_launch(self, c, &lc_d, a, &las, b, &lbs, &plan)
+    }
+}
+
 // /* #endregion */
