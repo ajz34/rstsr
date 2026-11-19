@@ -1571,14 +1571,11 @@ fn tensordot_refuses_a_contraction_that_needs_a_pack() {
 
 /// `var_with_dtype` and `std_with_dtype` on CUDA.
 ///
-/// These could not be *called* before this round: the public wrappers carried a
-/// `for<'f> Op_MutA_RefB_API<TOut, TOut, IxD, dyn Fn(..)>` bound for the `correction` rescale, and a
-/// closure cannot cross into a kernel, so the bound was unsatisfiable on any accelerator — even for
-/// `correction: None`, where the rescale never runs, because a `where` clause is checked whether or
-/// not the branch is taken. The rescale was only ever `x * factor`; it is now a device multiply.
+/// The `correction` is handed to the device, which computes the factor from the reduced size and
+/// folds it in; the public wrappers carry no element bound and no host-closure bound.
 ///
-/// So the first assertion is the interesting one: `correction: None` compiles at all. The second
-/// pins the arithmetic of the `Some` path against the CPU's own `M/(M-correction)` factor.
+/// The first assertion is the `None` path (no factor at all); the second pins `M / (M - correction)`
+/// against the CPU.
 #[test]
 fn var_std_with_dtype_vs_cpu() {
     require_cuda!();
@@ -1592,14 +1589,14 @@ fn var_std_with_dtype_vs_cpu() {
     let a_cpu: Tensor<f64, DeviceCpuSerial, _> = rt::asarray((data, &dcpu)).into_shape([6, 8]);
     let a = a_cpu.to_device(&d);
 
-    // (1) no correction: this is the call that used to fail to compile
+    // (1) no correction: must not need the correction machinery at all
     // The turbofish pins `TOut`: a `Tensor<f64, _, Ix1>` annotation would not, because the second
     // parameter is the backend and `_` there leaves the whole type ambiguous.
     let got_none = rt::var_with_dtype::<f64, f64, _, _>(&a, 1);
     let want_none = rt::var_with_dtype::<f64, f64, _, _>(&a_cpu, 1);
     assert_close(&host_nd(&got_none), &host_nd(&want_none), "var_with_dtype, correction None");
 
-    // (2) with a correction: `M / (M - 1)` rescale on the finished result
+    // (2) with a correction: `M / (M - 1)`, applied by the device
     let args = |ap: AxesIndex<isize>| VarArgs { axes: ap, keepdims: false, correction: Some(1.0) };
     let got = rt::var_with_dtype::<f64, f64, _, _>(&a, args(AxesIndex::Val(1)));
     let want = rt::var_with_dtype::<f64, f64, _, _>(&a_cpu, args(AxesIndex::Val(1)));

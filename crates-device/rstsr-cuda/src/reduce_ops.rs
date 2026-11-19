@@ -54,7 +54,7 @@
 
 use core::mem::MaybeUninit;
 
-use crate::dtype::CudaReal;
+use crate::dtype::{CudaArith, CudaReal};
 use crate::kernels::reduce_pair::{reduce_pair_launch, PairOp};
 use crate::kernels::reduce_plan::{classify_reduce, ReducePlan};
 use crate::kernels::reduce_unary::{reduce_unary_launch, AccSpec, ReduceAcc, UnaryOp};
@@ -573,21 +573,61 @@ where
 /// `Σ|x|²` in `T::Real`, i.e. two different accumulator types. `num::Float` is what excludes it.
 ///
 /// `NaN` is the empty-input fill, matching the CPU: with `n = 0` the formula is `0/0 − 0`.
+/// Applies the var/std `correction` factor to a finished pair reduction.
+///
+/// The device owns the factor and the `f64 -> T` conversion, so the tensor tier needs no element
+/// bound for `correction: None`.
+fn scale_pair_output<T>(
+    device: &DeviceCuda,
+    raw: Storage<DataOwned<CudaBuffer<T>>, T, DeviceCuda>,
+    layout: Layout<IxD>,
+    factor: T,
+) -> Result<(Storage<DataOwned<CudaBuffer<T>>, T, DeviceCuda>, Layout<IxD>)>
+where
+    T: CudaDType,
+    DeviceCuda: DeviceCreationAnyAPI<T>
+        + DeviceRawAPI<T, Raw = CudaBuffer<T>>
+        + DeviceRawAPI<MaybeUninit<T>, Raw = CudaBuffer<MaybeUninit<T>>>
+        + OpMulAPI<T, T, T, IxD>,
+{
+    let mut out = device.uninit_impl(layout.bounds_index()?.1)?;
+    <DeviceCuda as OpMulAPI<T, T, T, IxD>>::op_mutc_numa_refb(
+        device,
+        out.raw_mut(),
+        &layout,
+        factor,
+        raw.raw(),
+        &layout,
+    )?;
+    // SAFETY: the scalar multiply wrote every element of `layout`, which covers the fresh
+    // allocation exactly.
+    let out = unsafe { <DeviceCuda as DeviceCreationAnyAPI<T>>::assume_init_impl(out) }?;
+    Ok((out, layout))
+}
+
 macro_rules! impl_var_std {
-    ($tr:ident, $op:expr, $all:ident, $axes:ident) => {
+    ($tr:ident, $op:expr, $all:ident, $axes:ident, $is_std:literal) => {
         impl<T, D> $tr<T, D> for DeviceCuda
         where
             Self: DeviceRawAPI<T, Raw = CudaBuffer<T>>
                 + DeviceRawAPI<MaybeUninit<T>, Raw = CudaBuffer<MaybeUninit<T>>>
                 + DeviceCreationAnyAPI<T>
-                + DeviceToCpuAPI<T>,
-            T: CudaDType + ReduceAcc + num::Float,
+                + DeviceToCpuAPI<T>
+                + OpMulAPI<T, T, T, IxD>,
+            T: CudaDType + CudaArith + ReduceAcc + num::Float,
             D: DimAPI,
         {
             type TOut = T;
 
-            fn $all(&self, a: &CudaBuffer<T>, la: &Layout<D>) -> Result<T> {
-                reduce_pair_all_impl(self, $op, T::SPEC, a, &la.to_dim::<IxD>()?, T::nan())
+            fn $all(&self, a: &CudaBuffer<T>, la: &Layout<D>, correction: Option<f64>) -> Result<T> {
+                let value = reduce_pair_all_impl(self, $op, T::SPEC, a, &la.to_dim::<IxD>()?, T::nan())?;
+                Ok(match correction {
+                    Some(correction) => {
+                        let factor = var_correction_factor(la.size(), correction, $is_std);
+                        value * <T as num::NumCast>::from(factor).unwrap()
+                    },
+                    None => value,
+                })
             }
 
             fn $axes(
@@ -595,18 +635,27 @@ macro_rules! impl_var_std {
                 a: &CudaBuffer<T>,
                 la: &Layout<D>,
                 axes: &[isize],
+                correction: Option<f64>,
             ) -> Result<(
                 Storage<DataOwned<<Self as DeviceRawAPI<Self::TOut>>::Raw>, Self::TOut, Self>,
                 Layout<IxD>,
             )> {
-                reduce_pair_axes_impl(self, $op, T::SPEC, a, &la.to_dim::<IxD>()?, axes, T::nan())
+                let (raw, layout) = reduce_pair_axes_impl(self, $op, T::SPEC, a, &la.to_dim::<IxD>()?, axes, T::nan())?;
+                match correction {
+                    Some(correction) => {
+                        let (layout_axes, _) = la.dim_split_axes(axes)?;
+                        let factor = var_correction_factor(layout_axes.size(), correction, $is_std);
+                        scale_pair_output(self, raw, layout, <T as num::NumCast>::from(factor).unwrap())
+                    },
+                    None => Ok((raw, layout)),
+                }
             }
         }
     };
 }
 
-impl_var_std!(OpVarAPI, PairOp::Var, var_all, var_axes);
-impl_var_std!(OpStdAPI, PairOp::Std, std_all, std_axes);
+impl_var_std!(OpVarAPI, PairOp::Var, var_all, var_axes, false);
+impl_var_std!(OpStdAPI, PairOp::Std, std_all, std_axes, true);
 
 /// `var_axes_dtype`/`std_axes_dtype`: the same pair fold with an **explicit accumulator type**.
 ///
@@ -616,17 +665,18 @@ impl_var_std!(OpStdAPI, PairOp::Std, std_all, std_axes);
 /// separately. Until it existed, `var_with_dtype` did not exist for CUDA at all: the public wrapper
 /// names `OpVarDtypeAPI` in its `where` clause.
 macro_rules! impl_var_std_dtype {
-    ($tr:ident, $op:expr, $axes:ident) => {
+    ($tr:ident, $op:expr, $axes:ident, $is_std:literal) => {
         impl<T, TOut, D> $tr<T, TOut, D> for DeviceCuda
         where
             Self: DeviceRawAPI<T, Raw = CudaBuffer<T>>
                 + DeviceRawAPI<TOut, Raw = CudaBuffer<TOut>>
                 + DeviceRawAPI<MaybeUninit<TOut>, Raw = CudaBuffer<MaybeUninit<TOut>>>
-                + DeviceCreationAnyAPI<TOut>,
+                + DeviceCreationAnyAPI<TOut>
+                + OpMulAPI<TOut, TOut, TOut, IxD>,
             T: CudaDType,
             // The accumulator is the *output* type here, so it is the one that must be a real
             // float: `Σx²` in an integer accumulator is not a variance.
-            TOut: CudaDType + ReduceAcc + num::Float,
+            TOut: CudaDType + CudaArith + ReduceAcc + num::Float,
             D: DimAPI,
         {
             fn $axes(
@@ -634,18 +684,27 @@ macro_rules! impl_var_std_dtype {
                 a: &CudaBuffer<T>,
                 la: &Layout<D>,
                 axes: &[isize],
+                correction: Option<f64>,
             ) -> Result<(
                 Storage<DataOwned<<Self as DeviceRawAPI<TOut>>::Raw>, TOut, Self>,
                 Layout<IxD>,
             )> {
-                reduce_pair_axes_impl(self, $op, TOut::SPEC, a, &la.to_dim::<IxD>()?, axes, TOut::nan())
+                let (raw, layout) = reduce_pair_axes_impl(self, $op, TOut::SPEC, a, &la.to_dim::<IxD>()?, axes, TOut::nan())?;
+                match correction {
+                    Some(correction) => {
+                        let (layout_axes, _) = la.dim_split_axes(axes)?;
+                        let factor = var_correction_factor(layout_axes.size(), correction, $is_std);
+                        scale_pair_output(self, raw, layout, <TOut as num::NumCast>::from(factor).unwrap())
+                    },
+                    None => Ok((raw, layout)),
+                }
             }
         }
     };
 }
 
-impl_var_std_dtype!(OpVarDtypeAPI, PairOp::Var, var_axes_dtype);
-impl_var_std_dtype!(OpStdDtypeAPI, PairOp::Std, std_axes_dtype);
+impl_var_std_dtype!(OpVarDtypeAPI, PairOp::Var, var_axes_dtype, false);
+impl_var_std_dtype!(OpStdDtypeAPI, PairOp::Std, std_axes_dtype, true);
 
 /// `*_axes` for the two-slot family: the shared prelude, then the pair launcher.
 fn reduce_pair_axes_impl<TIn, TOut>(
