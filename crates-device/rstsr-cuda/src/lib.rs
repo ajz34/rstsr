@@ -7,6 +7,11 @@
 //! - [`flags`]: `Option<CudaRuntimeFlags>` per device + env-seeded global default; compared as
 //!   stored by `same_device`.
 //! - [`stream::CudaStreamObj`]: user-visible, strictly compared.
+//! - [`pinned::DeviceCudaPinned`] / [`pinned::PinnedBuffer<T>`]: page-locked *host* tensors
+//!   (`Raw = PinnedBuffer<T>`), a transfer endpoint for non-blocking H2D/D2H and a zero-copy source
+//!   of `DeviceCpuSerial` views ([`pinned::TensorPinnedHostViewAPI`]).
+//! - [`event::CudaEvent`] / [`sync::CudaSyncAPI`]: user-side cross-stream ordering and an explicit
+//!   "data is ready" wait.
 //!
 //! Execution model: every op is issued on the device value's stream and
 //! returns immediately; host reads (`to_vec`, `to_scalar`, `Display`, ...)
@@ -33,6 +38,7 @@
 //! | family | coverage |
 //! |---|---|
 //! | storage / transfer | creation, fill, strided copy with cast, `to_device` both ways, streams |
+//! | pinned host memory | `PinnedBuffer<T>` on `DeviceCudaPinned` (alloc/zeros/full/from_vec), non-blocking `to_device` both ways against `DeviceCuda`, copies against the CPU devices, zero-copy `host_view`/`host_view_mut`, one ordering event per buffer |
 //! | elementwise | arithmetic, comparison, transcendentals, unary float families, `where`, `clip` (same dtype) |
 //! | reductions | `sum`/`prod`/`mean`/`l2_norm`/`min`/`max`/`all`/`any`/`count_nonzero` (+ dtype variants), `var`/`std` (+ dtype), `argmin`/`argmax`/`nanarg*` (raveled, all + axes), `cumsum`/`cumprod` (real dtypes) |
 //! | linalg | `outer`, `cross`, `matmul`/`matmul_uninit` (cuBLAS, tiled kernel as fallback), `tensordot` (view-only tier) |
@@ -93,6 +99,7 @@
 //! CUDARC_CUDA_VERSION=12060 cargo test -p rstsr-cuda --lib            # no device needed
 //! CUDARC_CUDA_VERSION=12060 cargo test -p rstsr-cuda --test test_kernels
 //! CUDARC_CUDA_VERSION=12060 cargo test -p rstsr-cuda --test test_matmul_tiled
+//! CUDARC_CUDA_VERSION=12060 cargo test -p rstsr-cuda --test test_pinned
 //! ```
 //!
 //! Without a visible driver every hardware test prints `skipping: no CUDA device visible` and
@@ -148,9 +155,11 @@ pub mod creation;
 pub mod device;
 pub mod dtype;
 pub mod error;
+pub mod event;
 pub mod flags;
 pub mod format;
 pub mod kernel;
+pub mod pinned;
 pub mod linalg;
 pub(crate) mod kernels;
 
@@ -160,14 +169,18 @@ pub mod reduce_ops;
 pub mod scan_ops;
 pub mod registry;
 pub mod stream;
+pub mod sync;
 pub mod transfer;
 
 pub mod prelude_dev {
     pub use crate::buffer::CudaBuffer;
     pub use crate::device::DeviceCuda;
+    pub use crate::event::CudaEvent;
     pub use crate::flags::{default_flags, set_default_flags, ComputeType32F, CudaRuntimeFlags};
+    pub use crate::pinned::{DeviceCudaPinned, PinnedBuffer, TensorPinnedHostViewAPI, TensorPinnedHostViewMutAPI};
     pub use crate::registry::CudaOrdinalObj;
     pub use crate::stream::CudaStreamObj;
+    pub use crate::sync::CudaSyncAPI;
     pub use rstsr_core::prelude_dev::*;
 }
 
@@ -200,5 +213,10 @@ pub mod funcs {
     /// Block until all work on `device`'s execution stream completes.
     pub fn synchronize(device: &DeviceCuda) -> Result<()> {
         device.synchronize()
+    }
+
+    /// Block until the data of `tensor` (CUDA or pinned) is observable on the host.
+    pub fn synchronize_tensor<T: CudaSyncAPI>(tensor: &T) -> Result<()> {
+        tensor.synchronize_f()
     }
 }

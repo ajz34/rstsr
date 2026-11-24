@@ -1,5 +1,6 @@
 //! Stream wrapper for `DeviceCuda`.
 
+use crate::device::DeviceCuda;
 use crate::error::{map_driver_error, map_driver_result};
 use crate::prelude_dev::*;
 use cudarc::cublas::CudaBlas;
@@ -73,6 +74,11 @@ pub struct CudaStreamObj {
 }
 
 impl CudaStreamObj {
+    /// Create a new stream on `device`'s ordinal (context-bound, cublas slot lazy).
+    pub fn new_f(device: &DeviceCuda) -> Result<Self> {
+        Self::new(device.ordinal_obj().context())
+    }
+
     /// Create a new stream on `ctx`.
     pub(crate) fn new(ctx: &Arc<CudaContext>) -> Result<Self> {
         let stream = ctx.new_stream().map_err(map_driver_error)?;

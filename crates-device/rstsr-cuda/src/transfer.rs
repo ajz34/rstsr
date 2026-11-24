@@ -1,4 +1,5 @@
-//! Host <-> device transfers.
+//! Host <-> device transfers (pageable `Vec<T>` paths; the pinned-buffer
+//! paths live in [`crate::pinned::transfer`]).
 //!
 //! Copies use the raw driver API on byte views, keeping the storage layer
 //! dtype-agnostic. All transfers synchronize before host data is touched;

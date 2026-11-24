@@ -50,6 +50,48 @@ impl DeviceCuda {
         Ok(Self { ordinal: ordinal_obj, stream, flags: None, default_order: FlagOrder::default() })
     }
 
+    /// A device value of `ordinal` on a **fresh** stream (flags and order at
+    /// their defaults). Panics through the error mapping; use
+    /// [`DeviceCuda::new_stream_with_ordinal_f`] for the fallible form.
+    pub fn new_stream_with_ordinal(ordinal: usize) -> Self {
+        Self::new_stream_with_ordinal_f(ordinal).rstsr_unwrap()
+    }
+
+    /// Fallible form of [`DeviceCuda::new_stream_with_ordinal`].
+    pub fn new_stream_with_ordinal_f(ordinal: usize) -> Result<Self> {
+        let mut device = Self::new_f(ordinal)?;
+        let stream = Arc::new(CudaStreamObj::new_f(&device)?);
+        device.stream = stream;
+        Ok(device)
+    }
+
+    /// Clone of this device value on a **fresh** stream of the same ordinal
+    /// (keeps flags override and default order). Panics through the error
+    /// mapping; use [`DeviceCuda::new_stream_f`] for the fallible form.
+    pub fn new_stream(&self) -> Self {
+        self.new_stream_f().rstsr_unwrap()
+    }
+
+    /// Fallible form of [`DeviceCuda::new_stream`].
+    pub fn new_stream_f(&self) -> Result<Self> {
+        let mut device = self.clone();
+        let stream = Arc::new(CudaStreamObj::new_f(self)?);
+        device.stream = stream;
+        Ok(device)
+    }
+
+    /// Immutable twin of [`DeviceCuda::set_stream`]: this device value on
+    /// `stream`, otherwise unchanged.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `stream` belongs to a different ordinal.
+    pub fn with_stream(self, stream: &Arc<CudaStreamObj>) -> Self {
+        let mut device = self;
+        device.set_stream(stream.clone());
+        device
+    }
+
     /// The CUDA ordinal of this device.
     pub fn ordinal(&self) -> usize {
         self.ordinal.ordinal()
