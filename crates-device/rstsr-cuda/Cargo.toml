@@ -48,3 +48,7 @@ dynamic-linking = ["cudarc/dynamic-linking"]
 [[bench]]
 name = "bench_elementwise"
 harness = false
+
+[[bench]]
+name = "bench_streaming"
+harness = false
