@@ -52,7 +52,7 @@
 use crate::dtype::CudaDType;
 use crate::prelude_dev::*;
 
-use super::reduce_unary::{offset_ptr, render};
+use super::reduce_unary::render;
 
 /// `@TO@` is the element type; the index vector is `usize`, which `CudaDType` spells
 /// `unsigned long long` — the same width as `rstsr_usz`, so no conversion is needed on device.
@@ -182,7 +182,7 @@ where
     crate::kernel::FlatLaunch::new(exec, &f, n)
         .arg_buf(c_typed)
         .arg_buf(a)
-        .arg_u64(offset_ptr(exec, indices, 0))
+        .arg_ptr(indices, 0)
         .arg_i32(lc.ndim() as i32)
         .arg_u64(pack.shapes[0])
         .arg_u64(pack.strides[0])
@@ -256,7 +256,7 @@ where
     crate::kernel::FlatLaunch::new(exec, &f, n)
         .arg_buf(a)
         .arg_buf(v)
-        .arg_u64(offset_ptr(exec, indices, 0))
+        .arg_ptr(indices, 0)
         .arg_i32(lv.ndim() as i32)
         .arg_u64(pack.shapes[0])
         .arg_u64(pack.strides[0])

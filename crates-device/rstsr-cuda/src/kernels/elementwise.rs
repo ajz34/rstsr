@@ -20,7 +20,6 @@ use crate::dtype::CudaDType;
 use crate::kernel::{make_key, order_input, FlatLaunch};
 use crate::kernels_ops;
 use crate::prelude_dev::*;
-use std::sync::Arc;
 
 /// Device-side plan accessors: `rank == 0` is the flat encoding (offset =
 /// linear id); division is the round-up magic (`__umul64hi` high word).
@@ -377,17 +376,6 @@ fn plan_variant(plans: &[&OperandPlan]) -> PlanVariant {
     PlanVariant::Wide
 }
 
-/// Pointer argument folded with the element-unit offset (planned kernels
-/// take no separate offset parameters).
-fn offset_ptr<T>(exec: &Arc<CudaStreamObj>, buf: &CudaBuffer<T>, offset: usize) -> u64 {
-    if buf.is_empty() {
-        0
-    } else {
-        // the read event must land on the launching stream (not the
-        // allocation stream), or a cross-stream free can race the kernel
-        (buf.device_ptr_on(exec) as u64).wrapping_add(offset as u64 * core::mem::size_of::<T>() as u64)
-    }
-}
 
 // /* #endregion */
 // /* #region launchers */
@@ -474,9 +462,9 @@ where
         PlanVariant::Flat => {
             launch = launch
                 .elems_per_thread(4)
-                .arg_u64(offset_ptr(exec, c_typed, lc.offset()))
-                .arg_u64(offset_ptr(exec, a, la.offset()))
-                .arg_u64(offset_ptr(exec, b, lb.offset()))
+                .arg_ptr(c_typed, lc.offset())
+                .arg_ptr(a, la.offset())
+                .arg_ptr(b, lb.offset())
                 .arg_usize(n);
         },
         PlanVariant::Narrow => {
@@ -484,11 +472,11 @@ where
             let (nop, nap, nbp) = (plan_bytes_n(&po), plan_bytes_n(&pa), plan_bytes_n(&pb));
             launch = launch
                 .elems_per_thread(4)
-                .arg_u64(offset_ptr(exec, c_typed, lc.offset()))
+                .arg_ptr(c_typed, lc.offset())
                 .arg_bytes(nop.as_ref().unwrap_or(&zn).bytes())
-                .arg_u64(offset_ptr(exec, a, la.offset()))
+                .arg_ptr(a, la.offset())
                 .arg_bytes(nap.as_ref().unwrap_or(&zn).bytes())
-                .arg_u64(offset_ptr(exec, b, lb.offset()))
+                .arg_ptr(b, lb.offset())
                 .arg_bytes(nbp.as_ref().unwrap_or(&zn).bytes())
                 .arg_i32(n as i32);
         },
@@ -496,11 +484,11 @@ where
             let zero = PlanBytes::zeroed();
             let (bop, bap, bbp) = (plan_bytes(&po), plan_bytes(&pa), plan_bytes(&pb));
             launch = launch
-                .arg_u64(offset_ptr(exec, c_typed, lc.offset()))
+                .arg_ptr(c_typed, lc.offset())
                 .arg_bytes(bop.as_ref().unwrap_or(&zero).bytes())
-                .arg_u64(offset_ptr(exec, a, la.offset()))
+                .arg_ptr(a, la.offset())
                 .arg_bytes(bap.as_ref().unwrap_or(&zero).bytes())
-                .arg_u64(offset_ptr(exec, b, lb.offset()))
+                .arg_ptr(b, lb.offset())
                 .arg_bytes(bbp.as_ref().unwrap_or(&zero).bytes())
                 .arg_usize(n);
         },
@@ -590,9 +578,9 @@ where
         PlanVariant::Flat => {
             launch = launch
                 .elems_per_thread(4)
-                .arg_u64(offset_ptr(exec, c_typed, lc.offset()))
-                .arg_u64(offset_ptr(exec, a, la.offset()))
-                .arg_u64(offset_ptr(exec, b, lb.offset()))
+                .arg_ptr(c_typed, lc.offset())
+                .arg_ptr(a, la.offset())
+                .arg_ptr(b, lb.offset())
                 .arg_usize(n)
                 .arg_bytes(&sa.to_ne_bytes())
                 .arg_bytes(&sb.to_ne_bytes())
@@ -603,11 +591,11 @@ where
             let (nop, nap, nbp) = (plan_bytes_n(&po), plan_bytes_n(&pa), plan_bytes_n(&pb));
             launch = launch
                 .elems_per_thread(4)
-                .arg_u64(offset_ptr(exec, c_typed, lc.offset()))
+                .arg_ptr(c_typed, lc.offset())
                 .arg_bytes(nop.as_ref().unwrap_or(&zn).bytes())
-                .arg_u64(offset_ptr(exec, a, la.offset()))
+                .arg_ptr(a, la.offset())
                 .arg_bytes(nap.as_ref().unwrap_or(&zn).bytes())
-                .arg_u64(offset_ptr(exec, b, lb.offset()))
+                .arg_ptr(b, lb.offset())
                 .arg_bytes(nbp.as_ref().unwrap_or(&zn).bytes())
                 .arg_i32(n as i32)
                 .arg_bytes(&sa.to_ne_bytes())
@@ -618,11 +606,11 @@ where
             let zero = PlanBytes::zeroed();
             let (bop, bap, bbp) = (plan_bytes(&po), plan_bytes(&pa), plan_bytes(&pb));
             launch = launch
-                .arg_u64(offset_ptr(exec, c_typed, lc.offset()))
+                .arg_ptr(c_typed, lc.offset())
                 .arg_bytes(bop.as_ref().unwrap_or(&zero).bytes())
-                .arg_u64(offset_ptr(exec, a, la.offset()))
+                .arg_ptr(a, la.offset())
                 .arg_bytes(bap.as_ref().unwrap_or(&zero).bytes())
-                .arg_u64(offset_ptr(exec, b, lb.offset()))
+                .arg_ptr(b, lb.offset())
                 .arg_bytes(bbp.as_ref().unwrap_or(&zero).bytes())
                 .arg_usize(n)
                 .arg_bytes(&sa.to_ne_bytes())
@@ -678,8 +666,8 @@ where
         PlanVariant::Flat => {
             launch = launch
                 .elems_per_thread(4)
-                .arg_u64(offset_ptr(exec, c_typed, lc.offset()))
-                .arg_u64(offset_ptr(exec, b, lb.offset()))
+                .arg_ptr(c_typed, lc.offset())
+                .arg_ptr(b, lb.offset())
                 .arg_usize(n);
         },
         PlanVariant::Narrow => {
@@ -687,18 +675,18 @@ where
             let (nop, nbp) = (plan_bytes_n(&po), plan_bytes_n(&pb));
             launch = launch
                 .elems_per_thread(4)
-                .arg_u64(offset_ptr(exec, c_typed, lc.offset()))
+                .arg_ptr(c_typed, lc.offset())
                 .arg_bytes(nop.as_ref().unwrap_or(&zn).bytes())
-                .arg_u64(offset_ptr(exec, b, lb.offset()))
+                .arg_ptr(b, lb.offset())
                 .arg_bytes(nbp.as_ref().unwrap_or(&zn).bytes())
                 .arg_i32(n as i32);
         },
         PlanVariant::Wide => {
             let zero = PlanBytes::zeroed();
             launch = launch
-                .arg_u64(offset_ptr(exec, c_typed, lc.offset()))
+                .arg_ptr(c_typed, lc.offset())
                 .arg_bytes(plan_bytes(&po).as_ref().unwrap_or(&zero).bytes())
-                .arg_u64(offset_ptr(exec, b, lb.offset()))
+                .arg_ptr(b, lb.offset())
                 .arg_bytes(plan_bytes(&pb).as_ref().unwrap_or(&zero).bytes())
                 .arg_usize(n);
         },
@@ -749,7 +737,7 @@ where
         (PlanVariant::Wide, _) | (PlanVariant::Flat, OperandPlan::Flat) => {
             let zero = PlanBytes::zeroed();
             launch = launch
-                .arg_u64(offset_ptr(exec, a, la.offset()))
+                .arg_ptr(a, la.offset())
                 .arg_bytes(plan_bytes(&pa).as_ref().unwrap_or(&zero).bytes())
                 .arg_usize(n);
         },
@@ -757,7 +745,7 @@ where
             let zn = PlanBytesN::zeroed();
             launch = launch
                 .elems_per_thread(4)
-                .arg_u64(offset_ptr(exec, a, la.offset()))
+                .arg_ptr(a, la.offset())
                 .arg_bytes(plan_bytes_n(&pa).as_ref().unwrap_or(&zn).bytes())
                 .arg_i32(n as i32);
         },
@@ -843,8 +831,8 @@ where
         PlanVariant::Flat => {
             launch = launch
                 .elems_per_thread(4)
-                .arg_u64(offset_ptr(exec, c_typed, lc.offset()))
-                .arg_u64(offset_ptr(exec, t, lt.offset()))
+                .arg_ptr(c_typed, lc.offset())
+                .arg_ptr(t, lt.offset())
                 .arg_bytes(&sbytes)
                 .arg_usize(n);
         },
@@ -853,9 +841,9 @@ where
             let (nop, ntp) = (plan_bytes_n(&po), plan_bytes_n(&pt));
             launch = launch
                 .elems_per_thread(4)
-                .arg_u64(offset_ptr(exec, c_typed, lc.offset()))
+                .arg_ptr(c_typed, lc.offset())
                 .arg_bytes(nop.as_ref().unwrap_or(&zn).bytes())
-                .arg_u64(offset_ptr(exec, t, lt.offset()))
+                .arg_ptr(t, lt.offset())
                 .arg_bytes(ntp.as_ref().unwrap_or(&zn).bytes())
                 .arg_bytes(&sbytes)
                 .arg_i32(n as i32);
@@ -863,9 +851,9 @@ where
         PlanVariant::Wide => {
             let zero = PlanBytes::zeroed();
             launch = launch
-                .arg_u64(offset_ptr(exec, c_typed, lc.offset()))
+                .arg_ptr(c_typed, lc.offset())
                 .arg_bytes(plan_bytes(&po).as_ref().unwrap_or(&zero).bytes())
-                .arg_u64(offset_ptr(exec, t, lt.offset()))
+                .arg_ptr(t, lt.offset())
                 .arg_bytes(plan_bytes(&pt).as_ref().unwrap_or(&zero).bytes())
                 .arg_bytes(&sbytes)
                 .arg_usize(n);
@@ -981,20 +969,20 @@ where
             // one quad-store per thread slot; scalar remainder rides the tail loop
             launch = launch
                 .elems_per_thread(4)
-                .arg_u64(offset_ptr(exec, c, lc.offset()))
+                .arg_ptr(c, lc.offset())
                 .arg_bytes(&vbytes)
                 .arg_usize(n / 2)
                 .arg_usize(n);
         },
         PlanVariant::Flat => {
             launch =
-                launch.elems_per_thread(4).arg_u64(offset_ptr(exec, c, lc.offset())).arg_bytes(&vbytes).arg_usize(n);
+                launch.elems_per_thread(4).arg_ptr(c, lc.offset()).arg_bytes(&vbytes).arg_usize(n);
         },
         PlanVariant::Narrow => {
             let zn = PlanBytesN::zeroed();
             launch = launch
                 .elems_per_thread(4)
-                .arg_u64(offset_ptr(exec, c, lc.offset()))
+                .arg_ptr(c, lc.offset())
                 .arg_bytes(plan_bytes_n(&po).as_ref().unwrap_or(&zn).bytes())
                 .arg_bytes(&vbytes)
                 .arg_i32(n as i32);
@@ -1002,7 +990,7 @@ where
         PlanVariant::Wide => {
             let zero = PlanBytes::zeroed();
             launch = launch
-                .arg_u64(offset_ptr(exec, c, lc.offset()))
+                .arg_ptr(c, lc.offset())
                 .arg_bytes(plan_bytes(&po).as_ref().unwrap_or(&zero).bytes())
                 .arg_bytes(&vbytes)
                 .arg_usize(n);
@@ -1162,13 +1150,9 @@ where
     //     the swapped input view(r, c) = a_buf[c * m + r], i.e. a_buf holds
     //     the transpose data as [n, m] row-major: kernel in=(n, m) (a-buffer
     //     read row-major), out = c-buffer.
-    let (t_rows, t_cols, out_ptr, in_ptr) = match plan {
-        Transpose2D::OutContigInSwap { rows, cols } => {
-            (cols, rows, offset_ptr(exec, c, lc.offset()), offset_ptr(exec, a, la.offset()))
-        },
-        Transpose2D::InContigOutSwap { rows, cols } => {
-            (rows, cols, offset_ptr(exec, c, lc.offset()), offset_ptr(exec, a, la.offset()))
-        },
+    let (t_rows, t_cols) = match plan {
+        Transpose2D::OutContigInSwap { rows, cols } => (cols, rows),
+        Transpose2D::InContigOutSwap { rows, cols } => (rows, cols),
     };
     let includes = [TC::INCLUDES, TA::INCLUDES].concat();
     let subs = [("@TC@", TC::CNAME), ("@TA@", TA::CNAME)];
@@ -1179,8 +1163,8 @@ where
     let col_major = (device.default_order() == ColMajor) as i32;
     let launch = FlatLaunch::new(exec, &f, 0)
         .explicit_shape(grid, (32, 32, 1))
-        .arg_u64(out_ptr)
-        .arg_u64(in_ptr)
+        .arg_ptr(c, lc.offset())
+        .arg_ptr(a, la.offset())
         .arg_usize(t_rows)
         .arg_usize(t_cols)
         .arg_i32(col_major)
@@ -1259,8 +1243,8 @@ where
         PlanVariant::Flat => {
             launch = launch
                 .elems_per_thread(4)
-                .arg_u64(offset_ptr(exec, c, lc.offset()))
-                .arg_u64(offset_ptr(exec, a, la.offset()))
+                .arg_ptr(c, lc.offset())
+                .arg_ptr(a, la.offset())
                 .arg_usize(n);
         },
         PlanVariant::Narrow => {
@@ -1268,18 +1252,18 @@ where
             let (nop, nap) = (plan_bytes_n(&po), plan_bytes_n(&pa));
             launch = launch
                 .elems_per_thread(4)
-                .arg_u64(offset_ptr(exec, c, lc.offset()))
+                .arg_ptr(c, lc.offset())
                 .arg_bytes(nop.as_ref().unwrap_or(&zn).bytes())
-                .arg_u64(offset_ptr(exec, a, la.offset()))
+                .arg_ptr(a, la.offset())
                 .arg_bytes(nap.as_ref().unwrap_or(&zn).bytes())
                 .arg_i32(n as i32);
         },
         PlanVariant::Wide => {
             let zero = PlanBytes::zeroed();
             launch = launch
-                .arg_u64(offset_ptr(exec, c, lc.offset()))
+                .arg_ptr(c, lc.offset())
                 .arg_bytes(plan_bytes(&po).as_ref().unwrap_or(&zero).bytes())
-                .arg_u64(offset_ptr(exec, a, la.offset()))
+                .arg_ptr(a, la.offset())
                 .arg_bytes(plan_bytes(&pa).as_ref().unwrap_or(&zero).bytes())
                 .arg_usize(n);
         },
@@ -1389,9 +1373,9 @@ where
         PlanVariant::Flat => {
             launch = launch
                 .elems_per_thread(4)
-                .arg_u64(offset_ptr(exec, d_typed, ld.offset()))
-                .arg_u64(offset_ptr(exec, a, la.offset()))
-                .arg_u64(offset_ptr(exec, b, lb.offset()))
+                .arg_ptr(d_typed, ld.offset())
+                .arg_ptr(a, la.offset())
+                .arg_ptr(b, lb.offset())
                 .arg_bytes(&cb)
                 .arg_i32(inv)
                 .arg_usize(n);
@@ -1401,11 +1385,11 @@ where
             let (ndp, nap, nbp) = (plan_bytes_n(&pd), plan_bytes_n(&pa), plan_bytes_n(&pb));
             launch = launch
                 .elems_per_thread(4)
-                .arg_u64(offset_ptr(exec, d_typed, ld.offset()))
+                .arg_ptr(d_typed, ld.offset())
                 .arg_bytes(ndp.as_ref().unwrap_or(&zn).bytes())
-                .arg_u64(offset_ptr(exec, a, la.offset()))
+                .arg_ptr(a, la.offset())
                 .arg_bytes(nap.as_ref().unwrap_or(&zn).bytes())
-                .arg_u64(offset_ptr(exec, b, lb.offset()))
+                .arg_ptr(b, lb.offset())
                 .arg_bytes(nbp.as_ref().unwrap_or(&zn).bytes())
                 .arg_bytes(&cb)
                 .arg_i32(inv)
@@ -1414,11 +1398,11 @@ where
         PlanVariant::Wide => {
             let zero = PlanBytes::zeroed();
             launch = launch
-                .arg_u64(offset_ptr(exec, d_typed, ld.offset()))
+                .arg_ptr(d_typed, ld.offset())
                 .arg_bytes(plan_bytes(&pd).as_ref().unwrap_or(&zero).bytes())
-                .arg_u64(offset_ptr(exec, a, la.offset()))
+                .arg_ptr(a, la.offset())
                 .arg_bytes(plan_bytes(&pa).as_ref().unwrap_or(&zero).bytes())
-                .arg_u64(offset_ptr(exec, b, lb.offset()))
+                .arg_ptr(b, lb.offset())
                 .arg_bytes(plan_bytes(&pb).as_ref().unwrap_or(&zero).bytes())
                 .arg_bytes(&cb)
                 .arg_i32(inv)
@@ -1557,18 +1541,18 @@ where
         PlanVariant::Wide => {
             let zero = PlanBytes::zeroed();
             launch = launch
-                .arg_u64(offset_ptr(exec, a, la.offset()))
+                .arg_ptr(a, la.offset())
                 .arg_bytes(plan_bytes(&pa).as_ref().unwrap_or(&zero).bytes())
-                .arg_u64(offset_ptr(exec, b, lb.offset()))
+                .arg_ptr(b, lb.offset())
                 .arg_bytes(plan_bytes(&pb).as_ref().unwrap_or(&zero).bytes())
                 .arg_usize(n);
         },
         PlanVariant::Flat => {
             let zero = PlanBytes::zeroed();
             launch = launch
-                .arg_u64(offset_ptr(exec, a, la.offset()))
+                .arg_ptr(a, la.offset())
                 .arg_bytes(plan_bytes(&pa).as_ref().unwrap_or(&zero).bytes())
-                .arg_u64(offset_ptr(exec, b, lb.offset()))
+                .arg_ptr(b, lb.offset())
                 .arg_bytes(plan_bytes(&pb).as_ref().unwrap_or(&zero).bytes())
                 .arg_usize(n);
         },
@@ -1577,9 +1561,9 @@ where
             let (nap, nbp) = (plan_bytes_n(&pa), plan_bytes_n(&pb));
             launch = launch
                 .elems_per_thread(4)
-                .arg_u64(offset_ptr(exec, a, la.offset()))
+                .arg_ptr(a, la.offset())
                 .arg_bytes(nap.as_ref().unwrap_or(&zn).bytes())
-                .arg_u64(offset_ptr(exec, b, lb.offset()))
+                .arg_ptr(b, lb.offset())
                 .arg_bytes(nbp.as_ref().unwrap_or(&zn).bytes())
                 .arg_i32(n as i32);
         },
@@ -1631,13 +1615,13 @@ where
     match variant {
         PlanVariant::Flat => {
             launch =
-                launch.elems_per_thread(4).arg_u64(offset_ptr(exec, a, la.offset())).arg_bytes(&bbytes).arg_usize(n);
+                launch.elems_per_thread(4).arg_ptr(a, la.offset()).arg_bytes(&bbytes).arg_usize(n);
         },
         PlanVariant::Narrow => {
             let zn = PlanBytesN::zeroed();
             launch = launch
                 .elems_per_thread(4)
-                .arg_u64(offset_ptr(exec, a, la.offset()))
+                .arg_ptr(a, la.offset())
                 .arg_bytes(plan_bytes_n(&pa).as_ref().unwrap_or(&zn).bytes())
                 .arg_bytes(&bbytes)
                 .arg_i32(n as i32);
@@ -1645,7 +1629,7 @@ where
         PlanVariant::Wide => {
             let zero = PlanBytes::zeroed();
             launch = launch
-                .arg_u64(offset_ptr(exec, a, la.offset()))
+                .arg_ptr(a, la.offset())
                 .arg_bytes(plan_bytes(&pa).as_ref().unwrap_or(&zero).bytes())
                 .arg_bytes(&bbytes)
                 .arg_usize(n);
@@ -1760,10 +1744,10 @@ where
         PlanVariant::Flat => {
             launch = launch
                 .elems_per_thread(4)
-                .arg_u64(offset_ptr(exec, d_typed, ld.offset()))
-                .arg_u64(offset_ptr(exec, a, la.offset()))
-                .arg_u64(offset_ptr(exec, b, lb.offset()))
-                .arg_u64(offset_ptr(exec, c, lc.offset()))
+                .arg_ptr(d_typed, ld.offset())
+                .arg_ptr(a, la.offset())
+                .arg_ptr(b, lb.offset())
+                .arg_ptr(c, lc.offset())
                 .arg_usize(n);
         },
         PlanVariant::Narrow => {
@@ -1771,26 +1755,26 @@ where
             let (ndp, nap, nbp, ncp) = (plan_bytes_n(&pd), plan_bytes_n(&pa), plan_bytes_n(&pb), plan_bytes_n(&pc));
             launch = launch
                 .elems_per_thread(4)
-                .arg_u64(offset_ptr(exec, d_typed, ld.offset()))
+                .arg_ptr(d_typed, ld.offset())
                 .arg_bytes(ndp.as_ref().unwrap_or(&zn).bytes())
-                .arg_u64(offset_ptr(exec, a, la.offset()))
+                .arg_ptr(a, la.offset())
                 .arg_bytes(nap.as_ref().unwrap_or(&zn).bytes())
-                .arg_u64(offset_ptr(exec, b, lb.offset()))
+                .arg_ptr(b, lb.offset())
                 .arg_bytes(nbp.as_ref().unwrap_or(&zn).bytes())
-                .arg_u64(offset_ptr(exec, c, lc.offset()))
+                .arg_ptr(c, lc.offset())
                 .arg_bytes(ncp.as_ref().unwrap_or(&zn).bytes())
                 .arg_i32(n as i32);
         },
         PlanVariant::Wide => {
             let zero = PlanBytes::zeroed();
             launch = launch
-                .arg_u64(offset_ptr(exec, d_typed, ld.offset()))
+                .arg_ptr(d_typed, ld.offset())
                 .arg_bytes(plan_bytes(&pd).as_ref().unwrap_or(&zero).bytes())
-                .arg_u64(offset_ptr(exec, a, la.offset()))
+                .arg_ptr(a, la.offset())
                 .arg_bytes(plan_bytes(&pa).as_ref().unwrap_or(&zero).bytes())
-                .arg_u64(offset_ptr(exec, b, lb.offset()))
+                .arg_ptr(b, lb.offset())
                 .arg_bytes(plan_bytes(&pb).as_ref().unwrap_or(&zero).bytes())
-                .arg_u64(offset_ptr(exec, c, lc.offset()))
+                .arg_ptr(c, lc.offset())
                 .arg_bytes(plan_bytes(&pc).as_ref().unwrap_or(&zero).bytes())
                 .arg_usize(n);
         },
@@ -2026,7 +2010,7 @@ where
     // pre-marshaled plan bytes (both widths; unused width stays zeroed)
     let (wd, wa, wb, wc) = (plan_bytes(&pd), plan_bytes(&pa), plan_bytes(&pb), plan_bytes(&pc));
     let (nd, na, nb_, nc) = (plan_bytes_n(&pd), plan_bytes_n(&pa), plan_bytes_n(&pb), plan_bytes_n(&pc));
-    let mut launch = FlatLaunch::new(exec, &f, n).arg_u64(offset_ptr(exec, d_typed, ld.offset()));
+    let mut launch = FlatLaunch::new(exec, &f, n).arg_ptr(d_typed, ld.offset());
     if narrow {
         // the `_pn` entries are 4-step grid-stride loops
         launch = launch.elems_per_thread(4);
@@ -2036,7 +2020,7 @@ where
     } else {
         launch.arg_bytes(wd.as_ref().unwrap_or(&zero).bytes())
     };
-    launch = launch.arg_u64(offset_ptr(exec, a, la.offset()));
+    launch = launch.arg_ptr(a, la.offset());
     launch = if narrow {
         launch.arg_bytes(na.as_ref().unwrap_or(&zn).bytes())
     } else {
@@ -2044,14 +2028,14 @@ where
     };
     launch = match &lo {
         ClipBound::Tensor(buf, lb) => launch
-            .arg_u64(offset_ptr(exec, buf, lb.offset()))
+            .arg_ptr(buf, lb.offset())
             .arg_bytes(if narrow { nb_.as_ref().unwrap_or(&zn).bytes() } else { wb.as_ref().unwrap_or(&zero).bytes() })
             .arg_i32(b_kind),
         _ => launch.arg_u64(0).arg_bytes(if narrow { zn.bytes() } else { zero.bytes() }).arg_i32(b_kind),
     };
     launch = match &hi {
         ClipBound::Tensor(buf, lc) => launch
-            .arg_u64(offset_ptr(exec, buf, lc.offset()))
+            .arg_ptr(buf, lc.offset())
             .arg_bytes(if narrow { nc.as_ref().unwrap_or(&zn).bytes() } else { wc.as_ref().unwrap_or(&zero).bytes() })
             .arg_i32(c_kind),
         _ => launch.arg_u64(0).arg_bytes(if narrow { zn.bytes() } else { zero.bytes() }).arg_i32(c_kind),
@@ -2111,8 +2095,8 @@ where
         (PlanVariant::Flat, _, _) => {
             launch = launch
                 .elems_per_thread(4)
-                .arg_u64(offset_ptr(exec, d_typed, ld.offset()))
-                .arg_u64(offset_ptr(exec, a, la.offset()))
+                .arg_ptr(d_typed, ld.offset())
+                .arg_ptr(a, la.offset())
                 .arg_bytes(&lo)
                 .arg_bytes(&hi)
                 .arg_usize(n);
@@ -2121,9 +2105,9 @@ where
             let zn = PlanBytesN::zeroed();
             launch = launch
                 .elems_per_thread(4)
-                .arg_u64(offset_ptr(exec, d_typed, ld.offset()))
+                .arg_ptr(d_typed, ld.offset())
                 .arg_bytes(plan_bytes_n(&po).as_ref().unwrap_or(&zn).bytes())
-                .arg_u64(offset_ptr(exec, a, la.offset()))
+                .arg_ptr(a, la.offset())
                 .arg_bytes(plan_bytes_n(&pa).as_ref().unwrap_or(&zn).bytes())
                 .arg_bytes(&lo)
                 .arg_bytes(&hi)

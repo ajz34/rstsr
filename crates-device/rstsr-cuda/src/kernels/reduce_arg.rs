@@ -64,7 +64,7 @@ use crate::dtype::CudaDType;
 use crate::prelude_dev::*;
 use super::reduce_plan::ReducePlan;
 use super::reduce_unary::{
-    offset_ptr, reduce_unary_function, render as render_for, MAX_WARPS_PER_BLOCK as MAX_WARPS,
+    reduce_unary_function, render as render_for, MAX_WARPS_PER_BLOCK as MAX_WARPS,
 };
 
 /// One of the four arg policies.
@@ -329,8 +329,8 @@ where
         unsafe { &mut *(c as *mut CudaBuffer<MaybeUninit<TOut>> as *mut CudaBuffer<TOut>) };
 
     crate::kernel::FlatLaunch::new(exec, &f, grid_blocks)
-        .arg_u64(offset_ptr(exec, c_typed, lc.offset()))
-        .arg_u64(offset_ptr(exec, a, las.offset()))
+        .arg_ptr(c_typed, lc.offset())
+        .arg_ptr(a, las.offset())
         .arg_usize(n_out)
         .arg_usize(n_contract)
         .arg_bytes(&step_a.to_ne_bytes())

@@ -16,10 +16,11 @@ use cudarc::driver::DevicePtrMut;
 fn memcpy_fast<TC, TA>(c: &mut CudaBuffer<TC>, a: &CudaBuffer<TA>) -> Result<()> {
     let byte_len = c.len() * core::mem::size_of::<TC>();
     let stream = c.as_bytes().stream().clone();
-    // order a foreign-stream source before the copy (the raw accessor below
-    // bypasses cudarc's own cross-stream event)
+    // order a foreign-stream source before the copy; the read-event guard is
+    // held past the enqueue so the source's free waits for this copy
     let _guard = crate::kernel::order_input_raw(a, &stream)?;
-    let sptr = a.device_ptr_raw_on(&stream) as u64;
+    let (sptr, _read) = a.read_ptr_raw_on(&stream);
+    let sptr = sptr as u64;
     let dptr = {
         let c_bytes = c.as_mut_bytes();
         let (ptr, _record) = DevicePtrMut::<u8>::device_ptr_mut(c_bytes, &stream);
@@ -28,6 +29,7 @@ fn memcpy_fast<TC, TA>(c: &mut CudaBuffer<TC>, a: &CudaBuffer<TA>) -> Result<()>
     unsafe {
         map_driver_result(cudarc::driver::result::memcpy_dtod_async(dptr, sptr, byte_len, stream.cu_stream()))?;
     }
+    drop(_read);
     Ok(())
 }
 

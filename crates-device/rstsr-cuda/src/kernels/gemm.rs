@@ -62,7 +62,6 @@
 //! its zero as `(@T@)0`, and `rstsr_complex` has no single-argument constructor, so a complex
 //! instantiation would fail inside NVRTC — on a rented GPU — instead of at the call site.
 
-use std::sync::Arc;
 
 use crate::kernel::{FlatLaunch, order_input, order_output};
 use crate::kernels::cublas_gemm::{self, CublasScalar};
@@ -192,17 +191,6 @@ fn render(template: &str, subs: &[(&str, &str)]) -> String {
     s
 }
 
-/// Fold an element offset into a base device pointer, in bytes.
-///
-/// Mirrors `kernels::elementwise::offset_ptr`: the read event must be recorded on the **launching**
-/// stream, not the allocation stream, or a cross-stream free can race the kernel.
-fn offset_ptr<B>(exec: &Arc<CudaStreamObj>, buf: &CudaBuffer<B>, offset: usize) -> u64 {
-    if buf.is_empty() {
-        0
-    } else {
-        (buf.device_ptr_on(exec) as u64).wrapping_add(offset as u64 * core::mem::size_of::<B>() as u64)
-    }
-}
 
 /// Pick the axis the linear thread id enumerates, preferring a unit-stride one.
 ///
@@ -445,10 +433,16 @@ where
     // concern: it is what made four `matmul` tests fail with answers no wrong `lda` could produce.
     if !tiled_forced() {
         if let (Some(args), Some(blas)) = (cublas_gemm::args(&geom), exec.cublas()) {
+            // Read-event guards held until after the cuBLAS enqueue (fn scope:
+            // a successful return drops them past `launch`; a fallthrough
+            // keeps them past the tiled kernel, which records its own).
+            let (pa, _ra) = buf_a.read_ptr_on(exec);
+            let (pb, _rb) = buf_b.read_ptr_on(exec);
+            let (pc, _rc) = c.read_ptr_on(exec);
             let (pa, pb, pc) = (
-                offset_ptr(exec, buf_a, geom.a.0),
-                offset_ptr(exec, buf_b, geom.b.0),
-                offset_ptr(exec, c, geom.c.0),
+                (pa as u64).wrapping_add(geom.a.0 as u64 * core::mem::size_of::<T>() as u64),
+                (pb as u64).wrapping_add(geom.b.0 as u64 * core::mem::size_of::<T>() as u64),
+                (pc as u64).wrapping_add(geom.c.0 as u64 * core::mem::size_of::<T>() as u64),
             );
             if debug_gemm() {
                 static ONCE: std::sync::Once = std::sync::Once::new();
@@ -537,15 +531,15 @@ where
 
     FlatLaunch::new(exec, &f, 0)
         .explicit_shape((grid_x as u32, grid_y as u32, n_batch as u32), (TX, TY, 1))
-        .arg_u64(offset_ptr(exec, c, geom.c.0))
+        .arg_ptr(c, geom.c.0)
         .arg_bytes(&geom.c.1.to_ne_bytes())
         .arg_bytes(&geom.c.2.to_ne_bytes())
         .arg_bytes(&geom.c.3.to_ne_bytes())
-        .arg_u64(offset_ptr(exec, buf_a, geom.a.0))
+        .arg_ptr(buf_a, geom.a.0)
         .arg_bytes(&geom.a.1.to_ne_bytes())
         .arg_bytes(&geom.a.2.to_ne_bytes())
         .arg_bytes(&geom.a.3.to_ne_bytes())
-        .arg_u64(offset_ptr(exec, buf_b, geom.b.0))
+        .arg_ptr(buf_b, geom.b.0)
         .arg_bytes(&geom.b.1.to_ne_bytes())
         .arg_bytes(&geom.b.2.to_ne_bytes())
         .arg_bytes(&geom.b.3.to_ne_bytes())

@@ -168,9 +168,10 @@ fn pipeline(
 ) -> (Duration, Vec<Vec<f64>>) {
     // Issue order is the pipeline. An event recorded at issue time covers
     // everything enqueued on its stream so far, so the three stages are issued
-    // per chunk. Every cross-stream device buffer stays alive until the final
-    // sync (a buffer freed on its allocation stream while a foreign-stream
-    // kernel still reads it is the known read-lifetime hole).
+    // per chunk. Cross-stream device buffers are held in `keep` until the
+    // final sync: the drop-time read events order the frees correctly, but
+    // freeing mid-loop would enqueue stream waits into the steady state, so
+    // the vectors double as a timing-stability guard.
     let t0 = Instant::now();
     let mut keep: Vec<Tensor<f64, DeviceCuda>> = Vec::new();
     let mut results = Vec::new();
@@ -229,7 +230,7 @@ fn main() {
     let base = DeviceCuda::new(0);
     let pinned = DeviceCudaPinned::new(0);
     let cpu = DeviceCpuSerial::default();
-    let bytes = chunks * CHUNK_MIB << 20;
+    let bytes = (chunks * CHUNK_MIB) << 20;
     println!(
         "chunks {chunks} x {CHUNK_MIB} MiB f64 ({:.0} MiB per direction), {rounds} rounds, {base}",
         bytes as f64 / 1048576.0

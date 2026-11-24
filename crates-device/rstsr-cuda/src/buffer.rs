@@ -3,7 +3,7 @@
 use crate::error::{map_driver_error, map_driver_result_alloc};
 use crate::prelude_dev::*;
 use core::marker::PhantomData;
-use cudarc::driver::{CudaSlice, DevicePtr, DevicePtrMut};
+use cudarc::driver::{CudaSlice, DevicePtr, DevicePtrMut, SyncOnDrop};
 use std::sync::Arc;
 
 /// Owning device buffer of `len` elements of `T`; `DeviceRawAPI::Raw` for
@@ -79,9 +79,33 @@ impl<T> CudaBuffer<T> {
     }
 
     /// `device_ptr_on` over a raw cudarc stream (memcpy fast paths).
+    ///
+    /// The read event is recorded when the returned guard drops; the guard
+    /// must outlive the enqueued read (kernel launch / memcpy), or the free
+    /// on the allocation stream can race the reader. Prefer
+    /// [`CudaBuffer::read_ptr_on`] and the `FlatLaunch` argument builders,
+    /// which hold the guard past the enqueue.
     pub(crate) fn device_ptr_raw_on(&self, stream: &Arc<cudarc::driver::CudaStream>) -> *const T {
-        let (ptr, _record) = DevicePtr::<u8>::device_ptr(self.as_bytes(), stream);
-        ptr as *const T
+        self.read_ptr_raw_on(stream).0
+    }
+
+    /// [`Self::device_ptr_on`] with the read-event guard handed back; the
+    /// caller must keep it alive until after the read is enqueued.
+    pub fn read_ptr_on<'a>(
+        &'a self,
+        exec: &'a Arc<CudaStreamObj>,
+    ) -> (*const T, SyncOnDrop<'a>) {
+        let (ptr, guard) = self.read_ptr_raw_on(exec.inner());
+        (ptr, guard)
+    }
+
+    /// [`Self::read_ptr_on`] over a raw cudarc stream.
+    pub(crate) fn read_ptr_raw_on<'a>(
+        &'a self,
+        stream: &'a Arc<cudarc::driver::CudaStream>,
+    ) -> (*const T, SyncOnDrop<'a>) {
+        let (ptr, guard) = DevicePtr::<u8>::device_ptr(self.as_bytes(), stream);
+        (ptr as *const T, guard)
     }
 
     /// Mutable base device pointer (same caveats as [`Self::device_ptr`]).

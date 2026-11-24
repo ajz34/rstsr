@@ -128,18 +128,6 @@ extern "C" __global__ void rstsr_vecdot(
 }
 "#;
 
-/// Fold an element offset into a base device pointer, in bytes.
-///
-/// Mirrors `kernels::elementwise::offset_ptr`: the read event must be recorded on the **launching**
-/// stream, not the allocation stream, or a cross-stream free can race the kernel.
-fn offset_ptr<T>(exec: &Arc<CudaStreamObj>, buf: &CudaBuffer<T>, offset: usize) -> u64 {
-    if buf.is_empty() {
-        0
-    } else {
-        (buf.device_ptr_on(exec) as u64)
-            .wrapping_add(offset as u64 * core::mem::size_of::<T>() as u64)
-    }
-}
 
 fn render(template: &str, subs: &[(&str, &str)]) -> String {
     let mut s = template.to_string();
@@ -252,9 +240,9 @@ where
         unsafe { &mut *(c as *mut CudaBuffer<MaybeUninit<T>> as *mut CudaBuffer<T>) };
 
     crate::kernel::FlatLaunch::new(exec, &f, grid_blocks)
-        .arg_u64(offset_ptr(exec, c_typed, lc.offset()))
-        .arg_u64(offset_ptr(exec, a, las.offset()))
-        .arg_u64(offset_ptr(exec, b, lbs.offset()))
+        .arg_ptr(c_typed, lc.offset())
+        .arg_ptr(a, las.offset())
+        .arg_ptr(b, lbs.offset())
         .arg_usize(n_out)
         .arg_usize(n_contract)
         .arg_bytes(&step_a.to_ne_bytes())

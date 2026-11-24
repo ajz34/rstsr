@@ -422,11 +422,15 @@ pub(crate) struct FlatLaunch<'a> {
     /// kernels); when set, `n`/`elems_per_thread` are ignored.
     explicit_shape: Option<LaunchShape>,
     params: Vec<Vec<u8>>,
+    /// Read-event guards of every buffer argument; dropped after the launch,
+    /// so each read event covers the consuming kernel and the allocation
+    /// stream's free waits for it (foreign-stream read lifetime).
+    reads: Vec<cudarc::driver::SyncOnDrop<'a>>,
 }
 
 impl<'a> FlatLaunch<'a> {
     pub fn new(stream: &'a Arc<CudaStreamObj>, function: &'a CudaFunction, n: usize) -> Self {
-        Self { stream, function, n, elems_per_thread: 1, explicit_shape: None, params: Vec::with_capacity(8) }
+        Self { stream, function, n, elems_per_thread: 1, explicit_shape: None, params: Vec::with_capacity(8), reads: Vec::new() }
     }
 
     /// Grid covers `elems_per_thread` consecutive elements per thread
@@ -462,10 +466,44 @@ impl<'a> FlatLaunch<'a> {
     }
 
     /// Base device pointer of `buf` (null for empty buffers). The read
-    /// event is recorded on this launch's stream.
-    pub fn arg_buf<T>(self, buf: &CudaBuffer<T>) -> Self {
-        let ptr = if buf.is_empty() { 0 } else { buf.device_ptr_on(self.stream) as u64 };
-        self.arg_u64(ptr)
+    /// event is recorded after [`Self::launch`] enqueues the kernel, so the
+    /// buffer's allocation stream waits for this launch before its free.
+    pub fn arg_buf<'b, T>(mut self, buf: &'b CudaBuffer<T>) -> Self
+    where
+        'b: 'a,
+    {
+        if buf.is_empty() {
+            return self.arg_u64(0);
+        }
+        let (ptr, guard) = buf.read_ptr_on(self.stream);
+        self.reads.push(guard);
+        self.arg_u64(ptr as u64)
+    }
+
+    /// `arg_buf` folded with an element-unit offset (the common planned-kernel
+    /// pointer form).
+    pub fn arg_ptr<'b, T>(self, buf: &'b CudaBuffer<T>, offset_elems: usize) -> Self
+    where
+        'b: 'a,
+    {
+        if buf.is_empty() {
+            return self.arg_u64(0);
+        }
+        let (ptr, guard) = buf.read_ptr_on(self.stream);
+        let mut this = self;
+        this.reads.push(guard);
+        this.arg_u64((ptr as u64).wrapping_add(offset_elems as u64 * core::mem::size_of::<T>() as u64))
+    }
+
+    /// `arg_ptr` for an optional buffer operand (null when absent).
+    pub fn arg_ptr_opt<'b, T>(self, buf: Option<&'b CudaBuffer<T>>, offset_elems: usize) -> Self
+    where
+        'b: 'a,
+    {
+        match buf {
+            Some(buf) => self.arg_ptr(buf, offset_elems),
+            None => self.arg_u64(0),
+        }
     }
 
     /// Enqueue the kernel (async; host sync happens only at host reads).
@@ -494,6 +532,8 @@ impl<'a> FlatLaunch<'a> {
                 &mut ptrs,
             ))?;
         }
+        // the enqueued kernel is covered by every read event from here on
+        drop(self.reads);
         Ok(())
     }
 }

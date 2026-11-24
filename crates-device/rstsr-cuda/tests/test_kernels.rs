@@ -2034,3 +2034,51 @@ fn index_select_and_put_vs_cpu() {
 }
 
 /* #endregion */
+
+/* #region foreign-stream read lifetime */
+
+#[test]
+fn foreign_stream_temporary_kernel_input_ordered() {
+    require_cuda!();
+    // 2026-10-25 repro: a temporary allocated on S2 is consumed by a kernel
+    // on S0 and freed (with immediate pool reuse on S2) while the kernel is
+    // still pending. The launch-time read event must order the S2 free
+    // behind the S0 kernel; pre-fix this corrupted the output intermittently.
+    let dev_s0 = DeviceCuda::new(0);
+    let dev_s2 = DeviceCuda::new_stream_with_ordinal(0);
+    let n = 1 << 22;
+    let a = rt::asarray(((0..n).map(|i| i as f64).collect::<Vec<_>>(), &dev_s0));
+    // bitwise reference computed on-device with the same kernels, no frees
+    let tmp_ref = rt::arange((0.0f64, n as f64, 1.0, &dev_s0));
+    let mut expected = rt::add(&a, &tmp_ref);
+    for _ in 0..6 {
+        expected = rt::sin(&expected);
+    }
+    let expected = host_vec1(&expected);
+    // No syncs inside the loop: the S2 fill/copy work and the churn reusing the
+    // freed block run while the S0 kernel is still pending — the window the
+    // read event must close.
+    let outs: Vec<_> = (0..20)
+        .map(|_| {
+            // inline temporary: allocated and written on S2, read by a long
+            // S0 kernel chain, dropped (free on S2) at statement end; the
+            // short S2 churn re-allocates the block and rewrites it while
+            // the S0 chain is still running
+            let tmp = rt::arange((0.0f64, n as f64, 1.0, &dev_s2));
+            let mut out = rt::add(&a, &tmp);
+            drop(tmp);
+            for _ in 0..6 {
+                out = rt::sin(&out);
+            }
+            let _churn = rt::add(&a, &rt::arange((0.0f64, n as f64, 1.0, &dev_s2)));
+            out
+        })
+        .collect();
+    for out in &outs {
+        assert_eq!(host_vec1(out), expected);
+    }
+    dev_s0.synchronize().unwrap();
+    dev_s2.synchronize().unwrap();
+}
+
+/* #endregion */

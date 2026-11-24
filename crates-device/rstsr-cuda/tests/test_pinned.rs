@@ -310,22 +310,23 @@ fn pipeline_three_streams_bitwise_equals_serial() {
         host_in.iter().map(|v| pinned.tensor_f(pinned.from_vec_f(v.clone()).unwrap(), [n]).unwrap()).collect();
     let mut pin_out: Vec<_> =
         (0..chunks).map(|_| pinned.tensor_f(pinned.alloc_f::<f64>(n).unwrap(), [n]).unwrap()).collect();
-    // Keep every device buffer alive until the final sync: a buffer freed on its
-    // allocation stream while a foreign-stream kernel still reads it is the known
-    // read-lifetime hole (not fixed by this work; `staging` is the user-side guard).
-    let mut staging = Vec::new();
-    for t in &pin_in {
-        staging.push(t.to_device(&dev_h)); // H2D on H
-    }
-    for c in 0..chunks {
-        let g_c = staging[c].to_device(&dev_c); // compute on C (waits for H automatically)
+    // pipeline: per-chunk issue; every intermediate drops at the end of the
+    // iteration, and the drop-time read events order the frees behind the
+    // foreign-stream consumers (the pre-fix version of this test had to keep
+    // all device buffers alive until the final sync).
+    for (c, t) in pin_in.iter().enumerate() {
+        let g_h = t.to_device(&dev_h); // H2D on H
+        let g_c = g_h.to_device(&dev_c); // compute on C (waits for H automatically)
         let g2 = rt::add(&g_c, &g_c);
-        staging.push(rt::add(&g2, &g_c));
-    }
-    let results: Vec<_> = staging.iter().skip(chunks).map(|r| r.to_device(&dev_d)).collect();
-    for (c, r) in results.iter().enumerate() {
+        let r = rt::add(&g2, &g_c);
+        let r_d = r.to_device(&dev_d);
         // D2H into the preallocated pinned output chunk (non-blocking)
-        transfer::d2h_pinned_async(&dev_d, r.raw(), pin_out[c].raw_mut()).unwrap();
+        transfer::d2h_pinned_async(&dev_d, r_d.raw(), pin_out[c].raw_mut()).unwrap();
+        drop(r_d);
+        drop(r);
+        drop(g2);
+        drop(g_c);
+        drop(g_h);
     }
     for (c, out) in pin_out.iter().enumerate() {
         out.synchronize();

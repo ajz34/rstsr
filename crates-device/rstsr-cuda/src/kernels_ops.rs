@@ -1456,27 +1456,15 @@ extern "C" __global__ void rstsr_clip_g(
         .arg_buf(a)
         .arg_u64(pack.strides[1])
         .arg_usize(loa.offset)
-        .arg_u64(match &lo {
-            ClipBound::Tensor(buf, lb2) => {
-                let _ = lb2;
-                buf.device_ptr_on(exec) as u64
-            },
-            _ => 0,
-        })
-        .arg_u64(pack.strides[2])
+        .arg_ptr_opt(match &lo { ClipBound::Tensor(buf, _) => Some(buf), _ => None }, 0)
+        .arg_u64(match &lo { ClipBound::Tensor(_, _) => pack.strides[2], _ => 0 })
         .arg_usize(match &lo {
             ClipBound::Tensor(_, lb2) => lb2.offset(),
             _ => 0,
         })
         .arg_i32(b_kind)
-        .arg_u64(match &hi {
-            ClipBound::Tensor(buf, lc2) => {
-                let _ = lc2;
-                buf.device_ptr_on(exec) as u64
-            },
-            _ => 0,
-        })
-        .arg_u64(pack.strides[3])
+        .arg_ptr_opt(match &hi { ClipBound::Tensor(buf, _) => Some(buf), _ => None }, 0)
+        .arg_u64(match &hi { ClipBound::Tensor(_, _) => pack.strides[3], _ => 0 })
         .arg_usize(match &hi {
             ClipBound::Tensor(_, lc2) => lc2.offset(),
             _ => 0,

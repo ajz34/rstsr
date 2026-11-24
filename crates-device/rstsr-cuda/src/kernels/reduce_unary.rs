@@ -299,15 +299,6 @@ extern "C" __global__ void @NAME@(
 }
 "#;
 
-/// Fold an element offset into a base device pointer, in bytes.
-pub(super) fn offset_ptr<T>(exec: &Arc<CudaStreamObj>, buf: &CudaBuffer<T>, offset: usize) -> u64 {
-    if buf.is_empty() {
-        0
-    } else {
-        (buf.device_ptr_on(exec) as u64)
-            .wrapping_add(offset as u64 * core::mem::size_of::<T>() as u64)
-    }
-}
 
 /// Token substitution, in the caller's order. Shared with [`super::reduce_arg`]: the ordering rule
 /// (producers before consumers) is the caller's problem, but the mechanics are not worth a copy.
@@ -449,8 +440,8 @@ where
         unsafe { &mut *(c as *mut CudaBuffer<MaybeUninit<TOut>> as *mut CudaBuffer<TOut>) };
 
     crate::kernel::FlatLaunch::new(exec, &f, grid_blocks)
-        .arg_u64(offset_ptr(exec, c_typed, lc.offset()))
-        .arg_u64(offset_ptr(exec, a, las.offset()))
+        .arg_ptr(c_typed, lc.offset())
+        .arg_ptr(a, las.offset())
         .arg_usize(n_out)
         .arg_usize(n_contract)
         .arg_bytes(&step_a.to_ne_bytes())
