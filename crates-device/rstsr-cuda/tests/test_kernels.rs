@@ -2034,3 +2034,361 @@ fn index_select_and_put_vs_cpu() {
 }
 
 /* #endregion */
+
+/* #region compute type (TF32 / 16F / 16BF) */
+
+/// Relative 2-norm error of an `f32` result against an `f64` reference.
+///
+/// Both sides come from the **same `f32` inputs**, so this measures the GEMM's arithmetic alone —
+/// not the rounding of the operands, and not a difference of fixture. Scale-free by construction,
+/// which is what lets the range test below use magnitudes of 1e5 with the same threshold.
+fn rel_l2(got: &[f32], want: &[f64]) -> f64 {
+    let num = got.iter().zip(want).map(|(g, w)| (*g as f64 - w).powi(2)).sum::<f64>().sqrt();
+    let den = want.iter().map(|w| w * w).sum::<f64>().sqrt();
+    num / den
+}
+
+/// The `RSTSR_CUDA_COMPUTE_TYPE_32F` flag must actually reach cuBLAS, and `Default` must stay exact.
+///
+/// The decisive assertion is **not** "TF32 is accurate enough" — that is a chemistry question for a
+/// real system — but "TF32 is not silently ignored". If the flag never reached `cublasGemmEx`, both
+/// runs would be bit-identical, and the experiment would read as *no speedup for no reason*, which
+/// is the one failure mode that cannot be distinguished from "the hardware has no TF32".
+///
+/// The reference is f64 computed from the **same f32 operands**, so the difference measured is the
+/// GEMM's arithmetic alone, not the rounding of the inputs. The values are `k/7`, which needs the
+/// full 24-bit mantissa: integers would be exactly representable in TF32's 10 bits and the test
+/// would pass no matter what the flag did.
+#[test]
+fn compute_type_reaches_cublas() {
+    require_cuda!();
+    let dcpu = DeviceCpuSerial::default();
+    let (m, k, n) = (64usize, 512usize, 64usize);
+
+    let gen = |len: usize, phase: usize| -> Vec<f32> {
+        (0..len).map(|i| (((i * 7 + phase) % 23) as f32 - 11.0) / 7.0).collect()
+    };
+    let (av, bv) = (gen(m * k, 0), gen(k * n, 3));
+
+    // Reference: f64 matmul of the f32 operands, promoted. Exact to f64 rounding.
+    let a64: Tensor<f64, DeviceCpuSerial, _> =
+        rt::asarray((av.iter().map(|v| *v as f64).collect::<Vec<f64>>(), &dcpu)).into_shape([m, k]);
+    let b64: Tensor<f64, DeviceCpuSerial, _> =
+        rt::asarray((bv.iter().map(|v| *v as f64).collect::<Vec<f64>>(), &dcpu)).into_shape([k, n]);
+    let want: Vec<f64> = host_nd(&rt::matmul(&a64, &b64));
+
+    let run = |flag: ComputeType32F| -> Vec<f32> {
+        let mut d = DeviceCuda::new(0);
+        // Per-device override, not the global: a global write here would perturb every other test
+        // running in parallel, and the failure would land somewhere else entirely.
+        d.set_flags_override(Some(CudaRuntimeFlags { compute_type_32f: flag }));
+        let a: Tensor<f32, _, _> = rt::asarray((av.clone(), &d)).into_shape([m, k]);
+        let b: Tensor<f32, _, _> = rt::asarray((bv.clone(), &d)).into_shape([k, n]);
+        host_nd(&rt::matmul(&a, &b))
+    };
+
+    let rel_err = |got: &[f32], want: &[f64]| rel_l2(got, want);
+
+    let e_exact = rel_err(&run(ComputeType32F::Default), &want);
+    let e_tf32 = rel_err(&run(ComputeType32F::FastTF32), &want);
+
+    assert!(e_exact < 1e-5, "f32 gemm on the Default path should be near-exact vs f64: {e_exact:e}");
+    // 10-bit mantissa, ~4.9e-4 unit roundoff; accumulated over k=512 with mixed signs.
+    assert!(e_tf32 < 1e-1, "TF32 should still be accurate to ~1e-4..1e-3: {e_tf32:e}");
+    assert!(
+        e_tf32 > 10.0 * e_exact,
+        "TF32 and Default agree to within rounding ({e_exact:e} vs {e_tf32:e}) — the flag is not \
+         reaching cuBLAS, so the compute-type experiment would measure nothing"
+    );
+
+    // The batched form is a *separate* entry point (`cublasGemmStridedBatchedEx`), and its strides
+    // have their own history: a units bug there once left slice 0 exact and every later slice
+    // unwritten. So it gets its own assertion, and the slices carry different data so a stride error
+    // cannot hide behind repetition.
+    let p = 3usize;
+    let ap: Vec<f32> = (0..p).flat_map(|s| gen(m * k, 5 * s)).collect();
+    let ap64: Vec<f64> = ap.iter().map(|v| *v as f64).collect();
+    let a64b: Tensor<f64, DeviceCpuSerial, _> = rt::asarray((ap64, &dcpu)).into_shape([p, m, k]);
+    let want_b: Vec<f64> = host_nd(&rt::matmul(&a64b, &b64));
+
+    let run_b = |flag: ComputeType32F| -> Vec<f32> {
+        let mut d = DeviceCuda::new(0);
+        d.set_flags_override(Some(CudaRuntimeFlags { compute_type_32f: flag }));
+        let a: Tensor<f32, _, _> = rt::asarray((ap.clone(), &d)).into_shape([p, m, k]);
+        let b: Tensor<f32, _, _> = rt::asarray((bv.clone(), &d)).into_shape([k, n]);
+        host_nd(&rt::matmul(&a, &b))
+    };
+    let eb_exact = rel_err(&run_b(ComputeType32F::Default), &want_b);
+    let eb_tf32 = rel_err(&run_b(ComputeType32F::FastTF32), &want_b);
+    assert!(eb_exact < 1e-5, "batched f32 gemm on the Default path: {eb_exact:e}");
+    assert!(
+        eb_tf32 > 10.0 * eb_exact,
+        "batched TF32 not reaching cuBLAS ({eb_exact:e} vs {eb_tf32:e}) — the stride path is a \
+         different call and needs its own check"
+    );
+}
+
+/// The `FAST_*` compute types are a *licence*, not a switch: cuBLAS may compute in fp32 anyway.
+///
+/// The manual says "**Allows** the library to use Tensor Cores with automatic down-conversion",
+/// for all three fast types. There is no promise that it will, no status bit to say which way it
+/// went, and an exact answer is therefore a legal outcome — this test exists because the first
+/// version of it assumed otherwise and failed on an A100 with a relative error of `4.7e-8`, i.e. a
+/// perfectly exact fp32 matmul.
+///
+/// So the assertions are the ones the contract supports:
+///
+/// - **TF32 must engage**, at the shape where it is known to (`64x512x64`, the shape
+///   [`compute_type_reaches_cublas`] uses). Without this control, "16F did not engage" cannot be
+///   distinguished from "this shape never reaches cuBLAS at all".
+/// - **16F and 16BF may engage or not**, and the test reports which, per shape. What it refuses to
+///   accept is the middle: an answer that is neither exact nor predictably broken. That middle is
+///   the only genuinely alarming regime — it would mean a conversion this crate cannot characterise.
+/// - **If 16F engages, the range claim holds.** fp16 has a 5-bit exponent: it saturates at 65504 and
+///   has nothing to say below ~6e-8, so on inputs at ~1e5 the result is `inf` (overflow) or off by
+///   an O(1) factor (saturation), never "three digits worse".
+///
+/// The fixture is deliberately **all-positive** at ~1e5: additions then do not cancel, the sums sit
+/// at `k*1e10`, and a measured error is the mantissa alone. A mixed-sign fixture would instead test
+/// error amplification by cancellation, which is a property of the matrix, not of the compute type.
+///
+/// Run this with `--nocapture` to get the engagement map; it prints one line per (shape, flag).
+#[test]
+fn compute_type_engagement_is_the_librarys_choice() {
+    require_cuda!();
+    let dcpu = DeviceCpuSerial::default();
+
+    // (m, k, n): the shape TF32 is known to engage at, and the small one that first showed this
+    // behaviour. Engagement is size-dependent — that is the point of testing both.
+    let shapes = [(64usize, 512usize, 64usize), (48, 64, 48)];
+    let gen = |len: usize, phase: usize| -> Vec<f32> {
+        (0..len).map(|i| 1.0e5 + ((i * 7 + phase) % 29) as f32).collect()
+    };
+
+    for (m, k, n) in shapes {
+        let (av, bv) = (gen(m * k, 0), gen(k * n, 3));
+
+        // f64 reference from the *same* f32 inputs. Every entry exceeds fp16's 65504 ceiling, which
+        // is the whole point; it is nowhere near fp32's 3.4e38 ceiling.
+        let a64: Tensor<f64, DeviceCpuSerial, _> =
+            rt::asarray((av.iter().map(|v| *v as f64).collect::<Vec<f64>>(), &dcpu)).into_shape([m, k]);
+        let b64: Tensor<f64, DeviceCpuSerial, _> =
+            rt::asarray((bv.iter().map(|v| *v as f64).collect::<Vec<f64>>(), &dcpu)).into_shape([k, n]);
+        let want: Vec<f64> = host_nd(&rt::matmul(&a64, &b64));
+
+        let run = |flag: ComputeType32F| -> Vec<f32> {
+            let mut d = DeviceCuda::new(0);
+            d.set_flags_override(Some(CudaRuntimeFlags { compute_type_32f: flag }));
+            let a: Tensor<f32, _, _> = rt::asarray((av.clone(), &d)).into_shape([m, k]);
+            let b: Tensor<f32, _, _> = rt::asarray((bv.clone(), &d)).into_shape([k, n]);
+            host_nd(&rt::matmul(&a, &b))
+        };
+
+        let e_exact = rel_l2(&run(ComputeType32F::Default), &want);
+        assert!(e_exact < 1e-5, "the typed path should be near-exact vs f64: {e_exact:e}");
+        // "Engaged" is defined against the typed path rather than an absolute number: any conversion
+        // to a narrower format has to show up as a departure from fp32 rounding.
+        let engaged = |e: f64| e > 10.0 * e_exact;
+
+        // Control: TF32 is the one mode that is expected to engage, because on Ampere it is the
+        // ordinary f32 path rather than an extra conversion. If it stops engaging at this shape the
+        // rest of this test says nothing.
+        let e_tf32 = rel_l2(&run(ComputeType32F::FastTF32), &want);
+        eprintln!("[{m}x{k}x{n}] fasttf32: e={e_tf32:e} engaged={}", engaged(e_tf32));
+        if (m, k, n) == (64, 512, 64) {
+            assert!(
+                engaged(e_tf32),
+                "TF32 did not engage even at {m}x{k}x{n} ({e_exact:e} vs {e_tf32:e}) — the control \
+                 for this test, so the compute type is not reaching cuBLAS at a shape where it \
+                 already did"
+            );
+        }
+        assert!(e_tf32 < 1e-1, "TF32 engaged but reads the operands wrongly: {e_tf32:e}");
+
+        // bf16 keeps fp32's 8-bit exponent, so engagement can only cost mantissa digits.
+        let e_bf = rel_l2(&run(ComputeType32F::Fast16BF), &want);
+        eprintln!("[{m}x{k}x{n}] fast16bf: e={e_bf:e} engaged={}", engaged(e_bf));
+        assert!(
+            e_bf < 1e-1,
+            "16BF is off by more than a mantissa ({e_bf:e}) — bf16 has fp32's exponent range, so \
+             this cannot be a range effect"
+        );
+
+        // fp16 does not, and that is the difference between the two 16-bit modes.
+        let got16f = run(ComputeType32F::Fast16F);
+        let finite = got16f.iter().all(|v| v.is_finite());
+        let e_16f = rel_l2(&got16f, &want);
+        eprintln!(
+            "[{m}x{k}x{n}] fast16f: e={e_16f:e} finite={finite} engaged={}",
+            engaged(e_16f)
+        );
+        if engaged(e_16f) || !finite {
+            assert!(
+                !finite || e_16f.is_nan() || e_16f > 1e-2,
+                "16F engaged and returned a *nearly* right answer ({e_16f:e}). A 5-bit exponent at \
+                 ~1e5 magnitude cannot do that: the result should be inf or wrong by an O(1) \
+                 factor. Something is converting the operands that this crate does not model"
+            );
+        }
+        // Not engaging is allowed and is not a failure: the manual says "Allows the library to use",
+        // so keeping fp32 is legal. That is exactly why this flag cannot be sold as a rate.
+    }
+}
+
+/// The `OP_T` orientation — a `swapaxes`d operand, which is what `tensordot` hands cuBLAS when the
+/// free axis is the unit-stride one.
+///
+/// cuBLAS is passed `transb = true` here and steps along the other axis, which selects a different
+/// kernel family internally. The compute type is a per-call argument, so "TF32 works on the
+/// contiguous orientation" says nothing about this one, and this is the orientation a real
+/// contraction is more likely to produce.
+///
+/// The window is the assertion, and each bound rules out a different bug: **above** 10x the fp32
+/// rounding means the `Ex` path really ran (a layout cuBLAS could not express, or a refused compute
+/// type, would fall back to the tiled kernel and land back on the exact answer); **below** 1e-1
+/// means the leading dimensions were read correctly — a wrong `ldb` on a transposed operand gives an
+/// O(1) error, not a 1e-4 one.
+#[test]
+fn transposed_operand_still_honours_the_compute_type() {
+    require_cuda!();
+    let dcpu = DeviceCpuSerial::default();
+    let (m, k, n) = (64usize, 512usize, 64usize);
+
+    let gen = |len: usize, phase: usize| -> Vec<f32> {
+        (0..len).map(|i| (((i * 7 + phase) % 23) as f32 - 11.0) / 7.0).collect()
+    };
+    // `a_c` is contiguous k x m, so `a_c.swapaxes(0, 1)` is m x k with strides (1, m): unit stride
+    // on the M axis, i.e. the `OP_T` side.
+    let (acv, bv) = (gen(k * m, 0), gen(k * n, 3));
+
+    let ac64: Tensor<f64, DeviceCpuSerial, _> =
+        rt::asarray((acv.iter().map(|v| *v as f64).collect::<Vec<f64>>(), &dcpu)).into_shape([k, m]);
+    let b64: Tensor<f64, DeviceCpuSerial, _> =
+        rt::asarray((bv.iter().map(|v| *v as f64).collect::<Vec<f64>>(), &dcpu)).into_shape([k, n]);
+    let at64 = ac64.swapaxes(0, 1);
+    let want: Vec<f64> = host_nd(&rt::matmul(&at64, &b64));
+
+    let run = |flag: ComputeType32F| -> Vec<f32> {
+        let mut d = DeviceCuda::new(0);
+        d.set_flags_override(Some(CudaRuntimeFlags { compute_type_32f: flag }));
+        let ac: Tensor<f32, _, _> = rt::asarray((acv.clone(), &d)).into_shape([k, m]);
+        let b: Tensor<f32, _, _> = rt::asarray((bv.clone(), &d)).into_shape([k, n]);
+        let at = ac.swapaxes(0, 1);
+        host_nd(&rt::matmul(&at, &b))
+    };
+
+    let e_exact = rel_l2(&run(ComputeType32F::Default), &want);
+    let e_tf32 = rel_l2(&run(ComputeType32F::FastTF32), &want);
+
+    assert!(e_exact < 1e-5, "the transposed orientation should be near-exact on the typed path: {e_exact:e}");
+    assert!(
+        e_tf32 < 1e-1,
+        "TF32 on the transposed orientation is wrong, not merely inaccurate ({e_tf32:e}) — the \
+         leading dimension of the transposed operand is being read along the wrong axis"
+    );
+    assert!(
+        e_tf32 > 10.0 * e_exact,
+        "the transposed orientation left the gemmEx path ({e_exact:e} vs {e_tf32:e}) — this layout \
+         was not expressible to cuBLAS, or the compute type was refused, and it fell through to the \
+         tiled kernel where the flag cannot apply"
+    );
+}
+
+/// `Pedantic` is the other `Ex` entry, and it must not be a synonym for fast.
+///
+/// `32F_PEDANTIC` and `32F_FAST_TF32` are the two flags that differ *only* in intent — same entry
+/// point, same dtype, adjacent constants — so a swapped mapping would show up as "quietly three
+/// digits worse" rather than as a failure. The fixture is the one from
+/// [`compute_type_reaches_cublas`]: `k/7` values with mixed signs, so TF32 has to be visibly worse
+/// there and Pedantic must not be.
+///
+/// The bound is `100x` rather than `10x` on purpose: dropping the FMA contraction rounds each
+/// multiply and each add separately, which can cost up to a factor of two or four — anything beyond
+/// two orders of magnitude is a different arithmetic regime, not a different rounding.
+///
+/// A *refusal* is undetectable here, because the fallback is exact and therefore passes. That is
+/// acceptable: the claim this test defends is "Pedantic never becomes silently fast", and a fallback
+/// preserves it.
+#[test]
+fn pedantic_keeps_fp32_accuracy() {
+    require_cuda!();
+    let dcpu = DeviceCpuSerial::default();
+    let (m, k, n) = (64usize, 512usize, 64usize);
+
+    let gen = |len: usize, phase: usize| -> Vec<f32> {
+        (0..len).map(|i| (((i * 7 + phase) % 23) as f32 - 11.0) / 7.0).collect()
+    };
+    let (av, bv) = (gen(m * k, 0), gen(k * n, 3));
+
+    let a64: Tensor<f64, DeviceCpuSerial, _> =
+        rt::asarray((av.iter().map(|v| *v as f64).collect::<Vec<f64>>(), &dcpu)).into_shape([m, k]);
+    let b64: Tensor<f64, DeviceCpuSerial, _> =
+        rt::asarray((bv.iter().map(|v| *v as f64).collect::<Vec<f64>>(), &dcpu)).into_shape([k, n]);
+    let want: Vec<f64> = host_nd(&rt::matmul(&a64, &b64));
+
+    let run = |flag: ComputeType32F| -> Vec<f32> {
+        let mut d = DeviceCuda::new(0);
+        d.set_flags_override(Some(CudaRuntimeFlags { compute_type_32f: flag }));
+        let a: Tensor<f32, _, _> = rt::asarray((av.clone(), &d)).into_shape([m, k]);
+        let b: Tensor<f32, _, _> = rt::asarray((bv.clone(), &d)).into_shape([k, n]);
+        host_nd(&rt::matmul(&a, &b))
+    };
+
+    let e_exact = rel_l2(&run(ComputeType32F::Default), &want);
+    let e_pedantic = rel_l2(&run(ComputeType32F::Pedantic), &want);
+
+    assert!(e_exact < 1e-5, "the typed path should be near-exact vs f64: {e_exact:e}");
+    assert!(e_pedantic < 1e-5, "Pedantic is IEEE fp32 and must stay there: {e_pedantic:e}");
+    assert!(
+        e_pedantic < 100.0 * e_exact,
+        "Pedantic ({e_pedantic:e}) is a different arithmetic regime from the typed path \
+         ({e_exact:e}) — `pedantic` is mapped to a fast compute type"
+    );
+}
+
+/// `f64` must ignore every compute type, bit for bit.
+///
+/// The pure test asserts the decision (`entry_for::<f64>` is always `Typed`); this asserts the
+/// consequence on hardware. The failure it guards against is the one that cannot raise: a `32F`
+/// compute type against `CUDA_R_64F` operands makes cuBLAS read four bytes of an eight-byte value,
+/// so the answer would be plausible-looking nonsense with a success status.
+///
+/// One device, one pair of buffers, the flag the only thing that changes — so a difference here
+/// cannot come from a different handle, a different algorithm choice, or a different copy of the
+/// data. Comparison is on the bit patterns, because `==` would call `+0.0` and `-0.0` equal.
+#[test]
+fn f64_is_bit_identical_under_every_compute_type() {
+    require_cuda!();
+    let (m, k, n) = (64usize, 128usize, 64usize);
+
+    let gen = |len: usize, phase: usize| -> Vec<f64> {
+        (0..len).map(|i| (((i * 7 + phase) % 23) as f64 - 11.0) / 7.0).collect()
+    };
+    let (av, bv) = (gen(m * k, 0), gen(k * n, 3));
+
+    let mut d = DeviceCuda::new(0);
+    let a: Tensor<f64, _, _> = rt::asarray((av, &d)).into_shape([m, k]);
+    let b: Tensor<f64, _, _> = rt::asarray((bv, &d)).into_shape([k, n]);
+
+    let run = |d: &mut DeviceCuda, flag: ComputeType32F| -> Vec<u64> {
+        d.set_flags_override(Some(CudaRuntimeFlags { compute_type_32f: flag }));
+        host_nd(&rt::matmul(&a, &b)).iter().map(|v| v.to_bits()).collect()
+    };
+
+    let base = run(&mut d, ComputeType32F::Default);
+    for flag in [
+        ComputeType32F::Pedantic,
+        ComputeType32F::FastTF32,
+        ComputeType32F::Fast16F,
+        ComputeType32F::Fast16BF,
+    ] {
+        assert_eq!(
+            run(&mut d, flag),
+            base,
+            "{flag:?} changed an f64 matmul. A 32F compute type against 64-bit operands is a \
+             misread, not a loss of precision — the flag must be ignored for f64"
+        );
+    }
+}
+
+/* #endregion */
