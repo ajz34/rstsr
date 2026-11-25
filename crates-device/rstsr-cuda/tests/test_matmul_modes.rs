@@ -5,7 +5,9 @@
 //! the ones that down-convert the inputs (`Fast16F`, `Fast16BF`, `FastTF32`) to the precision of
 //! the conversion, the fixed-point emulation to the width cuBLAS picks by default. A driver that
 //! cannot serve a mode must say so: forced alone it is an error naming the reason, never a
-//! silently different precision.
+//! silently different precision. cuBLASLt serves every 32F mode (`Fast16BF` included) and
+//! `Default`/`Pedantic` of 64F; the argument shapes (batch, broadcast, transposes) run on each
+//! cuBLAS driver alone, and pointer alignment on cuBLASLt.
 //!
 //! The printed `max rel err` per mode is the measurement the tolerances were set from.
 
@@ -129,8 +131,8 @@ fn classic_serves(mode: ComputeType32F) -> bool {
     }
 }
 
-/// Every 32F mode on `cublasGemmEx` (always served) and on the classic entries (served where a
-/// math mode exists for it), through the device flags.
+/// Every 32F mode on cuBLASLt and `cublasGemmEx` (always served) and on the classic entries
+/// (served where a math mode exists for it), through the device flags.
 #[test]
 fn modes_32f() {
     require_cuda!();
@@ -143,6 +145,8 @@ fn modes_32f() {
         (ComputeType32F::Fast16BF, "fast 16bf", 5e-2),
     ];
     for (mode, name, tol) in cases {
+        let lt = device(MatMulDrivers::CUBLAS_LT, |f| f.compute_type_32f = mode);
+        check_f32(&lt, &format!("{name}, cublasLt"), m, k, n, tol);
         let ex = device(MatMulDrivers::CUBLAS_EX, |f| f.compute_type_32f = mode);
         check_f32(&ex, &format!("{name}, cublasEx"), m, k, n, tol);
         // the default chain takes the same driver
@@ -160,7 +164,7 @@ fn modes_32f() {
     }
 }
 
-/// Every 64F mode on both drivers; the fixed-point emulation on the classic handle only.
+/// Every 64F mode on the three drivers; the fixed-point emulation on the classic handle only.
 #[test]
 fn modes_64f() {
     require_cuda!();
@@ -168,6 +172,8 @@ fn modes_64f() {
     for (mode, name, tol) in
         [(ComputeType64F::Default, "default", 1e-13), (ComputeType64F::Pedantic, "pedantic", 1e-13)]
     {
+        let lt = device(MatMulDrivers::CUBLAS_LT, |f| f.compute_type_64f = mode);
+        check_f64(&lt, &format!("{name}, cublasLt"), m, k, n, tol);
         let ex = device(MatMulDrivers::CUBLAS_EX, |f| f.compute_type_64f = mode);
         check_f64(&ex, &format!("{name}, cublasEx"), m, k, n, tol);
         let all = device(MatMulDrivers::all(), |f| f.compute_type_64f = mode);
@@ -189,10 +195,12 @@ fn modes_64f() {
         let msg = matmul_err(&classic, data(4, 5), data(4, 6));
         assert!(msg.contains("cublas: cannot serve") && msg.contains("fixed-point"), "{msg}");
     }
-    // `cublasGemmEx` is not a candidate: no Ex-only chain, and the error says why
-    let ex = device(MatMulDrivers::CUBLAS_EX, |f| f.compute_type_64f = emu);
-    let msg = matmul_err(&ex, data(4, 5), data(4, 6));
-    assert!(msg.contains("no enabled driver is a candidate"), "{msg}");
+    // neither cuBLASLt nor `cublasGemmEx` is a candidate: no Lt-only or Ex-only chain
+    for forced in [MatMulDrivers::CUBLAS_LT, MatMulDrivers::CUBLAS_EX] {
+        let d = device(forced, |f| f.compute_type_64f = emu);
+        let msg = matmul_err(&d, data(4, 5), data(4, 6));
+        assert!(msg.contains("no enabled driver is a candidate"), "{msg}");
+    }
 }
 
 /// A mantissa width cannot be applied by this `cudarc`: with the emulation asked for it is an
@@ -211,31 +219,119 @@ fn fixedpoint_mantissa_bits() {
     let _ = rt::matmul(square(&d, data(4, 5), 2), square(&d, data(4, 6), 2));
 }
 
-/// `cublasGemmEx` with the batched and the transposed argument shapes: a strided batch, and a
-/// transposed operand broadcast against it.
+/// The batched and the transposed argument shapes, on each cuBLAS driver alone: a strided batch,
+/// a transposed right operand broadcast against the batch of `a`, a transposed left operand, and
+/// a broadcast batch of `a` against a batched `b`. The batch stride of cuBLASLt's layouts is an
+/// element count, like the strided-batched entries: this is where a byte count would show.
 #[test]
-fn cublas_ex_batched_and_transposed() {
+fn cublas_batched_and_transposed() {
     require_cuda!();
-    let d = device(MatMulDrivers::CUBLAS_EX, |_| {});
     let dcpu = DeviceCpuSerial::default();
     let (p, m, k, n) = (4usize, 32usize, 40usize, 24usize);
+
     let a: Tensor<f64, DeviceCpuSerial, _> = rt::asarray((data(p * m * k, 7), &dcpu)).into_shape([p, m, k]);
     let b: Tensor<f64, DeviceCpuSerial, _> = rt::asarray((data(p * k * n, 8), &dcpu)).into_shape([p, k, n]);
-    let want = rt::matmul(&a, &b);
-    let want = DeviceToCpuAPI::<f64>::to_cpu_vec(want.to_contig(RowMajor).storage()).rstsr_unwrap();
-    let got = rt::matmul(a.to_device(&d), b.to_device(&d));
-    let got = DeviceToCpuAPI::<f64>::to_cpu_vec(got.to_contig(RowMajor).storage()).rstsr_unwrap();
-    let err = rel_err(&got, &want);
-    assert!(err <= 1e-13, "batched: max rel err {err:.3e}");
+    let c2: Tensor<f64, DeviceCpuSerial, _> = rt::asarray((data(n * k, 9), &dcpu)).into_shape([n, k]);
+    let a2: Tensor<f64, DeviceCpuSerial, _> = rt::asarray((data(m * k, 10), &dcpu)).into_shape([m, k]);
+    let at: Tensor<f64, DeviceCpuSerial, _> = rt::asarray((data(m * k, 11), &dcpu)).into_shape([k, m]).t().to_owned();
 
-    // a transposed right operand against the broadcast batch of `a`
-    let a2: Tensor<f64, DeviceCpuSerial, _> = rt::asarray((data(n * k, 9), &dcpu)).into_shape([n, k]);
-    let bt = a2.t();
-    assert_eq!(bt.stride(), &[1, k as isize], "fixture: transposed operand");
-    let want = rt::matmul(&a, &bt);
-    let want = DeviceToCpuAPI::<f64>::to_cpu_vec(want.to_contig(RowMajor).storage()).rstsr_unwrap();
-    let got = rt::matmul(a.to_device(&d), bt.to_device(&d));
-    let got = DeviceToCpuAPI::<f64>::to_cpu_vec(got.to_contig(RowMajor).storage()).rstsr_unwrap();
-    let err = rel_err(&got, &want);
-    assert!(err <= 1e-13, "transposed b: max rel err {err:.3e}");
+    type Cpu = Tensor<f64, DeviceCpuSerial, IxD>;
+    let cases: [(&str, Cpu, Cpu); 4] = [
+        ("batched", a.clone(), b.clone()),
+        ("transposed b, broadcast", a.clone(), c2.t().to_owned()),
+        ("transposed a", at, b.clone()),
+        ("a broadcast over the batch", a2.clone(), b.clone()),
+    ];
+    for forced in [MatMulDrivers::CUBLAS_LT, MatMulDrivers::CUBLAS_EX, MatMulDrivers::CUBLAS] {
+        let d = device(forced, |f| f.trace_matmul = true);
+        for (what, a, b) in &cases {
+            let want = rt::matmul(a, b);
+            let want = DeviceToCpuAPI::<f64>::to_cpu_vec(want.to_contig(RowMajor).storage()).rstsr_unwrap();
+            let got = rt::matmul(a.to_device(&d), b.to_device(&d));
+            let got = DeviceToCpuAPI::<f64>::to_cpu_vec(got.to_contig(RowMajor).storage()).rstsr_unwrap();
+            let err = rel_err(&got, &want);
+            assert!(err <= 1e-13, "{what}, {forced:?}: max rel err {err:.3e}");
+        }
+    }
+}
+
+/// Operands and output that are views one element into their buffers: the addresses are not
+/// 16-byte aligned. The chain must get the product right, and cuBLASLt alone must either get it
+/// right or decline (an algorithm's alignment requirement is checked by `cublasLtMatmul`).
+#[test]
+fn cublas_lt_misaligned_views() {
+    require_cuda!();
+    let dcpu = DeviceCpuSerial::default();
+    let (m, k, n) = (32usize, 40usize, 24usize);
+    // an owning tensor whose layout starts one element into a buffer of `total + 1` (addresses
+    // off the 16-byte grid), on the device; the data also as a CPU vector
+    let shifted =
+        |rows: usize, cols: usize, seed: u64, d: &DeviceCuda| -> (Vec<f64>, Vec<f64>, Tensor<f64, DeviceCuda, IxD>) {
+            let total = rows * cols;
+            let v = data(total + 1, seed);
+            let t: Tensor<f64, DeviceCuda, _> = rt::asarray((v.clone(), d));
+            let (storage, _) = t.into_raw_parts();
+            let layout = Layout::<IxD>::new(vec![rows, cols], vec![cols as isize, 1], 1).unwrap();
+            (v[1..].to_vec(), v, Tensor::new(storage, layout))
+        };
+    for forced in [MatMulDrivers::CUBLAS_LT, MatMulDrivers::CUBLAS_EX, MatMulDrivers::all()] {
+        let d = device(forced, |f| f.trace_matmul = true);
+        let (av, _, a) = shifted(m, k, 12, &d);
+        let (bv, _, b) = shifted(k, n, 13, &d);
+        let (cv, cv_full, mut c) = shifted(m, n, 14, &d);
+        assert_eq!((a.offset(), b.offset(), c.offset()), (1, 1, 1), "fixture: shifted views");
+        let want =
+            rt::matmul(rt::asarray((av, &dcpu)).into_shape([m, k]), rt::asarray((bv, &dcpu)).into_shape([k, n]));
+        let want = DeviceToCpuAPI::<f64>::to_cpu_vec(want.to_contig(RowMajor).storage()).rstsr_unwrap();
+        // only cuBLASLt alone may refuse: the chain has the other drivers behind it
+        let refused =
+            |e: &dyn core::fmt::Debug| forced == MatMulDrivers::CUBLAS_LT && format!("{e:?}").contains("cublasLt");
+
+        // the fresh output of `a @ b`
+        match rt::matmul_f(&a, &b) {
+            Ok(got) => {
+                let got = DeviceToCpuAPI::<f64>::to_cpu_vec(got.to_contig(RowMajor).storage()).rstsr_unwrap();
+                let err = rel_err(&got, &want);
+                assert!(err <= 1e-13, "fresh output, {forced:?}: max rel err {err:.3e}");
+            },
+            Err(e) => assert!(refused(&e), "{forced:?}: {e:?}"),
+        }
+        // `c = 2 a b + c`, into the shifted `c` (read and written in place)
+        let before = DeviceToCpuAPI::<f64>::to_cpu_vec(c.to_contig(RowMajor).storage()).rstsr_unwrap();
+        eprintln!("  c before matches fixture: {}", rel_err(&before, &cv));
+        {
+            // the same offset layout on the CPU device, read back the same way
+            let cpu = Tensor::<f64, DeviceCpuSerial, IxD>::new(
+                Storage::new(DataOwned::from(cv_full.clone()), dcpu.clone()),
+                Layout::<IxD>::new(vec![m, n], vec![n as isize, 1], 1).unwrap(),
+            );
+            let back = DeviceToCpuAPI::<f64>::to_cpu_vec(cpu.to_contig(RowMajor).storage()).rstsr_unwrap();
+            eprintln!("  cpu offset read-back matches: {}", rel_err(&back, &cv));
+            let dev_plain = rt::asarray((cv.clone(), &d)).into_shape([m, n]);
+            let plain = DeviceToCpuAPI::<f64>::to_cpu_vec(dev_plain.to_contig(RowMajor).storage()).rstsr_unwrap();
+            eprintln!("  cuda plain read-back matches: {}", rel_err(&plain, &cv));
+            let raw = DeviceToCpuAPI::<f64>::to_cpu_vec(c.to_contig(RowMajor).storage()).rstsr_unwrap();
+            eprintln!(
+                "  before[0..3] = {:?} v[0..3] = {:?} v[1..4] = {:?}",
+                &before[0..3],
+                &cv_full[0..3],
+                &cv_full[1..4]
+            );
+            eprintln!("  cpu back[0..3] = {:?}", &back[0..3]);
+            eprintln!("  rel(before, v[0..]) = {}", rel_err(&before, &cv_full[..768]));
+            let _ = raw;
+        }
+        eprintln!("  want[0..3] = {:?} cv[0..3] = {:?}", &want[0..3], &cv[0..3]);
+        match op_mutc_refa_refb_matmul(&mut c, &a, &b, 2.0, 1.0) {
+            Ok(()) => {
+                // a fresh elementwise result reads `c` through its layout (a whole-storage read
+                // would start at the buffer, not at the offset)
+                let out = &c + 0.0;
+                let got = DeviceToCpuAPI::<f64>::to_cpu_vec(out.to_contig(RowMajor).storage()).rstsr_unwrap();
+                let err = rel_err(&got, &(0..want.len()).map(|i| 2.0 * want[i] + cv[i]).collect::<Vec<_>>());
+                assert!(err <= 1e-13, "beta path, {forced:?}: max rel err {err:.3e}");
+            },
+            Err(e) => assert!(refused(&e), "{forced:?}: {e:?}"),
+        }
+    }
 }

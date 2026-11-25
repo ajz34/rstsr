@@ -24,7 +24,7 @@
 //!
 //! | `(a, b) -> c` | accelerated drivers | always |
 //! |---|---|---|
-//! | `f32 -> f32`, `f64 -> f64` | `cublasGemmEx`, classic cuBLAS, tiled | naive |
+//! | `f32 -> f32`, `f64 -> f64` | cuBLASLt, `cublasGemmEx`, classic cuBLAS, tiled | naive |
 //! | everything else (integers, complex, half, mixed operands) | — (later batches) | naive |
 //!
 //! # Layouts
@@ -32,6 +32,12 @@
 //! Every layout the rule table admits is served: strided, negative and zero strides, broadcast
 //! and non-affine batches, either default order. The inner dot (`[k] @ [k]`) has no GEMM geometry
 //! and is refused by name.
+//!
+//! # Resources
+//!
+//! The cuBLAS drivers share one handle per stream, kept behind a lock; cuBLASLt keeps one handle
+//! and one heuristic cache per ordinal (a problem is described to it once, then reused), and one
+//! 32 MiB workspace per stream, allocated on the first matmul that stream runs through it.
 
 pub(crate) mod cublas_args;
 pub(crate) mod drivers;

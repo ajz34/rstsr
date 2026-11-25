@@ -6,6 +6,9 @@
 //! triple is tried in turn until one runs. An error is returned only when nothing ran.
 //!
 //! A driver that declines never enqueues anything, so fall-through cannot change the answer.
+//!
+//! The three cuBLAS drivers share the argument derivation ([`cublas::prepare`]): which layouts
+//! they can express is one rule, whatever entry is called.
 
 use std::any::TypeId;
 
@@ -18,6 +21,7 @@ pub(crate) use naive::NaiveScalar;
 
 pub(crate) mod cublas;
 pub(crate) mod cublas_ex;
+pub(crate) mod cublas_lt;
 pub(crate) mod naive;
 pub(crate) mod tiled;
 
@@ -72,8 +76,12 @@ pub(crate) enum Refusal {
     Cannot(&'static str),
     /// cuBLAS answered with this status; nothing was enqueued.
     CublasStatus(cudarc::cublas::sys::cublasStatus_t),
+    /// cuBLASLt answered with this status; nothing was enqueued.
+    CublasLtStatus(cudarc::cublaslt::sys::cublasStatus_t),
     /// `libcublas` is not loadable on this machine.
     NoCublas,
+    /// `libcublasLt` is not loadable on this machine.
+    NoCublasLt,
 }
 
 impl core::fmt::Display for Refusal {
@@ -81,7 +89,9 @@ impl core::fmt::Display for Refusal {
         match self {
             Self::Cannot(what) => write!(f, "cannot serve: {what}"),
             Self::CublasStatus(status) => write!(f, "cuBLAS status {status:?}"),
+            Self::CublasLtStatus(status) => write!(f, "cuBLASLt status {status:?}"),
             Self::NoCublas => write!(f, "libcublas is not loadable"),
+            Self::NoCublasLt => write!(f, "libcublasLt is not loadable"),
         }
     }
 }
@@ -227,6 +237,9 @@ impl Chain {
     }
 }
 
+/// The accelerated rows of the table: every driver, in the chain order.
+const ACCELERATED: [GemmDriver; 5] = GemmDriver::ALL;
+
 /// The drivers that can serve `(TA, TB) -> TC` under `mode`, in the chain order.
 ///
 /// Pure: a table lookup on the type triple and the mode, with no layout input. (Layout decides
@@ -234,26 +247,21 @@ impl Chain {
 ///
 /// | call | mode | candidates in order |
 /// |---|---|---|
-/// | `f32 -> f32` | any 32F mode | `cublasEx`, cuBLAS, tiled, naive |
-/// | `f64 -> f64` | `Default` / `Pedantic` | `cublasEx`, cuBLAS, tiled, naive |
+/// | `f32 -> f32` | any 32F mode | cuBLASLt, `cublasEx`, cuBLAS, tiled, naive |
+/// | `f64 -> f64` | `Default` / `Pedantic` | cuBLASLt, `cublasEx`, cuBLAS, tiled, naive |
 /// | `f64 -> f64` | `EmulatedFixedPoint` | cuBLAS, tiled, naive |
 /// | anything else | — | naive |
 ///
 /// The tiled and naive kernels are mode-agnostic: they compute in the output precision (or
-/// better), which every mode allows, so only the cuBLAS drivers read the plan. cuBLASLt joins as
-/// the first candidate of the accelerated rows with its own driver.
+/// better), which every mode allows, so only the cuBLAS drivers read the plan.
 pub(crate) fn candidates<TA: 'static, TB: 'static, TC: CudaMatMulMode>(mode: &TC::Mode) -> Chain {
     let same_type = same::<TA, TC>() && same::<TB, TC>();
     match plan::<TC>(mode) {
-        CublasPlan::F32(_) if same_type => {
-            Chain::new(&[GemmDriver::CublasEx, GemmDriver::Cublas, GemmDriver::Tiled, GemmDriver::Naive])
-        },
+        CublasPlan::F32(_) if same_type => Chain::new(&ACCELERATED),
         CublasPlan::F64(ComputeType64F::EmulatedFixedPoint) if same_type => {
             Chain::new(&[GemmDriver::Cublas, GemmDriver::Tiled, GemmDriver::Naive])
         },
-        CublasPlan::F64(_) if same_type => {
-            Chain::new(&[GemmDriver::CublasEx, GemmDriver::Cublas, GemmDriver::Tiled, GemmDriver::Naive])
-        },
+        CublasPlan::F64(_) if same_type => Chain::new(&ACCELERATED),
         CublasPlan::F32(_) | CublasPlan::F64(_) | CublasPlan::None => Chain::new(&[GemmDriver::Naive]),
     }
 }
@@ -278,13 +286,11 @@ where
             continue;
         }
         let verdict = match driver {
+            GemmDriver::CublasLt => cublas_lt::run(p, plan)?,
             GemmDriver::CublasEx => cublas_ex::run(p, plan)?,
             GemmDriver::Cublas => cublas::run(p, plan, flags.fixedpoint_mantissa_bits)?,
             GemmDriver::Tiled => tiled::run(p)?,
             GemmDriver::Naive => naive::run(p)?,
-            GemmDriver::CublasLt => {
-                rstsr_raise!(UnImplemented, "cuda matmul: the {} driver is not implemented yet", driver.name())?
-            },
         };
         if flags.trace_matmul {
             let g = &p.geom;
@@ -347,10 +353,10 @@ mod tests {
         c.iter().map(|d| d.name()).collect()
     }
 
-    /// Every 32F mode gives the full accelerated chain to `f32 -> f32`.
+    /// Every 32F mode gives the full chain to `f32 -> f32`.
     #[test]
     fn table_32f() {
-        let chain = ["cublasEx", "cublas", "tiled", "naive"];
+        let chain = ["cublasLt", "cublasEx", "cublas", "tiled", "naive"];
         let modes = [
             ComputeType32F::default(),
             ComputeType32F::Pedantic,
@@ -367,7 +373,7 @@ mod tests {
     /// classic handle only.
     #[test]
     fn table_64f() {
-        let chain = ["cublasEx", "cublas", "tiled", "naive"];
+        let chain = ["cublasLt", "cublasEx", "cublas", "tiled", "naive"];
         assert_eq!(names(&candidates::<f64, f64, f64>(&ComputeType64F::default())), chain);
         assert_eq!(names(&candidates::<f64, f64, f64>(&ComputeType64F::Pedantic)), chain);
         assert_eq!(names(&candidates::<f64, f64, f64>(&ComputeType64F::EmulatedFixedPoint)), [

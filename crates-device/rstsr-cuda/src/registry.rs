@@ -2,6 +2,7 @@
 
 use crate::error::{map_driver_error, map_driver_result};
 use crate::flags;
+use crate::matmul::drivers::cublas_lt::CublasLtHandle;
 use crate::prelude_dev::*;
 use cudarc::driver::CudaContext;
 use std::collections::HashMap;
@@ -26,6 +27,8 @@ pub struct CudaOrdinalObj {
     pub(crate) planned_cache_slot: OnceLock<crate::kernel::PlannedCache>,
     /// Cached arch string (one driver query per ordinal).
     pub(crate) arch_slot: OnceLock<core::result::Result<String, rstsr_core::prelude_dev::Error>>,
+    /// The cuBLASLt handle and heuristic cache, or a cached "not available".
+    pub(crate) cublaslt_slot: OnceLock<Option<Arc<CublasLtHandle>>>,
 }
 
 impl CudaOrdinalObj {
@@ -40,6 +43,7 @@ impl CudaOrdinalObj {
             kernel_cache_slot: OnceLock::new(),
             planned_cache_slot: OnceLock::new(),
             arch_slot: OnceLock::new(),
+            cublaslt_slot: OnceLock::new(),
         })
     }
 
@@ -56,6 +60,20 @@ impl CudaOrdinalObj {
     /// Compute capability `(major, minor)` of this ordinal's device.
     pub fn compute_capability(&self) -> Result<(i32, i32)> {
         map_driver_result(self.ctx.compute_capability())
+    }
+
+    /// The cuBLASLt state of this ordinal (see [`CublasLtHandle`]), or `None` when `libcublasLt` is
+    /// not loadable (cached: the probe either works once or never).
+    pub(crate) fn cublaslt(&self) -> Option<&Arc<CublasLtHandle>> {
+        self.cublaslt_slot
+            .get_or_init(|| {
+                // cudarc resolves the symbols lazily and panics when one is missing.
+                let made = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    CublasLtHandle::new(&self.default_stream)
+                }));
+                made.ok().and_then(|r| r.ok()).map(Arc::new)
+            })
+            .as_ref()
     }
 
     /// `(free, total)` device memory in bytes.

@@ -44,7 +44,7 @@
 //! | pinned host memory | `PinnedBuffer<T>` on `DeviceCudaPinned` (alloc/zeros/full/from_vec), non-blocking `to_device` both ways against `DeviceCuda`, copies against the CPU devices, zero-copy `host_view`/`host_view_mut`, one ordering event per buffer |
 //! | elementwise | arithmetic, comparison, transcendentals, unary float families, `where`, `clip` (same dtype) |
 //! | reductions | `sum`/`prod`/`mean`/`l2_norm`/`min`/`max`/`all`/`any`/`count_nonzero` (+ dtype variants), `var`/`std` (+ dtype), `argmin`/`argmax`/`nanarg*` (raveled, all + axes), `cumsum`/`cumprod` (real dtypes) |
-//! | linalg | `outer`, `cross`, `matmul`/`matmul_uninit` (driver chain: `cublasGemmEx`, classic cuBLAS, tiled kernel, naive kernel; compute modes by the flags), `tensordot` (view-only tier) |
+//! | linalg | `outer`, `cross`, `matmul`/`matmul_uninit` (driver chain: cuBLASLt, `cublasGemmEx`, classic cuBLAS, tiled kernel, naive kernel; compute modes by the flags), `tensordot` (view-only tier) |
 //! | indexing | `index_select`, `index_put` |
 //!
 //! **Absent, and why** — these are deliberate, not pending:

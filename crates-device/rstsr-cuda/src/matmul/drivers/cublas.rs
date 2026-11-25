@@ -166,11 +166,7 @@ impl_cublas_scalar!(f32, cublasSgemm_v2, cublasSgemmStridedBatched);
 impl_cublas_scalar!(f64, cublasDgemm_v2, cublasDgemmStridedBatched);
 
 fn op(t: bool) -> sys::cublasOperation_t {
-    if t {
-        sys::cublasOperation_t::CUBLAS_OP_T
-    } else {
-        sys::cublasOperation_t::CUBLAS_OP_N
-    }
+    if t { sys::cublasOperation_t::CUBLAS_OP_T } else { sys::cublasOperation_t::CUBLAS_OP_N }
 }
 
 /// A compute mode as the classic entries take it: a math mode of the handle.
@@ -268,11 +264,7 @@ unsafe fn replace_math_mode(
         return Err(status);
     }
     let status = unsafe { sys::cublasSetMathMode(handle, mode.cublas()) };
-    if status == sys::cublasStatus_t::CUBLAS_STATUS_SUCCESS {
-        Ok(previous)
-    } else {
-        Err(status)
-    }
+    if status == sys::cublasStatus_t::CUBLAS_STATUS_SUCCESS { Ok(previous) } else { Err(status) }
 }
 
 /// Issue the `gemm`. Returns the cuBLAS status; the caller hands the problem to the next driver on
@@ -397,13 +389,74 @@ unsafe fn gemm_unchecked<T: CublasScalar>(
     }
 }
 
-/// Prepare one `gemm` call for the cuBLAS drivers and run `f` with what they need.
+/// One `gemm` call prepared for the cuBLAS drivers.
+pub(crate) struct GemmCall<'a> {
+    /// The stream the call is enqueued on.
+    pub exec: &'a Arc<CudaStreamObj>,
+    /// The arguments, in cuBLAS's terms.
+    pub args: cublas_args::CublasArgs,
+    /// `[a, b, c]` named after the **geom** operands: each the buffer's base folded with its
+    /// layout's own offset in bytes.
+    pub ptrs: [u64; 3],
+    /// Cross-stream ordering events and read-event guards; held until the enqueue is done.
+    #[allow(dead_code)]
+    orders: [Option<crate::kernel::Event>; 3],
+    #[allow(dead_code)]
+    reads: [cudarc::driver::SyncOnDrop<'a>; 3],
+}
+
+/// A value, or the refusal of the problem.
+pub(crate) type Served<T> = core::result::Result<T, Refusal>;
+
+/// Derive the arguments and the pointers of a `gemm` on this problem.
 ///
-/// Refuses the problems cuBLAS cannot express (the rule table in [`cublas_args`]) and calls `f`
-/// with the handle (unlocked: `f` takes the lock), the arguments and the three pointers `[a, b, c]`
-/// named after the **geom** operands, each the buffer's base folded with its layout's own offset in
-/// bytes. The read-event guards of the three buffers live in this frame, so they are held until
-/// `f` returns.
+/// Refuses the problems cuBLAS cannot express (the rule table in [`cublas_args`]). The read-event
+/// guards of the three buffers live in the returned call, so they are held until the caller drops
+/// it, after the enqueue.
+pub(crate) fn prepare<'a, T, TA, TB, TC, TBuf>(
+    u: &Uniform<'a, T>,
+    p: &Problem<'a, TA, TB, TC, TBuf>,
+) -> Result<Served<GemmCall<'a>>>
+where
+    T: 'static,
+    TA: 'static,
+    TB: 'static,
+    TC: 'static,
+    TBuf: 'static,
+{
+    let geom = &p.geom;
+    let Some(args) = cublas_args::args(geom) else {
+        return Ok(Err(Refusal::Cannot(
+            "no column-major expression (stepped or reversed layout, no unit-stride operand axis, \
+             non-affine batch, or a dimension over i32)",
+        )));
+    };
+    let exec = p.device.stream();
+    // `geom.a` is the buffer whose layout went first to the rule table: the caller's `b` under
+    // `ColMajor`.
+    let (buf_a, buf_b) = if geom.swapped { (u.b, u.a) } else { (u.a, u.b) };
+    let orders = [order_input(buf_a, exec)?, order_input(buf_b, exec)?, order_output(u.c, exec)?];
+    let (pa, ra) = buf_a.read_ptr_on(exec);
+    let (pb, rb) = buf_b.read_ptr_on(exec);
+    let (pc, rc) = u.c.read_ptr_on(exec);
+    let esz = core::mem::size_of::<T>() as u64;
+    Ok(Ok(GemmCall {
+        exec,
+        args,
+        ptrs: [
+            (pa as u64).wrapping_add(geom.a.0 as u64 * esz),
+            (pb as u64).wrapping_add(geom.b.0 as u64 * esz),
+            (pc as u64).wrapping_add(geom.c.0 as u64 * esz),
+        ],
+        orders,
+        reads: [ra, rb, rc],
+    }))
+}
+
+/// Prepare one `gemm` call and run `f` with what a cuBLAS driver needs.
+///
+/// Declines with [`Refusal::NoCublas`] when `libcublas` is not loadable; otherwise `f` gets the
+/// handle (unlocked: `f` takes the lock), the arguments and the pointers of [`prepare`].
 pub(crate) fn with_gemm_call<T, TA, TB, TC, TBuf, F>(
     u: &Uniform<'_, T>,
     p: &Problem<'_, TA, TB, TC, TBuf>,
@@ -417,33 +470,14 @@ where
     TBuf: 'static,
     F: FnOnce(&Arc<CublasHandle>, &cublas_args::CublasArgs, [u64; 3]) -> Result<Verdict>,
 {
-    let geom = &p.geom;
-    let Some(args) = cublas_args::args(geom) else {
-        return Ok(Verdict::Declined(Refusal::Cannot(
-            "no column-major expression (stepped or reversed layout, no unit-stride operand axis, \
-             non-affine batch, or a dimension over i32)",
-        )));
+    let call = match prepare(u, p)? {
+        Ok(call) => call,
+        Err(r) => return Ok(Verdict::Declined(r)),
     };
-    let exec = p.device.stream();
-    let Some(blas) = exec.cublas() else {
+    let Some(blas) = call.exec.cublas() else {
         return Ok(Verdict::Declined(Refusal::NoCublas));
     };
-    // `geom.a` is the buffer whose layout went first to the rule table: the caller's `b` under
-    // `ColMajor`.
-    let (buf_a, buf_b) = if geom.swapped { (u.b, u.a) } else { (u.a, u.b) };
-    let _ga = order_input(buf_a, exec)?;
-    let _gb = order_input(buf_b, exec)?;
-    let _gc = order_output(u.c, exec)?;
-    let (pa, _ra) = buf_a.read_ptr_on(exec);
-    let (pb, _rb) = buf_b.read_ptr_on(exec);
-    let (pc, _rc) = u.c.read_ptr_on(exec);
-    let esz = core::mem::size_of::<T>() as u64;
-    let ptrs = [
-        (pa as u64).wrapping_add(geom.a.0 as u64 * esz),
-        (pb as u64).wrapping_add(geom.b.0 as u64 * esz),
-        (pc as u64).wrapping_add(geom.c.0 as u64 * esz),
-    ];
-    f(blas, &args, ptrs)
+    f(blas, &call.args, call.ptrs)
 }
 
 /// The status as a verdict: a non-success status is a refusal (nothing was enqueued).

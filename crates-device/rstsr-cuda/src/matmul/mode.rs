@@ -16,8 +16,8 @@ use num::Complex;
 /// resolves to [`Self::Default`] silently; [`Self::Pedantic`] is never downgraded and is an error.
 ///
 /// A driver that cannot express a mode declines the problem, and the next candidate runs
-/// (`Fast16BF` has no classic-entry math mode, so the classic driver hands it to the tiled or
-/// naive kernel, which compute in full `f32`).
+/// (`Fast16BF` has no classic-entry math mode, so the classic driver hands it on; the cuBLASLt
+/// and `cublasGemmEx` drivers serve it as a compute type).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum ComputeType32F {

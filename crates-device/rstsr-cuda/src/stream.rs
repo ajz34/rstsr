@@ -1,5 +1,6 @@
 //! Stream wrapper for `DeviceCuda`.
 
+use crate::buffer::CudaBuffer;
 use crate::device::DeviceCuda;
 use crate::error::{map_driver_error, map_driver_result};
 use crate::prelude_dev::*;
@@ -71,6 +72,9 @@ pub struct CudaStreamObj {
     /// dlopening `libcublas`, which either works once or never — retrying per launch would turn a
     /// missing library into a per-call panic.
     cublas_slot: OnceLock<Option<Arc<CublasHandle>>>,
+    /// The cuBLASLt workspace of this stream (32 MiB, lazy): scratch memory of the kernels, so
+    /// two streams never share one.
+    cublaslt_workspace_slot: OnceLock<Option<Arc<CudaBuffer<u8>>>>,
 }
 
 impl CudaStreamObj {
@@ -82,7 +86,12 @@ impl CudaStreamObj {
     /// Create a new stream on `ctx`.
     pub(crate) fn new(ctx: &Arc<CudaContext>) -> Result<Self> {
         let stream = ctx.new_stream().map_err(map_driver_error)?;
-        Ok(Self { stream, ordinal: ctx.ordinal(), cublas_slot: OnceLock::new() })
+        Ok(Self {
+            stream,
+            ordinal: ctx.ordinal(),
+            cublas_slot: OnceLock::new(),
+            cublaslt_workspace_slot: OnceLock::new(),
+        })
     }
 
     /// The underlying stream handle (launches, copies, synchronization).
@@ -93,7 +102,7 @@ impl CudaStreamObj {
     /// Wrap an existing cudarc stream of the given ordinal (test/interop
     /// helper; production code goes through `CudaOrdinalObj::new`).
     pub fn wrap(ordinal: usize, stream: Arc<CudaStream>) -> Self {
-        Self { stream, ordinal, cublas_slot: OnceLock::new() }
+        Self { stream, ordinal, cublas_slot: OnceLock::new(), cublaslt_workspace_slot: OnceLock::new() }
     }
 
     /// The cuBLAS handle for this stream, or `None` when the library cannot be loaded.
@@ -113,6 +122,15 @@ impl CudaStreamObj {
                     CudaBlas::new(self.stream.clone())
                 }));
                 made.ok().and_then(|r| r.ok()).map(|blas| Arc::new(CublasHandle::new(blas)))
+            })
+            .as_ref()
+    }
+
+    /// The cuBLASLt workspace of this stream, or `None` when it could not be allocated (cached).
+    pub(crate) fn cublaslt_workspace(self: &Arc<Self>) -> Option<&Arc<CudaBuffer<u8>>> {
+        self.cublaslt_workspace_slot
+            .get_or_init(|| {
+                CudaBuffer::new_f(self, crate::matmul::drivers::cublas_lt::WORKSPACE_BYTES).ok().map(Arc::new)
             })
             .as_ref()
     }
