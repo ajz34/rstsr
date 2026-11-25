@@ -11,12 +11,13 @@ use std::any::TypeId;
 
 use super::flags::MatMulDrivers;
 use super::geom::GemmGeom;
-use super::mode::CudaMatMulMode;
+use super::mode::{ComputeType32F, ComputeType64F, CudaMatMulMode};
 use crate::dtype::CudaDType;
 use crate::prelude_dev::*;
 pub(crate) use naive::NaiveScalar;
 
 pub(crate) mod cublas;
+pub(crate) mod cublas_ex;
 pub(crate) mod naive;
 pub(crate) mod tiled;
 
@@ -170,23 +171,90 @@ fn same<T: 'static, U: 'static>() -> bool {
     TypeId::of::<T>() == TypeId::of::<U>()
 }
 
+/// The compute mode of one call, resolved for its output type: what the cuBLAS drivers are asked
+/// for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum CublasPlan {
+    /// An `f32` output: the 32F mode.
+    F32(ComputeType32F),
+    /// An `f64` output: the 64F mode.
+    F64(ComputeType64F),
+    /// No cuBLAS compute mode: integers, half, or a type the accelerated drivers do not serve yet.
+    None,
+}
+
+/// The compute mode of one call, resolved for its output type: what the cuBLAS drivers are asked
+/// for. Every `CudaMatMulMode` impl pairs an output type with the mode enum of its family, so the
+/// mode is re-typed by the output type's `TypeId` (the shape `rules/code-concepts.md` names).
+///
+/// Complex and half outputs have no accelerated driver yet, so they have no plan; with those
+/// drivers, this is where a mode of the right family that the triple cannot serve resolves to the
+/// family default (never [`CublasPlan::None`], which would hand an asked-for mode to a kernel that
+/// never heard of it).
+pub(crate) fn plan<TC: CudaMatMulMode>(mode: &TC::Mode) -> CublasPlan {
+    if same::<TC, f32>() {
+        // SAFETY: these output types have `Mode = ComputeType32F`.
+        CublasPlan::F32(unsafe { *(mode as *const TC::Mode as *const ComputeType32F) })
+    } else if same::<TC, f64>() {
+        // SAFETY: these output types have `Mode = ComputeType64F`.
+        CublasPlan::F64(unsafe { *(mode as *const TC::Mode as *const ComputeType64F) })
+    } else {
+        CublasPlan::None
+    }
+}
+
+/// An ordered candidate list: at most one entry per driver.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Chain {
+    list: [GemmDriver; N],
+    len: u8,
+}
+
+/// The number of drivers.
+const N: usize = GemmDriver::ALL.len();
+
+impl Chain {
+    const EMPTY: [GemmDriver; N] = [GemmDriver::Naive; N];
+
+    fn new(list: &[GemmDriver]) -> Self {
+        let mut out = Self { list: Self::EMPTY, len: list.len() as u8 };
+        out.list[..list.len()].copy_from_slice(list);
+        out
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = GemmDriver> + '_ {
+        self.list[..self.len as usize].iter().copied()
+    }
+}
+
 /// The drivers that can serve `(TA, TB) -> TC` under `mode`, in the chain order.
 ///
 /// Pure: a table lookup on the type triple and the mode, with no layout input. (Layout decides
-/// whether a listed driver *can*; that is the run-time fall-through.) Until the mode-aware drivers
-/// land, only the `Default`-independent part of the table is filled in:
+/// whether a listed driver *can*; that is the run-time fall-through.)
 ///
-/// | call | candidates in order |
-/// |---|---|
-/// | `f32 -> f32`, `f64 -> f64` | cuBLAS, tiled, naive |
-/// | anything else | naive |
-pub(crate) fn candidates<TA: 'static, TB: 'static, TC: CudaMatMulMode>(mode: &TC::Mode) -> Vec<GemmDriver> {
-    let _ = mode;
+/// | call | mode | candidates in order |
+/// |---|---|---|
+/// | `f32 -> f32` | any 32F mode | `cublasEx`, cuBLAS, tiled, naive |
+/// | `f64 -> f64` | `Default` / `Pedantic` | `cublasEx`, cuBLAS, tiled, naive |
+/// | `f64 -> f64` | `EmulatedFixedPoint` | cuBLAS, tiled, naive |
+/// | anything else | — | naive |
+///
+/// The tiled and naive kernels are mode-agnostic: they compute in the output precision (or
+/// better), which every mode allows, so only the cuBLAS drivers read the plan. cuBLASLt joins as
+/// the first candidate of the accelerated rows with its own driver.
+pub(crate) fn candidates<TA: 'static, TB: 'static, TC: CudaMatMulMode>(mode: &TC::Mode) -> Chain {
     let same_type = same::<TA, TC>() && same::<TB, TC>();
-    if same_type && (same::<TC, f32>() || same::<TC, f64>()) {
-        vec![GemmDriver::Cublas, GemmDriver::Tiled, GemmDriver::Naive]
-    } else {
-        vec![GemmDriver::Naive]
+    match plan::<TC>(mode) {
+        CublasPlan::F32(_) if same_type => {
+            Chain::new(&[GemmDriver::CublasEx, GemmDriver::Cublas, GemmDriver::Tiled, GemmDriver::Naive])
+        },
+        CublasPlan::F64(ComputeType64F::EmulatedFixedPoint) if same_type => {
+            Chain::new(&[GemmDriver::Cublas, GemmDriver::Tiled, GemmDriver::Naive])
+        },
+        CublasPlan::F64(_) if same_type => {
+            Chain::new(&[GemmDriver::CublasEx, GemmDriver::Cublas, GemmDriver::Tiled, GemmDriver::Naive])
+        },
+        CublasPlan::F32(_) | CublasPlan::F64(_) | CublasPlan::None => Chain::new(&[GemmDriver::Naive]),
     }
 }
 
@@ -202,17 +270,19 @@ where
     TC: NaiveScalar + CudaMatMulMode,
     TBuf: 'static,
 {
+    let plan = plan::<TC>(mode);
     let enabled = flags.matmul_drivers;
     let mut declined: Vec<(&'static str, Refusal)> = Vec::new();
-    for driver in candidates::<TA, TB, TC>(mode) {
+    for driver in candidates::<TA, TB, TC>(mode).iter() {
         if !enabled.contains(driver.flag()) {
             continue;
         }
         let verdict = match driver {
-            GemmDriver::Cublas => cublas::run(p)?,
+            GemmDriver::CublasEx => cublas_ex::run(p, plan)?,
+            GemmDriver::Cublas => cublas::run(p, plan, flags.fixedpoint_mantissa_bits)?,
             GemmDriver::Tiled => tiled::run(p)?,
             GemmDriver::Naive => naive::run(p)?,
-            GemmDriver::CublasLt | GemmDriver::CublasEx => {
+            GemmDriver::CublasLt => {
                 rstsr_raise!(UnImplemented, "cuda matmul: the {} driver is not implemented yet", driver.name())?
             },
         };
@@ -273,26 +343,69 @@ mod tests {
     use super::*;
     use crate::matmul::mode::{ComputeType16F, ComputeType32F, ComputeType64F};
 
-    fn names(c: &[GemmDriver]) -> Vec<&'static str> {
+    fn names(c: &Chain) -> Vec<&'static str> {
         c.iter().map(|d| d.name()).collect()
     }
 
-    /// The real single-type triples get the accelerated chain; every other triple starts at naive.
+    /// Every 32F mode gives the full accelerated chain to `f32 -> f32`.
     #[test]
-    fn table_by_type_triple() {
-        let chain = ["cublas", "tiled", "naive"];
-        let naive = ["naive"];
-        assert_eq!(names(&candidates::<f32, f32, f32>(&ComputeType32F::default())), chain);
+    fn table_32f() {
+        let chain = ["cublasEx", "cublas", "tiled", "naive"];
+        let modes = [
+            ComputeType32F::default(),
+            ComputeType32F::Pedantic,
+            ComputeType32F::Fast16F,
+            ComputeType32F::Fast16BF,
+            ComputeType32F::FastTF32,
+        ];
+        for mode in modes {
+            assert_eq!(names(&candidates::<f32, f32, f32>(&mode)), chain, "{mode:?}");
+        }
+    }
+
+    /// `f64 -> f64`: the full chain, except that the fixed-point emulation is served by the
+    /// classic handle only.
+    #[test]
+    fn table_64f() {
+        let chain = ["cublasEx", "cublas", "tiled", "naive"];
         assert_eq!(names(&candidates::<f64, f64, f64>(&ComputeType64F::default())), chain);
         assert_eq!(names(&candidates::<f64, f64, f64>(&ComputeType64F::Pedantic)), chain);
+        assert_eq!(names(&candidates::<f64, f64, f64>(&ComputeType64F::EmulatedFixedPoint)), [
+            "cublas", "tiled", "naive"
+        ]);
+    }
+
+    /// The plan is keyed by the output type: the family mode for `f32`/`f64`, none for the types
+    /// without an accelerated driver yet.
+    #[test]
+    fn plan_by_output_type() {
+        assert_eq!(plan::<f32>(&ComputeType32F::FastTF32), CublasPlan::F32(ComputeType32F::FastTF32));
+        assert_eq!(plan::<f64>(&ComputeType64F::Pedantic), CublasPlan::F64(ComputeType64F::Pedantic));
+        assert_eq!(plan::<num::Complex<f64>>(&ComputeType64F::default()), CublasPlan::None);
+        assert_eq!(plan::<i32>(&()), CublasPlan::None);
+        assert_eq!(plan::<half::bf16>(&ComputeType16F::default()), CublasPlan::None);
+    }
+
+    /// Every other triple starts and ends at naive, whatever the mode.
+    #[test]
+    fn table_by_type_triple() {
+        let naive = ["naive"];
         assert_eq!(names(&candidates::<i32, i32, i32>(&())), naive);
         assert_eq!(names(&candidates::<f32, f64, f64>(&ComputeType64F::default())), naive, "mixed operands");
+        assert_eq!(names(&candidates::<f32, f64, f32>(&ComputeType32F::default())), naive, "mixed operands, f32 out");
         assert_eq!(names(&candidates::<half::f16, half::f16, f32>(&ComputeType32F::default())), naive);
         assert_eq!(names(&candidates::<half::bf16, half::bf16, half::bf16>(&ComputeType16F::default())), naive);
         assert_eq!(
             names(&candidates::<num::Complex<f64>, num::Complex<f64>, num::Complex<f64>>(&ComputeType64F::default())),
             naive
         );
+    }
+
+    /// The candidate list holds every driver at most once and never overflows.
+    #[test]
+    fn chain_bounds() {
+        assert_eq!(Chain::new(&GemmDriver::ALL).iter().collect::<Vec<_>>(), GemmDriver::ALL.to_vec());
+        assert_eq!(Chain::new(&[]).iter().count(), 0);
     }
 
     /// Each driver owns one enable-set bit, and the default set enables all of them.

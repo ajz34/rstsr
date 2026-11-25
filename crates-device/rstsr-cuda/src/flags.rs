@@ -28,7 +28,8 @@ pub struct CudaRuntimeFlags {
     /// Compute type for 16-bit-float matmul (read by `f16`/`bf16`-output calls only).
     pub compute_type_16f: ComputeType16F,
     /// Mantissa bits of the 64-bit-float fixed-point emulation; `0` keeps the library
-    /// default. Read only when `compute_type_64f` is `EmulatedFixedPoint`.
+    /// default (the only value `cudarc` 0.19 can honour: any other is an error naming this
+    /// field). Read only when `compute_type_64f` is `EmulatedFixedPoint`.
     pub fixedpoint_mantissa_bits: u32,
     /// The matmul drivers a device may use (default: all of them).
     pub matmul_drivers: MatMulDrivers,

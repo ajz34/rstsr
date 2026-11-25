@@ -15,11 +15,16 @@
 //! family. `DeviceMatMulAPI` reads the mode of the output type from the device flags; the
 //! tensor-level `*_mode` entries (passing it per call) are not built yet.
 //!
+//! The cuBLAS drivers take the mode as given; the tiled and naive kernels compute in the output
+//! precision (or better) whatever the mode. A driver that cannot express a mode declines and the
+//! next candidate runs: `Fast16BF` on the classic entries, and `EmulatedFixedPoint` without
+//! `cudarc`'s CUDA 13.0 bindings.
+//!
 //! # Type triples
 //!
 //! | `(a, b) -> c` | accelerated drivers | always |
 //! |---|---|---|
-//! | `f32 -> f32`, `f64 -> f64` | classic cuBLAS, tiled | naive |
+//! | `f32 -> f32`, `f64 -> f64` | `cublasGemmEx`, classic cuBLAS, tiled | naive |
 //! | everything else (integers, complex, half, mixed operands) | — (later batches) | naive |
 //!
 //! # Layouts

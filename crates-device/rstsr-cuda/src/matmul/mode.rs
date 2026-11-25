@@ -6,6 +6,7 @@
 
 use crate::dtype::CudaDType;
 use crate::flags::CudaRuntimeFlags;
+use cudarc::cublas::sys;
 use duplicate::duplicate_item;
 use num::Complex;
 
@@ -13,6 +14,10 @@ use num::Complex;
 ///
 /// Read by calls with an `f32` (or `f32`-family) output only. A mode the type triple cannot serve
 /// resolves to [`Self::Default`] silently; [`Self::Pedantic`] is never downgraded and is an error.
+///
+/// A driver that cannot express a mode declines the problem, and the next candidate runs
+/// (`Fast16BF` has no classic-entry math mode, so the classic driver hands it to the tiled or
+/// naive kernel, which compute in full `f32`).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum ComputeType32F {
@@ -31,6 +36,8 @@ pub enum ComputeType32F {
 }
 
 /// 64-bit-float compute-type family.
+///
+/// Read by calls with an `f64` output only, with the same resolution rule as [`ComputeType32F`].
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum ComputeType64F {
@@ -39,8 +46,9 @@ pub enum ComputeType64F {
     Default,
     /// Exact arithmetic semantics and the specified internal storage format.
     Pedantic,
-    /// Emulate the `f64` product in fixed point; the mantissa width is
-    /// [`CudaRuntimeFlags::fixedpoint_mantissa_bits`].
+    /// Emulate the `f64` product in fixed point. Only the classic cuBLAS driver serves it, and it
+    /// needs `cudarc`'s CUDA 13.0 bindings (`CUDARC_CUDA_VERSION=13000` or newer); the mantissa
+    /// width is [`CudaRuntimeFlags::fixedpoint_mantissa_bits`].
     EmulatedFixedPoint,
 }
 
@@ -66,6 +74,33 @@ pub trait CudaMatMulMode: CudaDType {
 
     /// The mode this output type resolves to under `flags`.
     fn matmul_mode(flags: &CudaRuntimeFlags) -> Self::Mode;
+}
+
+impl ComputeType32F {
+    /// The `cublasGemmEx` compute type of this mode.
+    pub(crate) fn gemm_ex(self) -> sys::cublasComputeType_t {
+        use sys::cublasComputeType_t as C;
+        match self {
+            Self::Default => C::CUBLAS_COMPUTE_32F,
+            Self::Pedantic => C::CUBLAS_COMPUTE_32F_PEDANTIC,
+            Self::Fast16F => C::CUBLAS_COMPUTE_32F_FAST_16F,
+            Self::Fast16BF => C::CUBLAS_COMPUTE_32F_FAST_16BF,
+            Self::FastTF32 => C::CUBLAS_COMPUTE_32F_FAST_TF32,
+        }
+    }
+}
+
+impl ComputeType64F {
+    /// The `cublasGemmEx` compute type of this mode, or `None` where the entry has none: the
+    /// fixed-point emulation is a math mode of the classic handle only.
+    pub(crate) fn gemm_ex(self) -> Option<sys::cublasComputeType_t> {
+        use sys::cublasComputeType_t as C;
+        match self {
+            Self::Default => Some(C::CUBLAS_COMPUTE_64F),
+            Self::Pedantic => Some(C::CUBLAS_COMPUTE_64F_PEDANTIC),
+            Self::EmulatedFixedPoint => None,
+        }
+    }
 }
 
 impl CudaMatMulMode for f32 {
@@ -118,4 +153,40 @@ impl CudaMatMulMode for half::bf16 {
 impl CudaMatMulMode for T {
     type Mode = ();
     fn matmul_mode(_: &CudaRuntimeFlags) -> Self::Mode {}
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_32f_mode_is_a_gemm_ex_compute_type() {
+        use sys::cublasComputeType_t as C;
+        assert_eq!(ComputeType32F::default().gemm_ex(), C::CUBLAS_COMPUTE_32F);
+        assert_eq!(ComputeType32F::Pedantic.gemm_ex(), C::CUBLAS_COMPUTE_32F_PEDANTIC);
+        assert_eq!(ComputeType32F::Fast16F.gemm_ex(), C::CUBLAS_COMPUTE_32F_FAST_16F);
+        assert_eq!(ComputeType32F::Fast16BF.gemm_ex(), C::CUBLAS_COMPUTE_32F_FAST_16BF);
+        assert_eq!(ComputeType32F::FastTF32.gemm_ex(), C::CUBLAS_COMPUTE_32F_FAST_TF32);
+    }
+
+    #[test]
+    fn fixed_point_emulation_has_no_gemm_ex_compute_type() {
+        use sys::cublasComputeType_t as C;
+        assert_eq!(ComputeType64F::default().gemm_ex(), Some(C::CUBLAS_COMPUTE_64F));
+        assert_eq!(ComputeType64F::Pedantic.gemm_ex(), Some(C::CUBLAS_COMPUTE_64F_PEDANTIC));
+        assert_eq!(ComputeType64F::EmulatedFixedPoint.gemm_ex(), None);
+    }
+
+    /// A call reads the field of its own family only.
+    #[test]
+    fn mode_read_from_the_family_field() {
+        let flags = CudaRuntimeFlags {
+            compute_type_32f: ComputeType32F::FastTF32,
+            compute_type_64f: ComputeType64F::EmulatedFixedPoint,
+            ..CudaRuntimeFlags::default()
+        };
+        assert_eq!(<f32 as CudaMatMulMode>::matmul_mode(&flags), ComputeType32F::FastTF32);
+        assert_eq!(<f64 as CudaMatMulMode>::matmul_mode(&flags), ComputeType64F::EmulatedFixedPoint);
+        assert_eq!(<Complex<f32> as CudaMatMulMode>::matmul_mode(&flags), ComputeType32F::FastTF32);
+    }
 }

@@ -37,7 +37,9 @@ faer = ["rstsr-core/faer"]
 # CUDA version resolution: cudarc detects the toolkit version from the build
 # system by default. Without nvcc, set the `CUDARC_CUDA_VERSION` environment
 # variable instead of enabling a per-version feature (cudarc cannot compile
-# with two version features active, which `--all-features` would do).
+# with two version features active, which `--all-features` would do). The
+# version also selects the cuBLAS bindings: the matmul math modes need 12.9,
+# the FP64 fixed-point emulation 13.0 (build.rs mirrors the choice).
 # Link against the installed toolkit (requires LD_LIBRARY_PATH or rpath).
 # Only the dynamic mode is exposed: cudarc's linking modes are mutually
 # exclusive and panic when combined, so forwarding more than one breaks the
