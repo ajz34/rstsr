@@ -4,8 +4,9 @@
 //!   `unique*` truncation, byte-erased device pointer).
 //! - [`device::DeviceCuda`]: registry-canonical per-ordinal state, an execution-stream selector, a
 //!   flags override, `default_order`.
-//! - [`flags`]: `Option<CudaRuntimeFlags>` per device + env-seeded global default; compared as
-//!   stored by `same_device`.
+//! - [`flags`]: `Option<CudaRuntimeFlags>` per device + a process-global default; compared as
+//!   stored by `same_device`. No flag is read from the environment.
+//! - [`matmul`]: the matmul driver chain, its compute modes and the driver enable set.
 //! - [`stream::CudaStreamObj`]: user-visible, strictly compared.
 //! - [`pinned::DeviceCudaPinned`] / [`pinned::PinnedBuffer<T>`]: page-locked *host* tensors
 //!   (`Raw = PinnedBuffer<T>`), a transfer endpoint for non-blocking H2D/D2H and a zero-copy source
@@ -31,6 +32,8 @@
 //!   out-of-range clamping differ); integer-to-float and width changes follow the CPU.
 //! - Integer division and remainder by zero yield `0` (NumPy); the CPU reference devices panic on
 //!   Rust's `/` and `%`.
+//! - Integer `matmul` wraps on overflow (C semantics, as NumPy does); the CPU reference devices
+//!   panic in debug builds.
 //! - `fill`/`ones`/`zeros` take the kernel path for every supported dtype (complex included).
 //!
 //! # What is implemented
@@ -41,7 +44,7 @@
 //! | pinned host memory | `PinnedBuffer<T>` on `DeviceCudaPinned` (alloc/zeros/full/from_vec), non-blocking `to_device` both ways against `DeviceCuda`, copies against the CPU devices, zero-copy `host_view`/`host_view_mut`, one ordering event per buffer |
 //! | elementwise | arithmetic, comparison, transcendentals, unary float families, `where`, `clip` (same dtype) |
 //! | reductions | `sum`/`prod`/`mean`/`l2_norm`/`min`/`max`/`all`/`any`/`count_nonzero` (+ dtype variants), `var`/`std` (+ dtype), `argmin`/`argmax`/`nanarg*` (raveled, all + axes), `cumsum`/`cumprod` (real dtypes) |
-//! | linalg | `outer`, `cross`, `matmul`/`matmul_uninit` (cuBLAS, tiled kernel as fallback), `tensordot` (view-only tier) |
+//! | linalg | `outer`, `cross`, `matmul`/`matmul_uninit` (driver chain: cuBLAS, tiled kernel, naive kernel), `tensordot` (view-only tier) |
 //! | indexing | `index_select`, `index_put` |
 //!
 //! **Absent, and why** — these are deliberate, not pending:
@@ -99,6 +102,7 @@
 //! CUDARC_CUDA_VERSION=12060 cargo test -p rstsr-cuda --lib            # no device needed
 //! CUDARC_CUDA_VERSION=12060 cargo test -p rstsr-cuda --test test_kernels
 //! CUDARC_CUDA_VERSION=12060 cargo test -p rstsr-cuda --test test_matmul_tiled
+//! CUDARC_CUDA_VERSION=12060 cargo test -p rstsr-cuda --test test_matmul_naive
 //! CUDARC_CUDA_VERSION=12060 cargo test -p rstsr-cuda --test test_pinned
 //! ```
 //!
@@ -107,13 +111,9 @@
 //! runs anywhere: the reduction plan, the kernel-token checks, the cuBLAS argument derivation and
 //! the addressing rules are all pure functions and are tested there.
 //!
-//! Environment knobs, both read once per process:
+//! Environment knobs, all read once per process and all kernel-build inputs (op behaviour,
+//! including which matmul drivers run, is set through [`flags::CudaRuntimeFlags`] instead):
 //!
-//! - `RSTSR_CUDA_MATMUL=tiled` forces the tiled GEMM instead of cuBLAS. It exists so the fallback
-//!   keeps hardware coverage; `tests/test_matmul_tiled.rs` sets it.
-//! - `RSTSR_CUDA_DEBUG_GEMM=1` prints the resolved geometry, the cuBLAS arguments and the pointer
-//!   bases once per process. This is the instrument that turned a stride-units bug into a two-minute
-//!   read after three sessions of inference.
 //! - `RSTSR_CUDA_STRICT_FP=1` compiles with `--fmad=false`, removing FMA contraction from the
 //!   kernels that can use it (`l2_norm`, `var`, `vecdot`). See the numerics section above for what
 //!   this does and does not recover.
@@ -162,6 +162,7 @@ pub mod kernel;
 pub mod pinned;
 pub mod linalg;
 pub(crate) mod kernels;
+pub mod matmul;
 
 pub(crate) mod kernels_ops;
 pub mod operators;
@@ -177,6 +178,7 @@ pub mod prelude_dev {
     pub use crate::device::DeviceCuda;
     pub use crate::event::CudaEvent;
     pub use crate::flags::{default_flags, set_default_flags, ComputeType32F, CudaRuntimeFlags};
+    pub use crate::matmul::{CudaMatMulMode, MatMulDrivers};
     pub use crate::pinned::{DeviceCudaPinned, PinnedBuffer, TensorPinnedHostViewAPI, TensorPinnedHostViewMutAPI};
     pub use crate::registry::CudaOrdinalObj;
     pub use crate::stream::CudaStreamObj;

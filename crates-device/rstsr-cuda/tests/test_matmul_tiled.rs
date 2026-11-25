@@ -1,9 +1,9 @@
 //! The tiled GEMM kernel, exercised on hardware.
 //!
-//! `cupy`-style delegation means cuBLAS is the default path, so the tiled kernel would otherwise
-//! never run on a GPU again — and it is the path a build without `libcublas` takes. This file forces
-//! it with `RSTSR_CUDA_MATMUL=tiled`, which is read once per process, and therefore sets the
-//! variable in every test that runs a matmul.
+//! cuBLAS is the first driver of the matmul chain, so the tiled kernel would otherwise rarely run
+//! on a GPU — and it is the path a build without `libcublas` takes. This file enables only the
+//! tiled driver through the device flags ([`MatMulDrivers::TILED`]), in every test that runs a
+//! matmul.
 //!
 //! `tests/test_kernels.rs` covers the same shapes through whatever the default is, so between the
 //! two files both paths have hardware evidence.
@@ -12,16 +12,21 @@ use rstsr::prelude::*;
 use rstsr_cuda::funcs;
 use rstsr_cuda::prelude_dev::*;
 
+/// A device on which the tiled driver is the only enabled matmul driver.
+fn forced(drivers: MatMulDrivers) -> DeviceCuda {
+    let mut flags = CudaRuntimeFlags::default();
+    flags.matmul_drivers = drivers;
+    DeviceCuda::new(0).with_flags(flags)
+}
+
 macro_rules! tiled_and_cuda {
-    () => {
-        // SAFETY: every test in this binary sets the same value before its first matmul, and the
-        // flag is cached on first read, so there is no ordering under which they disagree.
-        std::env::set_var("RSTSR_CUDA_MATMUL", "tiled");
+    ($d:ident) => {
         let available = std::panic::catch_unwind(funcs::is_available).unwrap_or(false);
         if !available {
             eprintln!("skipping: no CUDA device visible");
             return;
         }
+        let $d = forced(MatMulDrivers::TILED);
     };
 }
 
@@ -50,8 +55,7 @@ where
 /// `[m, k] @ [k, n]`, including shapes that clip every tile edge.
 #[test]
 fn tiled_gemm22_vs_cpu() {
-    tiled_and_cuda!();
-    let d = DeviceCuda::new(0);
+    tiled_and_cuda!(d);
     let dcpu = DeviceCpuSerial::default();
     for &(m, k, n) in &[(32usize, 32usize, 32usize), (17, 33, 5), (130, 70, 129)] {
         let a_cpu: Tensor<f64, DeviceCpuSerial, _> =
@@ -71,8 +75,7 @@ fn tiled_gemm22_vs_cpu() {
 /// Both non-default operand orientations, which select a different thread map each.
 #[test]
 fn tiled_transposed_operands() {
-    tiled_and_cuda!();
-    let d = DeviceCuda::new(0);
+    tiled_and_cuda!(d);
     let dcpu = DeviceCpuSerial::default();
     let (m, k, n) = (40usize, 24usize, 20usize);
 
@@ -98,8 +101,7 @@ fn tiled_transposed_operands() {
 /// `grid.z` over the batch, plus a broadcast batch.
 #[test]
 fn tiled_batched_vs_cpu() {
-    tiled_and_cuda!();
-    let d = DeviceCuda::new(0);
+    tiled_and_cuda!(d);
     let dcpu = DeviceCpuSerial::default();
     let (p, m, k, n) = (5usize, 12usize, 16usize, 8usize);
 
@@ -124,8 +126,7 @@ fn tiled_batched_vs_cpu() {
 /// `matmul_from`: the path that reads `c`, and the only one that hands the device a strided output.
 #[test]
 fn tiled_matmul_from_vs_cpu() {
-    tiled_and_cuda!();
-    let d = DeviceCuda::new(0);
+    tiled_and_cuda!(d);
     let dcpu = DeviceCpuSerial::default();
     let (m, k, n) = (20usize, 12usize, 16usize);
 
@@ -154,10 +155,10 @@ fn tiled_matmul_from_vs_cpu() {
 /// the shared cuBLAS handle was the only explanation left standing.
 #[test]
 fn tiled_col_major_and_gemv_gevm() {
-    tiled_and_cuda!();
+    tiled_and_cuda!(d);
 
     // ColMajor: reverse every layout, swap the operands.
-    let mut d = DeviceCuda::new(0);
+    let mut d = d;
     d.set_default_order(ColMajor);
     let mut dcpu = DeviceCpuSerial::default();
     dcpu.set_default_order(ColMajor);
@@ -176,7 +177,6 @@ fn tiled_col_major_and_gemv_gevm() {
 
     // Rules 3 and 4: a length-1 tile axis, which is where the vector's own rank has to be folded
     // into a 2-D matmul part (`dim_insert`, i.e. a stride-1 axis of extent 1).
-    let d = DeviceCuda::new(0);
     let dcpu = DeviceCpuSerial::default();
     let (m, k, n) = (24usize, 16usize, 18usize);
     let a_cpu: Tensor<f64, DeviceCpuSerial, _> =

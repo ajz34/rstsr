@@ -8,9 +8,7 @@
 //!   see dtype.rs complex INCLUDES).
 
 pub(crate) mod adv_index;
-pub(crate) mod cublas_gemm;
 pub(crate) mod elementwise;
-pub(crate) mod gemm;
 pub(crate) mod exprs;
 pub(crate) mod ops_binary_extra;
 pub(crate) mod ops_ternary;

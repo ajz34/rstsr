@@ -1,6 +1,7 @@
-//! `DeviceOuterAPI`, `DeviceCrossAPI`, `DeviceMatMulAPI` and `DeviceTensordotAPI` for `DeviceCuda`.
+//! `DeviceOuterAPI`, `DeviceCrossAPI` and `DeviceTensordotAPI` for `DeviceCuda`;
+//! `DeviceMatMulAPI` lives in [`crate::matmul`].
 //!
-//! Four very different amounts of work, and they sit in one file because the split is about *who
+//! Three very different amounts of work, and they sit in one file because the split is about *who
 //! owns the geometry*, not about the operator:
 //!
 //! - `outer` is a planned **binary** launch. The two 1-D operands are widened onto the `(n, m)`
@@ -9,17 +10,16 @@
 //! - `cross` reads four elements and writes three per slot (`a` and `b` at the axis offsets +1 and
 //!   +2), which no one-value-per-operand template can express, so it has its own entry:
 //!   `elementwise::cross_launch`. The iteration, the three plan variants and the cache are shared.
-//! - `matmul` is the only operation here whose *thread geometry* is the point: a tiled GEMM in
-//!   `gemm`, where the block owns a tile of the output and the contraction streams through shared
-//!   memory. It is also the only one that needs the batch axes, which ride in `grid.z`.
+//! - `matmul` owns no kernel here: it hands the validated layouts to the driver chain in
+//!   [`crate::matmul`], which resolves the geometry once and tries cuBLAS, the tiled kernel and the
+//!   naive kernel in turn.
 //! - `tensordot` owns no geometry at all: it is a *scheduler* over `matmul`. The axis reorder and the
 //!   block merges are a pure function of layouts shared with every other backend, so the impl is the
 //!   planner plus one call — and the interesting part is what it does when the planner declines.
 
 use crate::dtype::{CudaArith, CudaDType};
 use crate::kernels::elementwise;
-use crate::kernels::cublas_gemm::CublasScalar;
-use crate::kernels::gemm;
+use crate::matmul::drivers::cublas::CublasScalar;
 use crate::prelude_dev::*;
 
 impl<TA, TB, TC> DeviceOuterAPI<TA, TB, TC> for DeviceCuda
@@ -84,84 +84,12 @@ where
     }
 }
 
-impl<T, DA, DB, DC> DeviceMatMulAPI<T, T, T, DA, DB, DC> for DeviceCuda
-where
-    DA: DimAPI,
-    DB: DimAPI,
-    DC: DimAPI,
-    Self: DeviceRawAPI<T, Raw = CudaBuffer<T>>
-        + DeviceRawAPI<MaybeUninit<T>, Raw = CudaBuffer<MaybeUninit<T>>>,
-    // `num::Zero` is only used for the fresh-output path's `beta`, which both paths then treat as
-    // "do not read c" (cuBLAS has the same convention). It is not part of the arithmetic.
-    //
-    // `CublasScalar` is the bound that matters: it names exactly the two dtypes cuBLAS's typed
-    // `gemm` covers, so it also excludes complex — and complex stays out on purpose. The tiled
-    // kernel spells its zero as `(@T@)0`, which `rstsr_complex` has no single-argument constructor
-    // for, so a complex instantiation would fail inside NVRTC (on a rented GPU) rather than here.
-    // A complex GEMM needs a zero spelled as a two-argument construction and the mixed-precision
-    // expression builders — separate work.
-    //
-    // Integers are excluded too. They *were* handled by the tiled kernel and are now not handled at
-    // all; that is a deliberate narrowing, because an integer GEMM path that has never run on
-    // hardware is worse than a compile error.
-    T: CublasScalar + num::Zero,
-{
-    fn matmul(
-        &self,
-        c: &mut CudaBuffer<T>,
-        lc: &Layout<DC>,
-        a: &CudaBuffer<T>,
-        la: &Layout<DA>,
-        b: &CudaBuffer<T>,
-        lb: &Layout<DB>,
-        alpha: T,
-        beta: T,
-    ) -> Result<()> {
-        gemm::gemm_launch(
-            self,
-            c,
-            &lc.to_dim::<IxD>()?,
-            a,
-            &la.to_dim::<IxD>()?,
-            b,
-            &lb.to_dim::<IxD>()?,
-            alpha,
-            beta,
-        )
-    }
-
-    fn matmul_uninit(
-        &self,
-        c: &mut CudaBuffer<MaybeUninit<T>>,
-        lc: &Layout<DC>,
-        a: &CudaBuffer<T>,
-        la: &Layout<DA>,
-        b: &CudaBuffer<T>,
-        lb: &Layout<DB>,
-        alpha: T,
-    ) -> Result<()> {
-        // `beta = 0` is the whole of the "never read c" contract: the epilogue is guarded by
-        // `beta == 0`, so the `MaybeUninit` slots are written and not touched beforehand.
-        gemm::gemm_launch(
-            self,
-            c,
-            &lc.to_dim::<IxD>()?,
-            a,
-            &la.to_dim::<IxD>()?,
-            b,
-            &lb.to_dim::<IxD>()?,
-            alpha,
-            <T as num::Zero>::zero(),
-        )
-    }
-}
-
 /// `tensordot` as a single GEMM — tier 0 only: **views, never a copy.**
 ///
 /// # Why this is only a few lines
 ///
 /// A contraction is not a BLAS operation. cuBLAS's contract is exactly "one 2-D product, each
-/// operand addressed by a leading dimension on one axis" (see `kernels::cublas_gemm`), so
+/// operand addressed by a leading dimension on one axis" (see `matmul::cublas_args`), so
 /// the whole of `tensordot` above that call is *scheduling*: reorder each operand to
 /// `[free…, ctr…]` / `[ctr…, free…]`, and ask whether each of the three blocks collapses to 2-D
 /// without materializing data. That decision already exists as
@@ -203,16 +131,16 @@ where
 ///
 /// # One asymmetry with `matmul`, on purpose
 ///
-/// `matmul` refuses an inner dot ("single-axis contraction") and points at the reduce kernel,
-/// because the tiled fallback would put 256 threads on a `1 x 1` output. `tensordot` accepts it: the
+/// `matmul` refuses an inner dot ("single-axis contraction") and points at the reduce kernel;
+/// no matmul driver is the reduce kernel. `tensordot` accepts it: the
 /// planner yields `m = n = 1`, and cuBLAS runs a `1 x 1 x k` product without wasting anything. Same
 /// arithmetic, and here the fast path is the one that is already correct.
 ///
 /// # What is refused for a different reason
 ///
-/// `DeviceExtTensordotAPI` (mixed input dtypes) is not implemented at all: cuBLAS's typed `gemm`
-/// takes one dtype, and a mixed product needs `cublasGemmEx` with per-operand types. The tiled
-/// fallback is single-`@T@` too, so there is nothing here to fall back to.
+/// `DeviceExtTensordotAPI` (mixed input dtypes) is not implemented at all: the accelerated matmul
+/// drivers take same-dtype operands, so a mixed contraction would land in the naive kernel, which
+/// is no place for a multi-axis contraction on a GPU.
 impl<T, DA, DB, DC> DeviceTensordotAPI<T, T, T, DA, DB, DC> for DeviceCuda
 where
     DA: DimAPI,

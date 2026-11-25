@@ -4,6 +4,7 @@ use crate::error::{map_driver_error, map_driver_result_alloc};
 use crate::prelude_dev::*;
 use core::marker::PhantomData;
 use cudarc::driver::{CudaSlice, DevicePtr, DevicePtrMut, SyncOnDrop};
+use std::any::TypeId;
 use std::sync::Arc;
 
 /// Owning device buffer of `len` elements of `T`; `DeviceRawAPI::Raw` for
@@ -113,6 +114,24 @@ impl<T> CudaBuffer<T> {
         let stream = self.as_bytes().stream().clone();
         let (ptr, _record) = DevicePtrMut::<u8>::device_ptr_mut(self.as_mut_bytes(), &stream);
         ptr as *mut T
+    }
+
+    /// The same buffer read as `CudaBuffer<U>`: `Some` iff `T` is `U` or `MaybeUninit<U>`.
+    ///
+    /// The fast-path dtype dispatch of the matmul drivers checks the type triple at run time and
+    /// re-types the buffers, instead of widening every bound to the accelerated dtypes.
+    pub(crate) fn view_as<U: 'static>(&self) -> Option<&CudaBuffer<U>>
+    where
+        T: 'static,
+    {
+        let same = TypeId::of::<T>() == TypeId::of::<U>();
+        let uninit = TypeId::of::<T>() == TypeId::of::<MaybeUninit<U>>();
+        if !(same || uninit) {
+            return None;
+        }
+        // SAFETY: the two types differ only in `PhantomData<*const T>`, so their layouts are
+        // identical (see the type documentation).
+        Some(unsafe { &*(self as *const Self as *const CudaBuffer<U>) })
     }
 
     /// The stream this buffer was allocated on (owns free/reuse ordering).

@@ -144,6 +144,13 @@ impl DeviceCuda {
         self.flags = flags;
     }
 
+    /// Immutable twin of [`DeviceCuda::set_flags_override`]: this device value with `flags`
+    /// pinned, otherwise unchanged.
+    pub fn with_flags(mut self, flags: CudaRuntimeFlags) -> Self {
+        self.flags = Some(flags);
+        self
+    }
+
     /// Shortcut accessor for the common flag.
     pub fn compute_type_32f(&self) -> ComputeType32F {
         self.flags().compute_type_32f

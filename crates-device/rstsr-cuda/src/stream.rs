@@ -23,7 +23,7 @@ use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 /// from several threads order correctly — and it is why the tiled kernel never needed this while the
 /// cuBLAS path did. The handle therefore needs its own serialization, and it is kept *inside* this
 /// type so a caller cannot forget it: the guard is taken by
-/// `cublas_gemm::launch`, the only place that talks to cuBLAS.
+/// `matmul::drivers::cublas::launch`, the only place that talks to cuBLAS.
 ///
 /// Serializing the calls costs nothing measurable: `cublas*gemm` returns after enqueueing, and the
 /// work it enqueued is on one stream, so it was going to be ordered anyway.
@@ -105,7 +105,7 @@ impl CudaStreamObj {
     ///
     /// The returned handle is shared by every thread that uses this stream, and a `cublasHandle_t`
     /// is not thread-safe — take [`CublasHandle::lock`] before every call, or better, call
-    /// `cublas_gemm::launch`, which does it for you.
+    /// `matmul::drivers::cublas::launch`, which does it for you.
     pub(crate) fn cublas(&self) -> Option<&Arc<CublasHandle>> {
         self.cublas_slot
             .get_or_init(|| {

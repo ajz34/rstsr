@@ -86,13 +86,27 @@ fn flags_resolution() {
     // None tracks the global
     let before = funcs::default_flags();
     let mut d2 = d.clone();
-    d2.set_flags_override(Some(CudaRuntimeFlags { compute_type_32f: ComputeType32F::FastTF32 }));
+    let mut pinned = CudaRuntimeFlags::default();
+    pinned.compute_type_32f = ComputeType32F::FastTF32;
+    pinned.matmul_drivers = MatMulDrivers::TILED;
+    d2.set_flags_override(Some(pinned));
+    assert_eq!(d2.flags().matmul_drivers, MatMulDrivers::TILED);
     // pinned value wins over the global
     assert_eq!(d2.compute_type_32f(), ComputeType32F::FastTF32);
     assert_eq!(d.compute_type_32f(), before.compute_type_32f);
     // unpin tracks again
     d2.set_flags_override(None);
     assert_eq!(d2.compute_type_32f(), d.compute_type_32f());
+    assert_eq!(d2.flags().matmul_drivers, d.flags().matmul_drivers);
+
+    // `with_flags` is the immutable twin of `set_flags_override`
+    let d3 = d.clone().with_flags(pinned);
+    let mut d4 = d.clone();
+    d4.set_flags_override(Some(pinned));
+    assert!(d3.same_device(&d4));
+    assert!(!d.same_device(&d3), "pinned flags differ from `None`, whatever the global is");
+    assert_eq!(d3.flags().matmul_drivers, MatMulDrivers::TILED);
+    assert_eq!(d.flags(), before, "the original device value is unchanged");
 }
 
 #[test]
