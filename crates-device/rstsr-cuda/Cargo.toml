@@ -49,6 +49,10 @@ faer = ["rstsr-core/faer"]
 dynamic-linking = ["cudarc/dynamic-linking"]
 
 [[bench]]
+name = "bench_matmul"
+harness = false
+
+[[bench]]
 name = "bench_elementwise"
 harness = false
 

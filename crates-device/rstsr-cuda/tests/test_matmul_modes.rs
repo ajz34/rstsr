@@ -610,3 +610,122 @@ fn tensor_level_modes() {
         assert!((x - f32::from(y)).abs() <= 1e-2 * (1.0 + x.abs()), "f16 output against the f32 output");
     }
 }
+
+/// The argument shapes of the layout matrix: a plain product, a strided batch, a transposed right
+/// operand broadcast against the batch of `a`, a transposed left operand, a broadcast batch of `a`
+/// against a batched `b`, and a stepped (strided) `a`. `mk(data(seed, count), shape)` makes a
+/// tensor and `sh(batch, [m, k])` places the batch axis as the default order has it (leading
+/// under row-major, trailing under column-major), so the same cases are built on the CPU (`f64`
+/// of the rounded values) and on the device (the storage type), each in its own order.
+macro_rules! shape_cases {
+    ($mk:expr, $sh:expr, $data:expr, $m:expr, $k:expr, $n:expr, $p:expr) => {{
+        let (m, k, n, p) = ($m, $k, $n, $p);
+        let a = $mk($data(7, p * m * k), $sh(p, [m, k]));
+        let b = $mk($data(8, p * k * n), $sh(p, [k, n]));
+        let c2 = $mk($data(9, n * k), $sh(1, [n, k]));
+        let a2 = $mk($data(10, m * k), $sh(1, [m, k]));
+        let at = $mk($data(11, k * m), $sh(1, [k, m]));
+        let stepped0 = $mk($data(12, 4 * m * k), $sh(1, [2 * m, 2 * k]));
+        let stepped = stepped0.i(s![slice!(None, None, 2), slice!(None, None, 2)]);
+        vec![
+            ("plain", $mk($data(13, m * k), $sh(1, [m, k])), $mk($data(14, k * n), $sh(1, [k, n]))),
+            ("batched", a.clone(), b.clone()),
+            ("transposed b, broadcast", a.clone(), c2.t().to_owned()),
+            ("transposed a", at.t().to_owned(), b.clone()),
+            ("a broadcast over the batch", a2.clone(), b.clone()),
+            ("stepped a", stepped.to_owned(), $mk($data(15, k * n), $sh(1, [k, n]))),
+        ]
+    }};
+}
+
+/// `[batch, dims]` under row-major, `[dims, batch]` under column-major (a unit batch is dropped).
+fn sh(order: FlagOrder, batch: usize, dims: [usize; 2]) -> Vec<usize> {
+    let mut out = Vec::new();
+    if batch > 1 && order == RowMajor {
+        out.push(batch);
+    }
+    out.extend_from_slice(&dims);
+    if batch > 1 && order == ColMajor {
+        out.push(batch);
+    }
+    out
+}
+
+/// Every serving cuBLAS driver alone, the naive kernel (the on-device oracle) and the chain, for
+/// `to_s` operands stored as `S` and the output `C`, in both default orders.
+#[allow(clippy::too_many_arguments)]
+fn matrix<S, C>(what: &str, cublas_classic: bool, to_s: fn(f64) -> S, of_s: fn(S) -> f64, of_c: fn(C) -> f64, tol: f64)
+where
+    S: CudaDType + CudaMatMulMode + Copy + Clone + Send + Sync + 'static + num::Zero,
+    C: CudaDType + CudaMatMulMode + Copy + Clone + Send + Sync + 'static + num::Zero + num::One,
+{
+    let (m, k, n, p) = (12usize, 32usize, 8usize, 3usize);
+    let rounded = |seed: u64, cnt: usize| -> Vec<f64> { data(cnt, seed).into_iter().map(to_s).map(of_s).collect() };
+    let stored = |seed: u64, cnt: usize| -> Vec<S> { data(cnt, seed).into_iter().map(to_s).collect() };
+
+    let mut drivers = vec![MatMulDrivers::CUBLAS_LT, MatMulDrivers::CUBLAS_EX];
+    if cublas_classic {
+        drivers.push(MatMulDrivers::CUBLAS);
+    }
+    drivers.extend([MatMulDrivers::NAIVE, MatMulDrivers::all()]);
+    for order in [RowMajor, ColMajor] {
+        let mut dcpu = DeviceCpuSerial::default();
+        dcpu.set_default_order(order);
+        let cpu = |v: Vec<f64>, s: Vec<usize>| -> Cpu<f64> { rt::asarray((v, &dcpu)).into_shape(s) };
+        let cases = shape_cases!(cpu, |b: usize, d: [usize; 2]| sh(order, b, d), rounded, m, k, n, p);
+        for forced in &drivers {
+            let mut flags = CudaRuntimeFlags::default();
+            flags.matmul_drivers = *forced;
+            let mut d = DeviceCuda::new(0).with_flags(flags);
+            d.set_default_order(order);
+            let on_device = shape_cases!(
+                |v: Vec<S>, s: Vec<usize>| rt::asarray((v, &d)).into_shape(s),
+                |b: usize, dims: [usize; 2]| sh(order, b, dims),
+                stored,
+                m,
+                k,
+                n,
+                p
+            );
+            for ((shape, a, b), (_, ag, bg)) in cases.iter().zip(&on_device) {
+                let want = rt::matmul(a, b);
+                let c_shape = want.shape().to_vec();
+                let want = DeviceToCpuAPI::<f64>::to_cpu_vec(want.to_contig(RowMajor).storage()).rstsr_unwrap();
+                let mut c: Tensor<C, DeviceCuda, IxD> = rt::full((c_shape, C::one(), &d));
+                ag.matmul_with_output::<S, C, IxD, IxD>(bg, &mut c.view_mut());
+                let got: Vec<f64> = DeviceToCpuAPI::<C>::to_cpu_vec(c.to_contig(RowMajor).storage())
+                    .rstsr_unwrap()
+                    .into_iter()
+                    .map(of_c)
+                    .collect();
+                let err = rel_err(&got, &want);
+                assert!(err <= tol, "{what} {shape}, {order:?}, {forced:?}: max rel err {err:.3e} > {tol:.1e}");
+            }
+        }
+    }
+    eprintln!("  [{what}] 6 shapes x 2 orders x {} driver settings within {tol:.1e}", drivers.len());
+}
+
+/// The layout matrix over the type triples: tolerance per `(triple, mode)` here means the output
+/// rounding (all in the `Default` mode), the same numbers as `modes_half` and `modes_complex`.
+#[test]
+fn triple_layout_matrix() {
+    require_cuda!();
+    let re = |x: f64| Complex::new(x, 0.0);
+    let re_of = |z: Complex<f64>| z.re;
+    matrix::<f32, f32>("f32 -> f32", true, |x| x as f32, f64::from, f64::from, 1e-5);
+    matrix::<f64, f64>("f64 -> f64", true, |x| x, |x| x, |x| x, 1e-13);
+    matrix::<Complex<f32>, Complex<f32>>(
+        "c32 -> c32",
+        true,
+        |x: f64| Complex::new(x as f32, 0.0),
+        |z| z.re as f64,
+        |z| z.re as f64,
+        1e-5,
+    );
+    matrix::<Complex<f64>, Complex<f64>>("c64 -> c64", true, re, re_of, re_of, 1e-13);
+    matrix::<f16, f16>("f16 -> f16", false, f16::from_f64, f64::from, f64::from, 1e-2);
+    matrix::<f16, f32>("f16 -> f32", false, f16::from_f64, f64::from, f64::from, 1e-5);
+    matrix::<bf16, bf16>("bf16 -> bf16", false, bf16::from_f64, f64::from, f64::from, 1e-2);
+    matrix::<bf16, f32>("bf16 -> f32", false, bf16::from_f64, f64::from, f64::from, 1e-5);
+}

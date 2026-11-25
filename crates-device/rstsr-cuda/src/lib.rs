@@ -35,6 +35,9 @@
 //! - Integer `matmul` wraps on overflow (C semantics, as NumPy does); the CPU reference devices
 //!   panic in debug builds.
 //! - `fill`/`ones`/`zeros` take the kernel path for every supported dtype (complex included).
+//! - `matmul` of operands with different dtypes (`matmul_from`/`matmul_with_output`, which have
+//!   no `Mul` bound) casts each operand to the output type in the naive kernel: no copy, and no
+//!   cuBLAS driver. Same-dtype `f32`, `f64`, complex and half products run on cuBLAS.
 //!
 //! # What is implemented
 //!
@@ -44,7 +47,7 @@
 //! | pinned host memory | `PinnedBuffer<T>` on `DeviceCudaPinned` (alloc/zeros/full/from_vec), non-blocking `to_device` both ways against `DeviceCuda`, copies against the CPU devices, zero-copy `host_view`/`host_view_mut`, one ordering event per buffer |
 //! | elementwise | arithmetic, comparison, transcendentals, unary float families, `where`, `clip` (same dtype) |
 //! | reductions | `sum`/`prod`/`mean`/`l2_norm`/`min`/`max`/`all`/`any`/`count_nonzero` (+ dtype variants), `var`/`std` (+ dtype), `argmin`/`argmax`/`nanarg*` (raveled, all + axes), `cumsum`/`cumprod` (real dtypes) |
-//! | linalg | `outer`, `cross`, `matmul`/`matmul_uninit` (driver chain: cuBLASLt, `cublasGemmEx`, classic cuBLAS, tiled kernel, naive kernel; compute modes by the flags), `tensordot` (view-only tier) |
+//! | linalg | `outer`, `cross`, `matmul`/`matmul_uninit` (driver chain: cuBLASLt, `cublasGemmEx`, classic cuBLAS, tiled kernel, naive kernel; `f32`/`f64`/`c32`/`c64`/`f16`/`bf16` on the cuBLAS drivers, everything else on the naive kernel; compute modes by the flags or per call through `TensorCudaMatMulAPI`), `tensordot` (view-only tier) |
 //! | indexing | `index_select`, `index_put` |
 //!
 //! **Absent, and why** — these are deliberate, not pending:
@@ -104,6 +107,7 @@
 //! CUDARC_CUDA_VERSION=12060 cargo test -p rstsr-cuda --test test_matmul_tiled
 //! CUDARC_CUDA_VERSION=12060 cargo test -p rstsr-cuda --test test_matmul_naive
 //! CUDARC_CUDA_VERSION=12060 cargo test -p rstsr-cuda --test test_matmul_modes
+//! CUDARC_CUDA_VERSION=12060 cargo bench -p rstsr-cuda --bench bench_matmul   # timing per triple, shape, driver
 //! CUDARC_CUDA_VERSION=12060 cargo test -p rstsr-cuda --test test_pinned
 //! ```
 //!
@@ -117,6 +121,10 @@
 //! math mode (`Pedantic`, `FastTF32`, `Fast16F`) and no FP64 fixed-point emulation; those drivers
 //! then decline and the chain falls through. Left unset, the version comes from `nvcc` (13.0 or
 //! newer carries everything); `test_matmul_modes` expects whichever was built.
+//!
+//! `test_matmul_modes` also runs the type-triple layout matrix: every accelerated triple, six
+//! argument shapes (plain, batched, transposed, broadcast, stepped), both default orders, on each
+//! serving driver alone, on the naive kernel and on the chain.
 //!
 //! Environment knobs, all read once per process and all kernel-build inputs (op behaviour,
 //! including which matmul drivers run, is set through [`flags::CudaRuntimeFlags`] instead):

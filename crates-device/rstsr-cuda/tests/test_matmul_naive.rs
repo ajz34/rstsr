@@ -372,3 +372,35 @@ fn naive_both_orders() {
     assert_eq!(got.shape(), &[m, n, p]);
     assert_eq!(host_nd(&got), host_nd(&want.transpose([1, 2, 0])), "col-major");
 }
+
+/// `bf16` on the naive kernel: `bf16 -> bf16` and `bf16 -> f32`. The kernel's half helpers are
+/// per dtype (`__bfloat162float`, not `__half2float`): with the `f16` names the kernel did not
+/// compile, which only a `bf16` triple forced onto naive shows.
+#[test]
+fn bf16_triples_on_naive() {
+    require_cuda!();
+    let d = forced(MatMulDrivers::NAIVE);
+    let dcpu = DeviceCpuSerial::default();
+    let (m, k, n) = (8usize, 16usize, 6usize);
+    let round = |seed: u64, cnt: usize| -> Vec<half::bf16> { exact_data(cnt, seed).into_iter().map(half::bf16::from_f64).collect() };
+    let a: Tensor<half::bf16, DeviceCpuSerial, _> = rt::asarray((round(1, m * k), &dcpu)).into_shape([m, k]);
+    let b: Tensor<half::bf16, DeviceCpuSerial, _> = rt::asarray((round(2, k * n), &dcpu)).into_shape([k, n]);
+    let (ag, bg) = (a.to_device(&d), b.to_device(&d));
+
+    let mut c: Tensor<f32, _, _> = rt::full(([m * n], f32::NAN, &d)).into_shape([m, n]);
+    c.matmul_from(&ag, &bg, 1.0, 0.0);
+    let up = |t: &Tensor<half::bf16, DeviceCpuSerial, IxD>| -> Tensor<f32, DeviceCpuSerial, IxD> {
+        rt::asarray((host_nd(t).into_iter().map(f32::from).collect::<Vec<_>>(), &dcpu)).into_shape(t.shape().to_vec())
+    };
+    let want = rt::matmul(up(&a), up(&b));
+    assert_eq!(host_nd(&c), host_nd(&want), "bf16 @ bf16 -> f32");
+    assert!(!host_nd(&c).contains(&f32::NAN));
+
+    let got: Tensor<half::bf16, DeviceCuda, IxD> = rt::matmul(&ag, &bg);
+    let got: Vec<f32> = host_nd(&got).into_iter().map(f32::from).collect();
+    let want: Vec<f32> = host_nd(&want);
+    // bf16 output: within one bf16 rounding of the f32 product
+    for (g, w) in got.iter().zip(&want) {
+        assert!((g - w).abs() <= 4e-3 * (1.0 + w.abs()), "bf16 @ bf16 -> bf16");
+    }
+}

@@ -81,11 +81,12 @@ fn term(ta: &str, tb: &str, tacc: &str, a: &str, b: &str) -> String {
 
 /// The C expression of the scaled sum, and of the epilogue `v + beta * *p`.
 fn epilogue(tc: &str) -> (String, String) {
+    use crate::kernels::exprs::{load, store};
     if is_half_cname(tc) {
-        // `alpha` and `beta` are half, `acc` is float: compute the epilogue in float, store once
+        // `alpha`, `beta` and `v` are half, `acc` is float: compute the epilogue in float, store once
         (
-            crate::kernels::exprs::store(tc, "__half2float(alpha) * acc"),
-            "__float2half(__half2float(v) + __half2float(beta) * __half2float(*p))".to_string(),
+            store(tc, &format!("{} * acc", load(tc, "alpha"))),
+            store(tc, &format!("{} + {} * {}", load(tc, "v"), load(tc, "beta"), load(tc, "*p"))),
         )
     } else {
         ("alpha * acc".to_string(), "v + beta * (*p)".to_string())
