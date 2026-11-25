@@ -14,9 +14,10 @@ use std::any::TypeId;
 
 use super::flags::MatMulDrivers;
 use super::geom::GemmGeom;
-use super::mode::{ComputeType32F, ComputeType64F, CudaMatMulMode};
+use super::mode::{ComputeType16F, ComputeType32F, ComputeType64F, CudaMatMulMode};
 use crate::dtype::CudaDType;
 use crate::prelude_dev::*;
+use cudarc::cublas::sys;
 pub(crate) use naive::NaiveScalar;
 
 pub(crate) mod cublas;
@@ -130,86 +131,216 @@ impl<TA, TB, TC, TBuf> Problem<'_, TA, TB, TC, TBuf> {
     }
 }
 
-/// The problem with all three buffers read as one type `T`.
-pub(crate) struct Uniform<'a, T> {
-    pub c: &'a CudaBuffer<T>,
-    pub a: &'a CudaBuffer<T>,
-    pub b: &'a CudaBuffer<T>,
-    pub alpha: T,
-    pub beta: T,
+/// The problem's three buffers read as `A`, `B`, `C`.
+pub(crate) struct Buffers<'a, A, B, C> {
+    pub c: &'a CudaBuffer<C>,
+    pub a: &'a CudaBuffer<A>,
+    pub b: &'a CudaBuffer<B>,
 }
 
-/// `Some` iff `TA == TB == TC == T`, with the buffers re-typed accordingly.
-///
-/// The single-type drivers (cuBLAS, tiled) check the triple at run time and re-type the buffers,
-/// instead of widening their bound to every dtype.
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn uniform<'a, T: Copy + 'static, TA: 'static, TB: 'static, TC: 'static, TBuf: 'static>(
-    c: &'a CudaBuffer<TBuf>,
-    a: &'a CudaBuffer<TA>,
-    b: &'a CudaBuffer<TB>,
-    alpha: TC,
-    beta: TC,
-) -> Option<Uniform<'a, T>> {
-    if TypeId::of::<TC>() != TypeId::of::<T>() {
-        return None;
-    }
-    Some(Uniform {
-        c: c.view_as::<T>()?,
-        a: a.view_as::<T>()?,
-        b: b.view_as::<T>()?,
-        // SAFETY: `TC` is `T` (checked above), so this is a plain copy of a `T`.
-        alpha: unsafe { *(&alpha as *const TC as *const T) },
-        beta: unsafe { *(&beta as *const TC as *const T) },
-    })
-}
-
-impl<'a, TA, TB, TC, TBuf> Problem<'a, TA, TB, TC, TBuf> {
-    /// [`uniform`] over this problem.
-    pub fn uniform<T: Copy + 'static>(&self) -> Option<Uniform<'a, T>>
+impl<TA, TB, TC, TBuf> Problem<'_, TA, TB, TC, TBuf> {
+    /// The buffers read as `A`, `B`, `C`, or `None` unless `TA == A`, `TB == B` and `TC == C`.
+    ///
+    /// The cuBLAS drivers check the triple at run time and re-type the buffers, instead of
+    /// widening their bounds to every dtype.
+    pub fn retyped<'a, A: 'static, B: 'static, C: 'static>(&'a self) -> Option<Buffers<'a, A, B, C>>
     where
         TA: 'static,
         TB: 'static,
-        TC: Copy + 'static,
+        TC: 'static,
         TBuf: 'static,
     {
-        uniform(self.c, self.a, self.b, self.alpha, self.beta)
+        if !(same::<TA, A>() && same::<TB, B>() && same::<TC, C>()) {
+            return None;
+        }
+        Some(Buffers { c: self.c.view_as::<C>()?, a: self.a.view_as::<A>()?, b: self.b.view_as::<B>()? })
     }
+
+    /// [`Self::retyped`] with one type for the three buffers.
+    pub fn uniform<'a, T: Copy + 'static>(&'a self) -> Option<Buffers<'a, T, T, T>>
+    where
+        TA: 'static,
+        TB: 'static,
+        TC: 'static,
+        TBuf: 'static,
+    {
+        self.retyped::<T, T, T>()
+    }
+}
+
+/// `x` of the output type `TC`, as the scale type `S` of its family (the type itself, or `f32`
+/// from a half output); `None` if `TC` is not of `S`'s family.
+pub(crate) fn scale<S: Copy + 'static, TC: Copy + 'static>(x: TC) -> Option<S> {
+    /// `x`, read as `U`: valid only when `TC` is known to be `U` (checked by `TypeId`).
+    macro_rules! read {
+        ($u:ty) => {
+            unsafe { *(&x as *const TC as *const $u) }
+        };
+    }
+    if same::<S, TC>() {
+        return Some(read!(S));
+    }
+    // a half output takes `f32` scales: convert the value, then name it `S`
+    let f = if same::<TC, half::f16>() {
+        f32::from(read!(half::f16))
+    } else if same::<TC, half::bf16>() {
+        f32::from(read!(half::bf16))
+    } else {
+        return None;
+    };
+    if !same::<S, f32>() {
+        return None;
+    }
+    Some(unsafe { *(&f as *const f32 as *const S) })
 }
 
 fn same<T: 'static, U: 'static>() -> bool {
     TypeId::of::<T>() == TypeId::of::<U>()
 }
 
-/// The compute mode of one call, resolved for its output type: what the cuBLAS drivers are asked
-/// for.
+/// The `cudaDataType_t` of the three matrices, named after the **geom** operands (cuBLAS's slot
+/// `A` holds `geom.b`; see [`cublas::prepare`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct CublasGemmTypes {
+    pub a: sys::cudaDataType_t,
+    pub b: sys::cudaDataType_t,
+    pub c: sys::cudaDataType_t,
+}
+
+/// The problem of one call as the cuBLAS drivers see it: the types of its three matrices and the
+/// compute mode.
+///
+/// The mode is the one **valid for the triple**: one the triple cannot serve was resolved to the
+/// family default before ([`plan`]), so a driver only maps, never downgrades.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum CublasPlan {
-    /// An `f32` output: the 32F mode.
+    /// `f32 x f32 -> f32`: the 32F mode.
     F32(ComputeType32F),
-    /// An `f64` output: the 64F mode.
+    /// `f64 x f64 -> f64`: the 64F mode.
     F64(ComputeType64F),
-    /// No cuBLAS compute mode: integers, half, or a type the accelerated drivers do not serve yet.
+    /// `Complex<f32> x Complex<f32> -> Complex<f32>`: the 32F mode.
+    C32(ComputeType32F),
+    /// `Complex<f64>` throughout: the 64F mode.
+    C64(ComputeType64F),
+    /// `f16 x f16 -> f16`: the 16F mode.
+    F16(ComputeType16F),
+    /// `f16 x f16 -> f32`: the 32F mode.
+    F16F32(ComputeType32F),
+    /// `bf16 x bf16 -> bf16`: the 16F mode.
+    BF16(ComputeType16F),
+    /// `bf16 x bf16 -> f32`: the 32F mode.
+    BF16F32(ComputeType32F),
+    /// No cuBLAS problem: integers, or operands of different dtypes.
     None,
 }
 
-/// The compute mode of one call, resolved for its output type: what the cuBLAS drivers are asked
-/// for. Every `CudaMatMulMode` impl pairs an output type with the mode enum of its family, so the
-/// mode is re-typed by the output type's `TypeId` (the shape `rules/code-concepts.md` names).
+impl CublasPlan {
+    /// The `cudaDataType_t` of the three matrices, in **geom** operand order (`a`, `b`, output);
+    /// `None` without a cuBLAS problem.
+    pub fn gemm_types(self) -> Option<CublasGemmTypes> {
+        use sys::cudaDataType_t as D;
+        let (a, b, c) = match self {
+            Self::F32(_) => (D::CUDA_R_32F, D::CUDA_R_32F, D::CUDA_R_32F),
+            Self::F64(_) => (D::CUDA_R_64F, D::CUDA_R_64F, D::CUDA_R_64F),
+            Self::C32(_) => (D::CUDA_C_32F, D::CUDA_C_32F, D::CUDA_C_32F),
+            Self::C64(_) => (D::CUDA_C_64F, D::CUDA_C_64F, D::CUDA_C_64F),
+            Self::F16(_) => (D::CUDA_R_16F, D::CUDA_R_16F, D::CUDA_R_16F),
+            Self::F16F32(_) => (D::CUDA_R_16F, D::CUDA_R_16F, D::CUDA_R_32F),
+            Self::BF16(_) => (D::CUDA_R_16BF, D::CUDA_R_16BF, D::CUDA_R_16BF),
+            Self::BF16F32(_) => (D::CUDA_R_16BF, D::CUDA_R_16BF, D::CUDA_R_32F),
+            Self::None => return None,
+        };
+        Some(CublasGemmTypes { a, b, c })
+    }
+
+    /// The `cublasGemmEx`/cuBLASLt compute type; `None` where the plan has none (the fixed-point
+    /// emulation is a math mode of the classic handle).
+    pub fn compute(self) -> Option<sys::cublasComputeType_t> {
+        match self {
+            Self::F32(mode) | Self::C32(mode) | Self::F16F32(mode) | Self::BF16F32(mode) => Some(mode.gemm_ex()),
+            Self::F64(mode) | Self::C64(mode) => mode.gemm_ex(),
+            Self::F16(mode) | Self::BF16(mode) => Some(mode.gemm_ex()),
+            Self::None => None,
+        }
+    }
+}
+
+/// The plan of one call: the type triple with its mode, the mode resolved to one the triple can
+/// serve. Every `CudaMatMulMode` impl pairs an output type with the mode enum of its family, so
+/// the mode is re-typed by the output type's `TypeId` (the shape `rules/code-concepts.md` names).
 ///
-/// Complex and half outputs have no accelerated driver yet, so they have no plan; with those
-/// drivers, this is where a mode of the right family that the triple cannot serve resolves to the
-/// family default (never [`CublasPlan::None`], which would hand an asked-for mode to a kernel that
-/// never heard of it).
-pub(crate) fn plan<TC: CudaMatMulMode>(mode: &TC::Mode) -> CublasPlan {
+/// A mode the triple cannot serve resolves to the family default silently: the `Fast*` modes of
+/// the 32F family down-convert `f32` inputs, so they are not for complex inputs nor for half
+/// inputs with an `f32` output; `Acc16F` accumulates `f16` only, so a `bf16` output keeps the
+/// default. `Pedantic` is served by every triple, so it is never downgraded.
+pub(crate) fn plan<TA: 'static, TB: 'static, TC: CudaMatMulMode>(mode: &TC::Mode) -> CublasPlan {
+    use num::Complex;
     if same::<TC, f32>() {
-        // SAFETY: these output types have `Mode = ComputeType32F`.
-        CublasPlan::F32(unsafe { *(mode as *const TC::Mode as *const ComputeType32F) })
+        // SAFETY: these output types have `Mode` of the family named here.
+        let mode32 = unsafe { *(mode as *const TC::Mode as *const ComputeType32F) };
+        if same::<TA, f32>() && same::<TB, f32>() {
+            CublasPlan::F32(mode32)
+        } else if same::<TA, half::f16>() && same::<TB, half::f16>() {
+            CublasPlan::F16F32(resolve_32f(mode32))
+        } else if same::<TA, half::bf16>() && same::<TB, half::bf16>() {
+            CublasPlan::BF16F32(resolve_32f(mode32))
+        } else {
+            CublasPlan::None
+        }
     } else if same::<TC, f64>() {
-        // SAFETY: these output types have `Mode = ComputeType64F`.
-        CublasPlan::F64(unsafe { *(mode as *const TC::Mode as *const ComputeType64F) })
+        // SAFETY: as above.
+        CublasPlan::F64(if same::<TA, f64>() && same::<TB, f64>() {
+            unsafe { *(mode as *const TC::Mode as *const ComputeType64F) }
+        } else {
+            return CublasPlan::None;
+        })
+    } else if same::<TC, Complex<f32>>() {
+        // SAFETY: as above.
+        let mode32 = unsafe { *(mode as *const TC::Mode as *const ComputeType32F) };
+        if same::<TA, Complex<f32>>() && same::<TB, Complex<f32>>() {
+            CublasPlan::C32(resolve_32f(mode32))
+        } else {
+            CublasPlan::None
+        }
+    } else if same::<TC, Complex<f64>>() {
+        // SAFETY: as above.
+        let mode64 = unsafe { *(mode as *const TC::Mode as *const ComputeType64F) };
+        if same::<TA, Complex<f64>>() && same::<TB, Complex<f64>>() {
+            // the fixed-point emulation is a real-`f64` math mode
+            CublasPlan::C64(if mode64 == ComputeType64F::EmulatedFixedPoint {
+                ComputeType64F::default()
+            } else {
+                mode64
+            })
+        } else {
+            CublasPlan::None
+        }
+    } else if same::<TC, half::f16>() {
+        // SAFETY: as above.
+        let mode16 = unsafe { *(mode as *const TC::Mode as *const ComputeType16F) };
+        if same::<TA, half::f16>() && same::<TB, half::f16>() {
+            CublasPlan::F16(mode16)
+        } else {
+            CublasPlan::None
+        }
+    } else if same::<TC, half::bf16>() {
+        // SAFETY: as above.
+        let mode16 = unsafe { *(mode as *const TC::Mode as *const ComputeType16F) };
+        if same::<TA, half::bf16>() && same::<TB, half::bf16>() {
+            CublasPlan::BF16(if mode16 == ComputeType16F::Acc16F { ComputeType16F::default() } else { mode16 })
+        } else {
+            CublasPlan::None
+        }
     } else {
         CublasPlan::None
+    }
+}
+
+/// A 32F mode for inputs that are not `f32`: the `Fast*` conversions do not apply.
+fn resolve_32f(mode: ComputeType32F) -> ComputeType32F {
+    match mode {
+        ComputeType32F::Default | ComputeType32F::Pedantic => mode,
+        _ => ComputeType32F::Default,
     }
 }
 
@@ -237,7 +368,7 @@ impl Chain {
     }
 }
 
-/// The accelerated rows of the table: every driver, in the chain order.
+/// The rows of the table with the tiled kernel: every driver, in the chain order.
 const ACCELERATED: [GemmDriver; 5] = GemmDriver::ALL;
 
 /// The drivers that can serve `(TA, TB) -> TC` under `mode`, in the chain order.
@@ -250,19 +381,29 @@ const ACCELERATED: [GemmDriver; 5] = GemmDriver::ALL;
 /// | `f32 -> f32` | any 32F mode | cuBLASLt, `cublasEx`, cuBLAS, tiled, naive |
 /// | `f64 -> f64` | `Default` / `Pedantic` | cuBLASLt, `cublasEx`, cuBLAS, tiled, naive |
 /// | `f64 -> f64` | `EmulatedFixedPoint` | cuBLAS, tiled, naive |
+/// | `c32`, `c64` | `Default` / `Pedantic` | cuBLASLt, `cublasEx`, cuBLAS, naive |
+/// | `f16 -> f16` | `Default` / `Pedantic` | cuBLASLt, `cublasEx`, naive |
+/// | `f16 -> f16` | `Acc16F` | cuBLASLt, `cublasEx`, naive |
+/// | `f16 -> f32`, `bf16 -> bf16`, `bf16 -> f32` | `Default` / `Pedantic` | cuBLASLt, `cublasEx`, naive |
 /// | anything else | — | naive |
 ///
-/// The tiled and naive kernels are mode-agnostic: they compute in the output precision (or
-/// better), which every mode allows, so only the cuBLAS drivers read the plan.
+/// (Modes are resolved by [`plan`] first, so `f16 -> f32` under `FastTF32` arrives here as
+/// `Default`.) The tiled and naive kernels are mode-agnostic: they compute in the output precision
+/// (or better), which every mode allows, so only the cuBLAS drivers read the plan.
 pub(crate) fn candidates<TA: 'static, TB: 'static, TC: CudaMatMulMode>(mode: &TC::Mode) -> Chain {
-    let same_type = same::<TA, TC>() && same::<TB, TC>();
-    match plan::<TC>(mode) {
-        CublasPlan::F32(_) if same_type => Chain::new(&ACCELERATED),
-        CublasPlan::F64(ComputeType64F::EmulatedFixedPoint) if same_type => {
+    match plan::<TA, TB, TC>(mode) {
+        CublasPlan::F32(_) => Chain::new(&ACCELERATED),
+        CublasPlan::F64(ComputeType64F::EmulatedFixedPoint) => {
             Chain::new(&[GemmDriver::Cublas, GemmDriver::Tiled, GemmDriver::Naive])
         },
-        CublasPlan::F64(_) if same_type => Chain::new(&ACCELERATED),
-        CublasPlan::F32(_) | CublasPlan::F64(_) | CublasPlan::None => Chain::new(&[GemmDriver::Naive]),
+        CublasPlan::F64(_) => Chain::new(&ACCELERATED),
+        CublasPlan::C32(_) | CublasPlan::C64(_) => {
+            Chain::new(&[GemmDriver::CublasLt, GemmDriver::CublasEx, GemmDriver::Cublas, GemmDriver::Naive])
+        },
+        CublasPlan::F16(_) | CublasPlan::F16F32(_) | CublasPlan::BF16(_) | CublasPlan::BF16F32(_) => {
+            Chain::new(&[GemmDriver::CublasLt, GemmDriver::CublasEx, GemmDriver::Naive])
+        },
+        CublasPlan::None => Chain::new(&[GemmDriver::Naive]),
     }
 }
 
@@ -278,7 +419,7 @@ where
     TC: NaiveScalar + CudaMatMulMode,
     TBuf: 'static,
 {
-    let plan = plan::<TC>(mode);
+    let plan = plan::<TA, TB, TC>(mode);
     let enabled = flags.matmul_drivers;
     let mut declined: Vec<(&'static str, Refusal)> = Vec::new();
     for driver in candidates::<TA, TB, TC>(mode).iter() {
@@ -381,29 +522,167 @@ mod tests {
         ]);
     }
 
-    /// The plan is keyed by the output type: the family mode for `f32`/`f64`, none for the types
-    /// without an accelerated driver yet.
+    /// The plan is keyed by the type triple: the family mode for the accelerated triples, none for
+    /// the others.
     #[test]
-    fn plan_by_output_type() {
-        assert_eq!(plan::<f32>(&ComputeType32F::FastTF32), CublasPlan::F32(ComputeType32F::FastTF32));
-        assert_eq!(plan::<f64>(&ComputeType64F::Pedantic), CublasPlan::F64(ComputeType64F::Pedantic));
-        assert_eq!(plan::<num::Complex<f64>>(&ComputeType64F::default()), CublasPlan::None);
-        assert_eq!(plan::<i32>(&()), CublasPlan::None);
-        assert_eq!(plan::<half::bf16>(&ComputeType16F::default()), CublasPlan::None);
+    fn plan_by_type_triple() {
+        use num::Complex;
+        let p32 = CublasPlan::F32(ComputeType32F::FastTF32);
+        assert_eq!(plan::<f32, f32, f32>(&ComputeType32F::FastTF32), p32);
+        assert_eq!(plan::<f64, f64, f64>(&ComputeType64F::Pedantic), CublasPlan::F64(ComputeType64F::Pedantic));
+        assert_eq!(
+            plan::<Complex<f64>, Complex<f64>, Complex<f64>>(&ComputeType64F::default()),
+            CublasPlan::C64(ComputeType64F::default())
+        );
+        assert_eq!(plan::<i32, i32, i32>(&()), CublasPlan::None);
+        assert_eq!(
+            plan::<half::f16, half::f16, half::f16>(&ComputeType16F::default()),
+            CublasPlan::F16(ComputeType16F::default())
+        );
+        assert_eq!(
+            plan::<half::f16, half::f16, f32>(&ComputeType32F::default()),
+            CublasPlan::F16F32(ComputeType32F::Default)
+        );
+        assert_eq!(
+            plan::<half::bf16, half::bf16, half::bf16>(&ComputeType16F::default()),
+            CublasPlan::BF16(ComputeType16F::Default)
+        );
+        assert_eq!(
+            plan::<half::bf16, half::bf16, f32>(&ComputeType32F::default()),
+            CublasPlan::BF16F32(ComputeType32F::Default)
+        );
+        // operands of another dtype than the output names
+        assert_eq!(plan::<half::f16, half::bf16, f32>(&ComputeType32F::default()), CublasPlan::None);
+        assert_eq!(plan::<f32, f64, f64>(&ComputeType64F::default()), CublasPlan::None);
+    }
+
+    /// A mode the triple cannot serve is the family default by the time a driver sees it;
+    /// `Pedantic` is served everywhere and never downgraded.
+    #[test]
+    fn modes_the_triple_cannot_serve_resolve_to_default() {
+        use num::Complex;
+        let fast = [ComputeType32F::Fast16F, ComputeType32F::Fast16BF, ComputeType32F::FastTF32];
+        for mode in fast {
+            assert_eq!(
+                plan::<num::Complex<f32>, Complex<f32>, Complex<f32>>(&mode),
+                CublasPlan::C32(ComputeType32F::Default),
+                "{mode:?}"
+            );
+            assert_eq!(
+                plan::<half::f16, half::f16, f32>(&mode),
+                CublasPlan::F16F32(ComputeType32F::Default),
+                "{mode:?}"
+            );
+            assert_eq!(
+                plan::<half::bf16, half::bf16, f32>(&mode),
+                CublasPlan::BF16F32(ComputeType32F::Default),
+                "{mode:?}"
+            );
+        }
+        assert_eq!(
+            plan::<Complex<f32>, Complex<f32>, Complex<f32>>(&ComputeType32F::Pedantic),
+            CublasPlan::C32(ComputeType32F::Pedantic)
+        );
+        assert_eq!(
+            plan::<half::f16, half::f16, f32>(&ComputeType32F::Pedantic),
+            CublasPlan::F16F32(ComputeType32F::Pedantic)
+        );
+        // no bf16 accumulation exists; the fixed-point emulation is real only
+        assert_eq!(
+            plan::<Complex<f64>, Complex<f64>, Complex<f64>>(&ComputeType64F::EmulatedFixedPoint),
+            CublasPlan::C64(ComputeType64F::Default)
+        );
+        assert_eq!(
+            plan::<half::bf16, half::bf16, half::bf16>(&ComputeType16F::Acc16F),
+            CublasPlan::BF16(ComputeType16F::Default)
+        );
+        assert_eq!(
+            plan::<half::f16, half::f16, half::f16>(&ComputeType16F::Acc16F),
+            CublasPlan::F16(ComputeType16F::Acc16F)
+        );
+    }
+
+    /// Every plan names the storage of its three matrices and a compute type, except the
+    /// fixed-point emulation.
+    #[test]
+    fn plan_gemm_types_and_compute() {
+        use num::Complex;
+        use sys::cudaDataType_t as D;
+        let gemm_types = |p: CublasPlan| p.gemm_types().map(|s| (s.a, s.b, s.c));
+        assert_eq!(
+            gemm_types(CublasPlan::F32(ComputeType32F::default())),
+            Some((D::CUDA_R_32F, D::CUDA_R_32F, D::CUDA_R_32F))
+        );
+        assert_eq!(
+            gemm_types(CublasPlan::C64(ComputeType64F::default())),
+            Some((D::CUDA_C_64F, D::CUDA_C_64F, D::CUDA_C_64F))
+        );
+        assert_eq!(
+            gemm_types(CublasPlan::F16F32(ComputeType32F::default())),
+            Some((D::CUDA_R_16F, D::CUDA_R_16F, D::CUDA_R_32F))
+        );
+        assert_eq!(
+            gemm_types(CublasPlan::BF16F32(ComputeType32F::default())),
+            Some((D::CUDA_R_16BF, D::CUDA_R_16BF, D::CUDA_R_32F))
+        );
+        assert_eq!(
+            gemm_types(CublasPlan::BF16(ComputeType16F::default())),
+            Some((D::CUDA_R_16BF, D::CUDA_R_16BF, D::CUDA_R_16BF))
+        );
+        assert_eq!(gemm_types(CublasPlan::None), None);
+        assert_eq!(
+            plan::<Complex<f32>, Complex<f32>, Complex<f32>>(&ComputeType32F::Pedantic).compute(),
+            Some(sys::cublasComputeType_t::CUBLAS_COMPUTE_32F_PEDANTIC)
+        );
+        assert_eq!(
+            plan::<half::f16, half::f16, half::f16>(&ComputeType16F::Acc16F).compute(),
+            Some(sys::cublasComputeType_t::CUBLAS_COMPUTE_16F)
+        );
+        assert_eq!(plan::<f64, f64, f64>(&ComputeType64F::EmulatedFixedPoint).compute(), None);
+    }
+
+    /// The scale of a half output is `f32`; a type of another family has none.
+    #[test]
+    fn scales_of_the_output_type() {
+        use num::Complex;
+        assert_eq!(scale::<f32, f32>(1.5), Some(1.5));
+        assert_eq!(scale::<f32, half::f16>(half::f16::from_f32(1.5)), Some(1.5));
+        assert_eq!(scale::<f32, half::bf16>(half::bf16::from_f32(1.5)), Some(1.5));
+        assert_eq!(scale::<f64, f64>(1.5), Some(1.5));
+        assert_eq!(scale::<Complex<f32>, Complex<f32>>(Complex::new(1.0, 2.0)), Some(Complex::new(1.0, 2.0)));
+        assert_eq!(scale::<f32, f64>(1.5), None);
+        assert_eq!(scale::<f64, f32>(1.5), None);
     }
 
     /// Every other triple starts and ends at naive, whatever the mode.
     #[test]
     fn table_by_type_triple() {
         let naive = ["naive"];
+        let blas = ["cublasLt", "cublasEx", "cublas", "naive"];
+        let half = ["cublasLt", "cublasEx", "naive"];
         assert_eq!(names(&candidates::<i32, i32, i32>(&())), naive);
         assert_eq!(names(&candidates::<f32, f64, f64>(&ComputeType64F::default())), naive, "mixed operands");
         assert_eq!(names(&candidates::<f32, f64, f32>(&ComputeType32F::default())), naive, "mixed operands, f32 out");
-        assert_eq!(names(&candidates::<half::f16, half::f16, f32>(&ComputeType32F::default())), naive);
-        assert_eq!(names(&candidates::<half::bf16, half::bf16, half::bf16>(&ComputeType16F::default())), naive);
+        assert_eq!(
+            names(&candidates::<half::f16, half::bf16, f32>(&ComputeType32F::default())),
+            naive,
+            "mixed operands, f32 out"
+        );
+        assert_eq!(names(&candidates::<half::f16, half::f16, f32>(&ComputeType32F::default())), half);
+        assert_eq!(names(&candidates::<half::bf16, half::bf16, f32>(&ComputeType32F::default())), half);
+        assert_eq!(names(&candidates::<half::f16, half::f16, half::f16>(&ComputeType16F::default())), half);
+        assert_eq!(names(&candidates::<half::f16, half::f16, half::f16>(&ComputeType16F::Acc16F)), half);
+        assert_eq!(names(&candidates::<half::bf16, half::bf16, half::bf16>(&ComputeType16F::default())), half);
         assert_eq!(
             names(&candidates::<num::Complex<f64>, num::Complex<f64>, num::Complex<f64>>(&ComputeType64F::default())),
-            naive
+            blas
+        );
+        // the emulation of the 64F family is real `f64` only: a `c64` output keeps the default
+        assert_eq!(
+            names(&candidates::<num::Complex<f64>, num::Complex<f64>, num::Complex<f64>>(
+                &ComputeType64F::EmulatedFixedPoint
+            )),
+            blas
         );
     }
 

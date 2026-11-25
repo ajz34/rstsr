@@ -13,7 +13,8 @@
 //! The mode is keyed by the **output** type: [`CudaMatMulMode`] names the enum of its family
 //! ([`ComputeType32F`], [`ComputeType64F`], [`ComputeType16F`]), and the flags carry one field per
 //! family. `DeviceMatMulAPI` reads the mode of the output type from the device flags; the
-//! tensor-level `*_mode` entries (passing it per call) are not built yet.
+//! tensor-level entries of [`TensorCudaMatMulAPI`] (`*_mode`, and the fallible
+//! [`matmul_with_mode_f`]) pass it per call instead.
 //!
 //! The cuBLAS drivers take the mode as given; the tiled and naive kernels compute in the output
 //! precision (or better) whatever the mode. A driver that cannot express a mode declines and the
@@ -25,7 +26,17 @@
 //! | `(a, b) -> c` | accelerated drivers | always |
 //! |---|---|---|
 //! | `f32 -> f32`, `f64 -> f64` | cuBLASLt, `cublasGemmEx`, classic cuBLAS, tiled | naive |
-//! | everything else (integers, complex, half, mixed operands) | — (later batches) | naive |
+//! | `c32`, `c64` | cuBLASLt, `cublasGemmEx`, classic cuBLAS | naive |
+//! | `f16 -> f16`, `f16 -> f32`, `bf16 -> bf16`, `bf16 -> f32` | cuBLASLt, `cublasGemmEx` | naive |
+//! | everything else (integers, operands of different dtypes) | — | naive |
+//!
+//! A mode the triple cannot serve is the family default by the time a driver sees it: the `Fast*`
+//! modes convert `f32` inputs, so they do not apply to complex inputs nor to half inputs with an
+//! `f32` output; `Acc16F` (which scales in `f16`) is `f16` only; the fixed-point emulation is
+//! real `f64` only. `Pedantic` is served by every accelerated triple.
+//!
+//! Operands of different dtypes need no entry of their own: `matmul_from` / `matmul_with_output`
+//! carry no `Mul` bound, and the naive kernel casts each operand to the output type.
 //!
 //! # Layouts
 //!
@@ -44,9 +55,11 @@ pub(crate) mod drivers;
 pub(crate) mod geom;
 pub(crate) mod inner;
 pub mod mode;
+pub mod tensor;
 
 mod flags;
 
 pub use drivers::GemmDriver;
 pub use flags::MatMulDrivers;
 pub use mode::{ComputeType16F, ComputeType32F, ComputeType64F, CudaMatMulMode};
+pub use tensor::{matmul_with_mode_f, TensorCudaMatMulAPI};

@@ -63,7 +63,7 @@ where
         + DeviceRawAPI<TC, Raw = CudaBuffer<TC>>
         + DeviceRawAPI<MaybeUninit<TC>, Raw = CudaBuffer<MaybeUninit<TC>>>,
     // Every triple is accepted: the accelerated drivers serve the ones they can, the naive driver
-    // takes the rest (integers, complex, half, mixed operands).
+    // takes the rest (integers, operands of different dtypes).
     TA: NaiveScalar,
     TB: NaiveScalar,
     TC: NaiveScalar + CudaMatMulMode,

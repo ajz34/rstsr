@@ -12,8 +12,9 @@ use num::Complex;
 
 /// 32-bit-float compute-type family (`cublasComputeType_t` names).
 ///
-/// Read by calls with an `f32` (or `f32`-family) output only. A mode the type triple cannot serve
-/// resolves to [`Self::Default`] silently; [`Self::Pedantic`] is never downgraded and is an error.
+/// Read by calls with an `f32`, `Complex<f32>` or half-operand output only. A mode the type triple
+/// cannot serve resolves to [`Self::Default`] silently; [`Self::Pedantic`] is never downgraded and
+/// is an error.
 ///
 /// A driver that cannot express a mode declines the problem, and the next candidate runs
 /// (`Fast16BF` has no classic-entry math mode, so the classic driver hands it on; the cuBLASLt
@@ -37,7 +38,8 @@ pub enum ComputeType32F {
 
 /// 64-bit-float compute-type family.
 ///
-/// Read by calls with an `f64` output only, with the same resolution rule as [`ComputeType32F`].
+/// Read by calls with an `f64` or `Complex<f64>` output only, with the same resolution rule as
+/// [`ComputeType32F`].
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum ComputeType64F {
@@ -46,13 +48,16 @@ pub enum ComputeType64F {
     Default,
     /// Exact arithmetic semantics and the specified internal storage format.
     Pedantic,
-    /// Emulate the `f64` product in fixed point. Only the classic cuBLAS driver serves it, and it
-    /// needs `cudarc`'s CUDA 13.0 bindings (`CUDARC_CUDA_VERSION=13000` or newer); the mantissa
-    /// width is [`CudaRuntimeFlags::fixedpoint_mantissa_bits`].
+    /// Emulate the `f64` product in fixed point (real `f64` only). Only the classic cuBLAS driver
+    /// serves it, and it needs `cudarc`'s CUDA 13.0 bindings (`CUDARC_CUDA_VERSION=13000` or
+    /// newer); the mantissa width is [`CudaRuntimeFlags::fixedpoint_mantissa_bits`].
     EmulatedFixedPoint,
 }
 
 /// 16-bit-float output family (`f16`/`bf16` outputs).
+///
+/// A mode the output type cannot serve resolves to [`Self::Default`] silently: `bf16` has no
+/// 16-bit accumulation, so a `bf16` output keeps the default under [`Self::Acc16F`].
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum ComputeType16F {
@@ -63,6 +68,18 @@ pub enum ComputeType16F {
     Pedantic,
     /// Opt-in accumulation in 16 bits (faster, less accurate).
     Acc16F,
+}
+
+impl ComputeType16F {
+    /// The `cublasGemmEx`/cuBLASLt compute type of this mode.
+    pub(crate) fn gemm_ex(self) -> sys::cublasComputeType_t {
+        use sys::cublasComputeType_t as C;
+        match self {
+            Self::Default => C::CUBLAS_COMPUTE_32F,
+            Self::Pedantic => C::CUBLAS_COMPUTE_32F_PEDANTIC,
+            Self::Acc16F => C::CUBLAS_COMPUTE_16F,
+        }
+    }
 }
 
 /// An output type with a compute-mode family: [`Self::Mode`] is the enum the flags carry for it.

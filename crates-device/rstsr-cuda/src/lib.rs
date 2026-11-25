@@ -185,7 +185,7 @@ pub mod prelude_dev {
     pub use crate::device::DeviceCuda;
     pub use crate::event::CudaEvent;
     pub use crate::flags::{default_flags, set_default_flags, ComputeType32F, CudaRuntimeFlags};
-    pub use crate::matmul::{CudaMatMulMode, MatMulDrivers};
+    pub use crate::matmul::{CudaMatMulMode, MatMulDrivers, TensorCudaMatMulAPI};
     pub use crate::pinned::{DeviceCudaPinned, PinnedBuffer, TensorPinnedHostViewAPI, TensorPinnedHostViewMutAPI};
     pub use crate::registry::CudaOrdinalObj;
     pub use crate::stream::CudaStreamObj;

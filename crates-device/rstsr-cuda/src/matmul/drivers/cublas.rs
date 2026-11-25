@@ -5,10 +5,10 @@
 //! as fast for a hundredth of the engineering. What it cannot express is derived in
 //! [`super::super::cublas_args`] and handed to the next driver.
 //!
-//! The entries cover `f32` and `f64` only; the other accelerated triples come with the
-//! `cublasGemmEx` and cuBLASLt drivers. The compute mode is a math mode of the handle here (the
-//! typed entries have no compute-type argument), set inside the handle lock and restored before it
-//! is released; [`with_gemm_call`] is the preparation the `cublasGemmEx` driver shares.
+//! The entries cover `f32`, `f64` and the complex pairs; half and mixed-storage triples come
+//! with the `cublasGemmEx` and cuBLASLt drivers. The compute mode is a math mode of the handle here
+//! (the typed entries have no compute-type argument), set inside the handle lock and restored
+//! before it is released; [`with_gemm_call`] is the preparation the `cublasGemmEx` driver shares.
 //!
 //! # Thread safety
 //!
@@ -19,17 +19,17 @@
 
 use cudarc::cublas::sys;
 
-use super::{CublasPlan, Problem, Refusal, Uniform, Verdict};
+use super::{scale, Buffers, CublasPlan, Problem, Refusal, Verdict};
 use crate::dtype::CudaDType;
 use crate::kernel::{order_input, order_output};
 use crate::matmul::cublas_args;
 use crate::matmul::mode::{ComputeType32F, ComputeType64F};
 use crate::prelude_dev::*;
 use crate::stream::CublasHandle;
+use num::Complex;
 use std::sync::Arc;
 
-/// The float widths cuBLAS's typed `gemm` covers, which is exactly what `DeviceMatMulAPI` is
-/// instantiated for on this device.
+/// The types cuBLAS's typed `gemm` entries cover: the real and complex floats.
 pub(crate) trait CublasScalar: CudaDType {
     /// # Safety
     /// `a`, `b`, `c` must be device pointers of at least the extents implied by
@@ -78,6 +78,9 @@ pub(crate) trait CublasScalar: CudaDType {
 
 macro_rules! impl_cublas_scalar {
     ($t:ty, $gemm:ident, $gemm_sb:ident) => {
+        impl_cublas_scalar!($t, $gemm, $gemm_sb, $t);
+    };
+    ($t:ty, $gemm:ident, $gemm_sb:ident, $cx:path) => {
         impl CublasScalar for $t {
             unsafe fn gemm(
                 handle: sys::cublasHandle_t,
@@ -103,13 +106,13 @@ macro_rules! impl_cublas_scalar {
                         m,
                         n,
                         k,
-                        alpha,
-                        a as *const $t,
+                        alpha as *const $t as *const $cx,
+                        a as *const $t as *const $cx,
                         lda,
-                        b as *const $t,
+                        b as *const $t as *const $cx,
                         ldb,
-                        beta,
-                        c as *mut $t,
+                        beta as *const $t as *const $cx,
+                        c as *mut $t as *mut $cx,
                         ldc,
                     )
                 }
@@ -143,15 +146,15 @@ macro_rules! impl_cublas_scalar {
                         m,
                         n,
                         k,
-                        alpha,
-                        a as *const $t,
+                        alpha as *const $t as *const $cx,
+                        a as *const $t as *const $cx,
                         lda,
                         stride_a,
-                        b as *const $t,
+                        b as *const $t as *const $cx,
                         ldb,
                         stride_b,
-                        beta,
-                        c as *mut $t,
+                        beta as *const $t as *const $cx,
+                        c as *mut $t as *mut $cx,
                         ldc,
                         stride_c,
                         batch,
@@ -164,6 +167,8 @@ macro_rules! impl_cublas_scalar {
 
 impl_cublas_scalar!(f32, cublasSgemm_v2, cublasSgemmStridedBatched);
 impl_cublas_scalar!(f64, cublasDgemm_v2, cublasDgemmStridedBatched);
+impl_cublas_scalar!(Complex<f32>, cublasCgemm_v2, cublasCgemmStridedBatched, sys::cuFloatComplex);
+impl_cublas_scalar!(Complex<f64>, cublasZgemm_v2, cublasZgemmStridedBatched, sys::cuDoubleComplex);
 
 fn op(t: bool) -> sys::cublasOperation_t {
     if t { sys::cublasOperation_t::CUBLAS_OP_T } else { sys::cublasOperation_t::CUBLAS_OP_N }
@@ -413,12 +418,14 @@ pub(crate) type Served<T> = core::result::Result<T, Refusal>;
 /// Refuses the problems cuBLAS cannot express (the rule table in [`cublas_args`]). The read-event
 /// guards of the three buffers live in the returned call, so they are held until the caller drops
 /// it, after the enqueue.
-pub(crate) fn prepare<'a, T, TA, TB, TC, TBuf>(
-    u: &Uniform<'a, T>,
+pub(crate) fn prepare<'a, A, B, C, TA, TB, TC, TBuf>(
+    u: &Buffers<'a, A, B, C>,
     p: &Problem<'a, TA, TB, TC, TBuf>,
 ) -> Result<Served<GemmCall<'a>>>
 where
-    T: 'static,
+    A: 'static,
+    B: 'static,
+    C: 'static,
     TA: 'static,
     TB: 'static,
     TC: 'static,
@@ -432,21 +439,28 @@ where
         )));
     };
     let exec = p.device.stream();
-    // `geom.a` is the buffer whose layout went first to the rule table: the caller's `b` under
-    // `ColMajor`.
-    let (buf_a, buf_b) = if geom.swapped { (u.b, u.a) } else { (u.a, u.b) };
-    let orders = [order_input(buf_a, exec)?, order_input(buf_b, exec)?, order_output(u.c, exec)?];
-    let (pa, ra) = buf_a.read_ptr_on(exec);
-    let (pb, rb) = buf_b.read_ptr_on(exec);
-    let (pc, rc) = u.c.read_ptr_on(exec);
-    let esz = core::mem::size_of::<T>() as u64;
+    // The pointers are named after the **geom** operands: `geom.a` is the caller's `b` under
+    // `ColMajor`, so each operand's buffer, element size and input order follow the swap.
+    let (ord_a, ord_b, ord_c) = (order_input(u.a, exec)?, order_input(u.b, exec)?, order_output(u.c, exec)?);
+    let (ua, ra) = u.a.read_ptr_on(exec);
+    let (ub, rb) = u.b.read_ptr_on(exec);
+    let (uc, rc) = u.c.read_ptr_on(exec);
+    let sa = core::mem::size_of::<A>() as u64;
+    let sb = core::mem::size_of::<B>() as u64;
+    let (orders, pa, ea, pb, eb) = if geom.swapped {
+        ([ord_b, ord_a, ord_c], ub as usize, sb, ua as usize, sa)
+    } else {
+        ([ord_a, ord_b, ord_c], ua as usize, sa, ub as usize, sb)
+    };
+    let ec = core::mem::size_of::<C>() as u64;
+    let ptr = |base: u64, off: u64, esz: u64| base.wrapping_add(off.wrapping_mul(esz));
     Ok(Ok(GemmCall {
         exec,
         args,
         ptrs: [
-            (pa as u64).wrapping_add(geom.a.0 as u64 * esz),
-            (pb as u64).wrapping_add(geom.b.0 as u64 * esz),
-            (pc as u64).wrapping_add(geom.c.0 as u64 * esz),
+            ptr(pa as u64, geom.a.0 as u64, ea),
+            ptr(pb as u64, geom.b.0 as u64, eb),
+            ptr(uc as u64, geom.c.0 as u64, ec),
         ],
         orders,
         reads: [ra, rb, rc],
@@ -457,13 +471,15 @@ where
 ///
 /// Declines with [`Refusal::NoCublas`] when `libcublas` is not loadable; otherwise `f` gets the
 /// handle (unlocked: `f` takes the lock), the arguments and the pointers of [`prepare`].
-pub(crate) fn with_gemm_call<T, TA, TB, TC, TBuf, F>(
-    u: &Uniform<'_, T>,
+pub(crate) fn with_gemm_call<A, B, C, TA, TB, TC, TBuf, F>(
+    u: &Buffers<'_, A, B, C>,
     p: &Problem<'_, TA, TB, TC, TBuf>,
     f: F,
 ) -> Result<Verdict>
 where
-    T: 'static,
+    A: 'static,
+    B: 'static,
+    C: 'static,
     TA: 'static,
     TB: 'static,
     TC: 'static,
@@ -520,7 +536,26 @@ where
             }
             typed::<f64, TA, TB, TC, TBuf>(p, ask)
         },
-        CublasPlan::None => Ok(Verdict::Declined(Refusal::Cannot("the typed gemm entries cover f32 and f64 only"))),
+        CublasPlan::C32(mode) => {
+            let ask = bound(ask_32f(mode));
+            if let Ask::No(why) = ask {
+                return Ok(Verdict::Declined(Refusal::Cannot(why)));
+            }
+            typed::<Complex<f32>, TA, TB, TC, TBuf>(p, ask)
+        },
+        CublasPlan::C64(mode) => {
+            let ask = bound(ask_64f(mode, mantissa_bits)?);
+            if let Ask::No(why) = ask {
+                return Ok(Verdict::Declined(Refusal::Cannot(why)));
+            }
+            typed::<Complex<f64>, TA, TB, TC, TBuf>(p, ask)
+        },
+        CublasPlan::None => {
+            Ok(Verdict::Declined(Refusal::Cannot("the typed gemm entries cover f32, f64 and complex only")))
+        },
+        CublasPlan::F16(_) | CublasPlan::F16F32(_) | CublasPlan::BF16(_) | CublasPlan::BF16F32(_) => {
+            Ok(Verdict::Declined(Refusal::Cannot("the typed gemm entries cover f32, f64 and complex only")))
+        },
     }
 }
 
@@ -535,15 +570,19 @@ where
     let Some(u) = p.uniform::<T>() else {
         return Ok(Verdict::Declined(Refusal::Cannot("the operands and the output must share one dtype")));
     };
+    // SAFETY: the three buffers were re-typed to `T`, so the offsets are in `T`s.
     let math = match ask {
         Ask::Leave => None,
         Ask::Math(mode) => Some(mode),
         Ask::No(_) => unreachable!("a refusal is answered before the buffers are re-typed"),
     };
+    let (Some(alpha), Some(beta)) = (scale::<T, TC>(p.alpha), scale::<T, TC>(p.beta)) else {
+        return Ok(Verdict::Declined(Refusal::Cannot("the output type is not of the plan's family")));
+    };
     with_gemm_call(&u, p, |blas, args, ptrs| {
         // SAFETY: the pointers are the buffers' bases folded with the layouts' own offsets, and
         // `args` was derived from the same `geom` those offsets came from.
-        let status = unsafe { launch::<T>(blas, args, math, &u.alpha, &u.beta, ptrs)? };
+        let status = unsafe { launch::<T>(blas, args, math, &alpha, &beta, ptrs)? };
         Ok(status_verdict(status))
     })
 }

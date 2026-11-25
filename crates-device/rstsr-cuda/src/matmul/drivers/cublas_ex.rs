@@ -8,17 +8,19 @@
 //! What it cannot express: the FP64 fixed-point emulation (a math mode of the classic handle) and
 //! a triple whose storage it has no uniform type for (mixed operands).
 
+use crate::dtype::CudaDType;
 use cudarc::cublas::sys;
 
-use super::cublas::{status_verdict, with_gemm_call, CublasScalar};
-use super::{CublasPlan, Problem, Refusal, Verdict};
+use super::cublas::{status_verdict, with_gemm_call};
+use super::{scale, CublasPlan, Problem, Refusal, CublasGemmTypes, Verdict};
 use crate::matmul::cublas_args::CublasArgs;
+use crate::matmul::mode::ComputeType16F;
 use crate::prelude_dev::*;
 
-/// A scalar the `*Ex` entries take in all three matrix slots, with the scales of the same type.
-pub(crate) trait ExScalar: CublasScalar {
-    /// The `cudaDataType_t` of `A`, `B` and `C`.
-    const DATA: sys::cudaDataType_t;
+/// The Rust type of `alpha`/`beta` for a family of storage types.
+pub(crate) trait ExScalar: CudaDType {
+    /// The `cudaDataType_t` of the scales, hence of the matmul descriptor.
+    const SCALE: sys::cudaDataType_t;
 
     /// # Safety
     /// `ptrs` must be valid for `args`' extents on the handle's stream; the handle's lock must be
@@ -27,6 +29,7 @@ pub(crate) trait ExScalar: CublasScalar {
     unsafe fn gemm_ex(
         handle: sys::cublasHandle_t,
         a: &CublasArgs,
+        st: CublasGemmTypes,
         compute: sys::cublasComputeType_t,
         alpha: &Self,
         beta: &Self,
@@ -42,6 +45,7 @@ pub(crate) trait ExScalar: CublasScalar {
 unsafe fn gemm_ex_unchecked<T: ExScalar>(
     handle: sys::cublasHandle_t,
     a: &CublasArgs,
+    st: CublasGemmTypes,
     compute: sys::cublasComputeType_t,
     alpha: &T,
     beta: &T,
@@ -66,16 +70,16 @@ unsafe fn gemm_ex_unchecked<T: ExScalar>(
                 a.ko,
                 alpha,
                 a_ptr,
-                T::DATA,
+                st.a,
                 a.lda,
                 stride_a,
                 b_ptr,
-                T::DATA,
+                st.b,
                 a.ldb,
                 stride_b,
                 beta,
                 c_ptr,
-                T::DATA,
+                st.c,
                 a.ldc,
                 stride_c,
                 a.batch,
@@ -92,14 +96,14 @@ unsafe fn gemm_ex_unchecked<T: ExScalar>(
                 a.ko,
                 alpha,
                 a_ptr,
-                T::DATA,
+                st.a,
                 a.lda,
                 b_ptr,
-                T::DATA,
+                st.b,
                 a.ldb,
                 beta,
                 c_ptr,
-                T::DATA,
+                st.c,
                 a.ldc,
                 compute,
                 algo,
@@ -111,17 +115,18 @@ unsafe fn gemm_ex_unchecked<T: ExScalar>(
 macro_rules! impl_ex_scalar {
     ($t:ty, $data:ident) => {
         impl ExScalar for $t {
-            const DATA: sys::cudaDataType_t = sys::cudaDataType_t::$data;
+            const SCALE: sys::cudaDataType_t = sys::cudaDataType_t::$data;
 
             unsafe fn gemm_ex(
                 handle: sys::cublasHandle_t,
                 a: &CublasArgs,
+                st: CublasGemmTypes,
                 compute: sys::cublasComputeType_t,
                 alpha: &Self,
                 beta: &Self,
                 ptrs: [u64; 3],
             ) -> sys::cublasStatus_t {
-                unsafe { gemm_ex_unchecked::<$t>(handle, a, compute, alpha, beta, ptrs) }
+                unsafe { gemm_ex_unchecked::<$t>(handle, a, st, compute, alpha, beta, ptrs) }
             }
         }
     };
@@ -129,8 +134,12 @@ macro_rules! impl_ex_scalar {
 
 impl_ex_scalar!(f32, CUDA_R_32F);
 impl_ex_scalar!(f64, CUDA_R_64F);
+impl_ex_scalar!(half::f16, CUDA_R_16F);
+impl_ex_scalar!(num::Complex<f32>, CUDA_C_32F);
+impl_ex_scalar!(num::Complex<f64>, CUDA_C_64F);
 
-/// One attempt of the `cublasGemmEx` driver.
+/// One attempt of the `cublasGemmEx` driver: the scale type and the storage types follow the
+/// plan, and the buffers are re-typed accordingly.
 pub(super) fn run<TA, TB, TC, TBuf>(p: &Problem<'_, TA, TB, TC, TBuf>, plan: CublasPlan) -> Result<Verdict>
 where
     TA: 'static,
@@ -138,38 +147,60 @@ where
     TC: Copy + 'static,
     TBuf: 'static,
 {
-    let compute = match plan {
-        CublasPlan::F32(mode) => return typed::<f32, TA, TB, TC, TBuf>(p, mode.gemm_ex()),
-        CublasPlan::F64(mode) => mode.gemm_ex(),
-        CublasPlan::None => None,
-    };
-    match compute {
-        Some(compute) => typed::<f64, TA, TB, TC, TBuf>(p, compute),
-        None => Ok(Verdict::Declined(Refusal::Cannot(
-            "cublasGemmEx serves f32 and f64 outputs in their own storage, and has no fixed-point emulation",
-        ))),
+    if plan.gemm_types().is_none() {
+        return Ok(Verdict::Declined(Refusal::Cannot("no cuBLAS problem for this type triple")));
+    }
+    if plan.compute().is_none() {
+        return Ok(Verdict::Declined(Refusal::Cannot(
+            "cublasGemmEx has no fixed-point emulation (a math mode of the classic handle)",
+        )));
+    }
+    /// `typed` with the plan's scale type `S` and storage types `A`, `B`, `C`.
+    macro_rules! serve {
+        ($s:ty, $a:ty, $b:ty, $c:ty) => {
+            typed::<$s, $a, $b, $c, TA, TB, TC, TBuf>(p, plan)
+        };
+    }
+    match plan {
+        CublasPlan::F32(_) => serve!(f32, f32, f32, f32),
+        CublasPlan::F64(_) => serve!(f64, f64, f64, f64),
+        CublasPlan::C32(_) => serve!(num::Complex<f32>, num::Complex<f32>, num::Complex<f32>, num::Complex<f32>),
+        CublasPlan::C64(_) => serve!(num::Complex<f64>, num::Complex<f64>, num::Complex<f64>, num::Complex<f64>),
+        // 16-bit accumulation takes half scales
+        CublasPlan::F16(ComputeType16F::Acc16F) => serve!(half::f16, half::f16, half::f16, half::f16),
+        CublasPlan::F16(_) => serve!(f32, half::f16, half::f16, half::f16),
+        CublasPlan::F16F32(_) => serve!(f32, half::f16, half::f16, f32),
+        CublasPlan::BF16(_) => serve!(f32, half::bf16, half::bf16, half::bf16),
+        CublasPlan::BF16F32(_) => serve!(f32, half::bf16, half::bf16, f32),
+        CublasPlan::None => unreachable!("declined above"),
     }
 }
 
 /// Derive the arguments, decline on anything cuBLAS cannot express, launch.
-fn typed<T: ExScalar, TA, TB, TC, TBuf>(
-    p: &Problem<'_, TA, TB, TC, TBuf>,
-    compute: sys::cublasComputeType_t,
-) -> Result<Verdict>
+fn typed<S: ExScalar, A, B, C, TA, TB, TC, TBuf>(p: &Problem<'_, TA, TB, TC, TBuf>, plan: CublasPlan) -> Result<Verdict>
 where
+    A: 'static,
+    B: 'static,
+    C: 'static,
     TA: 'static,
     TB: 'static,
     TC: Copy + 'static,
     TBuf: 'static,
 {
-    let Some(u) = p.uniform::<T>() else {
-        return Ok(Verdict::Declined(Refusal::Cannot("the operands and the output must share one dtype")));
+    let Some(u) = p.retyped::<A, B, C>() else {
+        return Ok(Verdict::Declined(Refusal::Cannot("the buffers are not of the plan's storage types")));
+    };
+    let (Some(alpha), Some(beta)) = (scale::<S, TC>(p.alpha), scale::<S, TC>(p.beta)) else {
+        return Ok(Verdict::Declined(Refusal::Cannot("the output type is not of the plan's family")));
+    };
+    let (Some(st), Some(compute)) = (plan.gemm_types(), plan.compute()) else {
+        return Ok(Verdict::Declined(Refusal::Cannot("no cuBLAS problem for this type triple")));
     };
     with_gemm_call(&u, p, |blas, args, ptrs| {
         let _api = blas.lock();
         // SAFETY: the pointers are the buffers' bases folded with the layouts' own offsets, and
         // `args` was derived from the same `geom` those offsets came from.
-        let status = unsafe { T::gemm_ex(*blas.blas().handle(), args, compute, &u.alpha, &u.beta, ptrs) };
+        let status = unsafe { S::gemm_ex(*blas.blas().handle(), args, st, compute, &alpha, &beta, ptrs) };
         Ok(status_verdict(status))
     })
 }

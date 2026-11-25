@@ -16,7 +16,8 @@
 //!
 //! Every 32F mode is served, `Fast16BF` included (a compute type, where the classic entries only
 //! have a handle math mode); of the 64F family `Default` and `Pedantic`, the fixed-point emulation
-//! being left to the classic driver.
+//! being left to the classic driver. The half triples are served with their storage types (half
+//! operands, an `f32` or half output) and `f32` scales.
 
 use core::ffi::c_void;
 use cudarc::cublas::sys as cb;
@@ -24,10 +25,11 @@ use cudarc::cublaslt::sys as lt;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use super::cublas::{GemmCall, Served, prepare};
+use super::cublas::{prepare, GemmCall, Served};
 use super::cublas_ex::ExScalar;
-use super::{CublasPlan, Problem, Refusal, Verdict};
+use super::{scale, CublasPlan, Problem, Refusal, CublasGemmTypes, Verdict};
 use crate::matmul::cublas_args::CublasArgs;
+use crate::matmul::mode::ComputeType16F;
 use crate::prelude_dev::*;
 
 /// The cuBLASLt workspace, per stream.
@@ -100,23 +102,32 @@ fn align(ptr: u64) -> u8 {
     (ptr & 0xff) as u8
 }
 
-/// The layouts of the three stored matrices; batch count and batch stride (in **elements**, like
-/// the strided-batched entries) follow [`crate::matmul::cublas_args::batch_strides`], slot by slot.
-fn layout_keys(a: &CublasArgs, dtype: u32) -> [LayoutKey; 3] {
+/// The layouts of the three stored matrices, each in its own storage type; batch count and batch
+/// stride (in **elements**, like the strided-batched entries) follow
+/// [`crate::matmul::cublas_args::batch_strides`], slot to slot.
+fn layout_keys(a: &CublasArgs, st: CublasGemmTypes) -> [LayoutKey; 3] {
     let (stride_a, stride_b, stride_c) = crate::matmul::cublas_args::batch_strides(a);
-    let mut out = [LayoutKey { dtype, rows: 0, cols: 0, ld: 0, batch: 0, stride: 0 }; 3];
-    for (o, (s, stride)) in out.iter_mut().zip(stored_matrices(a).into_iter().zip([stride_a, stride_b, stride_c])) {
-        *o = LayoutKey { dtype, rows: s.rows, cols: s.cols, ld: s.ld, batch: a.batch, stride };
+    let dtypes = [st.b, st.a, st.c];
+    let mut out = [LayoutKey { dtype: 0, rows: 0, cols: 0, ld: 0, batch: 0, stride: 0 }; 3];
+    for (o, ((s, stride), dtype)) in
+        out.iter_mut().zip(stored_matrices(a).into_iter().zip([stride_a, stride_b, stride_c]).zip(dtypes))
+    {
+        *o = LayoutKey { dtype: dtype as u32, rows: s.rows, cols: s.cols, ld: s.ld, batch: a.batch, stride };
     }
     out
 }
 
 /// The cache key of one call: its cuBLAS arguments, the three pointers (named after the **geom**
 /// operands) and the compute type.
-pub(crate) fn key<T: ExScalar>(args: &CublasArgs, ptrs: [u64; 3], compute: lt::cublasComputeType_t) -> Key {
+pub(crate) fn key<T: ExScalar>(
+    args: &CublasArgs,
+    ptrs: [u64; 3],
+    st: CublasGemmTypes,
+    compute: lt::cublasComputeType_t,
+) -> Key {
     // SAFETY: `cudaDataType_t` is the same enum in both modules.
-    let scale: lt::cudaDataType_t = unsafe { retyped(T::DATA) };
-    let [a_l, b_l, c_l] = layout_keys(args, scale as u32);
+    let scale: lt::cudaDataType_t = unsafe { retyped(T::SCALE) };
+    let [a_l, b_l, c_l] = layout_keys(args, st);
     let [ptr_a, ptr_b, ptr_c] = slot_ptrs(ptrs);
     Key {
         compute: compute as u32,
@@ -224,10 +235,14 @@ fn refused(status: lt::cublasStatus_t) -> Option<Refusal> {
 unsafe fn build<T: ExScalar>(
     handle: lt::cublasLtHandle_t,
     call: &GemmCall<'_>,
+    st: CublasGemmTypes,
     compute: lt::cublasComputeType_t,
 ) -> Served<Entry> {
+    // the storage type of the slots `A`, `B`, `C`, `D` (slot A holds `geom.b`, D mirrors C)
     // SAFETY: `cudaDataType_t` is the same enum in both modules.
-    let scale: lt::cudaDataType_t = unsafe { retyped(T::DATA) };
+    let data: [lt::cudaDataType_t; 4] = [st.b, st.a, st.c, st.c].map(|d| unsafe { retyped(d) });
+    // SAFETY: `cudaDataType_t` is the same enum in both modules.
+    let scale: lt::cudaDataType_t = unsafe { retyped(T::SCALE) };
     let a = &call.args;
     let mut desc = core::mem::MaybeUninit::uninit();
     if let Some(r) = refused(unsafe { lt::cublasLtMatmulDescCreate(desc.as_mut_ptr(), compute, scale) }) {
@@ -258,8 +273,8 @@ unsafe fn build<T: ExScalar>(
     // `D` is `C`: the product is accumulated in place, or written over the unread `C`.
     let [s_a, s_b, s_c] = stored_matrices(a);
     let slots = [s_a, s_b, s_c, s_c].into_iter().zip([stride_a, stride_b, stride_c, stride_c]);
-    for (l, (s, stride)) in entry.layouts.iter_mut().zip(slots) {
-        if let Some(r) = refused(unsafe { lt::cublasLtMatrixLayoutCreate(l, scale, s.rows, s.cols, s.ld) }) {
+    for (l, ((s, stride), data)) in entry.layouts.iter_mut().zip(slots.zip(data)) {
+        if let Some(r) = refused(unsafe { lt::cublasLtMatrixLayoutCreate(l, data, s.rows, s.cols, s.ld) }) {
             return Err(r);
         }
         if a.batch > 1 {
@@ -359,7 +374,8 @@ impl Drop for CublasLtHandle {
     }
 }
 
-/// One attempt of the cuBLASLt driver.
+/// One attempt of the cuBLASLt driver: the scale type and the storage types follow the plan, and
+/// the buffers are re-typed accordingly.
 pub(super) fn run<TA, TB, TC, TBuf>(p: &Problem<'_, TA, TB, TC, TBuf>, plan: CublasPlan) -> Result<Verdict>
 where
     TA: 'static,
@@ -367,30 +383,52 @@ where
     TC: Copy + 'static,
     TBuf: 'static,
 {
+    if plan.compute().is_none() {
+        return Ok(Verdict::Declined(Refusal::Cannot(if plan.gemm_types().is_some() {
+            "the fixed-point emulation is served by the classic driver"
+        } else {
+            "no cuBLAS problem for this type triple"
+        })));
+    }
+    /// `typed` with the plan's scale type `S` and storage types `A`, `B`, `C`.
+    macro_rules! serve {
+        ($s:ty, $a:ty, $b:ty, $c:ty) => {
+            typed::<$s, $a, $b, $c, TA, TB, TC, TBuf>(p, plan)
+        };
+    }
     match plan {
-        CublasPlan::F32(mode) => typed::<f32, TA, TB, TC, TBuf>(p, unsafe { retyped(mode.gemm_ex()) }),
-        CublasPlan::F64(mode) => match mode.gemm_ex() {
-            Some(compute) => typed::<f64, TA, TB, TC, TBuf>(p, unsafe { retyped(compute) }),
-            None => Ok(Verdict::Declined(Refusal::Cannot("the fixed-point emulation is served by the classic driver"))),
-        },
-        CublasPlan::None => {
-            Ok(Verdict::Declined(Refusal::Cannot("cuBLASLt serves f32 and f64 outputs in their own storage")))
-        },
+        CublasPlan::F32(_) => serve!(f32, f32, f32, f32),
+        CublasPlan::F64(_) => serve!(f64, f64, f64, f64),
+        CublasPlan::C32(_) => serve!(num::Complex<f32>, num::Complex<f32>, num::Complex<f32>, num::Complex<f32>),
+        CublasPlan::C64(_) => serve!(num::Complex<f64>, num::Complex<f64>, num::Complex<f64>, num::Complex<f64>),
+        // 16-bit accumulation takes half scales
+        CublasPlan::F16(ComputeType16F::Acc16F) => serve!(half::f16, half::f16, half::f16, half::f16),
+        CublasPlan::F16(_) => serve!(f32, half::f16, half::f16, half::f16),
+        CublasPlan::F16F32(_) => serve!(f32, half::f16, half::f16, f32),
+        CublasPlan::BF16(_) => serve!(f32, half::bf16, half::bf16, half::bf16),
+        CublasPlan::BF16F32(_) => serve!(f32, half::bf16, half::bf16, f32),
+        CublasPlan::None => unreachable!("declined above"),
     }
 }
 
-fn typed<T: ExScalar, TA, TB, TC, TBuf>(
-    p: &Problem<'_, TA, TB, TC, TBuf>,
-    compute: lt::cublasComputeType_t,
-) -> Result<Verdict>
+fn typed<S: ExScalar, A, B, C, TA, TB, TC, TBuf>(p: &Problem<'_, TA, TB, TC, TBuf>, plan: CublasPlan) -> Result<Verdict>
 where
+    A: 'static,
+    B: 'static,
+    C: 'static,
     TA: 'static,
     TB: 'static,
     TC: Copy + 'static,
     TBuf: 'static,
 {
-    let Some(u) = p.uniform::<T>() else {
-        return Ok(Verdict::Declined(Refusal::Cannot("the operands and the output must share one dtype")));
+    let Some(u) = p.retyped::<A, B, C>() else {
+        return Ok(Verdict::Declined(Refusal::Cannot("the buffers are not of the plan's storage types")));
+    };
+    let (Some(alpha), Some(beta)) = (scale::<S, TC>(p.alpha), scale::<S, TC>(p.beta)) else {
+        return Ok(Verdict::Declined(Refusal::Cannot("the output type is not of the plan's family")));
+    };
+    let (Some(st), Some(compute)) = (plan.gemm_types(), plan.compute()) else {
+        return Ok(Verdict::Declined(Refusal::Cannot("no cuBLAS problem for this type triple")));
     };
     let call = match prepare(&u, p)? {
         Ok(call) => call,
@@ -402,11 +440,12 @@ where
     let Some(workspace) = call.exec.cublaslt_workspace() else {
         return Ok(Verdict::Declined(Refusal::Cannot("the cuBLASLt workspace could not be allocated")));
     };
-    let key = key::<T>(&call.args, call.ptrs, compute);
+    let compute: lt::cublasComputeType_t = unsafe { retyped(compute) };
+    let key = key::<S>(&call.args, call.ptrs, st, compute);
     let mut cache = lt_state.lock();
     if !cache.contains_key(&key) {
         // SAFETY: the handle is live and this thread holds its lock.
-        let entry = match unsafe { build::<T>(lt_state.handle, &call, compute) } {
+        let entry = match unsafe { build::<S>(lt_state.handle, &call, st, compute) } {
             Ok(entry) => entry,
             Err(r) => return Ok(Verdict::Declined(r)),
         };
@@ -422,12 +461,12 @@ where
         lt::cublasLtMatmul(
             lt_state.handle,
             e.desc,
-            &u.alpha as *const T as *const c_void,
+            &alpha as *const S as *const c_void,
             ptr(ptr_a) as *const c_void,
             e.layouts[0],
             ptr(ptr_b) as *const c_void,
             e.layouts[1],
-            &u.beta as *const T as *const c_void,
+            &beta as *const S as *const c_void,
             ptr(ptr_c) as *const c_void,
             e.layouts[2],
             ptr(ptr_c),
@@ -450,7 +489,7 @@ mod tests {
     use super::*;
     use crate::matmul::cublas_args::{args, batch_strides};
     use crate::matmul::geom::resolve_geom;
-    use crate::matmul::mode::{ComputeType32F, ComputeType64F};
+    use crate::matmul::mode::{ComputeType16F, ComputeType32F, ComputeType64F};
 
     fn layout(shape: &[usize], stride: &[isize]) -> Layout<IxD> {
         Layout::<IxD>::new(shape.to_vec(), stride.to_vec(), 0).unwrap()
@@ -467,6 +506,10 @@ mod tests {
             ("batched", 6, &[4, 1], &[5, 1]),
             ("a broadcast over the batch", 6, &[0, 4, 1], &[5, 1]),
         ]
+    }
+
+    fn all(st: cb::cudaDataType_t) -> CublasGemmTypes {
+        CublasGemmTypes { a: st, b: st, c: st }
     }
 
     fn arguments(a_strides: &[isize], b_strides: &[isize], batch: usize) -> CublasArgs {
@@ -507,7 +550,7 @@ mod tests {
             // a declared `ld` is never below the declared row count
             assert!(s_a.ld >= s_a.rows as i64 && s_b.ld >= s_b.rows as i64 && s_c.ld >= s_c.rows as i64, "{label}");
 
-            let keys = layout_keys(&a, 0);
+            let keys = layout_keys(&a, all(cb::cudaDataType_t::CUDA_R_32F));
             let strides = batch_strides(&a);
             assert_eq!((keys[0].batch, keys[1].batch, keys[2].batch), (a.batch, a.batch, a.batch), "{label}");
             assert_eq!(
@@ -525,34 +568,64 @@ mod tests {
     fn key_is_the_whole_problem() {
         let (plain, transposed) = (arguments(&[4, 1], &[5, 1], 1), arguments(&[1, 4], &[1, 5], 1));
         let ptrs = [0x1000, 0x2000, 0x3000];
-        let base = key::<f32>(&plain, ptrs, unsafe { retyped(ComputeType32F::default().gemm_ex()) });
-        assert_eq!(base, key::<f32>(&plain, ptrs, unsafe { retyped(ComputeType32F::default().gemm_ex()) }));
-        assert_ne!(base, key::<f32>(&plain, ptrs, unsafe { retyped(ComputeType32F::FastTF32.gemm_ex()) }));
-        assert_ne!(base, key::<f32>(&transposed, ptrs, unsafe { retyped(ComputeType32F::default().gemm_ex()) }));
+        let base = key::<f32>(&plain, ptrs, all(cb::cudaDataType_t::CUDA_R_32F), unsafe {
+            retyped(ComputeType32F::default().gemm_ex())
+        });
+        assert_eq!(
+            base,
+            key::<f32>(&plain, ptrs, all(cb::cudaDataType_t::CUDA_R_32F), unsafe {
+                retyped(ComputeType32F::default().gemm_ex())
+            })
+        );
         assert_ne!(
             base,
-            key::<f32>(&arguments(&[4, 1], &[5, 1], 6), ptrs, unsafe { retyped(ComputeType32F::default().gemm_ex()) })
+            key::<f32>(&plain, ptrs, all(cb::cudaDataType_t::CUDA_R_32F), unsafe {
+                retyped(ComputeType32F::FastTF32.gemm_ex())
+            })
+        );
+        assert_ne!(
+            base,
+            key::<f32>(&transposed, ptrs, all(cb::cudaDataType_t::CUDA_R_32F), unsafe {
+                retyped(ComputeType32F::default().gemm_ex())
+            })
+        );
+        assert_ne!(
+            base,
+            key::<f32>(&arguments(&[4, 1], &[5, 1], 6), ptrs, all(cb::cudaDataType_t::CUDA_R_32F), unsafe {
+                retyped(ComputeType32F::default().gemm_ex())
+            })
         );
         for i in 0..3 {
             let mut p = ptrs;
             p[i] += 4;
             assert_ne!(
                 base,
-                key::<f32>(&plain, p, unsafe { retyped(ComputeType32F::default().gemm_ex()) }),
+                key::<f32>(&plain, p, all(cb::cudaDataType_t::CUDA_R_32F), unsafe {
+                    retyped(ComputeType32F::default().gemm_ex())
+                }),
                 "pointer {i}"
             );
         }
         // 256-byte-equivalent addresses are one class
         let far = [ptrs[0] + 0x100, ptrs[1], ptrs[2]];
-        assert_eq!(base, key::<f32>(&plain, far, unsafe { retyped(ComputeType32F::default().gemm_ex()) }));
+        assert_eq!(
+            base,
+            key::<f32>(&plain, far, all(cb::cudaDataType_t::CUDA_R_32F), unsafe {
+                retyped(ComputeType32F::default().gemm_ex())
+            })
+        );
         // the scale type is the output type
         let scale = |k: &Key| k.scale;
         assert_eq!(
-            scale(&key::<f32>(&plain, ptrs, unsafe { retyped(ComputeType32F::default().gemm_ex()) })),
+            scale(&key::<f32>(&plain, ptrs, all(cb::cudaDataType_t::CUDA_R_32F), unsafe {
+                retyped(ComputeType32F::default().gemm_ex())
+            })),
             lt::cudaDataType_t::CUDA_R_32F as u32
         );
         assert_eq!(
-            scale(&key::<f64>(&plain, ptrs, unsafe { retyped(ComputeType64F::default().gemm_ex().unwrap()) })),
+            scale(&key::<f64>(&plain, ptrs, all(cb::cudaDataType_t::CUDA_R_64F), unsafe {
+                retyped(ComputeType64F::default().gemm_ex().unwrap())
+            })),
             lt::cudaDataType_t::CUDA_R_64F as u32
         );
     }
@@ -578,6 +651,34 @@ mod tests {
         same(ComputeType64F::Pedantic.gemm_ex().unwrap());
         let data: lt::cudaDataType_t = unsafe { retyped(cb::cudaDataType_t::CUDA_R_32F) };
         assert_eq!(data, lt::cudaDataType_t::CUDA_R_32F);
+        for d in [
+            cb::cudaDataType_t::CUDA_R_16F,
+            cb::cudaDataType_t::CUDA_R_16BF,
+            cb::cudaDataType_t::CUDA_C_32F,
+            cb::cudaDataType_t::CUDA_C_64F,
+        ] {
+            let same: lt::cudaDataType_t = unsafe { retyped(d) };
+            assert_eq!(d as u32, same as u32, "{d:?}");
+        }
+        same(ComputeType16F::Acc16F.gemm_ex());
+    }
+
+    /// A plan with mixed storage keys its slots apart: half operands with an `f32` output is
+    /// another problem than all-`f32`, and another than all-half.
+    #[test]
+    fn key_tells_the_storage_types_apart() {
+        use cb::cudaDataType_t as D;
+        let a = arguments(&[4, 1], &[5, 1], 1);
+        let ptrs = [0x1000, 0x2000, 0x3000];
+        let compute = unsafe { retyped(ComputeType32F::default().gemm_ex()) };
+        let f32 = key::<f32>(&a, ptrs, all(D::CUDA_R_32F), compute);
+        let h_f32 = key::<f32>(&a, ptrs, CublasGemmTypes { a: D::CUDA_R_16F, b: D::CUDA_R_16F, c: D::CUDA_R_32F }, compute);
+        let h16 = key::<f32>(&a, ptrs, all(D::CUDA_R_16F), compute);
+        assert_ne!(f32, h_f32);
+        assert_ne!(f32, h16);
+        let dtypes = |k: &Key| k.layouts.map(|l| l.dtype);
+        // slot A holds `geom.b`, slot B `geom.a`: both of the operands' type
+        assert_eq!(dtypes(&h_f32), [D::CUDA_R_16F, D::CUDA_R_16F, D::CUDA_R_32F, D::CUDA_R_32F].map(|d| d as u32));
     }
 
     /// The pointers follow the slots: `geom.b` in cuBLAS's `A`, `geom.a` in its `B`.

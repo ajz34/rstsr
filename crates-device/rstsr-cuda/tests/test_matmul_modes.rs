@@ -11,10 +11,12 @@
 //!
 //! The printed `max rel err` per mode is the measurement the tolerances were set from.
 
+use half::{bf16, f16};
+use num::Complex;
 use rstsr::prelude::*;
 use rstsr_cuda::dtype::CudaDType;
 use rstsr_cuda::funcs;
-use rstsr_cuda::matmul::{ComputeType32F, ComputeType64F};
+use rstsr_cuda::matmul::{matmul_with_mode_f, ComputeType16F, ComputeType32F, ComputeType64F, TensorCudaMatMulAPI};
 use rstsr_cuda::prelude_dev::*;
 
 /// Uniform data in `[-1, 1]`.
@@ -280,8 +282,7 @@ fn cublas_lt_misaligned_views() {
         let (bv, _, b) = shifted(k, n, 13, &d);
         let (cv, cv_full, mut c) = shifted(m, n, 14, &d);
         assert_eq!((a.offset(), b.offset(), c.offset()), (1, 1, 1), "fixture: shifted views");
-        let want =
-            rt::matmul(rt::asarray((av, &dcpu)).into_shape([m, k]), rt::asarray((bv, &dcpu)).into_shape([k, n]));
+        let want = rt::matmul(rt::asarray((av, &dcpu)).into_shape([m, k]), rt::asarray((bv, &dcpu)).into_shape([k, n]));
         let want = DeviceToCpuAPI::<f64>::to_cpu_vec(want.to_contig(RowMajor).storage()).rstsr_unwrap();
         // only cuBLASLt alone may refuse: the chain has the other drivers behind it
         let refused =
@@ -333,5 +334,279 @@ fn cublas_lt_misaligned_views() {
             },
             Err(e) => assert!(refused(&e), "{forced:?}: {e:?}"),
         }
+    }
+}
+
+type Cpu<T> = Tensor<T, DeviceCpuSerial, IxD>;
+
+/// `a @ b` with the operands stored as `S` (rounded from the `f64` data) and the output `C`, on
+/// `d`, against the CPU `f64` product of the **rounded** operands.
+#[allow(clippy::too_many_arguments)]
+fn check_rounded<S, C>(
+    d: &DeviceCuda,
+    what: &str,
+    m: usize,
+    k: usize,
+    n: usize,
+    tol: f64,
+    to_s: fn(f64) -> S,
+    of_s: fn(S) -> f64,
+    of_c: fn(C) -> f64,
+) where
+    S: CudaDType + CudaMatMulMode + Copy + Clone + Send + Sync + 'static + num::Zero,
+    C: CudaDType + CudaMatMulMode + Copy + Clone + Send + Sync + 'static + num::Zero + num::One,
+{
+    let dcpu = DeviceCpuSerial::default();
+    let av: Vec<S> = data(m * k, 1).into_iter().map(to_s).collect();
+    let bv: Vec<S> = data(k * n, 2).into_iter().map(to_s).collect();
+    let up = |v: Vec<S>, cnt: usize| -> Vec<f64> {
+        assert_eq!(v.len(), cnt);
+        v.into_iter().map(of_s).collect()
+    };
+    let a64: Cpu<f64> = rt::asarray((up(av.clone(), m * k), &dcpu)).into_shape([m, k]);
+    let b64: Cpu<f64> = rt::asarray((up(bv.clone(), k * n), &dcpu)).into_shape([k, n]);
+    let want = rt::matmul(&a64, &b64);
+    let want = DeviceToCpuAPI::<f64>::to_cpu_vec(want.to_contig(RowMajor).storage()).rstsr_unwrap();
+
+    let a: Tensor<S, DeviceCuda, IxD> = rt::asarray((av, d)).into_shape([m, k]);
+    let b: Tensor<S, DeviceCuda, IxD> = rt::asarray((bv, d)).into_shape([k, n]);
+    let mut c: Tensor<C, DeviceCuda, IxD> = rt::full(([m * n], C::one(), d)).into_shape([m, n]);
+    a.matmul_with_output::<S, C, IxD, IxD>(&b, &mut c.view_mut());
+    let got: Vec<f64> =
+        DeviceToCpuAPI::<C>::to_cpu_vec(c.to_contig(RowMajor).storage()).rstsr_unwrap().into_iter().map(of_c).collect();
+    let err = rel_err(&got, &want);
+    eprintln!("  [{what}] max rel err {err:.3e}");
+    assert!(err <= tol, "{what}: max rel err {err:.3e} > {tol:.1e}");
+}
+
+/// The cuBLAS drivers alone, then the chain. The classic entries take `Pedantic` as a handle math
+/// mode, which this build's bindings carry from CUDA 12.9 on: without them the classic driver is
+/// left out of a `Pedantic` run (it refuses, as `modes_32f` checks).
+fn drivers(classic_serves_pedantic: bool) -> impl Iterator<Item = MatMulDrivers> {
+    let all = [MatMulDrivers::CUBLAS_LT, MatMulDrivers::CUBLAS_EX, MatMulDrivers::CUBLAS, MatMulDrivers::all()];
+    all.into_iter().filter(move |f| classic_serves_pedantic || *f != MatMulDrivers::CUBLAS)
+}
+
+/// `c32` and `c64` on each cuBLAS driver, with `Default` and `Pedantic`; the `Fast*` modes and
+/// the fixed-point emulation resolve to the default for complex outputs.
+#[test]
+fn modes_complex() {
+    require_cuda!();
+    let (m, k, n) = (64usize, 96usize, 48usize);
+    for (mode, name) in [(ComputeType32F::Default, "default"), (ComputeType32F::Pedantic, "pedantic")] {
+        for forced in drivers(mode == ComputeType32F::Default || cfg!(cublas_math_mode)) {
+            let d = device(forced, |f| f.compute_type_32f = mode);
+            check_rounded::<Complex<f32>, Complex<f32>>(
+                &d,
+                &format!("c32 {name}, {forced:?}"),
+                m,
+                k,
+                n,
+                1e-5,
+                |x| Complex::new(x as f32, 0.0),
+                |z| z.re as f64,
+                |z| z.re as f64,
+            );
+        }
+    }
+    for (mode, name) in [(ComputeType64F::Default, "default"), (ComputeType64F::Pedantic, "pedantic")] {
+        for forced in drivers(mode == ComputeType64F::Default || cfg!(cublas_math_mode)) {
+            let d = device(forced, |f| f.compute_type_64f = mode);
+            check_rounded::<Complex<f64>, Complex<f64>>(
+                &d,
+                &format!("c64 {name}, {forced:?}"),
+                m,
+                k,
+                n,
+                1e-13,
+                Complex::from,
+                |z| z.re,
+                |z| z.re,
+            );
+        }
+    }
+    // the default chain (naive) gets the same answer for the modes cuBLAS cannot express
+    for mode in [ComputeType32F::FastTF32, ComputeType32F::Fast16F, ComputeType32F::Fast16BF] {
+        let d = device(MatMulDrivers::all(), |f| f.compute_type_32f = mode);
+        check_rounded::<Complex<f32>, Complex<f32>>(
+            &d,
+            "c32 fast mode -> default, chain",
+            m,
+            k,
+            n,
+            1e-5,
+            |x| Complex::new(x as f32, 0.0),
+            |z| z.re as f64,
+            |z| z.re as f64,
+        );
+    }
+    // the fixed-point emulation is real `f64` only: a `c64` output keeps the default
+    let d = device(MatMulDrivers::all(), |f| f.compute_type_64f = ComputeType64F::EmulatedFixedPoint);
+    check_rounded::<Complex<f64>, Complex<f64>>(
+        &d,
+        "c64 fixed point -> default, chain",
+        m,
+        k,
+        n,
+        1e-13,
+        Complex::from,
+        |z| z.re,
+        |z| z.re,
+    );
+}
+
+/// The half triples on cuBLASLt and `cublasGemmEx`, and through the default chain: `f16 -> f16`
+/// in every 16F mode, `f16 -> f32`, `bf16 -> bf16`, `bf16 -> f32` in the default and `Pedantic`.
+/// The tolerance is the rounding of the **output** storage (the operands are rounded before the
+/// reference is taken).
+#[test]
+fn modes_half() {
+    require_cuda!();
+    let (m, k, n) = (80usize, 256usize, 40usize);
+    for (mode, name) in [
+        (ComputeType16F::Default, "default"),
+        (ComputeType16F::Pedantic, "pedantic"),
+        (ComputeType16F::Acc16F, "acc16f"),
+    ] {
+        // Acc16F keeps fewer bits of the sum: measured, then held with a margin
+        let tol = if mode == ComputeType16F::Acc16F { 5e-3 } else { 1e-2 };
+        for forced in [MatMulDrivers::CUBLAS_LT, MatMulDrivers::CUBLAS_EX, MatMulDrivers::all()] {
+            let d = device(forced, |f| f.compute_type_16f = mode);
+            check_rounded::<f16, f16>(
+                &d,
+                &format!("f16 -> f16 {name}, {forced:?}"),
+                m,
+                k,
+                n,
+                tol,
+                f16::from_f64,
+                f64::from,
+                f64::from,
+            );
+        }
+    }
+    for (mode, name) in [(ComputeType32F::Default, "default"), (ComputeType32F::Pedantic, "pedantic")] {
+        for forced in [MatMulDrivers::CUBLAS_LT, MatMulDrivers::CUBLAS_EX, MatMulDrivers::all()] {
+            let d = device(forced, |f| f.compute_type_32f = mode);
+            check_rounded::<f16, f32>(
+                &d,
+                &format!("f16 -> f32 {name}, {forced:?}"),
+                m,
+                k,
+                n,
+                1e-5,
+                f16::from_f64,
+                f64::from,
+                f64::from,
+            );
+            check_rounded::<bf16, f32>(
+                &d,
+                &format!("bf16 -> f32 {name}, {forced:?}"),
+                m,
+                k,
+                n,
+                1e-5,
+                bf16::from_f64,
+                f64::from,
+                f64::from,
+            );
+        }
+    }
+    for (mode, name) in [
+        (ComputeType16F::Default, "default"),
+        (ComputeType16F::Pedantic, "pedantic"),
+        (ComputeType16F::Acc16F, "acc16f"),
+    ] {
+        for forced in [MatMulDrivers::CUBLAS_LT, MatMulDrivers::CUBLAS_EX, MatMulDrivers::all()] {
+            let d = device(forced, |f| f.compute_type_16f = mode);
+            check_rounded::<bf16, bf16>(
+                &d,
+                &format!("bf16 -> bf16 {name}, {forced:?}"),
+                m,
+                k,
+                n,
+                1e-2,
+                bf16::from_f64,
+                f64::from,
+                f64::from,
+            );
+        }
+    }
+    // a 32F `Fast*` mode does not apply to half inputs with an `f32` output: the default
+    let d = device(MatMulDrivers::all(), |f| f.compute_type_32f = ComputeType32F::FastTF32);
+    check_rounded::<f16, f32>(
+        &d,
+        "f16 -> f32 fast tf32 -> default, chain",
+        m,
+        k,
+        n,
+        1e-5,
+        f16::from_f64,
+        f64::from,
+        f64::from,
+    );
+}
+
+/// The entries that pass the mode per call: `matmul_from_mode`, `matmul_with_mode` and
+/// `matmul_with_output_mode`, with `f16` operands into an `f32` output and with `f32` operands,
+/// whatever the device flags say. `rt::matmul` and `%` infer the `f16` output from `Mul`.
+#[test]
+fn tensor_level_modes() {
+    require_cuda!();
+    let d = device(MatMulDrivers::all(), |f| f.compute_type_32f = ComputeType32F::Default);
+    let (m, k, n) = (24usize, 64usize, 12usize);
+    let a: Tensor<f16, DeviceCuda, IxD> =
+        rt::asarray((data(m * k, 1).into_iter().map(f16::from_f64).collect::<Vec<_>>(), &d)).into_shape([m, k]);
+    let b: Tensor<f16, DeviceCuda, IxD> =
+        rt::asarray((data(k * n, 2).into_iter().map(f16::from_f64).collect::<Vec<_>>(), &d)).into_shape([k, n]);
+
+    let plain: Tensor<f32, DeviceCuda, IxD> =
+        matmul_with_mode_f::<f16, f16, f32, IxD, IxD, IxD>(&a, &b, 1.0, ComputeType32F::Pedantic).rstsr_unwrap();
+    let with_output: Tensor<f32, DeviceCuda, IxD> =
+        a.matmul_with_mode::<f16, f32, IxD, IxD>(&b, ComputeType32F::Pedantic);
+    let mut c: Tensor<f32, DeviceCuda, IxD> = rt::full(([m * n], 2.0f32, &d)).into_shape([m, n]);
+    c.matmul_from_mode(&a, &b, 1.0, 0.0, ComputeType32F::Pedantic);
+    let mut scaled: Tensor<f32, DeviceCuda, IxD> = rt::full(([m * n], 2.0f32, &d)).into_shape([m, n]);
+    scaled.matmul_from_mode(&a, &b, 3.0, 0.5, ComputeType32F::Pedantic);
+    let read = |t: &Tensor<f32, DeviceCuda, IxD>| -> Vec<f32> {
+        DeviceToCpuAPI::<f32>::to_cpu_vec(t.to_contig(RowMajor).storage()).rstsr_unwrap()
+    };
+    let (p, o, s) = (read(&plain), read(&c), read(&scaled));
+    assert_eq!(p, read(&with_output), "matmul_with_output_mode");
+    assert_eq!(p, o, "matmul_from_mode");
+    for (x, y) in p.iter().zip(&s) {
+        assert!((3.0 * x + 1.0 - y).abs() <= 1e-5 * (1.0 + (3.0 * x).abs()), "matmul_from_mode with alpha, beta");
+    }
+    // f32 operands: the mode given, not the flags'
+    let a32: Tensor<f32, DeviceCuda, IxD> =
+        rt::asarray((data(m * k, 3).into_iter().map(|x| x as f32).collect::<Vec<_>>(), &d)).into_shape([m, k]);
+    let b32: Tensor<f32, DeviceCuda, IxD> =
+        rt::asarray((data(k * n, 4).into_iter().map(|x| x as f32).collect::<Vec<_>>(), &d)).into_shape([k, n]);
+    let pedantic: Tensor<f32, DeviceCuda, IxD> =
+        a32.matmul_with_mode::<f32, f32, IxD, IxD>(&b32, ComputeType32F::Pedantic);
+    let fast: Tensor<f32, DeviceCuda, IxD> = a32.matmul_with_mode::<f32, f32, IxD, IxD>(&b32, ComputeType32F::FastTF32);
+    assert_ne!(read(&pedantic), read(&fast), "the mode of the call is the one run");
+
+    // operands of different dtypes need no mode entry: `matmul_from` has no `Mul` bound, and the
+    // chain takes the mixed triple (on the naive driver: the reference is the `f32` product)
+    let b64: Tensor<f64, DeviceCuda, IxD> =
+        rt::asarray((data(k * n, 2).into_iter().map(|x| x as f32 as f64).collect::<Vec<_>>(), &d)).into_shape([k, n]);
+    let a32h: Tensor<f32, DeviceCuda, IxD> =
+        rt::asarray((data(m * k, 1).into_iter().map(|x| x as f32).collect::<Vec<_>>(), &d)).into_shape([m, k]);
+    let mut mixed: Tensor<f64, DeviceCuda, IxD> = rt::full(([m * n], f64::NAN, &d)).into_shape([m, n]);
+    mixed.matmul_from(&a32h, &b64, 1.0, 0.0);
+    let mixed = DeviceToCpuAPI::<f64>::to_cpu_vec(mixed.to_contig(RowMajor).storage()).rstsr_unwrap();
+    assert!(mixed.iter().all(|x| x.is_finite()), "f32 @ f64 -> f64 on the chain");
+
+    // `rt::matmul` and `%` give the `f16` output
+    let h: Tensor<f16, DeviceCuda, IxD> = rt::matmul(&a, &b);
+    let op: Tensor<f16, DeviceCuda, IxD> = &a % &b;
+    let host = |t: &Tensor<f16, DeviceCuda, IxD>| -> Vec<f16> {
+        DeviceToCpuAPI::<f16>::to_cpu_vec(t.to_contig(RowMajor).storage()).rstsr_unwrap()
+    };
+    assert_eq!(host(&h), host(&op));
+    let (hp, hh) = (read(&plain), host(&h));
+    for (x, y) in hp.iter().zip(hh) {
+        assert!((x - f32::from(y)).abs() <= 1e-2 * (1.0 + x.abs()), "f16 output against the f32 output");
     }
 }

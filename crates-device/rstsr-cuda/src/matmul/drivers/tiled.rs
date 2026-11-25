@@ -56,7 +56,7 @@
 use std::any::TypeId;
 
 use super::super::geom::GemmGeom;
-use super::{Problem, Refusal, Uniform, Verdict};
+use super::{Buffers as Uniform, Problem, Refusal, Verdict};
 use crate::dtype::CudaDType;
 use crate::kernel::{order_input, order_output, FlatLaunch};
 use crate::kernels::elementwise::planned_function;
@@ -227,7 +227,7 @@ where
 /// `c` is read by address only (its element type is `T` or `MaybeUninit<T>`), and it is not read
 /// at all on the device when `beta == 0`: that is the contract of `matmul_uninit`.
 fn typed<T: CudaDType, TA, TB, TC, TBuf>(
-    u: Option<Uniform<'_, T>>,
+    u: Option<Uniform<'_, T, T, T>>,
     p: &Problem<'_, TA, TB, TC, TBuf>,
 ) -> Result<Verdict> {
     let Some(u) = u else {
@@ -315,8 +315,8 @@ fn typed<T: CudaDType, TA, TB, TC, TBuf>(
     let f = planned_function(p.device, "rstsr_gemm", T::INCLUDES, &disc, || render(GEMM_ENTRY, &subs))?;
 
     let nb = core::mem::size_of::<T>();
-    let abytes = super::scalar_bytes(&u.alpha);
-    let bbytes = super::scalar_bytes(&u.beta);
+    let abytes = super::scalar_bytes(&p.alpha);
+    let bbytes = super::scalar_bytes(&p.beta);
 
     FlatLaunch::new(exec, &f, 0)
         .explicit_shape((grid_x as u32, grid_y as u32, n_batch as u32), (TX, TY, 1))
