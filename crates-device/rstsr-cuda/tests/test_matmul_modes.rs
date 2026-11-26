@@ -611,9 +611,10 @@ fn tensor_level_modes() {
     }
 }
 
-/// The argument shapes of the layout matrix: a plain product, a strided batch, a transposed right
-/// operand broadcast against the batch of `a`, a transposed left operand, a broadcast batch of `a`
-/// against a batched `b`, and a stepped (strided) `a`. `mk(data(seed, count), shape)` makes a
+/// The argument shapes of the layout matrix: a plain product, the inner dot, the symmetric
+/// product `a @ a.t()`, a strided batch, a transposed right operand broadcast against the batch
+/// of `a`, a transposed left operand, a broadcast batch of `a` against a batched `b`, and a
+/// stepped (strided) `a`. `mk(data(seed, count), shape)` makes a
 /// tensor and `sh(batch, [m, k])` places the batch axis as the default order has it (leading
 /// under row-major, trailing under column-major), so the same cases are built on the CPU (`f64`
 /// of the rounded values) and on the device (the storage type), each in its own order.
@@ -627,8 +628,13 @@ macro_rules! shape_cases {
         let at = $mk($data(11, k * m), $sh(1, [k, m]));
         let stepped0 = $mk($data(12, 4 * m * k), $sh(1, [2 * m, 2 * k]));
         let stepped = stepped0.i(s![slice!(None, None, 2), slice!(None, None, 2)]);
+        // the two special forms of the chain: the inner dot and the symmetric product
+        let dot = $mk($data(16, k), vec![k]);
+        let square = $mk($data(17, m * k), $sh(1, [m, k]));
         vec![
             ("plain", $mk($data(13, m * k), $sh(1, [m, k])), $mk($data(14, k * n), $sh(1, [k, n]))),
+            ("inner dot", dot.clone(), dot.clone()),
+            ("syrk", square.clone(), square.t().to_owned()),
             ("batched", a.clone(), b.clone()),
             ("transposed b, broadcast", a.clone(), c2.t().to_owned()),
             ("transposed a", at.t().to_owned(), b.clone()),
