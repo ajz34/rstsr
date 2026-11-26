@@ -12,7 +12,7 @@
 
 use std::any::TypeId;
 
-use super::flags::MatMulDrivers;
+use super::flags::{MatMulDrivers, MatMulUseSyrk};
 use super::geom::GemmGeom;
 use super::mode::{ComputeType16F, ComputeType32F, ComputeType64F, CudaMatMulMode};
 use crate::dtype::CudaDType;
@@ -416,11 +416,12 @@ pub(crate) fn candidates<TA: 'static, TB: 'static, TC: CudaMatMulMode>(mode: &TC
 }
 
 /// Whether the symmetric form is tried before the chain: the layout condition of the BLAS devices
-/// ([`CallerGeom::is_syrk`]), the same buffer for both operands, `beta` zero, one type, the size
-/// gate of the output type, and the classic driver enabled (which owns the routine).
+/// ([`CallerGeom::is_syrk`]), the same buffer for both operands, `beta` zero, one type, the output
+/// type allowed by [`MatMulUseSyrk`], and the classic driver enabled (which owns the routine).
 fn syrk_applies<TA: 'static, TB: 'static, TC: 'static, TBuf>(
     p: &Problem<'_, TA, TB, TC, TBuf>,
     enabled: MatMulDrivers,
+    use_syrk: MatMulUseSyrk,
 ) -> bool {
     same::<TA, TB>()
         && same::<TB, TC>()
@@ -428,7 +429,7 @@ fn syrk_applies<TA: 'static, TB: 'static, TC: 'static, TBuf>(
         && p.geom.n_batch == 1
         && p.geom.caller().is_syrk()
         && std::ptr::eq(p.a.device_ptr() as *const u8, p.b.device_ptr() as *const u8)
-        && syrk::gated::<TC>(p.geom.m)
+        && use_syrk.takes::<TC>()
         && enabled.contains(GemmDriver::Cublas.flag())
 }
 
@@ -466,7 +467,7 @@ where
         }
     };
     // the symmetric form first: `a @ a^T` with a fresh output is half the work of the gemm
-    if syrk_applies::<TA, TB, TC, TBuf>(p, enabled) {
+    if syrk_applies::<TA, TB, TC, TBuf>(p, enabled, flags.matmul_use_syrk) {
         let verdict = syrk::run(p, plan)?;
         trace("cublas (syrk)", &verdict);
         if let Verdict::Ran = verdict {

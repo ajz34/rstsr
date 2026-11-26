@@ -43,9 +43,11 @@
 //! `a @ a.t()` into a fresh output of one type (`f32`, `f64`, `c32`, `c64`) is half the work of the
 //! gemm, and is run as one cuBLAS `?syrk` call before the chain is tried: `b` must be `a` with
 //! reversed strides in the same buffer, `beta` must be zero, and the product unbatched. The other
-//! triangle of the output is mirrored by a small kernel. cuBLAS's `f32` `syrk` kernels only pay
-//! from an output side of 2048 on, so smaller `f32` products stay on the chain; `f64` and the
-//! complex types take the form at every size. A product that looks alike but is not (`beta != 0`,
+//! triangle of the output is mirrored by a small kernel. The types are chosen by
+//! [`MatMulUseSyrk`] in [`CudaRuntimeFlags::matmul_use_syrk`][crate::flags::CudaRuntimeFlags::matmul_use_syrk],
+//! not by size: the default, `Scientific`, takes `f64` and the complex types (1.3x to 3.6x on a
+//! RTX 5070 Laptop) and leaves `f32` on the chain, because cuBLAS's `f32` syrk kernels lose
+//! against its gemm on thin operands (up to 2.3x); `Allow` takes `f32` as well; `Disallow` never. A product that looks alike but is not (`beta != 0`,
 //! the conjugate transpose, a copy of the transpose, a batch) runs the chain as before.
 //!
 //! # Layouts
@@ -79,6 +81,6 @@ pub mod tensor;
 mod flags;
 
 pub use drivers::GemmDriver;
-pub use flags::MatMulDrivers;
+pub use flags::{MatMulDrivers, MatMulUseSyrk};
 pub use mode::{ComputeType16F, ComputeType32F, ComputeType64F, CudaMatMulMode};
 pub use tensor::{matmul_with_mode_f, TensorCudaMatMulAPI, WithMode};

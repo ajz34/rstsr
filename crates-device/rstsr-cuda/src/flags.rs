@@ -1,6 +1,6 @@
 //! Runtime flags for the CUDA device.
 
-use crate::matmul::{ComputeType16F, ComputeType64F, MatMulDrivers};
+use crate::matmul::{ComputeType16F, ComputeType64F, MatMulDrivers, MatMulUseSyrk};
 use rstsr_core::prelude_dev::*;
 use std::sync::RwLock;
 
@@ -33,6 +33,8 @@ pub struct CudaRuntimeFlags {
     pub fixedpoint_mantissa_bits: u32,
     /// The matmul drivers a device may use (default: all of them).
     pub matmul_drivers: MatMulDrivers,
+    /// When `a @ a.t()` runs as a symmetric rank-k update (default: [`MatMulUseSyrk::Scientific`]).
+    pub matmul_use_syrk: MatMulUseSyrk,
     /// Print one line per matmul launch: the triple, the shape, the mode and the driver tried.
     pub trace_matmul: bool,
 }
@@ -43,6 +45,7 @@ static CUDA_FLAGS_DEFAULT: RwLock<CudaRuntimeFlags> = RwLock::new(CudaRuntimeFla
     compute_type_16f: ComputeType16F::Default,
     fixedpoint_mantissa_bits: 0,
     matmul_drivers: MatMulDrivers::all(),
+    matmul_use_syrk: MatMulUseSyrk::Scientific,
     trace_matmul: false,
 });
 

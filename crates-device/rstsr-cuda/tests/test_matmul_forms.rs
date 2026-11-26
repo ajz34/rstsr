@@ -7,7 +7,7 @@ use num::Complex;
 use rstsr::prelude::*;
 use rstsr_cuda::dtype::CudaDType;
 use rstsr_cuda::funcs;
-use rstsr_cuda::matmul::{CudaMatMulMode, MatMulDrivers};
+use rstsr_cuda::matmul::{CudaMatMulMode, MatMulDrivers, MatMulUseSyrk};
 use rstsr_cuda::prelude_dev::*;
 
 /// Uniform data in `[-1, 1]` with an imaginary part in `[0, 1]`.
@@ -57,7 +57,7 @@ fn syrk_views<S: CudaDType + CudaMatMulMode + Copy + Clone + Send + Sync + 'stat
     mk: fn(Vec<Complex<f64>>) -> Vec<S>,
 ) {
     require_cuda!();
-    let (n, k) = (37usize, 53usize);
+    let (n, k) = (513usize, 53usize);
     let v = data_c(4 * n * k, 7);
     // the reference is row-major on the CPU; the device operand takes the order's own layout
     let dcpu = DeviceCpuSerial::default();
@@ -114,7 +114,7 @@ fn syrk_c64() {
 #[test]
 fn syrk_look_alikes_take_the_chain() {
     require_cuda!();
-    let (n, k, p) = (12usize, 20usize, 3usize);
+    let (n, k, p) = (600usize, 20usize, 3usize);
     let v = data_c(n * k, 11);
     // the references are row-major on the CPU; the device operands take the order's own layout
     let dcpu = DeviceCpuSerial::default();
@@ -202,23 +202,37 @@ fn syrk_look_alikes_take_the_chain() {
     }
 }
 
-/// Both sides of the `f32` size gate (`F32_MIN_N = 2048`), against the CPU device.
+/// The flag chooses the output types: `f32` takes the form under `Allow` only, `f64` never under
+/// `Disallow`. Every setting gives the gemm's answer (a thin operand and a square one).
 #[test]
-fn syrk_f32_around_the_gate() {
+fn syrk_follows_the_flag() {
     require_cuda!();
-    let k = 48usize;
-    for n in [2047usize, 2048] {
-        let v = data(n * k, 7);
-        let mut dcpu = DeviceCpuSerial::default();
-        dcpu.set_default_order(RowMajor);
-        let w: Cpu<f32> = rt::asarray((v.iter().map(|&x| x as f32).collect::<Vec<_>>(), &dcpu)).into_shape([n, k]);
-        let want: Vec<f64> = host_cpu(&rt::matmul(&w, w.t())).into_iter().map(f64::from).collect();
-        let d = DeviceCuda::new(0);
-        let a: Tensor<f32, DeviceCuda, IxD> =
-            rt::asarray((v.iter().map(|&x| x as f32).collect::<Vec<_>>(), &d)).into_shape([n, k]);
-        let got = host(&rt::matmul(&a, a.t()));
-        for (x, y) in got.iter().zip(&want) {
-            assert!((f64::from(*x) - y).abs() <= 2e-5 * (1.0 + y.abs()), "f32, n = {n}: {x} vs {y}");
+    let cells: [(usize, usize); 2] = [(2048, 64), (512, 512)];
+    for use_syrk in [MatMulUseSyrk::Allow, MatMulUseSyrk::Scientific, MatMulUseSyrk::Disallow] {
+        // the reference never takes the form: the classic driver off switches it off
+        for ((n, k), t) in cells.iter().flat_map(|c| [(*c, "f32"), (*c, "f64")]) {
+            let mk = |flags: CudaRuntimeFlags, no_form: bool| -> Vec<f64> {
+                let mut flags = flags;
+                if no_form {
+                    flags.matmul_drivers = flags.matmul_drivers.minus(MatMulDrivers::CUBLAS);
+                }
+                let d = DeviceCuda::new(0).with_flags(flags);
+                if t == "f32" {
+                    let v: Vec<f32> = data(n * k, 7).into_iter().map(|x| x as f32).collect();
+                    let a = rt::asarray((v, &d)).into_shape([n, k]);
+                    host(&rt::matmul(&a, a.t())).into_iter().map(f64::from).collect()
+                } else {
+                    let v = data(n * k, 7);
+                    let a = rt::asarray((v, &d)).into_shape([n, k]);
+                    host(&rt::matmul(&a, a.t()))
+                }
+            };
+            let mut flags = CudaRuntimeFlags::default();
+            flags.matmul_use_syrk = use_syrk;
+            let (got, want) = (mk(flags, false), mk(flags, true));
+            for (x, y) in got.iter().zip(&want) {
+                assert!((x - y).abs() <= 1e-4 * (1.0 + y.abs()), "{use_syrk:?}, {t}, ({n}, {k}): {x} vs {y}");
+            }
         }
     }
 }

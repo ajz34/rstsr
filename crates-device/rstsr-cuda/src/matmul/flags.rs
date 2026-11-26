@@ -1,4 +1,4 @@
-//! The driver enable set of the matmul chain.
+//! Runtime switches of the matmul chain: the driver enable set and the symmetric form.
 
 use core::fmt;
 use std::ops::{BitOr, BitOrAssign, Sub, SubAssign};
@@ -102,9 +102,54 @@ impl fmt::Debug for MatMulDrivers {
     }
 }
 
+/// When the matmul runs `a @ a.t()` as a symmetric rank-k update
+/// ([`CudaRuntimeFlags::matmul_use_syrk`]).
+///
+/// [`CudaRuntimeFlags::matmul_use_syrk`]: crate::flags::CudaRuntimeFlags::matmul_use_syrk
+///
+/// The form is tried before the driver chain, for a fresh output of one type when `b` is `a` with
+/// reversed strides in the same buffer. It is not gated by size.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum MatMulUseSyrk {
+    /// Every type cuBLAS's `?syrk` entries cover: `f32`, `f64`, `c32`, `c64`. cuBLAS's `f32`
+    /// kernels lose against its gemm on thin operands (`k` well below `n`), by up to 2.3x.
+    Allow,
+    /// `f64`, `c32` and `c64` only (they gain 1.3x to 3.6x); `f32` stays on the gemm chain.
+    #[default]
+    Scientific,
+    /// Never: the gemm chain always.
+    Disallow,
+}
+
+impl MatMulUseSyrk {
+    /// Whether the form is taken for an output of type `T`.
+    pub(crate) fn takes<T: 'static>(self) -> bool {
+        let real32 = std::any::TypeId::of::<T>() == std::any::TypeId::of::<f32>();
+        match self {
+            Self::Allow => true,
+            Self::Scientific => !real32,
+            Self::Disallow => false,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `Scientific` leaves out exactly `f32`; `Allow` takes every type, `Disallow` none.
+    #[test]
+    fn syrk_flag_by_output_type() {
+        use num::Complex;
+        assert_eq!(MatMulUseSyrk::default(), MatMulUseSyrk::Scientific);
+        for t in [MatMulUseSyrk::Allow, MatMulUseSyrk::Scientific, MatMulUseSyrk::Disallow] {
+            assert_eq!(t.takes::<f32>(), t == MatMulUseSyrk::Allow, "{t:?}");
+            assert_eq!(t.takes::<f64>(), t != MatMulUseSyrk::Disallow, "{t:?}");
+            assert_eq!(t.takes::<Complex<f32>>(), t != MatMulUseSyrk::Disallow, "{t:?}");
+            assert_eq!(t.takes::<Complex<f64>>(), t != MatMulUseSyrk::Disallow, "{t:?}");
+        }
+    }
 
     /// The five drivers own one bit each, and `all` is their union.
     #[test]

@@ -6,7 +6,8 @@
 //!
 //! The condition is the one the BLAS devices apply in their matmul: one type throughout, `beta`
 //! zero, `b` the same buffer as `a` with reversed strides, unbatched ([`CallerGeom::is_syrk`]).
-//! A size gate keeps the cases where cuBLAS's own `?syrk` kernels are slower than its gemm.
+//! Which output types take the form is [`MatMulUseSyrk`][crate::matmul::MatMulUseSyrk]; there is no
+//! size gate.
 
 use cudarc::cublas::sys;
 
@@ -17,19 +18,6 @@ use crate::kernel::{order_input, order_output, FlatLaunch};
 use crate::kernels::elementwise::planned_function;
 use crate::matmul::geom::CallerGeom;
 use crate::prelude_dev::*;
-
-/// The smallest `f32` output side cuBLAS's `Ssyrk` wins at (measured against its gemm); `f64` and
-/// complex win at every measured size.
-pub(crate) const F32_MIN_N: usize = 2048;
-
-/// Whether the symmetric form pays for an output of side `n` of this type.
-pub(crate) fn gated<T: 'static>(n: usize) -> bool {
-    !same::<T, f32>() || n >= F32_MIN_N
-}
-
-fn same<T: 'static, U: 'static>() -> bool {
-    std::any::TypeId::of::<T>() == std::any::TypeId::of::<U>()
-}
 
 /// One `?syrk_v2` call, in cuBLAS's terms.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -224,15 +212,5 @@ mod tests {
         assert!(args(&geom(RowMajor, (16, 2), (5, 1)).caller()).is_none());
         assert!(args(&geom(RowMajor, (8, 1), (10, 2)).caller()).is_none());
         assert!(args(&geom(RowMajor, (-1, -5), (5, 1)).caller()).is_none());
-    }
-
-    /// The gate is an `f32` size floor only.
-    #[test]
-    fn gate_is_per_output_type() {
-        assert!(!gated::<f32>(F32_MIN_N - 1));
-        assert!(gated::<f32>(F32_MIN_N));
-        assert!(gated::<f64>(0));
-        assert!(gated::<num::Complex<f32>>(1));
-        assert!(gated::<num::Complex<f64>>(256));
     }
 }
