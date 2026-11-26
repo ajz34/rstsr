@@ -148,7 +148,7 @@ fn main() {
     cells!("f16 -> f32", 1.0, [CUBLAS_LT, CUBLAS_EX], |d: &DeviceCuda, m, k, n, p| {
         let a = operand!(half::f16, d, 1, m, k, p, half::f16::from_f64);
         let b = operand!(half::f16, d, 2, k, n, p, half::f16::from_f64);
-        move || a.matmul_with_mode::<half::f16, f32, IxD, IxD>(&b, ComputeType32F::Default)
+        move || a.matmul_with_mode(&b, ComputeType32F::Default).out::<f32>()
     });
 
     println!("triple,shape,driver,median_ms,tflops");

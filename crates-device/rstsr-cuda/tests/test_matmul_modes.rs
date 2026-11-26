@@ -547,7 +547,7 @@ fn modes_half() {
     );
 }
 
-/// The entries that pass the mode per call: `matmul_from_mode`, `matmul_with_mode` and
+/// The entries that pass the mode per call: `matmul_from_mode`, `matmul_with_mode(..).out()` and
 /// `matmul_with_output_mode`, with `f16` operands into an `f32` output and with `f32` operands,
 /// whatever the device flags say. `rt::matmul` and `%` infer the `f16` output from `Mul`.
 #[test]
@@ -563,7 +563,7 @@ fn tensor_level_modes() {
     let plain: Tensor<f32, DeviceCuda, IxD> =
         matmul_with_mode_f::<f16, f16, f32, IxD, IxD, IxD>(&a, &b, 1.0, ComputeType32F::Pedantic).rstsr_unwrap();
     let with_output: Tensor<f32, DeviceCuda, IxD> =
-        a.matmul_with_mode::<f16, f32, IxD, IxD>(&b, ComputeType32F::Pedantic);
+        a.matmul_with_mode(&b, ComputeType32F::Pedantic).out::<f32>();
     let mut c: Tensor<f32, DeviceCuda, IxD> = rt::full(([m * n], 2.0f32, &d)).into_shape([m, n]);
     c.matmul_from_mode(&a, &b, 1.0, 0.0, ComputeType32F::Pedantic);
     let mut scaled: Tensor<f32, DeviceCuda, IxD> = rt::full(([m * n], 2.0f32, &d)).into_shape([m, n]);
@@ -583,8 +583,8 @@ fn tensor_level_modes() {
     let b32: Tensor<f32, DeviceCuda, IxD> =
         rt::asarray((data(k * n, 4).into_iter().map(|x| x as f32).collect::<Vec<_>>(), &d)).into_shape([k, n]);
     let pedantic: Tensor<f32, DeviceCuda, IxD> =
-        a32.matmul_with_mode::<f32, f32, IxD, IxD>(&b32, ComputeType32F::Pedantic);
-    let fast: Tensor<f32, DeviceCuda, IxD> = a32.matmul_with_mode::<f32, f32, IxD, IxD>(&b32, ComputeType32F::FastTF32);
+        a32.matmul_with_mode(&b32, ComputeType32F::Pedantic).out();
+    let fast: Tensor<f32, DeviceCuda, IxD> = a32.matmul_with_mode(&b32, ComputeType32F::FastTF32).out();
     assert_ne!(read(&pedantic), read(&fast), "the mode of the call is the one run");
 
     // operands of different dtypes need no mode entry: `matmul_from` has no `Mul` bound, and the

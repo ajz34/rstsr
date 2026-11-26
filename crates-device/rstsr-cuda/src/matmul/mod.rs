@@ -13,7 +13,7 @@
 //! The mode is keyed by the **output** type: [`CudaMatMulMode`] names the enum of its family
 //! ([`ComputeType32F`], [`ComputeType64F`], [`ComputeType16F`]), and the flags carry one field per
 //! family. `DeviceMatMulAPI` reads the mode of the output type from the device flags; the
-//! tensor-level entries of [`TensorCudaMatMulAPI`] (`*_mode`, and the fallible
+//! tensor-level entries of [`TensorCudaMatMulAPI`] (`*_mode`; `a.matmul_with_mode(&b, mode).out::<TC>()`, and the fallible
 //! [`matmul_with_mode_f`]) pass it per call instead.
 //!
 //! The cuBLAS drivers take the mode as given; the tiled and naive kernels compute in the output
@@ -62,4 +62,4 @@ mod flags;
 pub use drivers::GemmDriver;
 pub use flags::MatMulDrivers;
 pub use mode::{ComputeType16F, ComputeType32F, ComputeType64F, CudaMatMulMode};
-pub use tensor::{matmul_with_mode_f, TensorCudaMatMulAPI};
+pub use tensor::{matmul_with_mode_f, TensorCudaMatMulAPI, WithMode};

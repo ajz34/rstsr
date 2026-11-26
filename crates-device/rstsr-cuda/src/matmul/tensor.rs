@@ -7,7 +7,10 @@ use crate::prelude_dev::*;
 ///
 /// `rstsr-core` cannot name the CUDA modes, so the entries that take one live here; they follow
 /// the core functions rule for rule, and read nothing from the device flags. The mode is that of
-/// the **output** type: `<TC as CudaMatMulMode>::Mode`.
+/// the **output** type: `<TC as CudaMatMulMode>::Mode`. `matmul_from_mode` and
+/// `matmul_with_output_mode` get the output type from `c`; `matmul_with_mode` allocates it, so
+/// its result waits for the type to be named: `a.matmul_with_mode(&b, mode).out::<TC>()` (the
+/// output is always an `IxD` tensor).
 ///
 /// # Panics
 ///
@@ -19,19 +22,20 @@ where
     D: DimAPI,
     R: DataAPI<Data = CudaBuffer<T>>,
 {
-    /// [`matmul`] under `mode`, allocating the output: `TC` is named by the turbofish
-    /// (`a.matmul_with_mode::<TB, TC, _, _>(&b, mode)`).
-    fn matmul_with_mode<TB, TC, DB, DC>(
-        &self,
-        rhs: impl TensorViewAPI<Type = TB, Backend = DeviceCuda, Dim = DB>,
-        mode: <TC as CudaMatMulMode>::Mode,
-    ) -> Tensor<TC, DeviceCuda, DC>
+    /// [`matmul`] under `mode`, allocating the output: a pending product
+    /// ([`WithMode`]), completed by `out::<TC>()`. The mode is read as
+    /// `<TC as CudaMatMulMode>::Mode` (so it may differ from the operands' family, as for `f16`
+    /// operands into an `f32` output); `TC` is the only type to name. The output is an `IxD`
+    /// tensor.
+    fn matmul_with_mode<'a, M, TB, DB, RB>(
+        &'a self,
+        rhs: &'a TensorAny<RB, TB, DeviceCuda, DB>,
+        mode: M,
+    ) -> WithMode<'a, T, D, TB, DB, M>
     where
         TB: CudaMatMulMode + num::Zero,
-        TC: CudaMatMulMode + num::Zero + num::One,
         DB: DimAPI,
-        DC: DimAPI,
-        LayoutMatMulConfig<D, DB>: LayoutMatMulAPI<D, DB, DC = DC>;
+        RB: DataAPI<Data = CudaBuffer<TB>> + 'a;
 
     /// [`matmul_with_output`] under `mode` (the mode of the output `c`).
     fn matmul_with_output_mode<TB, TC, DB, DC>(
@@ -68,19 +72,17 @@ where
     D: DimAPI,
     R: DataAPI<Data = CudaBuffer<T>>,
 {
-    fn matmul_with_mode<TB, TC, DB, DC>(
-        &self,
-        rhs: impl TensorViewAPI<Type = TB, Backend = DeviceCuda, Dim = DB>,
-        mode: <TC as CudaMatMulMode>::Mode,
-    ) -> Tensor<TC, DeviceCuda, DC>
+    fn matmul_with_mode<'a, M, TB, DB, RB>(
+        &'a self,
+        rhs: &'a TensorAny<RB, TB, DeviceCuda, DB>,
+        mode: M,
+    ) -> WithMode<'a, T, D, TB, DB, M>
     where
         TB: CudaMatMulMode + num::Zero,
-        TC: CudaMatMulMode + num::Zero + num::One,
         DB: DimAPI,
-        DC: DimAPI,
-        LayoutMatMulConfig<D, DB>: LayoutMatMulAPI<D, DB, DC = DC>,
+        RB: DataAPI<Data = CudaBuffer<TB>> + 'a,
     {
-        matmul_with_mode_f(self.view(), rhs, TC::one(), mode).rstsr_unwrap()
+        WithMode { a: self.view(), b: rhs.view(), mode }
     }
 
     fn matmul_with_output_mode<TB, TC, DB, DC>(
@@ -115,7 +117,52 @@ where
     }
 }
 
-/// The fallible free function of [`TensorCudaMatMulAPI::matmul_with_mode`].
+/// A product waiting for its output type: `a.matmul_with_mode(&b, mode)`, completed by
+/// [`Self::out`] (or its fallible form [`Self::out_f`]).
+///
+/// The mode's type is that of the output, so `out::<TC>()` is what makes it mean something: a
+/// `ComputeType32F` is the mode of an `f32` output, of a `Complex<f32>` output, or of an `f32`
+/// output of `f16` operands alike.
+pub struct WithMode<'a, TA: 'a, DA, TB: 'a, DB, M>
+where
+    DA: DimAPI,
+    DB: DimAPI,
+{
+    a: TensorView<'a, TA, DeviceCuda, DA>,
+    b: TensorView<'a, TB, DeviceCuda, DB>,
+    mode: M,
+}
+
+impl<TA, DA, TB, DB, M> WithMode<'_, TA, DA, TB, DB, M>
+where
+    DA: DimAPI,
+    DB: DimAPI,
+{
+    /// The product, with the output stored as `TC` (`TC: CudaMatMulMode<Mode = M>`) in an
+    /// `IxD` tensor: `out::<f32>()`.
+    pub fn out<TC>(self) -> Tensor<TC, DeviceCuda, IxD>
+    where
+        TC: CudaMatMulMode<Mode = M> + num::Zero + num::One,
+        TA: CudaMatMulMode + num::Zero,
+        TB: CudaMatMulMode + num::Zero,
+        LayoutMatMulConfig<DA, DB>: LayoutMatMulAPI<DA, DB, DC = IxD>,
+    {
+        self.out_f().rstsr_unwrap()
+    }
+
+    /// The fallible form of [`Self::out`].
+    pub fn out_f<TC>(self) -> Result<Tensor<TC, DeviceCuda, IxD>>
+    where
+        TC: CudaMatMulMode<Mode = M> + num::Zero + num::One,
+        TA: CudaMatMulMode + num::Zero,
+        TB: CudaMatMulMode + num::Zero,
+        LayoutMatMulConfig<DA, DB>: LayoutMatMulAPI<DA, DB, DC = IxD>,
+    {
+        matmul_with_mode_f(self.a, self.b, TC::one(), self.mode)
+    }
+}
+
+/// The fallible free function of [`WithMode::out`]: `alpha * (a @ b)` into a fresh output.
 pub fn matmul_with_mode_f<TA, TB, TC, DA, DB, DC>(
     a: impl TensorViewAPI<Type = TA, Backend = DeviceCuda, Dim = DA>,
     b: impl TensorViewAPI<Type = TB, Backend = DeviceCuda, Dim = DB>,
