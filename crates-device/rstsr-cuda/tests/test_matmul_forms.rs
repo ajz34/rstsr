@@ -236,3 +236,52 @@ fn syrk_follows_the_flag() {
         }
     }
 }
+
+/// The rest of the inner dot's cases: mixed dtypes on the naive driver (`f16` operands, an `f32`
+/// output), a large `k` against the CPU device, and the rank-0 output next to the `[1]` and
+/// `[1, 1]` shapes of the same product.
+#[test]
+fn dot_mixed_large_and_shapes() {
+    require_cuda!();
+    // mixed dtypes: only the naive driver serves `f16 -> f32` with a rank-0 output
+    {
+        let k = 1000usize;
+        let v = data(k, 21);
+        let mut flags = CudaRuntimeFlags::default();
+        flags.matmul_drivers = MatMulDrivers::NAIVE;
+        let d = DeviceCuda::new(0).with_flags(flags);
+        let f16v = |x: f64| half::f16::from_f64(x);
+        let a: Tensor<half::f16, DeviceCuda, IxD> =
+            rt::asarray((v.iter().map(|&x| f16v(x)).collect::<Vec<_>>(), &d)).into_shape(vec![k]);
+        let got = a.matmul_with_mode(&a.t(), ComputeType32F::Default).out::<f32>();
+        let want: f32 = v.iter().map(|&x| f16v(x).to_f64() * f16v(x).to_f64()).sum::<f64>() as f32;
+        assert!((got.to_scalar() - want).abs() <= 1e-4 * want.abs(), "f16 -> f32 dot");
+    }
+    // a large k: many blocks on the memory-bound path
+    {
+        let k = 1usize << 22;
+        let v = data(k, 23);
+        let d = DeviceCuda::new(0);
+        let a: Tensor<f64, DeviceCuda, IxD> = rt::asarray((v.clone(), &d)).into_shape(vec![k]);
+        let got = rt::matmul(&a, a.t()).to_scalar();
+        let want: f64 = v.iter().map(|&x| x * x).sum();
+        assert!((got - want).abs() <= 1e-12 * want, "large dot");
+    }
+    // the shapes around the rank-0 one give the same single number
+    {
+        let k = 40usize;
+        let v = data(k, 25);
+        let d = DeviceCuda::new(0);
+        let dot: Tensor<f64, DeviceCuda, IxD> = rt::asarray((v.clone(), &d)).into_shape(vec![k]);
+        let want = rt::matmul(&dot, dot.t()).to_scalar();
+        let row: Tensor<f64, DeviceCuda, IxD> = rt::asarray((v.clone(), &d)).into_shape([1, k]);
+        let col: Tensor<f64, DeviceCuda, IxD> = rt::asarray((v, &d)).into_shape([k, 1]);
+        for (what, got) in [
+            ("[1, k] @ [k]", rt::matmul(&row, dot.t()).to_scalar()),
+            ("[k] @ [k, 1]", rt::matmul(&dot, &col).to_scalar()),
+            ("[1, k] @ [k, 1]", rt::matmul(&row, &col).to_scalar()),
+        ] {
+            assert!((got - want).abs() <= 1e-13 * want.abs(), "{what}: {got} vs {want}");
+        }
+    }
+}
