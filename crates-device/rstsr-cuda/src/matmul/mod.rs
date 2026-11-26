@@ -38,11 +38,30 @@
 //! Operands of different dtypes need no entry of their own: `matmul_from` / `matmul_with_output`
 //! carry no `Mul` bound, and the naive kernel casts each operand to the output type.
 //!
+//! # Symmetric products
+//!
+//! `a @ a.t()` into a fresh output of one type (`f32`, `f64`, `c32`, `c64`) is half the work of the
+//! gemm, and is run as one cuBLAS `?syrk` call before the chain is tried: `b` must be `a` with
+//! reversed strides in the same buffer, `beta` must be zero, and the product unbatched. The other
+//! triangle of the output is mirrored by a small kernel. cuBLAS's `f32` `syrk` kernels only pay
+//! from an output side of 2048 on, so smaller `f32` products stay on the chain; `f64` and the
+//! complex types take the form at every size. A product that looks alike but is not (`beta != 0`,
+//! the conjugate transpose, a copy of the transpose, a batch) runs the chain as before.
+//!
 //! # Layouts
 //!
 //! Every layout the rule table admits is served: strided, negative and zero strides, broadcast
 //! and non-affine batches, either default order. The inner dot (`[k] @ [k]`) is served as the
 //! `1 x k @ k x 1` GEMM it is, which cuBLAS runs at memory bandwidth.
+//!
+//! Where the batch axis sits follows the default order of the operands, as in every rstsr matmul:
+//! the matmul axes are the **last two** axes under row-major and the **first two** under
+//! column-major, so a batch of `[n, k]` matrices is `[p, n, k]` in row-major and `[n, k, p]` in
+//! column-major (`a.transpose(...)` swaps the two matmul axes only: `[0, 2, 1]` and `[1, 0, 2]`
+//! respectively). A tensor built as `[p, n, k]` on a column-major device is a batch of `[k, p]`
+//! matrices, and `a @ a.t()` on it is refused as a shape mismatch. `asarray(..).into_shape(s)`
+//! keeps the logical shape `s` whatever the order; only the strides follow the order, so the
+//! data of a column-major tensor has to be given in column-major positions.
 //!
 //! # Resources
 //!

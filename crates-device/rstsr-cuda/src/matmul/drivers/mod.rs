@@ -24,6 +24,7 @@ pub(crate) mod cublas;
 pub(crate) mod cublas_ex;
 pub(crate) mod cublas_lt;
 pub(crate) mod naive;
+pub(crate) mod syrk;
 pub(crate) mod tiled;
 
 /// One matmul driver of the chain.
@@ -414,6 +415,23 @@ pub(crate) fn candidates<TA: 'static, TB: 'static, TC: CudaMatMulMode>(mode: &TC
     }
 }
 
+/// Whether the symmetric form is tried before the chain: the layout condition of the BLAS devices
+/// ([`CallerGeom::is_syrk`]), the same buffer for both operands, `beta` zero, one type, the size
+/// gate of the output type, and the classic driver enabled (which owns the routine).
+fn syrk_applies<TA: 'static, TB: 'static, TC: 'static, TBuf>(
+    p: &Problem<'_, TA, TB, TC, TBuf>,
+    enabled: MatMulDrivers,
+) -> bool {
+    same::<TA, TB>()
+        && same::<TB, TC>()
+        && !p.read_c
+        && p.geom.n_batch == 1
+        && p.geom.caller().is_syrk()
+        && std::ptr::eq(p.a.device_ptr() as *const u8, p.b.device_ptr() as *const u8)
+        && syrk::gated::<TC>(p.geom.m)
+        && enabled.contains(GemmDriver::Cublas.flag())
+}
+
 /// Run the problem on the first enabled driver that takes it.
 pub(crate) fn dispatch<TA, TB, TC, TBuf>(
     p: &Problem<'_, TA, TB, TC, TBuf>,
@@ -428,6 +446,33 @@ where
 {
     let plan = plan::<TA, TB, TC>(mode);
     let enabled = flags.matmul_drivers;
+    let trace = |what: &str, verdict: &Verdict| {
+        if flags.trace_matmul {
+            let g = &p.geom;
+            eprintln!(
+                "[rstsr-cuda matmul] {} {}x{}x{} batch {} mode {:?}: {} -> {}",
+                p.triple(),
+                g.m,
+                g.k,
+                g.n,
+                g.n_batch,
+                mode,
+                what,
+                match verdict {
+                    Verdict::Ran => "ran".to_string(),
+                    Verdict::Declined(r) => format!("declined ({r})"),
+                }
+            );
+        }
+    };
+    // the symmetric form first: `a @ a^T` with a fresh output is half the work of the gemm
+    if syrk_applies::<TA, TB, TC, TBuf>(p, enabled) {
+        let verdict = syrk::run(p, plan)?;
+        trace("cublas (syrk)", &verdict);
+        if let Verdict::Ran = verdict {
+            return Ok(());
+        }
+    }
     let mut declined: Vec<(&'static str, Refusal)> = Vec::new();
     for driver in candidates::<TA, TB, TC>(mode).iter() {
         if !enabled.contains(driver.flag()) {
@@ -440,23 +485,7 @@ where
             GemmDriver::Tiled => tiled::run(p)?,
             GemmDriver::Naive => naive::run(p)?,
         };
-        if flags.trace_matmul {
-            let g = &p.geom;
-            eprintln!(
-                "[rstsr-cuda matmul] {} {}x{}x{} batch {} mode {:?}: {} -> {}",
-                p.triple(),
-                g.m,
-                g.k,
-                g.n,
-                g.n_batch,
-                mode,
-                driver.name(),
-                match &verdict {
-                    Verdict::Ran => "ran".to_string(),
-                    Verdict::Declined(r) => format!("declined ({r})"),
-                }
-            );
-        }
+        trace(driver.name(), &verdict);
         match verdict {
             Verdict::Ran => return Ok(()),
             Verdict::Declined(r) => declined.push((driver.name(), r)),

@@ -100,6 +100,19 @@ pub(crate) struct CallerGeom<'a> {
     pub batch: [&'a BatchPart; 3],
 }
 
+impl CallerGeom<'_> {
+    /// Whether `b` is `a` with its two axes reversed, at the same buffer offset, in an unbatched
+    /// square problem: the shape of `a @ a.t()`. Whether the two are the same buffer is for the
+    /// caller to say; this is a statement about the layouts only.
+    pub fn is_syrk(&self) -> bool {
+        let (m, _, n) = self.mnk;
+        m == n
+            && self.b.0 == self.a.0
+            && (self.b.1, self.b.2) == (self.a.2, self.a.1)
+            && self.batch.iter().all(|part| part.shape.is_empty())
+    }
+}
+
 impl GemmGeom {
     /// The single element step of each batch part, or `None` if any is not one linear run.
     pub fn affine_batch(&self) -> Option<[isize; 3]> {
@@ -356,6 +369,31 @@ mod tests {
                 assert_eq!(v.b.0 as isize + v.b.1 * kk as isize, off(&lb, &[kk]), "{order:?}: b");
             }
             assert_eq!(v.c.0 as isize, lc.offset() as isize);
+        }
+    }
+
+    /// `a @ a.t()` is recognised from the layouts alone; a contiguous copy of the transpose, a
+    /// rectangular product and a batched one are not.
+    #[test]
+    fn syrk_is_a_transposed_self_product() {
+        let (n, k) = (5usize, 8usize);
+        let la = layout(&[n, k], &[k as isize, 1]);
+        let lc = layout(&[n, n], &[n as isize, 1]);
+        for order in [RowMajor, ColMajor] {
+            assert!(resolve_geom(order, &lc, &la, &la.reverse_axes()).unwrap().caller().is_syrk(), "{order:?}");
+            // a stepped view inside a larger buffer: the offset and the strides are both reversed
+            let view = Layout::<IxD>::new(vec![n, k], vec![2 * k as isize, 2], 3 + 4 * 2 * k).unwrap();
+            assert!(resolve_geom(order, &lc, &view, &view.reverse_axes()).unwrap().caller().is_syrk());
+            // the transpose copied into another, contiguous layout
+            let copy = layout(&[k, n], &[n as isize, 1]);
+            assert!(!resolve_geom(order, &lc, &la, &copy).unwrap().caller().is_syrk());
+            // rectangular
+            let (lm, lb, lcn) = (
+                layout(&[n + 1, k], &[k as isize, 1]),
+                layout(&[k, n], &[1, k as isize]),
+                layout(&[n + 1, n], &[n as isize, 1]),
+            );
+            assert!(!resolve_geom(order, &lcn, &lm, &lb).unwrap().caller().is_syrk());
         }
     }
 

@@ -785,7 +785,7 @@ where
                 let host64 = |t: &Cpu<f64>| -> f64 { t.to_scalar() };
 
                 let got = rt::matmul(&a, &b);
-                assert_eq!(got.shape(), &[][..], "a rank-0 output: {ctx}");
+                assert!(got.shape().is_empty(), "a rank-0 output: {ctx}");
                 let want = host64(&rt::matmul(&a_cpu, &b_cpu));
                 assert!(close(host(&got), to_s(want)), "{ctx}: fresh dot vs {want}");
 

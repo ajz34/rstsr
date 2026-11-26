@@ -52,6 +52,25 @@ pub(crate) trait CublasScalar: CudaDType {
         ldc: i32,
     ) -> sys::cublasStatus_t;
 
+    /// `c = alpha * op(a) op(a)^T + beta * c` over one triangle of the `n x n` output.
+    ///
+    /// # Safety
+    /// `a`, `c` must be device pointers of at least the extents implied by `n, k, lda, ldc`, on
+    /// the stream the handle is bound to.
+    unsafe fn syrk(
+        handle: sys::cublasHandle_t,
+        uplo: sys::cublasFillMode_t,
+        trans: sys::cublasOperation_t,
+        n: i32,
+        k: i32,
+        alpha: &Self,
+        a: u64,
+        lda: i32,
+        beta: &Self,
+        c: u64,
+        ldc: i32,
+    ) -> sys::cublasStatus_t;
+
     /// Same contract, plus `batch` matrices spaced `stride_*` elements apart.
     #[allow(clippy::too_many_arguments)]
     unsafe fn gemm_strided_batched(
@@ -77,10 +96,10 @@ pub(crate) trait CublasScalar: CudaDType {
 }
 
 macro_rules! impl_cublas_scalar {
-    ($t:ty, $gemm:ident, $gemm_sb:ident) => {
-        impl_cublas_scalar!($t, $gemm, $gemm_sb, $t);
+    ($t:ty, $gemm:ident, $gemm_sb:ident, $syrk:ident) => {
+        impl_cublas_scalar!($t, $gemm, $gemm_sb, $syrk, $t);
     };
-    ($t:ty, $gemm:ident, $gemm_sb:ident, $cx:path) => {
+    ($t:ty, $gemm:ident, $gemm_sb:ident, $syrk:ident, $cx:path) => {
         impl CublasScalar for $t {
             unsafe fn gemm(
                 handle: sys::cublasHandle_t,
@@ -111,6 +130,36 @@ macro_rules! impl_cublas_scalar {
                         lda,
                         b as *const $t as *const $cx,
                         ldb,
+                        beta as *const $t as *const $cx,
+                        c as *mut $t as *mut $cx,
+                        ldc,
+                    )
+                }
+            }
+
+            unsafe fn syrk(
+                handle: sys::cublasHandle_t,
+                uplo: sys::cublasFillMode_t,
+                trans: sys::cublasOperation_t,
+                n: i32,
+                k: i32,
+                alpha: &Self,
+                a: u64,
+                lda: i32,
+                beta: &Self,
+                c: u64,
+                ldc: i32,
+            ) -> sys::cublasStatus_t {
+                unsafe {
+                    sys::$syrk(
+                        handle,
+                        uplo,
+                        trans,
+                        n,
+                        k,
+                        alpha as *const $t as *const $cx,
+                        a as *const $t as *const $cx,
+                        lda,
                         beta as *const $t as *const $cx,
                         c as *mut $t as *mut $cx,
                         ldc,
@@ -165,12 +214,12 @@ macro_rules! impl_cublas_scalar {
     };
 }
 
-impl_cublas_scalar!(f32, cublasSgemm_v2, cublasSgemmStridedBatched);
-impl_cublas_scalar!(f64, cublasDgemm_v2, cublasDgemmStridedBatched);
-impl_cublas_scalar!(Complex<f32>, cublasCgemm_v2, cublasCgemmStridedBatched, sys::cuFloatComplex);
-impl_cublas_scalar!(Complex<f64>, cublasZgemm_v2, cublasZgemmStridedBatched, sys::cuDoubleComplex);
+impl_cublas_scalar!(f32, cublasSgemm_v2, cublasSgemmStridedBatched, cublasSsyrk_v2);
+impl_cublas_scalar!(f64, cublasDgemm_v2, cublasDgemmStridedBatched, cublasDsyrk_v2);
+impl_cublas_scalar!(Complex<f32>, cublasCgemm_v2, cublasCgemmStridedBatched, cublasCsyrk_v2, sys::cuFloatComplex);
+impl_cublas_scalar!(Complex<f64>, cublasZgemm_v2, cublasZgemmStridedBatched, cublasZsyrk_v2, sys::cuDoubleComplex);
 
-fn op(t: bool) -> sys::cublasOperation_t {
+pub(super) fn op(t: bool) -> sys::cublasOperation_t {
     if t { sys::cublasOperation_t::CUBLAS_OP_T } else { sys::cublasOperation_t::CUBLAS_OP_N }
 }
 
