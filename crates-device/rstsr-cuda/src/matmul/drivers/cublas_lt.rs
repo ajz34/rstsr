@@ -27,7 +27,7 @@ use std::sync::{Arc, Mutex};
 
 use super::cublas::{prepare, GemmCall, Served};
 use super::cublas_ex::ExScalar;
-use super::{scale, CublasPlan, Problem, Refusal, CublasGemmTypes, Verdict};
+use super::{scale, AlignedScale, CublasGemmTypes, CublasPlan, Problem, Refusal, Verdict};
 use crate::matmul::cublas_args::CublasArgs;
 use crate::matmul::mode::ComputeType16F;
 use crate::prelude_dev::*;
@@ -427,6 +427,7 @@ where
     let (Some(alpha), Some(beta)) = (scale::<S, TC>(p.alpha), scale::<S, TC>(p.beta)) else {
         return Ok(Verdict::Declined(Refusal::Cannot("the output type is not of the plan's family")));
     };
+    let (alpha, beta) = (AlignedScale(alpha), AlignedScale(beta));
     let (Some(st), Some(compute)) = (plan.gemm_types(), plan.compute()) else {
         return Ok(Verdict::Declined(Refusal::Cannot("no cuBLAS problem for this type triple")));
     };
@@ -461,12 +462,12 @@ where
         lt::cublasLtMatmul(
             lt_state.handle,
             e.desc,
-            &alpha as *const S as *const c_void,
+            &alpha.0 as *const S as *const c_void,
             ptr(ptr_a) as *const c_void,
             e.layouts[0],
             ptr(ptr_b) as *const c_void,
             e.layouts[1],
-            &beta as *const S as *const c_void,
+            &beta.0 as *const S as *const c_void,
             ptr(ptr_c) as *const c_void,
             e.layouts[2],
             ptr(ptr_c),

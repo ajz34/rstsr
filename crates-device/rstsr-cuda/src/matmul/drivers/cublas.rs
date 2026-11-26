@@ -19,7 +19,7 @@
 
 use cudarc::cublas::sys;
 
-use super::{scale, Buffers, CublasPlan, Problem, Refusal, Verdict};
+use super::{scale, AlignedScale, Buffers, CublasPlan, Problem, Refusal, Verdict};
 use crate::dtype::CudaDType;
 use crate::kernel::{order_input, order_output};
 use crate::matmul::cublas_args;
@@ -579,10 +579,11 @@ where
     let (Some(alpha), Some(beta)) = (scale::<T, TC>(p.alpha), scale::<T, TC>(p.beta)) else {
         return Ok(Verdict::Declined(Refusal::Cannot("the output type is not of the plan's family")));
     };
+    let (alpha, beta) = (AlignedScale(alpha), AlignedScale(beta));
     with_gemm_call(&u, p, |blas, args, ptrs| {
         // SAFETY: the pointers are the buffers' bases folded with the layouts' own offsets, and
         // `args` was derived from the same `geom` those offsets came from.
-        let status = unsafe { launch::<T>(blas, args, math, &alpha, &beta, ptrs)? };
+        let status = unsafe { launch::<T>(blas, args, math, &alpha.0, &beta.0, ptrs)? };
         Ok(status_verdict(status))
     })
 }

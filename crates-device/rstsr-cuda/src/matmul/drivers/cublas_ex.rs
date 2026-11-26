@@ -12,7 +12,7 @@ use crate::dtype::CudaDType;
 use cudarc::cublas::sys;
 
 use super::cublas::{status_verdict, with_gemm_call};
-use super::{scale, CublasPlan, Problem, Refusal, CublasGemmTypes, Verdict};
+use super::{scale, AlignedScale, CublasGemmTypes, CublasPlan, Problem, Refusal, Verdict};
 use crate::matmul::cublas_args::CublasArgs;
 use crate::matmul::mode::ComputeType16F;
 use crate::prelude_dev::*;
@@ -200,7 +200,8 @@ where
         let _api = blas.lock();
         // SAFETY: the pointers are the buffers' bases folded with the layouts' own offsets, and
         // `args` was derived from the same `geom` those offsets came from.
-        let status = unsafe { S::gemm_ex(*blas.blas().handle(), args, st, compute, &alpha, &beta, ptrs) };
+        let (alpha, beta) = (AlignedScale(alpha), AlignedScale(beta));
+        let status = unsafe { S::gemm_ex(*blas.blas().handle(), args, st, compute, &alpha.0, &beta.0, ptrs) };
         Ok(status_verdict(status))
     })
 }

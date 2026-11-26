@@ -194,6 +194,13 @@ pub(crate) fn scale<S: Copy + 'static, TC: Copy + 'static>(x: TC) -> Option<S> {
     Some(unsafe { *(&f as *const f32 as *const S) })
 }
 
+/// A scale handed to cuBLAS by pointer, in storage aligned to 16 bytes.
+///
+/// cuBLASLt reads the 16-byte `Complex<f64>` scales with aligned SIMD loads, while the type's own
+/// alignment is 8: a plain local is 16-aligned only by chance (it was not in a debug build).
+#[repr(C, align(16))]
+pub(crate) struct AlignedScale<T>(pub T);
+
 fn same<T: 'static, U: 'static>() -> bool {
     TypeId::of::<T>() == TypeId::of::<U>()
 }
@@ -700,5 +707,15 @@ mod tests {
             assert!(MatMulDrivers::all().contains(d.flag()), "{}", d.name());
             assert!(!MatMulDrivers::none().contains(d.flag()));
         }
+    }
+
+    /// The scales handed to cuBLAS sit in 16-byte-aligned storage, whatever their own alignment:
+    /// cuBLASLt loads a `Complex<f64>` scale with an aligned SIMD load.
+    #[test]
+    fn scales_are_aligned_for_cublas() {
+        let a = AlignedScale(num::Complex::new(1.0f64, 0.0));
+        assert_eq!(core::mem::align_of::<num::Complex<f64>>(), 8);
+        assert_eq!(core::mem::align_of_val(&a), 16);
+        assert_eq!(&a.0 as *const _ as usize, &a as *const _ as usize);
     }
 }
