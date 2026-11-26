@@ -1369,22 +1369,6 @@ fn matmul_gemv_gevm_vs_cpu() {
     );
 }
 
-/// The inner-dot rule is a reduction, not a GEMM, and is refused by name rather than run as a
-/// `1 x 1` tile of 256 redundant threads.
-#[test]
-fn matmul_inner_dot_is_refused_by_name() {
-    require_cuda!();
-    let d = DeviceCuda::new(0);
-    let v: Tensor<f64, _, _> = rt::arange((0., 16., 1., &d));
-    match rt::matmul_f(&v, &v) {
-        Ok(_) => panic!("inner dot should be refused, but it computed a result"),
-        Err(e) => {
-            let msg = format!("{e}");
-            assert!(msg.contains("single-axis contraction"), "expected the reduction reason, got: {msg}");
-        },
-    }
-}
-
 /// `ColMajor`: the device reverses every layout and swaps the operands, per the identity in
 /// `rstsr_common::layout::matmul`. If that reversal is wrong the numbers come out transposed, which
 /// only a rectangular case can show.

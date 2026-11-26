@@ -729,3 +729,86 @@ fn triple_layout_matrix() {
     matrix::<bf16, bf16>("bf16 -> bf16", false, bf16::from_f64, f64::from, f64::from, 1e-2);
     matrix::<bf16, f32>("bf16 -> f32", false, bf16::from_f64, f64::from, f64::from, 1e-5);
 }
+
+/// The inner dot `[k] @ [k] -> []`: a `1 x k @ k x 1` GEMM on the chain. Every serving driver
+/// alone, the naive kernel and the chain, both orders, contiguous and stepped vectors, a fresh
+/// output and the `alpha`/`beta` path into a caller's rank-0 output.
+#[allow(clippy::too_many_arguments)]
+fn dot_matrix<S>(what: &str, classic: bool, to_s: fn(f64) -> S, close: fn(S, S) -> bool)
+where
+    S: CudaDType + CudaMatMulMode + Copy + Clone + Send + Sync + 'static + num::Zero + num::One,
+{
+    let k = 40usize;
+    let mut drivers = vec![MatMulDrivers::CUBLAS_LT, MatMulDrivers::CUBLAS_EX];
+    if classic {
+        drivers.push(MatMulDrivers::CUBLAS);
+    }
+    drivers.extend([MatMulDrivers::NAIVE, MatMulDrivers::all()]);
+    for order in [RowMajor, ColMajor] {
+        let mut dcpu = DeviceCpuSerial::default();
+        dcpu.set_default_order(order);
+        for forced in &drivers {
+            let mut flags = CudaRuntimeFlags::default();
+            flags.matmul_drivers = *forced;
+            let mut d = DeviceCuda::new(0).with_flags(flags);
+            d.set_default_order(order);
+            for stepped in [false, true] {
+                // the stepped pair reads every 2nd of `wa` against every 3rd of `wb`
+                let (na, nb) = if stepped { (2 * k, 3 * k) } else { (k, k) };
+                let (va, vb) = (data(na, 7), data(nb, 8));
+                let cpu = |v: Vec<f64>| -> Cpu<f64> {
+                    let n = v.len();
+                    rt::asarray((v, &dcpu)).into_shape([n])
+                };
+                let dev = |v: Vec<f64>| -> Tensor<S, DeviceCuda, IxD> {
+                    let n = v.len();
+                    rt::asarray((v.into_iter().map(to_s).collect::<Vec<S>>(), &d)).into_shape([n])
+                };
+                let (a_cpu, b_cpu) = if stepped {
+                    (
+                        cpu(va.clone()).i(s![slice!(None, None, 2)]).to_owned(),
+                        cpu(vb.clone()).i(s![slice!(None, None, 3)]).to_owned(),
+                    )
+                } else {
+                    (cpu(va.clone()), cpu(vb.clone()))
+                };
+                let (a, b) = if stepped {
+                    (
+                        dev(va.clone()).i(s![slice!(None, None, 2)]).to_owned(),
+                        dev(vb.clone()).i(s![slice!(None, None, 3)]).to_owned(),
+                    )
+                } else {
+                    (dev(va.clone()), dev(vb.clone()))
+                };
+                let ctx = format!("{what}, {order:?}, {forced:?}, stepped = {stepped}");
+                let host = |t: &Tensor<S, DeviceCuda, IxD>| -> S { t.to_scalar() };
+                let host64 = |t: &Cpu<f64>| -> f64 { t.to_scalar() };
+
+                let got = rt::matmul(&a, &b);
+                assert_eq!(got.shape(), &[][..], "a rank-0 output: {ctx}");
+                let want = host64(&rt::matmul(&a_cpu, &b_cpu));
+                assert!(close(host(&got), to_s(want)), "{ctx}: fresh dot vs {want}");
+
+                let fill = to_s(0.5);
+                let mut c = rt::full(([], fill, &d));
+                let mut c_cpu = rt::full(([], 0.5f64, &dcpu));
+                rt::matmul_from(&mut c, &a, &b, to_s(2.0), to_s(3.0));
+                rt::matmul_from(&mut c_cpu, &a_cpu, &b_cpu, 2.0f64, 3.0f64);
+                let want = host64(&c_cpu);
+                assert!(close(host(&c), to_s(want)), "{ctx}: 2 * dot + 3 * c vs {want}");
+            }
+        }
+    }
+}
+
+/// The inner dot for the four types the cuBLAS drivers serve.
+#[test]
+fn inner_dot() {
+    require_cuda!();
+    dot_matrix::<f32>("f32", true, |x| x as f32, |a, b| (a - b).abs() <= 1e-5 * (1.0 + b.abs()));
+    dot_matrix::<f64>("f64", true, |x| x, |a, b| (a - b).abs() <= 1e-13 * (1.0 + b.abs()));
+    let re32 = |x: f64| Complex::new(x as f32, 0.0);
+    let re64 = |x: f64| Complex::new(x, 0.0);
+    dot_matrix::<Complex<f32>>("c32", true, re32, |a, b| (a - b).norm() <= 1e-5 * (1.0 + b.norm()));
+    dot_matrix::<Complex<f64>>("c64", true, re64, |a, b| (a - b).norm() <= 1e-13 * (1.0 + b.norm()));
+}

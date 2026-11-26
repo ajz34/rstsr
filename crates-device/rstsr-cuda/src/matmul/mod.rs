@@ -41,8 +41,8 @@
 //! # Layouts
 //!
 //! Every layout the rule table admits is served: strided, negative and zero strides, broadcast
-//! and non-affine batches, either default order. The inner dot (`[k] @ [k]`) has no GEMM geometry
-//! and is refused by name.
+//! and non-affine batches, either default order. The inner dot (`[k] @ [k]`) is served as the
+//! `1 x k @ k x 1` GEMM it is, which cuBLAS runs at memory bandwidth.
 //!
 //! # Resources
 //!

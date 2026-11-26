@@ -129,12 +129,11 @@ where
 /// before it becomes the default. The refusal prints the three layouts, because "which block failed
 /// to merge" is otherwise invisible.
 ///
-/// # One asymmetry with `matmul`, on purpose
+/// # The inner dot
 ///
-/// `matmul` refuses an inner dot ("single-axis contraction") and points at the reduce kernel;
-/// no matmul driver is the reduce kernel. `tensordot` accepts it: the
-/// planner yields `m = n = 1`, and cuBLAS runs a `1 x 1 x k` product without wasting anything. Same
-/// arithmetic, and here the fast path is the one that is already correct.
+/// `tensordot` accepts an inner dot: the planner yields `m = n = 1`, and cuBLAS runs a
+/// `1 x 1 x k` product without wasting anything. `matmul` serves it the same way, by lifting
+/// `[k] @ [k]` to that product in its geometry.
 ///
 /// # What is refused for a different reason
 ///

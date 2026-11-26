@@ -131,6 +131,27 @@ impl GemmGeom {
     }
 }
 
+/// The inner dot `[k] @ [k] -> []` as the `1 x k @ k x 1 -> 1 x 1` GEMM it is arithmetically.
+///
+/// cuBLAS runs that product with its own multi-block reduction (measured at the bandwidth
+/// ceiling), so the chain serves the dot with no driver of its own. The inserted axes have extent
+/// 1, so their strides address nothing; they are written as a contiguous `[1, k]` would have them.
+/// Layouts of any other rank are returned unchanged.
+fn lift_inner_dot(la: Layout<IxD>, lb: Layout<IxD>, lc: Layout<IxD>) -> (Layout<IxD>, Layout<IxD>, Layout<IxD>) {
+    if la.ndim() != 1 || lb.ndim() != 1 || lc.ndim() != 0 {
+        return (la, lb, lc);
+    }
+    let (k, sa, sb) = (la.shape()[0], la.stride()[0], lb.stride()[0]);
+    let unit = |l: &Layout<IxD>, shape: Vec<usize>, stride: Vec<isize>| {
+        Layout::<IxD>::new(shape, stride, l.offset()).unwrap_or_else(|_| l.clone())
+    };
+    (
+        unit(&la, vec![1, k], vec![sa.saturating_mul(k as isize), sa]),
+        unit(&lb, vec![k, 1], vec![sb, sb]),
+        unit(&lc, vec![1, 1], vec![1, 1]),
+    )
+}
+
 /// Resolve the geometry of `c = a @ b` on the layout the tier already validated. Pure.
 pub(crate) fn resolve_geom(order: FlagOrder, lc: &Layout<IxD>, la: &Layout<IxD>, lb: &Layout<IxD>) -> Result<GemmGeom> {
     // Col-major: reverse every layout **and swap the operands**, so the row-major decomposition of
@@ -147,17 +168,12 @@ pub(crate) fn resolve_geom(order: FlagOrder, lc: &Layout<IxD>, la: &Layout<IxD>,
     } else {
         (la.clone(), lb.clone(), lc.clone())
     };
+    let (la_c, lb_c, lc_c) = lift_inner_dot(la_c, lb_c, lc_c);
 
     let cfg = layout_matmul_dyn_row_major_with_lc(&la_c, &lb_c, &lc_c)?;
 
-    // The inner-dot rule leaves `la_matmul` rank 1. That rule is a reduction, not a GEMM: no
-    // driver here is the reduce kernel, so it is refused by name.
     if cfg.la_matmul.ndim() != 2 || cfg.lb_matmul.ndim() != 2 {
-        rstsr_raise!(
-            UnImplemented,
-            "cuda matmul: this is a single-axis contraction (inner dot), not a GEMM; it belongs on \
-             the reduce kernel and is not wired to it yet"
-        )?
+        rstsr_raise!(UnImplemented, "cuda matmul: the matmul parts of a and b should be matrices")?
     }
 
     let (lay_a, lay_b) = (&cfg.la_matmul, &cfg.lb_matmul);
@@ -323,13 +339,34 @@ mod tests {
         assert_eq!(g1.affine_batch(), Some([0, (k * n) as isize, (m * n) as isize]));
     }
 
-    /// The inner-dot rule has no 2-D matmul part, and is refused rather than run as a 1x1 tile.
+    /// The inner dot is a `1 x k @ k x 1` GEMM whose three single elements are addressed by the
+    /// operands' own strides, in both orders.
     #[test]
-    fn inner_dot_has_no_geometry() {
-        let la = layout(&[6], &[1]);
-        let lc = layout(&[], &[]);
-        let e = resolve_geom(RowMajor, &lc, &la, &la).unwrap_err();
-        assert!(format!("{e}").contains("single-axis contraction"), "got: {e}");
+    fn inner_dot_is_a_one_by_one_gemm() {
+        for order in [RowMajor, ColMajor] {
+            let (la, lb, lc) = (layout(&[6], &[2]), layout(&[6], &[3]), layout(&[], &[]));
+            let g = resolve_geom(order, &lc, &la, &lb).unwrap();
+            assert_eq!((g.m, g.n, g.k, g.n_batch), (1, 1, 6, 1));
+            assert_eq!(g.swapped, matches!(order, ColMajor));
+            // the lifted `[1, k]` and `[k, 1]` walk the vectors at their own strides
+            let v = g.caller();
+            assert_eq!(v.mnk, (1, 6, 1));
+            for kk in 0..6 {
+                assert_eq!(v.a.0 as isize + v.a.2 * kk as isize, off(&la, &[kk]), "{order:?}: a");
+                assert_eq!(v.b.0 as isize + v.b.1 * kk as isize, off(&lb, &[kk]), "{order:?}: b");
+            }
+            assert_eq!(v.c.0 as isize, lc.offset() as isize);
+        }
+    }
+
+    /// A product that is not an inner dot keeps its layouts: nothing is lifted.
+    #[test]
+    fn other_ranks_are_not_lifted() {
+        let la = layout(&[2, 3], &[3, 1]);
+        let lb = layout(&[3], &[1]);
+        let lc = layout(&[2], &[1]);
+        let (a, b, c) = lift_inner_dot(la.clone(), lb.clone(), lc.clone());
+        assert_eq!((a, b, c), (la, lb, lc));
     }
 
     /// The caller view undoes the col-major relabelling: every `(i, k)`, `(k, j)` and `(i, j)` of

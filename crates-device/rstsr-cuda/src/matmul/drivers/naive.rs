@@ -13,8 +13,8 @@
 //! DRAM-bound, which is why it runs last.
 //!
 //! Nothing is declined here. An empty output returns before any driver is asked, and the two
-//! shapes that have no GEMM geometry at all (the inner dot; a batch rank over [`RANK_MAX`]) are
-//! refused by name before the chain.
+//! shapes that have no GEMM geometry at all (a batch rank over [`RANK_MAX`]) are refused by name
+//! before the chain.
 
 use super::super::geom::CallerGeom;
 use super::{Problem, Verdict};
