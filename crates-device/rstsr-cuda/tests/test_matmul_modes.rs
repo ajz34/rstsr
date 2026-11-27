@@ -221,6 +221,61 @@ fn fixedpoint_mantissa_bits() {
     let _ = rt::matmul(square(&d, data(4, 5), 2), square(&d, data(4, 6), 2));
 }
 
+/// The symmetric form honors the compute mode of its plan, like any other driver: a mantissa width
+/// the `cudarc` bindings cannot apply is the same error on `a @ a.t()` as on `a @ b` (the form
+/// used to bypass the check), and a mode that changes the arithmetic is never silently answered
+/// with `Default` math by the form — the `?syrk` entries do not apply it, so the form declines and
+/// the mode is served on the `gemm` instead (visible: `FastTF32` accuracy, not `Default`).
+#[test]
+fn syrk_honors_the_compute_mode() {
+    require_cuda!();
+    let emu = device(MatMulDrivers::CUBLAS, |f| {
+        f.compute_type_64f = ComputeType64F::EmulatedFixedPoint;
+        f.fixedpoint_mantissa_bits = 30;
+    });
+    let a = square(&emu, data(4, 1), 2);
+    let err = match rt::matmul_f(&a, a.t()) {
+        Ok(_) => panic!("the symmetric form must not bypass the mantissa-width error"),
+        Err(e) => format!("{e:?}").chars().filter(|&c| c != '\n').collect::<String>(),
+    };
+    assert!(err.contains("fixedpoint_mantissa_bits"), "{err}");
+
+    // a mode that changes the arithmetic is not answered with `Default` math by the form: forced
+    // on the classic entries, `a @ a.t()` under `FastTF32` must come out at `FastTF32` accuracy
+    // (the form declines; the gemm applies the mode) — the form used to run plain `f32` here
+    if !cfg!(cublas_math_mode) {
+        eprintln!("  [f32 syrk] skipped: this build has no cublasSetMathMode");
+        return;
+    }
+    let dcpu = DeviceCpuSerial::default();
+    let av = data(256 * 256, 5);
+    let a64: Tensor<f64, DeviceCpuSerial, _> =
+        rt::asarray((av.iter().map(|&x| x as f32 as f64).collect::<Vec<_>>(), &dcpu)).into_shape([256, 256]);
+    let want = rt::matmul(&a64, a64.t());
+    let want = DeviceToCpuAPI::<f64>::to_cpu_vec(want.to_contig(RowMajor).storage()).rstsr_unwrap();
+    let a32: Vec<f32> = av.into_iter().map(|x| x as f32).collect();
+    for (mode, name) in [(ComputeType32F::Default, "default"), (ComputeType32F::FastTF32, "fast tf32")] {
+        let d = device(MatMulDrivers::CUBLAS, |f| {
+            f.compute_type_32f = mode;
+            f.matmul_use_syrk = MatMulUseSyrk::Allow;
+        });
+        let a = rt::asarray((a32.clone(), &d)).into_shape([256, 256]);
+        let got = rt::matmul(&a, a.t());
+        let got = DeviceToCpuAPI::<f32>::to_cpu_vec(got.to_contig(RowMajor).storage())
+            .rstsr_unwrap()
+            .into_iter()
+            .map(f64::from)
+            .collect::<Vec<_>>();
+        let err = rel_err(&got, &want);
+        eprintln!("  [f32 syrk {name}] max rel err {err:.3e}");
+        let tol = if mode == ComputeType32F::Default { 1e-5 } else { 1e-2 };
+        assert!(err <= tol, "syrk {name}: max rel err {err:.3e} > {tol:.1e}");
+        if mode == ComputeType32F::FastTF32 {
+            assert!(err > 1e-5, "syrk {name}: max rel err {err:.3e} is Default accuracy: mode silently ignored");
+        }
+    }
+}
+
 /// The batched and the transposed argument shapes, on each cuBLAS driver alone: a strided batch,
 /// a transposed right operand broadcast against the batch of `a`, a transposed left operand, and
 /// a broadcast batch of `a` against a batched `b`. The batch stride of cuBLASLt's layouts is an

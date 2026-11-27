@@ -468,7 +468,7 @@ where
     };
     // the symmetric form first: `a @ a^T` with a fresh output is half the work of the gemm
     if syrk_applies::<TA, TB, TC, TBuf>(p, enabled, flags.matmul_use_syrk) {
-        let verdict = syrk::run(p, plan)?;
+        let verdict = syrk::run(p, plan, flags.fixedpoint_mantissa_bits)?;
         trace("cublas (syrk)", &verdict);
         if let Verdict::Ran = verdict {
             return Ok(());

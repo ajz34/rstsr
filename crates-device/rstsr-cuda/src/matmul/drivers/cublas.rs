@@ -254,7 +254,7 @@ impl MathMode {
 
 /// What the driver does with the handle for one compute mode.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Ask {
+pub(super) enum Ask {
     /// Run with the handle as it is (`Default`).
     Leave,
     /// Set this math mode for the call.
@@ -263,7 +263,7 @@ enum Ask {
     No(&'static str),
 }
 
-fn ask_32f(mode: ComputeType32F) -> Ask {
+pub(super) fn ask_32f(mode: ComputeType32F) -> Ask {
     match mode {
         ComputeType32F::Default => Ask::Leave,
         ComputeType32F::Pedantic => Ask::Math(MathMode::Pedantic),
@@ -273,7 +273,7 @@ fn ask_32f(mode: ComputeType32F) -> Ask {
     }
 }
 
-fn ask_64f(mode: ComputeType64F, mantissa_bits: u32) -> Result<Ask> {
+pub(super) fn ask_64f(mode: ComputeType64F, mantissa_bits: u32) -> Result<Ask> {
     Ok(match mode {
         ComputeType64F::Default => Ask::Leave,
         ComputeType64F::Pedantic => Ask::Math(MathMode::Pedantic),
@@ -291,7 +291,7 @@ fn ask_64f(mode: ComputeType64F, mantissa_bits: u32) -> Result<Ask> {
 }
 
 /// A math mode this build's `cudarc` bindings do not carry is a refusal, never a silent `Default`.
-fn bound(ask: Ask) -> Ask {
+pub(super) fn bound(ask: Ask) -> Ask {
     match ask {
         Ask::Math(MathMode::Fp64EmulatedFixedPoint) if !cfg!(cublas_fixedpoint_math) => {
             Ask::No("this build's cudarc bindings have no fixed-point emulation math mode (CUDA 13.0 or newer needed)")
@@ -319,6 +319,47 @@ unsafe fn replace_math_mode(
     }
     let status = unsafe { sys::cublasSetMathMode(handle, mode.cublas()) };
     if status == sys::cublasStatus_t::CUBLAS_STATUS_SUCCESS { Ok(previous) } else { Err(status) }
+}
+
+/// Run `call` on the handle with `math` set, the previous mode restored afterwards.
+///
+/// The handle's lock is taken here and held for the whole call: a `cublasHandle_t` is not
+/// thread-safe, and this stream's handle is shared by every thread that uses the ordinal (see
+/// [`CublasHandle`]). A failure to set the mode comes back as the status — nothing was enqueued;
+/// the only [`Err`] is a handle that could not be put back after the product was enqueued, which
+/// would leak the mode into later calls of this crate.
+pub(super) fn with_math_mode(
+    blas: &CublasHandle,
+    math: Option<MathMode>,
+    call: impl FnOnce(sys::cublasHandle_t) -> sys::cublasStatus_t,
+) -> Result<sys::cublasStatus_t> {
+    let _api = blas.lock();
+    let handle = *blas.blas().handle();
+    // Nothing is enqueued yet, so a failure to set the mode is a plain refusal.
+    #[cfg(not(cublas_math_mode))]
+    let _ = math;
+    #[cfg(cublas_math_mode)]
+    let previous = match math {
+        None => None,
+        Some(mode) => match unsafe { replace_math_mode(handle, mode) } {
+            Ok(previous) => Some(previous),
+            Err(status) => return Ok(status),
+        },
+    };
+    let status = call(handle);
+    // The product is enqueued by now: a handle left in the asked mode would leak the mode into
+    // later calls, which is an error rather than a fall-through.
+    #[cfg(cublas_math_mode)]
+    if let Some(previous) = previous {
+        let restored = unsafe { sys::cublasSetMathMode(handle, previous) };
+        if restored != sys::cublasStatus_t::CUBLAS_STATUS_SUCCESS {
+            rstsr_raise!(
+                RuntimeError,
+                "cuda matmul: cuBLAS status {restored:?} while restoring the handle math mode after the call"
+            )?;
+        }
+    }
+    Ok(status)
 }
 
 /// Issue the `gemm`. Returns the cuBLAS status; the caller hands the problem to the next driver on
@@ -359,33 +400,9 @@ pub(crate) unsafe fn launch<T: CublasScalar>(
     beta: &T,
     ptrs: [u64; 3],
 ) -> Result<sys::cublasStatus_t> {
-    let _api = blas.lock();
-    let handle = *blas.blas().handle();
-    // Nothing is enqueued yet, so a failure to set the mode is a plain refusal.
-    #[cfg(not(cublas_math_mode))]
-    let _ = math;
-    #[cfg(cublas_math_mode)]
-    let previous = match math {
-        None => None,
-        Some(mode) => match unsafe { replace_math_mode(handle, mode) } {
-            Ok(previous) => Some(previous),
-            Err(status) => return Ok(status),
-        },
-    };
-    let status = unsafe { gemm_unchecked::<T>(handle, a, alpha, beta, ptrs) };
-    // The product is enqueued by now: a handle left in the asked mode would leak the mode into
-    // later calls, which is an error rather than a fall-through.
-    #[cfg(cublas_math_mode)]
-    if let Some(previous) = previous {
-        let restored = unsafe { sys::cublasSetMathMode(handle, previous) };
-        if restored != sys::cublasStatus_t::CUBLAS_STATUS_SUCCESS {
-            rstsr_raise!(
-                RuntimeError,
-                "cuda matmul: cuBLAS status {restored:?} while restoring the handle math mode after a gemm"
-            )?;
-        }
-    }
-    Ok(status)
+    // SAFETY: `launch` promises pointers valid for `a`'s extents on the handle's stream; the
+    // handle is live, its lock taken inside `with_math_mode`.
+    with_math_mode(blas, math, |handle| unsafe { gemm_unchecked::<T>(handle, a, alpha, beta, ptrs) })
 }
 
 /// The `gemm` call proper, on a handle whose lock is held.

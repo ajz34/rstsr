@@ -8,10 +8,19 @@
 //! zero, `b` the same buffer as `a` with reversed strides, unbatched ([`CallerGeom::is_syrk`]).
 //! Which output types take the form is [`MatMulUseSyrk`][crate::matmul::MatMulUseSyrk]; there is no
 //! size gate.
+//!
+//! # The compute mode
+//!
+//! The typed `?syrk` entries apply the handle's math mode only partially: measured on this
+//! library, a `?syrk` under `CUBLAS_TF32_TENSOR_OP_MATH` is plain `f32` arithmetic. A mode that
+//! changes the arithmetic (`Fast*`, the fixed-point emulation) therefore declines the form, and
+//! the chain serves it on a `gemm` that applies it. `Default` and `Pedantic` take the form:
+//! the typed `?syrk` is exact arithmetic, so `Pedantic` rides along (set and restored around the
+//! call, as the classic `gemm` does it), and it is a measured win over the pedantic `gemm`.
 
 use cudarc::cublas::sys;
 
-use super::cublas::{op, CublasScalar};
+use super::cublas::{ask_32f, ask_64f, bound, op, with_math_mode, Ask, CublasScalar, MathMode};
 use super::{scale, AlignedScale, CublasPlan, Problem, Refusal, Verdict};
 use crate::dtype::CudaDType;
 use crate::kernel::{order_input, order_output, FlatLaunch};
@@ -68,8 +77,14 @@ pub(crate) fn args(v: &CallerGeom<'_>) -> Option<SyrkArgs> {
     Some(SyrkArgs { trans, n: n as i32, k: k as i32, lda, ldc, lower })
 }
 
-/// One attempt of the symmetric form, for the four types the typed entry covers.
-pub(super) fn run<TA, TB, TC, TBuf>(p: &Problem<'_, TA, TB, TC, TBuf>, plan: CublasPlan) -> Result<Verdict>
+/// One attempt of the symmetric form, for the four types the typed entry covers. The compute mode
+/// rides along where the `?syrk` entries can honor it (see the module doc); the rest declines to
+/// the chain.
+pub(super) fn run<TA, TB, TC, TBuf>(
+    p: &Problem<'_, TA, TB, TC, TBuf>,
+    plan: CublasPlan,
+    mantissa_bits: u32,
+) -> Result<Verdict>
 where
     TA: 'static,
     TB: 'static,
@@ -77,15 +92,39 @@ where
     TBuf: 'static,
 {
     match plan {
-        CublasPlan::F32(_) => typed::<f32, TA, TB, TC, TBuf>(p),
-        CublasPlan::F64(_) => typed::<f64, TA, TB, TC, TBuf>(p),
-        CublasPlan::C32(_) => typed::<num::Complex<f32>, TA, TB, TC, TBuf>(p),
-        CublasPlan::C64(_) => typed::<num::Complex<f64>, TA, TB, TC, TBuf>(p),
+        CublasPlan::F32(mode) => attempt::<f32, TA, TB, TC, TBuf>(p, bound(ask_32f(mode))),
+        CublasPlan::F64(mode) => attempt::<f64, TA, TB, TC, TBuf>(p, bound(ask_64f(mode, mantissa_bits)?)),
+        CublasPlan::C32(mode) => attempt::<num::Complex<f32>, TA, TB, TC, TBuf>(p, bound(ask_32f(mode))),
+        CublasPlan::C64(mode) => {
+            attempt::<num::Complex<f64>, TA, TB, TC, TBuf>(p, bound(ask_64f(mode, mantissa_bits)?))
+        },
         _ => Ok(Verdict::Declined(Refusal::Cannot("the typed syrk entries cover f32, f64 and complex only"))),
     }
 }
 
-fn typed<T: CublasScalar, TA, TB, TC, TBuf>(p: &Problem<'_, TA, TB, TC, TBuf>) -> Result<Verdict>
+/// One attempt under the ask the mode resolved to; a refused or unapplicable mode falls to the
+/// chain.
+fn attempt<T: CublasScalar, TA, TB, TC, TBuf>(p: &Problem<'_, TA, TB, TC, TBuf>, ask: Ask) -> Result<Verdict>
+where
+    TA: 'static,
+    TB: 'static,
+    TC: Copy + 'static,
+    TBuf: 'static,
+{
+    if let Ask::No(why) = ask {
+        return Ok(Verdict::Declined(Refusal::Cannot(why)));
+    }
+    // a mode that changes the arithmetic is not applied by the `?syrk` entries: serving it here
+    // would silently answer `Default`, so the gemm chain serves the mode instead
+    if !matches!(ask, Ask::Leave | Ask::Math(MathMode::Pedantic)) {
+        return Ok(Verdict::Declined(Refusal::Cannot(
+            "the syrk entries do not apply a math mode that changes the arithmetic",
+        )));
+    }
+    typed::<T, TA, TB, TC, TBuf>(p, ask)
+}
+
+fn typed<T: CublasScalar, TA, TB, TC, TBuf>(p: &Problem<'_, TA, TB, TC, TBuf>, ask: Ask) -> Result<Verdict>
 where
     TA: 'static,
     TB: 'static,
@@ -104,6 +143,11 @@ where
         return Ok(Verdict::Declined(Refusal::Cannot("the output type is not of the plan's family")));
     };
     let (alpha, beta) = (AlignedScale(alpha), AlignedScale(beta));
+    let math = match ask {
+        Ask::Leave => None,
+        Ask::Math(mode) => Some(mode),
+        Ask::No(_) => unreachable!("a refusal is answered before the buffers are re-typed"),
+    };
     let exec = p.device.stream();
     let Some(blas) = exec.cublas() else {
         return Ok(Verdict::Declined(Refusal::NoCublas));
@@ -115,26 +159,23 @@ where
     let (pc, rc) = u.c.read_ptr_on(exec);
     let esz = core::mem::size_of::<T>();
     let (ap, cp) = (pa as usize + view.a.0 * esz, pc as usize + view.c.0 * esz);
-    let status = {
-        let _api = blas.lock();
+    let status = with_math_mode(blas, math, |handle| unsafe {
         // SAFETY: the pointers are the buffers' bases folded with the layouts' own offsets, and
         // `args` was derived from the same view.
-        unsafe {
-            T::syrk(
-                *blas.blas().handle(),
-                sys::cublasFillMode_t::CUBLAS_FILL_MODE_UPPER,
-                op(a.trans),
-                a.n,
-                a.k,
-                &alpha.0,
-                ap as u64,
-                a.lda,
-                &beta.0,
-                cp as u64,
-                a.ldc,
-            )
-        }
-    };
+        T::syrk(
+            handle,
+            sys::cublasFillMode_t::CUBLAS_FILL_MODE_UPPER,
+            op(a.trans),
+            a.n,
+            a.k,
+            &alpha.0,
+            ap as u64,
+            a.lda,
+            &beta.0,
+            cp as u64,
+            a.ldc,
+        )
+    })?;
     if status != sys::cublasStatus_t::CUBLAS_STATUS_SUCCESS {
         return Ok(Verdict::Declined(Refusal::CublasStatus(status)));
     }
