@@ -394,6 +394,79 @@ fn cublas_lt_misaligned_views() {
 
 type Cpu<T> = Tensor<T, DeviceCpuSerial, IxD>;
 
+/// `a @ b` with **complex** operands carrying real and imaginary parts, output `T`, on `d`,
+/// against the CPU complex product of the same (narrowed) operands: both parts compared. A
+/// conjugation error (`OP_C` instead of `OP_T`) is invisible on real-only data, which is why the
+/// complex coverage does not run through the `f64` plumbing of `check_rounded`.
+fn check_complex<T>(
+    d: &DeviceCuda,
+    what: &str,
+    m: usize,
+    k: usize,
+    n: usize,
+    tol: f64,
+    narrow: fn(Complex<f64>) -> T,
+    widen: fn(T) -> Complex<f64>,
+) where
+    T: CudaDType + CudaMatMulMode + Copy + Clone + Send + Sync + 'static + num::Zero + num::One,
+{
+    let dcpu = DeviceCpuSerial::default();
+    let parts = |seed: u64, cnt: usize| -> Vec<Complex<f64>> {
+        let (re, im) = (data(cnt, seed), data(cnt, seed + 9));
+        re.into_iter().zip(im).map(|(re, im)| Complex::new(re, im)).collect()
+    };
+    let av: Vec<T> = parts(1, m * k).into_iter().map(narrow).collect();
+    let bv: Vec<T> = parts(2, k * n).into_iter().map(narrow).collect();
+    let a64: Cpu<Complex<f64>> =
+        rt::asarray((av.iter().map(|z| widen(*z)).collect::<Vec<_>>(), &dcpu)).into_shape([m, k]);
+    let b64: Cpu<Complex<f64>> =
+        rt::asarray((bv.iter().map(|z| widen(*z)).collect::<Vec<_>>(), &dcpu)).into_shape([k, n]);
+    let want = rt::matmul(&a64, &b64);
+    let want: Vec<Complex<f64>> =
+        DeviceToCpuAPI::<Complex<f64>>::to_cpu_vec(want.to_contig(RowMajor).storage()).rstsr_unwrap();
+
+    let a: Tensor<T, DeviceCuda, IxD> = rt::asarray((av, d)).into_shape([m, k]);
+    let b: Tensor<T, DeviceCuda, IxD> = rt::asarray((bv.clone(), d)).into_shape([k, n]);
+    let mut c: Tensor<T, DeviceCuda, IxD> = rt::full(([m * n], T::one(), d)).into_shape([m, n]);
+    a.matmul_with_output::<T, T, IxD, IxD>(&b, &mut c.view_mut());
+    let got: Vec<Complex<f64>> = DeviceToCpuAPI::<T>::to_cpu_vec(c.to_contig(RowMajor).storage())
+        .rstsr_unwrap()
+        .into_iter()
+        .map(widen)
+        .collect();
+    let err = |pick: fn(&Complex<f64>) -> f64| {
+        rel_err(&got.iter().map(pick).collect::<Vec<_>>(), &want.iter().map(pick).collect::<Vec<_>>())
+    };
+    let (err_re, err_im) = (err(|z| z.re), err(|z| z.im));
+    eprintln!("  [{what}] max rel err re {err_re:.3e}, im {err_im:.3e}");
+    assert!(err_re <= tol && err_im <= tol, "{what}: max rel err re {err_re:.3e}, im {err_im:.3e} > {tol:.1e}");
+
+    // the transposed right operand runs on `OP_T`, where a conjugation error (`OP_C`) is the
+    // mistake to catch: with real-only data it is invisible, with imaginary parts it is not.
+    // The same values stored as `[n, k]` and presented with one transposition.
+    let bt64: Cpu<Complex<f64>> =
+        rt::asarray((bv.iter().map(|z| widen(*z)).collect::<Vec<_>>(), &dcpu)).into_shape([n, k]);
+    let want = rt::matmul(&a64, bt64.t());
+    let want: Vec<Complex<f64>> =
+        DeviceToCpuAPI::<Complex<f64>>::to_cpu_vec(want.to_contig(RowMajor).storage()).rstsr_unwrap();
+    let bt: Tensor<T, DeviceCuda, IxD> = rt::asarray((bv, d)).into_shape([n, k]);
+    let got = rt::matmul(&a, bt.t());
+    let got: Vec<Complex<f64>> = DeviceToCpuAPI::<T>::to_cpu_vec(got.to_contig(RowMajor).storage())
+        .rstsr_unwrap()
+        .into_iter()
+        .map(widen)
+        .collect();
+    let err = |pick: fn(&Complex<f64>) -> f64| {
+        rel_err(&got.iter().map(pick).collect::<Vec<_>>(), &want.iter().map(pick).collect::<Vec<_>>())
+    };
+    let (err_re, err_im) = (err(|z| z.re), err(|z| z.im));
+    eprintln!("  [{what}, b transposed] max rel err re {err_re:.3e}, im {err_im:.3e}");
+    assert!(
+        err_re <= tol && err_im <= tol,
+        "{what}, b transposed: max rel err re {err_re:.3e}, im {err_im:.3e} > {tol:.1e}"
+    );
+}
+
 /// `a @ b` with the operands stored as `S` (rounded from the `f64` data) and the output `C`, on
 /// `d`, against the CPU `f64` product of the **rounded** operands.
 #[allow(clippy::too_many_arguments)]
@@ -443,71 +516,40 @@ fn drivers(classic_serves_pedantic: bool) -> impl Iterator<Item = MatMulDrivers>
 }
 
 /// `c32` and `c64` on each cuBLAS driver, with `Default` and `Pedantic`; the `Fast*` modes and
-/// the fixed-point emulation resolve to the default for complex outputs.
+/// the fixed-point emulation resolve to the default for complex outputs. The data carries real
+/// and imaginary parts, and both parts of the output are compared.
 #[test]
 fn modes_complex() {
     require_cuda!();
     let (m, k, n) = (64usize, 96usize, 48usize);
+    let c32 = (
+        (|z: Complex<f64>| Complex::new(z.re as f32, z.im as f32)) as fn(Complex<f64>) -> Complex<f32>,
+        (|z: Complex<f32>| Complex::new(z.re as f64, z.im as f64)) as fn(Complex<f32>) -> Complex<f64>,
+    );
+    let c64 = (
+        (|z: Complex<f64>| z) as fn(Complex<f64>) -> Complex<f64>,
+        (|z: Complex<f64>| z) as fn(Complex<f64>) -> Complex<f64>,
+    );
     for (mode, name) in [(ComputeType32F::Default, "default"), (ComputeType32F::Pedantic, "pedantic")] {
         for forced in drivers(mode == ComputeType32F::Default || cfg!(cublas_math_mode)) {
             let d = device(forced, |f| f.compute_type_32f = mode);
-            check_rounded::<Complex<f32>, Complex<f32>>(
-                &d,
-                &format!("c32 {name}, {forced:?}"),
-                m,
-                k,
-                n,
-                1e-5,
-                |x| Complex::new(x as f32, 0.0),
-                |z| z.re as f64,
-                |z| z.re as f64,
-            );
+            check_complex::<Complex<f32>>(&d, &format!("c32 {name}, {forced:?}"), m, k, n, 1e-5, c32.0, c32.1);
         }
     }
     for (mode, name) in [(ComputeType64F::Default, "default"), (ComputeType64F::Pedantic, "pedantic")] {
         for forced in drivers(mode == ComputeType64F::Default || cfg!(cublas_math_mode)) {
             let d = device(forced, |f| f.compute_type_64f = mode);
-            check_rounded::<Complex<f64>, Complex<f64>>(
-                &d,
-                &format!("c64 {name}, {forced:?}"),
-                m,
-                k,
-                n,
-                1e-13,
-                Complex::from,
-                |z| z.re,
-                |z| z.re,
-            );
+            check_complex::<Complex<f64>>(&d, &format!("c64 {name}, {forced:?}"), m, k, n, 1e-13, c64.0, c64.1);
         }
     }
     // the default chain (naive) gets the same answer for the modes cuBLAS cannot express
     for mode in [ComputeType32F::FastTF32, ComputeType32F::Fast16F, ComputeType32F::Fast16BF] {
         let d = device(MatMulDrivers::all(), |f| f.compute_type_32f = mode);
-        check_rounded::<Complex<f32>, Complex<f32>>(
-            &d,
-            "c32 fast mode -> default, chain",
-            m,
-            k,
-            n,
-            1e-5,
-            |x| Complex::new(x as f32, 0.0),
-            |z| z.re as f64,
-            |z| z.re as f64,
-        );
+        check_complex::<Complex<f32>>(&d, "c32 fast mode -> default, chain", m, k, n, 1e-5, c32.0, c32.1);
     }
     // the fixed-point emulation is real `f64` only: a `c64` output keeps the default
     let d = device(MatMulDrivers::all(), |f| f.compute_type_64f = ComputeType64F::EmulatedFixedPoint);
-    check_rounded::<Complex<f64>, Complex<f64>>(
-        &d,
-        "c64 fixed point -> default, chain",
-        m,
-        k,
-        n,
-        1e-13,
-        Complex::from,
-        |z| z.re,
-        |z| z.re,
-    );
+    check_complex::<Complex<f64>>(&d, "c64 fixed point -> default, chain", m, k, n, 1e-13, c64.0, c64.1);
 }
 
 /// The half triples on cuBLASLt and `cublasGemmEx`, and through the default chain: `f16 -> f16`
@@ -683,13 +725,15 @@ macro_rules! shape_cases {
         let at = $mk($data(11, k * m), $sh(1, [k, m]));
         let stepped0 = $mk($data(12, 4 * m * k), $sh(1, [2 * m, 2 * k]));
         let stepped = stepped0.i(s![slice!(None, None, 2), slice!(None, None, 2)]);
-        // the two special forms of the chain: the inner dot and the symmetric product
+        // the inner dot is the chain's second special form; the symmetric form runs on real views
+        // in `syrk_views` (test_matmul_forms) — a transposed **copy** like this row is a
+        // look-alike with different buffers, which the gemm chain serves
         let dot = $mk($data(16, k), vec![k]);
         let square = $mk($data(17, m * k), $sh(1, [m, k]));
         vec![
             ("plain", $mk($data(13, m * k), $sh(1, [m, k])), $mk($data(14, k * n), $sh(1, [k, n]))),
             ("inner dot", dot.clone(), dot.clone()),
-            ("syrk", square.clone(), square.t().to_owned()),
+            ("transposed copy (a syrk look-alike)", square.clone(), square.t().to_owned()),
             ("batched", a.clone(), b.clone()),
             ("transposed b, broadcast", a.clone(), c2.t().to_owned()),
             ("transposed a", at.t().to_owned(), b.clone()),
@@ -767,28 +811,95 @@ where
     eprintln!("  [{what}] 6 shapes x 2 orders x {} driver settings within {tol:.1e}", drivers.len());
 }
 
-/// The layout matrix over the type triples: tolerance per `(triple, mode)` here means the output
-/// rounding (all in the `Default` mode), the same numbers as `modes_half` and `modes_complex`.
+/// The layout matrix over the real and half type triples (the complex triples run in
+/// `complex_matrix`, whose data carries imaginary parts: a conjugation error is invisible on
+/// real-only data). Tolerance per `(triple, mode)` here means the output rounding (all in the
+/// `Default` mode), the same numbers as `modes_half`.
 #[test]
 fn triple_layout_matrix() {
     require_cuda!();
-    let re = |x: f64| Complex::new(x, 0.0);
-    let re_of = |z: Complex<f64>| z.re;
     matrix::<f32, f32>("f32 -> f32", true, |x| x as f32, f64::from, f64::from, 1e-5);
     matrix::<f64, f64>("f64 -> f64", true, |x| x, |x| x, |x| x, 1e-13);
-    matrix::<Complex<f32>, Complex<f32>>(
-        "c32 -> c32",
-        true,
-        |x: f64| Complex::new(x as f32, 0.0),
-        |z| z.re as f64,
-        |z| z.re as f64,
-        1e-5,
-    );
-    matrix::<Complex<f64>, Complex<f64>>("c64 -> c64", true, re, re_of, re_of, 1e-13);
     matrix::<f16, f16>("f16 -> f16", false, f16::from_f64, f64::from, f64::from, 1e-2);
     matrix::<f16, f32>("f16 -> f32", false, f16::from_f64, f64::from, f64::from, 1e-5);
     matrix::<bf16, bf16>("bf16 -> bf16", false, bf16::from_f64, f64::from, f64::from, 1e-2);
     matrix::<bf16, f32>("bf16 -> f32", false, bf16::from_f64, f64::from, f64::from, 1e-5);
+}
+
+/// The complex layout matrix: the same shapes and driver settings as `matrix`, with real and
+/// imaginary parts in the data and **both parts of the output** compared with the CPU complex
+/// product of the same operands. A conjugation error (`OP_C` instead of `OP_T`) would pass the
+/// real-only rows of `matrix`, so the complex triples live here instead.
+fn complex_matrix<S>(what: &str, tol: f64, narrow: fn(Complex<f64>) -> S, widen: fn(S) -> Complex<f64>)
+where
+    S: CudaDType + CudaMatMulMode + Copy + Clone + Send + Sync + 'static + num::Zero + num::One,
+{
+    let (m, k, n, p) = (12usize, 32usize, 8usize, 3usize);
+    let parts = |seed: u64, cnt: usize| -> Vec<Complex<f64>> {
+        let (re, im) = (data(cnt, seed), data(cnt, seed + 9));
+        re.into_iter().zip(im).map(|(re, im)| Complex::new(re, im)).collect()
+    };
+    let stored = |seed: u64, cnt: usize| -> Vec<S> { parts(seed, cnt).into_iter().map(narrow).collect() };
+    let rounded =
+        |seed: u64, cnt: usize| -> Vec<Complex<f64>> { parts(seed, cnt).into_iter().map(narrow).map(widen).collect() };
+    let mut drivers =
+        vec![MatMulDrivers::CUBLAS_LT, MatMulDrivers::CUBLAS_EX, MatMulDrivers::CUBLAS, MatMulDrivers::NAIVE];
+    drivers.push(MatMulDrivers::all());
+    for order in [RowMajor, ColMajor] {
+        let mut dcpu = DeviceCpuSerial::default();
+        dcpu.set_default_order(order);
+        let cpu = |v: Vec<Complex<f64>>, s: Vec<usize>| -> Cpu<Complex<f64>> { rt::asarray((v, &dcpu)).into_shape(s) };
+        let cases = shape_cases!(cpu, |b: usize, d: [usize; 2]| sh(order, b, d), rounded, m, k, n, p);
+        for forced in &drivers {
+            let mut flags = CudaRuntimeFlags::default();
+            flags.matmul_drivers = *forced;
+            let mut d = DeviceCuda::new(0).with_flags(flags);
+            d.set_default_order(order);
+            let on_device = shape_cases!(
+                |v: Vec<S>, s: Vec<usize>| rt::asarray((v, &d)).into_shape(s),
+                |b: usize, dims: [usize; 2]| sh(order, b, dims),
+                stored,
+                m,
+                k,
+                n,
+                p
+            );
+            for ((shape, a, b), (_, ag, bg)) in cases.iter().zip(&on_device) {
+                let want = rt::matmul(a, b);
+                let c_shape = want.shape().to_vec();
+                let want: Vec<Complex<f64>> =
+                    DeviceToCpuAPI::<Complex<f64>>::to_cpu_vec(want.to_contig(RowMajor).storage()).rstsr_unwrap();
+                let mut c: Tensor<S, DeviceCuda, IxD> = rt::full((c_shape, S::one(), &d));
+                ag.matmul_with_output::<S, S, IxD, IxD>(bg, &mut c.view_mut());
+                let got: Vec<Complex<f64>> = DeviceToCpuAPI::<S>::to_cpu_vec(c.to_contig(RowMajor).storage())
+                    .rstsr_unwrap()
+                    .into_iter()
+                    .map(widen)
+                    .collect();
+                let err = |pick: fn(&Complex<f64>) -> f64| {
+                    rel_err(&got.iter().map(pick).collect::<Vec<_>>(), &want.iter().map(pick).collect::<Vec<_>>())
+                };
+                let (err_re, err_im) = (err(|z| z.re), err(|z| z.im));
+                assert!(
+                    err_re <= tol && err_im <= tol,
+                    "{what} {shape}, {order:?}, {forced:?}: max rel err re {err_re:.3e}, im {err_im:.3e} > {tol:.1e}"
+                );
+            }
+        }
+    }
+    eprintln!("  [{what}] 8 shapes x 2 orders x {} driver settings within {tol:.1e}", drivers.len());
+}
+
+#[test]
+fn complex_layout_matrix() {
+    require_cuda!();
+    complex_matrix::<Complex<f32>>(
+        "c32 -> c32",
+        1e-5,
+        |z| Complex::new(z.re as f32, z.im as f32),
+        |z| Complex::new(z.re as f64, z.im as f64),
+    );
+    complex_matrix::<Complex<f64>>("c64 -> c64", 1e-13, |z| z, |z| z);
 }
 
 /// The inner dot `[k] @ [k] -> []`: a `1 x k @ k x 1` GEMM on the chain. Every serving driver
@@ -862,16 +973,13 @@ where
     }
 }
 
-/// The inner dot for the four types the cuBLAS drivers serve.
+/// The inner dot for the real types the cuBLAS drivers serve (the complex dots run in
+/// `complex_layout_matrix`, whose data carries imaginary parts).
 #[test]
 fn inner_dot() {
     require_cuda!();
     dot_matrix::<f32>("f32", true, |x| x as f32, |a, b| (a - b).abs() <= 1e-5 * (1.0 + b.abs()));
     dot_matrix::<f64>("f64", true, |x| x, |a, b| (a - b).abs() <= 1e-13 * (1.0 + b.abs()));
-    let re32 = |x: f64| Complex::new(x as f32, 0.0);
-    let re64 = |x: f64| Complex::new(x, 0.0);
-    dot_matrix::<Complex<f32>>("c32", true, re32, |a, b| (a - b).norm() <= 1e-5 * (1.0 + b.norm()));
-    dot_matrix::<Complex<f64>>("c64", true, re64, |a, b| (a - b).norm() <= 1e-13 * (1.0 + b.norm()));
 }
 
 /// The degenerate inner dots, on every cuBLAS driver set: `[0] @ [0]` is exactly `0.0` — the
@@ -881,9 +989,7 @@ fn inner_dot() {
 fn degenerate_dots() {
     require_cuda!();
     let dcpu = DeviceCpuSerial::default();
-    for drivers in
-        [MatMulDrivers::all(), MatMulDrivers::CUBLAS_LT, MatMulDrivers::CUBLAS_EX, MatMulDrivers::CUBLAS]
-    {
+    for drivers in [MatMulDrivers::all(), MatMulDrivers::CUBLAS_LT, MatMulDrivers::CUBLAS_EX, MatMulDrivers::CUBLAS] {
         let d = device(drivers, |_| {});
         for (k, val) in [(0usize, 0.0f64), (1, 3.0)] {
             let cpu: Tensor<f64, DeviceCpuSerial, _> = rt::asarray((vec![val; k], &dcpu)).into_shape([k]);

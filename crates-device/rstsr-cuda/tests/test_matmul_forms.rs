@@ -49,37 +49,100 @@ fn host_cpu<T: Clone>(t: &Cpu<T>) -> Vec<T> {
 }
 
 /// `a @ a.t()` on every path: the chain (the form first), the classic driver alone, and the chain
-/// without it; compared with the CPU device, in both orders. `a` is a row-strided view into a
-/// larger buffer (so the offset is not the buffer base).
-fn syrk_views<S: CudaDType + CudaMatMulMode + Copy + Clone + Send + Sync + 'static + num::Zero + num::One>(
+/// without it; compared with the CPU device, in both orders. `a` stays a **view** into a larger
+/// buffer in both orientations — a real row-strided operand, offset not the buffer base, leading
+/// dimension the big matrix's row stride. A copy would test an ordinary contiguous gemm, and the
+/// copied transpose is a look-alike the form must not take (it has its own test below).
+fn syrk_views<
+    S: CudaDType + CudaMatMulMode + Copy + Clone + Send + Sync + 'static + num::Zero + num::One + PartialEq,
+>(
     what: &str,
     close: fn(S, S) -> bool,
     mk: fn(Vec<Complex<f64>>) -> Vec<S>,
 ) {
     require_cuda!();
-    let (n, k) = (513usize, 53usize);
-    let v = data_c(4 * n * k, 7);
-    // the reference is row-major on the CPU; the device operand takes the order's own layout
-    let dcpu = DeviceCpuSerial::default();
-    let cpu_big: Cpu<S> = rt::asarray((mk(v.clone()), &dcpu)).into_shape([2 * n, 2 * k]);
-    let cpu_a = cpu_big.i(s![..n, ..k]).to_owned();
-    let want_t = rt::matmul(&cpu_a, cpu_a.t());
-    let (want_shape, want) = (want_t.shape().to_vec(), host_cpu(&want_t));
+    let (n, k) = (37usize, 19usize);
+    let v = data_c((n + 2) * (k + 3), 7);
+    let (zero, one, fill) = (
+        mk(vec![Complex::new(0.0, 0.0)])[0],
+        mk(vec![Complex::new(1.0, 0.0)])[0],
+        mk(vec![Complex::new(0.5, -0.25)])[0],
+    );
     for order in [RowMajor, ColMajor] {
+        // the CPU reference takes the same default order as the device, so the two big matrices
+        // are the same tensor laid out the same way and the views mean the same thing
+        let mut dcpu = DeviceCpuSerial::default();
+        dcpu.set_default_order(order);
+        let cpu_big: Cpu<S> = rt::asarray((mk(v.clone()), &dcpu)).into_shape([n + 2, k + 3]);
         for drivers in [MatMulDrivers::all(), MatMulDrivers::CUBLAS, MatMulDrivers::all().minus(MatMulDrivers::CUBLAS)]
         {
+            let ctx = |name: &str| format!("{what}, {order:?}, {drivers:?}, {name}");
             let mut flags = CudaRuntimeFlags::default();
             flags.matmul_drivers = drivers;
             let mut d = DeviceCuda::new(0).with_flags(flags);
-            let big: Tensor<S, DeviceCuda, IxD> = rt::asarray((mk(v.clone()), &d)).into_shape([2 * n, 2 * k]);
-            // a view inside a larger buffer, so the offset is not the buffer base
-            let a = big.i(s![..n, ..k]).to_contig(order).to_owned();
             d.set_default_order(order);
-            let got = rt::matmul(&a, a.t());
-            assert_eq!(got.shape(), &want_shape[..], "{what}, {order:?}, {drivers:?}");
-            let got = host(&got);
-            for (x, y) in got.iter().zip(&want) {
-                assert!(close(*x, *y), "{what}, {order:?}, {drivers:?}: {x:?} vs {y:?}");
+            let big: Tensor<S, DeviceCuda, IxD> = rt::asarray((mk(v.clone()), &d)).into_shape([n + 2, k + 3]);
+            // the two orientations of a real strided view; the roles swap with the device order
+            let cpu_big_t = cpu_big.t();
+            let big_t = big.t();
+            let cpu_a = cpu_big.i(s![1..n + 1, 2..k + 2]);
+            let cpu_a2 = cpu_big_t.i(s![2..k + 2, 1..n + 1]);
+            let dev_a = big.i(s![1..n + 1, 2..k + 2]);
+            let dev_a2 = big_t.i(s![2..k + 2, 1..n + 1]);
+            for (name, c, a) in [("a strided view", &cpu_a, &dev_a), ("a of the other orientation", &cpu_a2, &dev_a2)] {
+                let want = host_cpu(&rt::matmul(c, c.t()));
+                let got = host(&rt::matmul(a, a.t()));
+                for (x, y) in got.iter().zip(&want) {
+                    assert!(close(*x, *y), "{}: {x:?} vs {y:?}", ctx(name));
+                }
+            }
+            // k = 0: the product is exactly the zero matrix
+            let g0 = big.i(s![1..n + 1, 2..2]);
+            let got = host(&rt::matmul(&g0, g0.t()));
+            assert!(got.iter().all(|&x| x == zero), "{}: {:?}", ctx("k = 0"), &got[..4]);
+            // n = 1 and k = 1
+            for (name, cs, gs) in [
+                ("n = 1", cpu_big.i(s![1..2, 2..k + 2]), big.i(s![1..2, 2..k + 2])),
+                ("k = 1", cpu_big.i(s![1..n + 1, 2..3]), big.i(s![1..n + 1, 2..3])),
+            ] {
+                let want = host_cpu(&rt::matmul(&cs, cs.t()));
+                let got = host(&rt::matmul(&gs, gs.t()));
+                for (x, y) in got.iter().zip(&want) {
+                    assert!(close(*x, *y), "{}: {x:?} vs {y:?}", ctx(name));
+                }
+            }
+            // alpha = 0 with beta = 0 into a caller's buffer: exactly the zeros it asks for
+            let mut c = rt::full(([n * n], fill, &d)).into_shape([n, n]);
+            rt::matmul_from(&mut c, &dev_a, dev_a.t(), zero, zero);
+            let got = host(&c);
+            assert!(got.iter().all(|&x| x == zero), "{}: {:?}", ctx("alpha = 0, beta = 0"), &got[..4]);
+            // a strided output view inside a larger buffer: the block is written, nothing else is
+            let want = host_cpu(&rt::matmul(&cpu_a, cpu_a.t()));
+            let mut zbig: Tensor<S, DeviceCuda, IxD> =
+                rt::asarray((mk(vec![Complex::new(0.0, 0.0); 4 * n * n]), &d)).into_shape([2 * n, 2 * n]);
+            {
+                let mut block = zbig.i_mut(s![..n, ..n]);
+                rt::matmul_from(&mut block, &dev_a, dev_a.t(), one, zero);
+            }
+            let check_block = |got: &[S], name: &str| {
+                for (i, x) in got.iter().enumerate() {
+                    let (r, co) = (i / (2 * n), i % (2 * n));
+                    let y = if r < n && co < n { want[r * n + co] } else { zero };
+                    assert!(close(*x, y), "{}: [{r},{co}] {x:?} vs {y:?}", ctx(name));
+                }
+            };
+            check_block(&host(&zbig), "c strided view");
+            // the transposed output view has no column-major expression: the tiled/naive case,
+            // which only the whole chain serves
+            if drivers == MatMulDrivers::all() {
+                let mut zbig: Tensor<S, DeviceCuda, IxD> =
+                    rt::asarray((mk(vec![Complex::new(0.0, 0.0); 4 * n * n]), &d)).into_shape([2 * n, 2 * n]);
+                {
+                    let mut whole = zbig.view_mut().into_reverse_axes();
+                    let mut block = whole.i_mut(s![..n, ..n]);
+                    rt::matmul_from(&mut block, &dev_a, dev_a.t(), one, zero);
+                }
+                check_block(&host(&zbig), "c strided view, transposed");
             }
         }
     }
