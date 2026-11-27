@@ -122,9 +122,10 @@
 //! then decline and the chain falls through. Left unset, the version comes from `nvcc` (13.0 or
 //! newer carries everything); `test_matmul_modes` expects whichever was built.
 //!
-//! `test_matmul_modes` also runs the type-triple layout matrix: every accelerated triple, six
-//! argument shapes (plain, batched, transposed, broadcast, stepped), both default orders, on each
-//! serving driver alone, on the naive kernel and on the chain.
+//! `test_matmul_modes` also runs the type-triple layout matrix: every accelerated triple, eight
+//! argument shapes (plain, inner dot, the syrk look-alike, batched, transposed, broadcast,
+//! stepped), both default orders, on each serving driver alone, on the naive kernel and on the
+//! chain.
 //!
 //! Environment knobs, all read once per process and all kernel-build inputs (op behaviour,
 //! including which matmul drivers run, is set through [`flags::CudaRuntimeFlags`] instead):

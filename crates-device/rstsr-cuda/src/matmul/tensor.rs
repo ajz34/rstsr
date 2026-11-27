@@ -6,7 +6,9 @@ use crate::prelude_dev::*;
 /// [`matmul`] and its GEMM forms with the compute mode of the **output** given per call.
 ///
 /// `rstsr-core` cannot name the CUDA modes, so the entries that take one live here; they follow
-/// the core functions rule for rule, and read nothing from the device flags. The mode is that of
+/// the core functions rule for rule. Only the mode moves to the call: `matmul_drivers`,
+/// `matmul_use_syrk`, `fixedpoint_mantissa_bits` and `trace_matmul` still come from the device
+/// flags. The mode is that of
 /// the **output** type: `<TC as CudaMatMulMode>::Mode`. `matmul_from_mode` and
 /// `matmul_with_output_mode` get the output type from `c`; `matmul_with_mode` allocates it, so
 /// its result waits for the type to be named: `a.matmul_with_mode(&b, mode).out::<TC>()` (the

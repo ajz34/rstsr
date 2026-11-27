@@ -21,9 +21,10 @@ pub use crate::matmul::ComputeType32F;
 #[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
 #[non_exhaustive]
 pub struct CudaRuntimeFlags {
-    /// Compute type for 32-bit-float matmul (read by `f32`-output calls only).
+    /// Compute type for 32-bit-float matmul (read by calls with an `f32` or `Complex<f32>` output,
+    /// or half operands into an `f32` output).
     pub compute_type_32f: ComputeType32F,
-    /// Compute type for 64-bit-float matmul (read by `f64`-output calls only).
+    /// Compute type for 64-bit-float matmul (read by calls with an `f64` or `Complex<f64>` output).
     pub compute_type_64f: ComputeType64F,
     /// Compute type for 16-bit-float matmul (read by `f16`/`bf16`-output calls only).
     pub compute_type_16f: ComputeType16F,

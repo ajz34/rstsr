@@ -13,8 +13,8 @@ use num::Complex;
 /// 32-bit-float compute-type family (`cublasComputeType_t` names).
 ///
 /// Read by calls with an `f32`, `Complex<f32>` or half-operand output only. A mode the type triple
-/// cannot serve resolves to [`Self::Default`] silently; [`Self::Pedantic`] is never downgraded and
-/// is an error.
+/// cannot serve resolves to [`Self::Default`] silently; [`Self::Pedantic`] is served by every
+/// triple and is never downgraded.
 ///
 /// A driver that cannot express a mode declines the problem, and the next candidate runs
 /// (`Fast16BF` has no classic-entry math mode, so the classic driver hands it on; the cuBLASLt

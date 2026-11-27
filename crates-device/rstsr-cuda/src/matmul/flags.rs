@@ -115,7 +115,9 @@ pub enum MatMulUseSyrk {
     /// Every type cuBLAS's `?syrk` entries cover: `f32`, `f64`, `c32`, `c64`. cuBLAS's `f32`
     /// kernels lose against its gemm on thin operands (`k` well below `n`), by up to 2.3x.
     Allow,
-    /// `f64`, `c32` and `c64` only (they gain 1.3x to 3.6x); `f32` stays on the gemm chain.
+    /// `f32` stays on the gemm chain; the form's table serves `f64`, `c32` and `c64` only (the
+    /// types that gain 1.3x to 3.6x). The flag itself takes every other type, e.g. the halves,
+    /// which the form declines and the chain serves.
     #[default]
     Scientific,
     /// Never: the gemm chain always.
@@ -123,7 +125,8 @@ pub enum MatMulUseSyrk {
 }
 
 impl MatMulUseSyrk {
-    /// Whether the form is taken for an output of type `T`.
+    /// Whether the form is taken for an output of type `T` (the flag only: the form's own table
+    /// still declines the triples it cannot serve).
     pub(crate) fn takes<T: 'static>(self) -> bool {
         let real32 = std::any::TypeId::of::<T>() == std::any::TypeId::of::<f32>();
         match self {

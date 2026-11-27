@@ -14,7 +14,7 @@
 //!
 //! Nothing is declined here. An empty output returns before any driver is asked, and the two
 //! shapes that have no GEMM geometry at all (a batch rank over [`RANK_MAX`]) are refused by name
-//! before the chain.
+//! by the naive driver — the last of the chain, so nothing falls through.
 
 use super::super::geom::CallerGeom;
 use super::{Problem, Verdict};

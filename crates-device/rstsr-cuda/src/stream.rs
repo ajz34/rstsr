@@ -23,8 +23,9 @@ use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 /// is a good default — a stream *is* thread-safe at the CUDA API level, so kernel launches and copies
 /// from several threads order correctly — and it is why the tiled kernel never needed this while the
 /// cuBLAS path did. The handle therefore needs its own serialization, and it is kept *inside* this
-/// type so a caller cannot forget it: the guard is taken by
-/// `matmul::drivers::cublas::launch`, the only place that talks to cuBLAS.
+/// type so a caller cannot forget it: every entry into this handle takes the guard —
+/// `matmul::drivers::cublas::launch` (the classic entries), the `cublasGemmEx` driver and the
+/// symmetric form. The cuBLASLt driver serializes through its own per-ordinal lock.
 ///
 /// Serializing the calls costs nothing measurable: `cublas*gemm` returns after enqueueing, and the
 /// work it enqueued is on one stream, so it was going to be ordered anyway.
