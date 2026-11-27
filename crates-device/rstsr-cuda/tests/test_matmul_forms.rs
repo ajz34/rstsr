@@ -6,9 +6,9 @@
 use num::Complex;
 use rstsr::prelude::*;
 use rstsr_cuda::dtype::CudaDType;
-use rstsr_cuda::funcs;
 use rstsr_cuda::matmul::{CudaMatMulMode, MatMulDrivers, MatMulUseSyrk};
 use rstsr_cuda::prelude_dev::*;
+use rstsr_cuda::registry::is_available;
 
 /// Uniform data in `[-1, 1]` with an imaginary part in `[0, 1]`.
 fn data(n: usize, seed: u64) -> Vec<f64> {
@@ -28,7 +28,7 @@ fn data_c(n: usize, seed: u64) -> Vec<Complex<f64>> {
 
 macro_rules! require_cuda {
     () => {
-        if !std::panic::catch_unwind(funcs::is_available).unwrap_or(false) {
+        if !std::panic::catch_unwind(is_available).unwrap_or(false) {
             eprintln!("skipping: no CUDA device visible");
             return;
         }

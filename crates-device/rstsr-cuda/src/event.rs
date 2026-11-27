@@ -10,7 +10,7 @@ use std::sync::Arc;
 ///
 /// - `record(stream)` captures "everything enqueued on `stream` so far"; `wait(stream)` makes
 ///   `stream` wait for the recorded point.
-/// - `synchronize_f` blocks the host until the recorded point completes.
+/// - `synchronize` blocks the host until the recorded point completes.
 ///
 /// Created without timing support (`CU_EVENT_DISABLE_TIMING`), like the
 /// crate's internal ordering events.
@@ -42,23 +42,47 @@ impl CudaEvent {
         &self.inner
     }
 
-    /// Record the event on `stream`.
-    pub fn record(&self, stream: &CudaStreamObj) -> Result<()> {
+    /// Record the event on `stream`. Panics through the error mapping; use
+    /// [`CudaEvent::record_f`] for the fallible form.
+    pub fn record(&self, stream: &CudaStreamObj) {
+        self.record_f(stream).rstsr_unwrap()
+    }
+
+    /// Fallible form of [`CudaEvent::record`].
+    pub fn record_f(&self, stream: &CudaStreamObj) -> Result<()> {
         map_driver_result(self.inner.record(stream.inner()))
     }
 
-    /// Make `stream` wait for this event.
-    pub fn wait(&self, stream: &CudaStreamObj) -> Result<()> {
+    /// Make `stream` wait for this event. Panics through the error mapping;
+    /// use [`CudaEvent::wait_f`] for the fallible form.
+    pub fn wait(&self, stream: &CudaStreamObj) {
+        self.wait_f(stream).rstsr_unwrap()
+    }
+
+    /// Fallible form of [`CudaEvent::wait`].
+    pub fn wait_f(&self, stream: &CudaStreamObj) -> Result<()> {
         map_driver_result(stream.inner().wait(&self.inner))
     }
 
-    /// Block the host until the recorded point completes.
+    /// Block the host until the recorded point completes. Panics through the
+    /// error mapping; use [`CudaEvent::synchronize_f`] for the fallible form.
+    pub fn synchronize(&self) {
+        self.synchronize_f().rstsr_unwrap()
+    }
+
+    /// Fallible form of [`CudaEvent::synchronize`].
     pub fn synchronize_f(&self) -> Result<()> {
         map_driver_result(self.inner.synchronize())
     }
 
     /// Whether the recorded point has completed without waiting; an event that
-    /// was never recorded counts as complete.
+    /// was never recorded counts as complete. Panics through the error
+    /// mapping; use [`CudaEvent::is_complete_f`] for the fallible form.
+    pub fn is_complete(&self) -> bool {
+        self.is_complete_f().rstsr_unwrap()
+    }
+
+    /// Fallible form of [`CudaEvent::is_complete`].
     pub fn is_complete_f(&self) -> Result<bool> {
         map_driver_result(self.inner.try_is_complete())
     }

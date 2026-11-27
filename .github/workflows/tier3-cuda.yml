@@ -10,6 +10,9 @@
 #   3. checks, for each pinned CUDA version, that the `cfg`s `build.rs` derives from the cudarc
 #      bindings are the ones the pin names (a pin without its `cfg`s compiles and mis-answers at
 #      runtime, which is exactly the bug this caught).
+#   4. compiles and runs the facade (`rstsr`) with the `cuda` feature, so the `rt::cuda` prelude
+#      wiring cannot rot silently; its wiring test prints "skipping: no CUDA device visible"
+#      without a device, but every cfg-gated re-export still has to compile.
 #
 # It does not *run* the hardware suite. Those tests start with `require_cuda!()` and print
 # "skipping: no CUDA device visible" when there is no driver, so running them on this runner would
@@ -43,6 +46,8 @@ jobs:
         run: cargo test -p rstsr-cuda --lib --release
       - name: compile the hardware test suite (not run — no device on this runner)
         run: cargo test -p rstsr-cuda --all-targets --no-run --release
+      - name: facade cuda feature (rt::cuda prelude wiring; test skips without a device)
+        run: cargo test -p rstsr --features "cuda backtrace row_major" --no-default-features --lib
       - name: the build's cfgs match the pinned CUDA version
         run: |
           cfgs=$(cargo rustc -p rstsr-cuda --lib -- --print cfg)

@@ -3,14 +3,14 @@
 //! (copy-and-compare parity shape).
 
 use rstsr::prelude::*;
-use rstsr_cuda::funcs;
 use rstsr_cuda::prelude_dev::*;
+use rstsr_cuda::registry::is_available;
 use std::sync::Arc;
 
 /// D2H of a tensor's visible elements by layout gather (house helper).
 ///
-/// **1-D only**: it goes through `to_raw_f`, which asserts `ndim == 1`. Use [`host_nd`] for anything
-/// of higher rank and `to_scalar` for a 0-D result.
+/// **1-D only**: it goes through `to_raw_f`, which asserts `ndim == 1`. Use [`host_nd`] for
+/// anything of higher rank and `to_scalar` for a 0-D result.
 fn host_vec1<T, B, D, R>(t: &TensorAny<R, T, B, D>) -> Vec<T>
 where
     R: DataAPI<Data = <B as DeviceRawAPI<T>>::Raw>,
@@ -49,7 +49,7 @@ macro_rules! require_cuda {
         // reporting zero devices, so `is_available()` is not a probe on a machine without CUDA —
         // it aborts the test. Treat the panic as "no device" so this file skips on a laptop
         // instead of failing every GPU test, and still runs normally where a driver is present.
-        let available = std::panic::catch_unwind(funcs::is_available).unwrap_or(false);
+        let available = std::panic::catch_unwind(is_available).unwrap_or(false);
         if !available {
             eprintln!("skipping: no CUDA device visible");
             return;
@@ -218,11 +218,9 @@ fn pow_vs_cpu() {
     require_cuda!();
     let d = DeviceCuda::new(0);
     let dcpu = DeviceCpuSerial::default();
-    let base_cpu: Tensor<f64, DeviceCpuSerial, _> =
-        rt::asarray((exact_data(48, 95), &dcpu)).into_shape([6, 8]);
+    let base_cpu: Tensor<f64, DeviceCpuSerial, _> = rt::asarray((exact_data(48, 95), &dcpu)).into_shape([6, 8]);
     let exp_cpu: Tensor<f64, DeviceCpuSerial, _> =
-        rt::asarray((exact_data(48, 96).into_iter().map(|v| v.abs()).collect::<Vec<f64>>(), &dcpu))
-            .into_shape([6, 8]);
+        rt::asarray((exact_data(48, 96).into_iter().map(|v| v.abs()).collect::<Vec<f64>>(), &dcpu)).into_shape([6, 8]);
     let (base, exp) = (base_cpu.to_device(&d), exp_cpu.to_device(&d));
     assert_close(&host_nd(&rt::pow(&base, &exp)), &host_nd(&rt::pow(&base_cpu, &exp_cpu)), "pow(a, b)");
     // scalar exponent, the other branch of the promoting macro
@@ -342,7 +340,8 @@ fn scalar_ops_and_inplace_unary() {
     assert_eq!(host_vec1(&rt::eq(&v, 3.0)), host_vec1(&rt::eq(&v_cpu, 3.0)));
 
     // in-place unary on an owned tensor
-    // `f64` spelled out: `host_nd` is generic over the element type, so the literal no longer pins it.
+    // `f64` spelled out: `host_nd` is generic over the element type, so the literal no longer pins
+    // it.
     let b = rt::arange((0.1f64, 16.1, 1., &d)).into_shape([4, 4]);
     let b_cpu = rt::arange((0.1f64, 16.1, 1., &dcpu)).into_shape([4, 4]);
     let s = rt::sin(b);
@@ -571,9 +570,9 @@ fn assert_close(got: &[f64], want: &[f64], ctx: &str) {
 
 /// One shape per lane count the classifier can emit: `(rows, cols, contracted axis)`.
 ///
-/// C-order, so contracting the last axis makes the contraction unit-stride and contracting the first
-/// axis makes the output unit-stride. Row 5 is the interesting one for addressing: the contraction is
-/// *strided* and lanes > 1, which the old `ContigS` kernel never had to handle.
+/// C-order, so contracting the last axis makes the contraction unit-stride and contracting the
+/// first axis makes the output unit-stride. Row 5 is the interesting one for addressing: the
+/// contraction is *strided* and lanes > 1, which the old `ContigS` kernel never had to handle.
 ///
 /// The last three rows look transposed because they are: to reach 64/128/256 lanes the *output* has
 /// to be small (fewer than ~4000 elements) while the contraction is at least as long as the lane
@@ -593,14 +592,13 @@ const VECDOT_CASES: &[(usize, usize, isize)] = &[
 /// One case, built on the CPU device, copied to the GPU, and compared back.
 fn vecdot_case(rows: usize, cols: usize, axis: isize, exact: bool) {
     let d = DeviceCuda::new(0);
-    // Pin the host device: `DeviceCpu` resolves to `DeviceFaer` under `faer_as_default`, whose impls
-    // are feature-gated.
+    // Pin the host device: `DeviceCpu` resolves to `DeviceFaer` under `faer_as_default`, whose
+    // impls are feature-gated.
     let dcpu = DeviceCpuSerial::default();
     let gen = if exact { exact_data } else { probe_data };
 
     let seed = (rows as u64) * 1_000_003 + cols as u64;
-    let a_cpu: Tensor<f64, DeviceCpuSerial, _> =
-        rt::asarray((gen(rows * cols, seed), &dcpu)).into_shape([rows, cols]);
+    let a_cpu: Tensor<f64, DeviceCpuSerial, _> = rt::asarray((gen(rows * cols, seed), &dcpu)).into_shape([rows, cols]);
     let b_cpu: Tensor<f64, DeviceCpuSerial, _> =
         rt::asarray((gen(rows * cols, seed ^ 0x9e37_79b9), &dcpu)).into_shape([rows, cols]);
 
@@ -643,9 +641,9 @@ fn vecdot_all_lane_counts_vs_cpu() {
 /// Non-zero `layout.offset()` on the cooperative path.
 ///
 /// The launcher folds the split layouts' offset into the base pointer and the kernel then walks
-/// `ia = j * out_step + m * step`. A double-counted or dropped offset shows up here and nowhere else,
-/// and it shows up as wrong numbers rather than as an error — hence exact data, so the comparison is
-/// bitwise.
+/// `ia = j * out_step + m * step`. A double-counted or dropped offset shows up here and nowhere
+/// else, and it shows up as wrong numbers rather than as an error — hence exact data, so the
+/// comparison is bitwise.
 #[test]
 fn vecdot_offset_view() {
     require_cuda!();
@@ -679,8 +677,7 @@ fn vecdot_refuses_unplannable_shapes() {
     // there is nothing to coalesce on. Packing is the eventual answer; until then, refuse.
     let r = SliceI::new(None::<isize>, None::<isize>, Some(2isize));
     let a2: Tensor<f64, _, _> = rt::arange((0., 512. * 512., 1., &d)).into_shape([512, 512]);
-    let b2: Tensor<f64, _, _> =
-        rt::arange((1., (512. * 512.) + 1., 1., &d)).into_shape([512, 512]);
+    let b2: Tensor<f64, _, _> = rt::arange((1., (512. * 512.) + 1., 1., &d)).into_shape([512, 512]);
     match rt::vecdot_f(a2.i((r, r)), b2.i((r, r)), 0) {
         Ok(_) => panic!("stepped-on-both-axes should be refused, but it computed a result"),
         Err(e) => {
@@ -693,10 +690,8 @@ fn vecdot_refuses_unplannable_shapes() {
     // axis orders would multiply elements that do not correspond — a wrong answer that looks like a
     // number. The plan refuses; the fix is `to_contig` on one operand.
     let (p, i, j) = (2usize, 2usize, 3usize);
-    let ac_cpu: Tensor<f64, DeviceCpuSerial, _> =
-        rt::asarray((exact_data(p * i * j, 17), &dcpu)).into_shape([p, i, j]);
-    let bj_cpu: Tensor<f64, DeviceCpuSerial, _> =
-        rt::asarray((exact_data(p * j * i, 18), &dcpu)).into_shape([p, j, i]);
+    let ac_cpu: Tensor<f64, DeviceCpuSerial, _> = rt::asarray((exact_data(p * i * j, 17), &dcpu)).into_shape([p, i, j]);
+    let bj_cpu: Tensor<f64, DeviceCpuSerial, _> = rt::asarray((exact_data(p * j * i, 18), &dcpu)).into_shape([p, j, i]);
     let bt_cpu = bj_cpu.swapaxes(1, 2); // [p, i, j] with its (i, j) block F-ordered
     assert_eq!(bt_cpu.layout().stride()[1], 1, "fixture: b's contracted block must be F-ordered");
     let ac = ac_cpu.to_device(&d);
@@ -719,19 +714,19 @@ fn vecdot_refuses_unplannable_shapes() {
     // The second case this test used to assert — a rank-3 contraction leaving a two-axis output —
     // is no longer refused. `output_step` accepts any row-major run in shape order, not just a
     // single axis, so it is now planned and computed; `vecdot_multi_axis_output_vs_cpu` checks the
-    // answer instead. The refusals that remain reachable through `rt::vecdot_f` are the stepped one,
-    // a gapped contracted block and this enumeration mismatch, and `reduce_plan::tests` pins all
-    // three on the host, so a classifier change fails in `cargo test --lib` rather than only on a
-    // machine with a GPU.
+    // answer instead. The refusals that remain reachable through `rt::vecdot_f` are the stepped
+    // one, a gapped contracted block and this enumeration mismatch, and `reduce_plan::tests` pins
+    // all three on the host, so a classifier change fails in `cargo test --lib` rather than only on
+    // a machine with a GPU.
 }
 
 /// Contracting the last axis of a rank-3 tensor leaves a **two-axis** output part.
 ///
-/// This was refused by the first classifier, which required the output side to be a single axis, and
-/// that refusal was asserted in `vecdot_refuses_unplannable_shapes` until it quietly stopped being
-/// true. It is now supported: `[4, 8]` with strides `[64, 8]` is one arithmetic progression with
-/// step 8, so the kernel's `j * out_step` covers it. `reduce_plan::tests::multi_axis_output_is_planned`
-/// pins the same shape on the host.
+/// This was refused by the first classifier, which required the output side to be a single axis,
+/// and that refusal was asserted in `vecdot_refuses_unplannable_shapes` until it quietly stopped
+/// being true. It is now supported: `[4, 8]` with strides `[64, 8]` is one arithmetic progression
+/// with step 8, so the kernel's `j * out_step` covers it.
+/// `reduce_plan::tests::multi_axis_output_is_planned` pins the same shape on the host.
 #[test]
 fn vecdot_multi_axis_output_vs_cpu() {
     require_cuda!();
@@ -739,10 +734,8 @@ fn vecdot_multi_axis_output_vs_cpu() {
     let dcpu = DeviceCpuSerial::default();
 
     // Exact data, so any summation order agrees and the comparison stays an assert_eq!.
-    let a_cpu: Tensor<f64, DeviceCpuSerial, _> =
-        rt::asarray((exact_data(4 * 8 * 8, 21), &dcpu)).into_shape([4, 8, 8]);
-    let b_cpu: Tensor<f64, DeviceCpuSerial, _> =
-        rt::asarray((exact_data(4 * 8 * 8, 22), &dcpu)).into_shape([4, 8, 8]);
+    let a_cpu: Tensor<f64, DeviceCpuSerial, _> = rt::asarray((exact_data(4 * 8 * 8, 21), &dcpu)).into_shape([4, 8, 8]);
+    let b_cpu: Tensor<f64, DeviceCpuSerial, _> = rt::asarray((exact_data(4 * 8 * 8, 22), &dcpu)).into_shape([4, 8, 8]);
     let a = a_cpu.to_device(&d);
     let b = b_cpu.to_device(&d);
 
@@ -752,7 +745,6 @@ fn vecdot_multi_axis_output_vs_cpu() {
     assert_eq!(got.len(), 32, "(4, 8, 8) contracted on axis 2 leaves 4 * 8 outputs");
     assert_eq!(got, want, "rank-3 input with a two-axis output part");
 }
-
 
 /* #endregion */
 
@@ -778,7 +770,11 @@ const REDUCE_CASES: &[(usize, usize, isize)] = &[
 
 /// One `(rows, cols)` pair of tensors on both devices, integer-valued so summation order cannot
 /// matter, plus the probe-data twin for the ops where it can.
-fn reduce_pair(rows: usize, cols: usize, seed: u64) -> (Tensor<f64, DeviceCuda, IxD>, Tensor<f64, DeviceCpuSerial, IxD>) {
+fn reduce_pair(
+    rows: usize,
+    cols: usize,
+    seed: u64,
+) -> (Tensor<f64, DeviceCuda, IxD>, Tensor<f64, DeviceCpuSerial, IxD>) {
     let d = DeviceCuda::new(0);
     let dcpu = DeviceCpuSerial::default();
     let cpu: Tensor<f64, DeviceCpuSerial, _> =
@@ -804,7 +800,8 @@ fn reduce_sum_over_all_lane_counts() {
     }
 }
 
-/// The folds that are not a sum: `min`, `max` (order-blind) and `mean`, `l2_norm` (order-dependent).
+/// The folds that are not a sum: `min`, `max` (order-blind) and `mean`, `l2_norm`
+/// (order-dependent).
 #[test]
 fn reduce_families_vs_cpu() {
     require_cuda!();
@@ -858,8 +855,7 @@ fn reduce_multi_axis_keepdims_and_whole() {
     require_cuda!();
     let d = DeviceCuda::new(0);
     let dcpu = DeviceCpuSerial::default();
-    let cpu: Tensor<f64, DeviceCpuSerial, _> =
-        rt::asarray((exact_data(24, 11), &dcpu)).into_shape([2, 3, 4]);
+    let cpu: Tensor<f64, DeviceCpuSerial, _> = rt::asarray((exact_data(24, 11), &dcpu)).into_shape([2, 3, 4]);
     let gpu = cpu.to_device(&d);
 
     // (1, 2) contracted: those axes are one contiguous 12-element block per output
@@ -901,8 +897,7 @@ fn reduce_offset_view() {
     require_cuda!();
     let d = DeviceCuda::new(0);
     let dcpu = DeviceCpuSerial::default();
-    let cpu: Tensor<f64, DeviceCpuSerial, _> =
-        rt::asarray((exact_data(100 * 40, 5), &dcpu)).into_shape([100, 40]);
+    let cpu: Tensor<f64, DeviceCpuSerial, _> = rt::asarray((exact_data(100 * 40, 5), &dcpu)).into_shape([100, 40]);
     let gpu = cpu.to_device(&d);
 
     for axis in [0isize, 1] {
@@ -944,16 +939,16 @@ fn reduce_bool_family() {
 }
 
 /// `min`/`max` are the only rows whose identity is an infinity, and the only rows where the CPU and
-/// CUDA defaults disagree: `ExtReal::ext_min` propagates NaN (IEEE 754-2019 `minimum`), while CUDA's
-/// `fmin` returns the non-NaN operand. These two cases are what the `RSTSR_MIN` guard exists for.
+/// CUDA defaults disagree: `ExtReal::ext_min` propagates NaN (IEEE 754-2019 `minimum`), while
+/// CUDA's `fmin` returns the non-NaN operand. These two cases are what the `RSTSR_MIN` guard exists
+/// for.
 #[test]
 fn reduce_min_max_nan_and_signed_zero() {
     require_cuda!();
     let d = DeviceCuda::new(0);
     let dcpu = DeviceCpuSerial::default();
 
-    let with_nan: Tensor<f64, DeviceCpuSerial, _> =
-        rt::asarray((vec![1.0f64, f64::NAN, -2.0, 3.0], &dcpu));
+    let with_nan: Tensor<f64, DeviceCpuSerial, _> = rt::asarray((vec![1.0f64, f64::NAN, -2.0, 3.0], &dcpu));
     let g = with_nan.to_device(&d);
     assert!(with_nan.min().is_nan(), "CPU reference: NaN propagates");
     assert!(g.min().is_nan(), "min must propagate NaN, like ExtReal::ext_min");
@@ -976,9 +971,9 @@ fn reduce_min_max_nan_and_signed_zero() {
     }
 }
 
-/// Empty input: the launcher returns without writing, so the caller must have filled the output with
-/// the identity. `sum([]) == 0` reading uninitialised device memory that happens to look like zero is
-/// exactly the bug this catches.
+/// Empty input: the launcher returns without writing, so the caller must have filled the output
+/// with the identity. `sum([]) == 0` reading uninitialised device memory that happens to look like
+/// zero is exactly the bug this catches.
 #[test]
 fn reduce_empty_identities() {
     require_cuda!();
@@ -1004,8 +999,8 @@ fn reduce_empty_identities() {
 
 /// The explicit-output-dtype path: `f32` operand accumulated in `f64`.
 ///
-/// `0.1f32` is exact in `f64`, so summing 1000 of them in `f64` is exact while summing them in `f32`
-/// is not — which is what makes this a test of `@TACC@` and not just of the kernel running.
+/// `0.1f32` is exact in `f64`, so summing 1000 of them in `f64` is exact while summing them in
+/// `f32` is not — which is what makes this a test of `@TACC@` and not just of the kernel running.
 #[test]
 fn reduce_dtype_accumulator() {
     require_cuda!();
@@ -1037,14 +1032,11 @@ fn reduce_dtype_accumulator() {
         rt::mean_with_dtype::<f32, f64, _, _>(&small_cpu, ()).to_scalar(),
         "mean_with_dtype"
     );
-    assert_ne!(
-        got as f32, in_f32,
-        "the test data must actually distinguish an f64 accumulator from an f32 one"
-    );
+    assert_ne!(got as f32, in_f32, "the test data must actually distinguish an f64 accumulator from an f32 one");
 }
 
-/// `var` and `std` are the two-slot folds: `(Σx, Σx²)` accumulated together, `Σx²/n − (Σx/n)²` at the
-/// writer. Three things are tested separately because they fail for different reasons:
+/// `var` and `std` are the two-slot folds: `(Σx, Σx²)` accumulated together, `Σx²/n − (Σx/n)²` at
+/// the writer. Three things are tested separately because they fail for different reasons:
 ///
 /// - the **arithmetic**, against the CPU's own one-pass formula;
 /// - the **strided path**, where the contracted axis is a view's (the plan's step machinery);
@@ -1063,8 +1055,7 @@ fn var_std_vs_cpu() {
     // Arithmetic: both axes, and the whole array. Integer-valued data with a mean near zero, so the
     // one-pass formula is not dominated by cancellation and the comparison is about the fold.
     let (m, k) = (6usize, 32usize);
-    let a_cpu: Tensor<f64, DeviceCpuSerial, _> =
-        rt::asarray((exact_data(m * k, 91), &dcpu)).into_shape([m, k]);
+    let a_cpu: Tensor<f64, DeviceCpuSerial, _> = rt::asarray((exact_data(m * k, 91), &dcpu)).into_shape([m, k]);
     let a = a_cpu.to_device(&d);
     assert_close(&host_nd(&rt::var_axes(&a, 1)), &host_nd(&rt::var_axes(&a_cpu, 1)), "var over the last axis");
     assert_close(&host_nd(&rt::var_axes(&a, 0)), &host_nd(&rt::var_axes(&a_cpu, 0)), "var over the first axis");
@@ -1080,24 +1071,20 @@ fn var_std_vs_cpu() {
     assert_close(&host_nd(&rt::std_axes(&t, 0)), &host_nd(&rt::std_axes(&t_cpu, 0)), "std over a strided axis");
 
     // Multi-warp: the lane count is `max(free, need).next_power_of_two().min(cap)` with
-    // `need = MIN_BLOCKS*BLOCK/n_out`, so it is *few outputs* rather than long contractions that push
-    // lanes past a warp — here 4 outputs of 4096 give `lanes = 256`, which is what makes the
+    // `need = MIN_BLOCKS*BLOCK/n_out`, so it is *few outputs* rather than long contractions that
+    // push lanes past a warp — here 4 outputs of 4096 give `lanes = 256`, which is what makes the
     // shared-memory half of the tree live. A single-warp fixture cannot reach that code.
     let (m2, k2) = (4usize, 4096usize);
-    let big_cpu: Tensor<f64, DeviceCpuSerial, _> =
-        rt::asarray((exact_data(m2 * k2, 92), &dcpu)).into_shape([m2, k2]);
+    let big_cpu: Tensor<f64, DeviceCpuSerial, _> = rt::asarray((exact_data(m2 * k2, 92), &dcpu)).into_shape([m2, k2]);
     let big = big_cpu.to_device(&d);
     assert_close(&host_nd(&rt::var_axes(&big, 1)), &host_nd(&rt::var_axes(&big_cpu, 1)), "var over 4096 elements");
     assert_close(&host_nd(&rt::std_axes(&big, 1)), &host_nd(&rt::std_axes(&big_cpu, 1)), "std over 4096 elements");
 
     // A single `f32` instantiation: the template's `nan`/`sqrt` text and the accumulator width are
-    // per-dtype, and an untested second instantiation is exactly the kind of thing that compiles and
-    // is wrong.
-    let f_cpu: Tensor<f32, DeviceCpuSerial, _> = rt::asarray((
-        exact_data(64, 93).into_iter().map(|v| v as f32).collect::<Vec<f32>>(),
-        &dcpu,
-    ))
-    .into_shape([8, 8]);
+    // per-dtype, and an untested second instantiation is exactly the kind of thing that compiles
+    // and is wrong.
+    let f_cpu: Tensor<f32, DeviceCpuSerial, _> =
+        rt::asarray((exact_data(64, 93).into_iter().map(|v| v as f32).collect::<Vec<f32>>(), &dcpu)).into_shape([8, 8]);
     let f = f_cpu.to_device(&d);
     let got: Vec<f64> = host_nd(&rt::var_axes(&f, 1)).into_iter().map(|v| v as f64).collect();
     let want: Vec<f64> = host_nd(&rt::var_axes(&f_cpu, 1)).into_iter().map(|v| v as f64).collect();
@@ -1124,19 +1111,11 @@ fn outer_vs_cpu() {
     assert_eq!(host_nd(&rt::outer(&a, &b)), host_nd(&rt::outer(&a_cpu, &b_cpu)), "dense");
 
     // offset view: a[1..]
-    assert_eq!(
-        host_nd(&rt::outer(a.i(1..), &b)),
-        host_nd(&rt::outer(a_cpu.i(1..), &b_cpu)),
-        "offset operand"
-    );
+    assert_eq!(host_nd(&rt::outer(a.i(1..), &b)), host_nd(&rt::outer(a_cpu.i(1..), &b_cpu)), "offset operand");
 
     // negative-stride view: a[::-2]
     let rev = SliceI::new(None::<isize>, None::<isize>, Some(-2isize));
-    assert_eq!(
-        host_nd(&rt::outer(a.i(rev), &b)),
-        host_nd(&rt::outer(a_cpu.i(rev), &b_cpu)),
-        "negative-stride operand"
-    );
+    assert_eq!(host_nd(&rt::outer(a.i(rev), &b)), host_nd(&rt::outer(a_cpu.i(rev), &b_cpu)), "negative-stride operand");
 
     // into an existing output: the tier transmutes it into the write-only slot
     // `outer_from` wants a fixed-rank `Ix2` output; `into_shape` yields `IxD`, so narrow it
@@ -1148,9 +1127,9 @@ fn outer_vs_cpu() {
     assert_eq!(host_nd(&c), host_nd(&c_cpu), "outer_from");
 }
 
-/// `cross` has its own kernel (four reads, three writes per slot). The four cases pin the parts that
-/// a one-value-per-operand template could not have handled: the cyclic component order, a broadcast
-/// operand (stride 0 along the size-3 axis), a non-last axis, and a negative `axis`.
+/// `cross` has its own kernel (four reads, three writes per slot). The four cases pin the parts
+/// that a one-value-per-operand template could not have handled: the cyclic component order, a
+/// broadcast operand (stride 0 along the size-3 axis), a non-last axis, and a negative `axis`.
 #[test]
 fn cross_vs_cpu() {
     require_cuda!();
@@ -1173,11 +1152,7 @@ fn cross_vs_cpu() {
     // broadcast: a single vector against a stack — stride 0 along the cross axis for `b`
     let v: Tensor<f64, _, _> = rt::arange((1., 4., 1., &d));
     let v_cpu: Tensor<f64, DeviceCpuSerial, _> = rt::arange((1., 4., 1., &dcpu));
-    assert_eq!(
-        host_nd(&rt::cross(&a, &v, 1)),
-        host_nd(&rt::cross(&a_cpu, &v_cpu, 1)),
-        "broadcast operand"
-    );
+    assert_eq!(host_nd(&rt::cross(&a, &v, 1)), host_nd(&rt::cross(&a_cpu, &v_cpu, 1)), "broadcast operand");
 
     // a middle axis of a rank-3 tensor, and a strided (non-contiguous) stack
     let a3: Tensor<f64, _, _> = rt::arange((0., 24., 1., &d)).into_shape([2, 3, 4]);
@@ -1207,8 +1182,7 @@ type F64Pair = (Tensor<f64, DeviceCuda, IxD>, Tensor<f64, DeviceCpuSerial, IxD>)
 fn matmul_pair(m: usize, k: usize, n: usize, seed: u64) -> (F64Pair, F64Pair) {
     let d = DeviceCuda::new(0);
     let dcpu = DeviceCpuSerial::default();
-    let a_cpu: Tensor<f64, DeviceCpuSerial, _> =
-        rt::asarray((exact_data(m * k, seed), &dcpu)).into_shape([m, k]);
+    let a_cpu: Tensor<f64, DeviceCpuSerial, _> = rt::asarray((exact_data(m * k, seed), &dcpu)).into_shape([m, k]);
     let b_cpu: Tensor<f64, DeviceCpuSerial, _> =
         rt::asarray((exact_data(k * n, seed ^ 0x5bf0_3635), &dcpu)).into_shape([k, n]);
     ((a_cpu.to_device(&d), a_cpu), (b_cpu.to_device(&d), b_cpu))
@@ -1219,13 +1193,7 @@ fn matmul_pair(m: usize, k: usize, n: usize, seed: u64) -> (F64Pair, F64Pair) {
 #[test]
 fn matmul_gemm22_vs_cpu() {
     require_cuda!();
-    for &(m, k, n) in &[
-        (32usize, 32usize, 32usize),
-        (64, 64, 64),
-        (17, 33, 5),
-        (1, 8, 9),
-        (130, 70, 129),
-    ] {
+    for &(m, k, n) in &[(32usize, 32usize, 32usize), (64, 64, 64), (17, 33, 5), (1, 8, 9), (130, 70, 129)] {
         let ((a, a_cpu), (b, b_cpu)) = matmul_pair(m, k, n, m as u64 * 7 + n as u64);
         let got = host_nd(&rt::matmul(&a, &b));
         let want = host_nd(&rt::matmul(&a_cpu, &b_cpu));
@@ -1254,10 +1222,8 @@ fn matmul_transposed_operands() {
     // b^T-style right operand: [k, n] whose k axis is contiguous
     let b_base = rt::asarray((exact_data(n * k, 4), &dcpu)).into_shape([n, k]);
     let bt_cpu = b_base.swapaxes(0, 1);
-    let b0_cpu: Tensor<f64, DeviceCpuSerial, _> =
-        rt::asarray((exact_data(k * n, 5), &dcpu)).into_shape([k, n]);
-    let a0_cpu: Tensor<f64, DeviceCpuSerial, _> =
-        rt::asarray((exact_data(m * k, 6), &dcpu)).into_shape([m, k]);
+    let b0_cpu: Tensor<f64, DeviceCpuSerial, _> = rt::asarray((exact_data(k * n, 5), &dcpu)).into_shape([k, n]);
+    let a0_cpu: Tensor<f64, DeviceCpuSerial, _> = rt::asarray((exact_data(m * k, 6), &dcpu)).into_shape([m, k]);
 
     let at = at_cpu.to_device(&d);
     let bt = bt_cpu.to_device(&d);
@@ -1284,10 +1250,8 @@ fn matmul_batched_vs_cpu() {
     let dcpu = DeviceCpuSerial::default();
     let (p, m, k, n) = (5usize, 12usize, 16usize, 8usize);
 
-    let a_cpu: Tensor<f64, DeviceCpuSerial, _> =
-        rt::asarray((exact_data(p * m * k, 11), &dcpu)).into_shape([p, m, k]);
-    let b_cpu: Tensor<f64, DeviceCpuSerial, _> =
-        rt::asarray((exact_data(p * k * n, 12), &dcpu)).into_shape([p, k, n]);
+    let a_cpu: Tensor<f64, DeviceCpuSerial, _> = rt::asarray((exact_data(p * m * k, 11), &dcpu)).into_shape([p, m, k]);
+    let b_cpu: Tensor<f64, DeviceCpuSerial, _> = rt::asarray((exact_data(p * k * n, 12), &dcpu)).into_shape([p, k, n]);
     let a = a_cpu.to_device(&d);
     let b = b_cpu.to_device(&d);
 
@@ -1296,8 +1260,7 @@ fn matmul_batched_vs_cpu() {
     assert_eq!(got, host_nd(&rt::matmul(&a_cpu, &b_cpu)), "batched [p,m,k] @ [p,k,n]");
 
     // broadcast batch: the left operand has no batch axis, so its batch stride is 0
-    let a2_cpu: Tensor<f64, DeviceCpuSerial, _> =
-        rt::asarray((exact_data(m * k, 13), &dcpu)).into_shape([m, k]);
+    let a2_cpu: Tensor<f64, DeviceCpuSerial, _> = rt::asarray((exact_data(m * k, 13), &dcpu)).into_shape([m, k]);
     let a2 = a2_cpu.to_device(&d);
     assert_eq!(
         host_nd(&rt::matmul(&a2, &b)),
@@ -1306,8 +1269,8 @@ fn matmul_batched_vs_cpu() {
     );
 }
 
-/// `matmul_from`: the `beta` path, which reads `c`. The opposite of `matmul_uninit`, whose buffer is
-/// `MaybeUninit` and must never be read — hence the two entry points.
+/// `matmul_from`: the `beta` path, which reads `c`. The opposite of `matmul_uninit`, whose buffer
+/// is `MaybeUninit` and must never be read — hence the two entry points.
 #[test]
 fn matmul_from_alpha_beta() {
     require_cuda!();
@@ -1317,8 +1280,7 @@ fn matmul_from_alpha_beta() {
     let ((a, a_cpu), (b, b_cpu)) = matmul_pair(m, k, n, 21);
 
     let mut c: Tensor<f64, _, _> = rt::full(([m * n], 1.0f64, &d)).into_shape([m, n]);
-    let mut c_cpu: Tensor<f64, DeviceCpuSerial, _> =
-        rt::full(([m * n], 1.0f64, &dcpu)).into_shape([m, n]);
+    let mut c_cpu: Tensor<f64, DeviceCpuSerial, _> = rt::full(([m * n], 1.0f64, &dcpu)).into_shape([m, n]);
 
     rt::matmul_from(&mut c, &a, &b, 2.0f64, 3.0f64);
     rt::matmul_from(&mut c_cpu, &a_cpu, &b_cpu, 2.0f64, 3.0f64);
@@ -1326,8 +1288,7 @@ fn matmul_from_alpha_beta() {
 
     // beta = 0 must not read c: same answer from a NaN-filled buffer
     let mut z: Tensor<f64, _, _> = rt::full(([m * n], f64::NAN, &d)).into_shape([m, n]);
-    let mut z_cpu: Tensor<f64, DeviceCpuSerial, _> =
-        rt::full(([m * n], f64::NAN, &dcpu)).into_shape([m, n]);
+    let mut z_cpu: Tensor<f64, DeviceCpuSerial, _> = rt::full(([m * n], f64::NAN, &dcpu)).into_shape([m, n]);
     rt::matmul_from(&mut z, &a, &b, 1.0f64, 0.0f64);
     rt::matmul_from(&mut z_cpu, &a_cpu, &b_cpu, 1.0f64, 0.0f64);
     assert_eq!(host_nd(&z), host_nd(&z_cpu), "beta = 0 must ignore c's contents");
@@ -1343,12 +1304,10 @@ fn matmul_gemv_gevm_vs_cpu() {
     let dcpu = DeviceCpuSerial::default();
     let (m, k, n) = (24usize, 16usize, 18usize);
 
-    let a_cpu: Tensor<f64, DeviceCpuSerial, _> =
-        rt::asarray((exact_data(m * k, 31), &dcpu)).into_shape([m, k]);
+    let a_cpu: Tensor<f64, DeviceCpuSerial, _> = rt::asarray((exact_data(m * k, 31), &dcpu)).into_shape([m, k]);
     let v_cpu: Tensor<f64, DeviceCpuSerial, _> = rt::asarray((exact_data(k, 32), &dcpu));
     let w_cpu: Tensor<f64, DeviceCpuSerial, _> = rt::asarray((exact_data(k, 33), &dcpu));
-    let c_cpu: Tensor<f64, DeviceCpuSerial, _> =
-        rt::asarray((exact_data(k * n, 34), &dcpu)).into_shape([k, n]);
+    let c_cpu: Tensor<f64, DeviceCpuSerial, _> = rt::asarray((exact_data(k * n, 34), &dcpu)).into_shape([k, n]);
 
     let a = a_cpu.to_device(&d);
     let v = v_cpu.to_device(&d);
@@ -1356,17 +1315,9 @@ fn matmul_gemv_gevm_vs_cpu() {
     let c = c_cpu.to_device(&d);
 
     // rule 4: [m, k] @ [k] -> [m]
-    assert_eq!(
-        host_vec1(&rt::matmul(&a, &v)),
-        host_vec1(&rt::matmul(&a_cpu, &v_cpu)),
-        "gemv: [m,k] @ [k]"
-    );
+    assert_eq!(host_vec1(&rt::matmul(&a, &v)), host_vec1(&rt::matmul(&a_cpu, &v_cpu)), "gemv: [m,k] @ [k]");
     // rule 3: [k] @ [k, n] -> [n]
-    assert_eq!(
-        host_vec1(&rt::matmul(&w, &c)),
-        host_vec1(&rt::matmul(&w_cpu, &c_cpu)),
-        "gevm: [k] @ [k,n]"
-    );
+    assert_eq!(host_vec1(&rt::matmul(&w, &c)), host_vec1(&rt::matmul(&w_cpu, &c_cpu)), "gevm: [k] @ [k,n]");
 }
 
 /// `ColMajor`: the device reverses every layout and swaps the operands, per the identity in
@@ -1381,10 +1332,8 @@ fn matmul_col_major_vs_cpu() {
     dcpu.set_default_order(ColMajor);
     let (m, k, n) = (20usize, 12usize, 32usize);
 
-    let a_cpu: Tensor<f64, DeviceCpuSerial, _> =
-        rt::asarray((exact_data(m * k, 41), &dcpu)).into_shape([m, k]);
-    let b_cpu: Tensor<f64, DeviceCpuSerial, _> =
-        rt::asarray((exact_data(k * n, 42), &dcpu)).into_shape([k, n]);
+    let a_cpu: Tensor<f64, DeviceCpuSerial, _> = rt::asarray((exact_data(m * k, 41), &dcpu)).into_shape([m, k]);
+    let b_cpu: Tensor<f64, DeviceCpuSerial, _> = rt::asarray((exact_data(k * n, 42), &dcpu)).into_shape([k, n]);
     let a = a_cpu.to_device(&d);
     let b = b_cpu.to_device(&d);
 
@@ -1397,10 +1346,10 @@ fn matmul_col_major_vs_cpu() {
 /// Several threads using one device at once, which is one stream and therefore one cuBLAS handle.
 ///
 /// `cublasHandle_t` is not thread-safe, but `cudarc` declares `unsafe impl Sync for CudaBlas`, and
-/// the registry's one-stream-per-ordinal cache hands every `DeviceCuda::new(0)` the same handle. The
-/// lock inside `CublasHandle` is what makes this legal, and this is the test that exercises it: the
-/// library is expected to support several threads on one device, not merely to survive `cargo test`'s
-/// default parallelism.
+/// the registry's one-stream-per-ordinal cache hands every `DeviceCuda::new(0)` the same handle.
+/// The lock inside `CublasHandle` is what makes this legal, and this is the test that exercises it:
+/// the library is expected to support several threads on one device, not merely to survive `cargo
+/// test`'s default parallelism.
 ///
 /// Each thread uses its **own** data on purpose. An earlier version gave every thread the same
 /// matrices, which made the test blind to exactly what it should catch: if two threads' buffers or
@@ -1418,10 +1367,8 @@ fn matmul_from_several_threads_on_one_device() {
         .map(|t| {
             let a_data = exact_data(m * k, 61 + 2 * t);
             let b_data = exact_data(k * n, 62 + 2 * t);
-            let a_cpu: Tensor<f64, DeviceCpuSerial, _> =
-                rt::asarray((a_data.clone(), &dcpu)).into_shape([m, k]);
-            let b_cpu: Tensor<f64, DeviceCpuSerial, _> =
-                rt::asarray((b_data.clone(), &dcpu)).into_shape([k, n]);
+            let a_cpu: Tensor<f64, DeviceCpuSerial, _> = rt::asarray((a_data.clone(), &dcpu)).into_shape([m, k]);
+            let b_cpu: Tensor<f64, DeviceCpuSerial, _> = rt::asarray((b_data.clone(), &dcpu)).into_shape([k, n]);
             let want = host_nd(&rt::matmul(&a_cpu, &b_cpu));
             (a_data, b_data, want)
         })
@@ -1453,9 +1400,10 @@ fn matmul_from_several_threads_on_one_device() {
 /// The tier-0 promise: a contraction that is a GEMM over **views**, so no copy is made.
 ///
 /// Every case here is one the planner accepts; the refusals are pinned by
-/// [`tensordot_refuses_a_contraction_that_needs_a_pack`]. What is being tested is not the arithmetic
-/// (cuBLAS owns that) but the *scheduling*: the axis reorder to `[free…, ctr…]` / `[ctr…, free…]`,
-/// the merge of each block into one `M`/`K`/`N` factor, and the handover to `matmul`.
+/// [`tensordot_refuses_a_contraction_that_needs_a_pack`]. What is being tested is not the
+/// arithmetic (cuBLAS owns that) but the *scheduling*: the axis reorder to `[free…, ctr…]` /
+/// `[ctr…, free…]`, the merge of each block into one `M`/`K`/`N` factor, and the handover to
+/// `matmul`.
 #[test]
 fn tensordot_views_only_vs_cpu() {
     require_cuda!();
@@ -1463,10 +1411,8 @@ fn tensordot_views_only_vs_cpu() {
     let dcpu = DeviceCpuSerial::default();
 
     // (5,4) @ (4,6), contracting a's trailing with b's leading axis.
-    let a_cpu: Tensor<f64, DeviceCpuSerial, _> =
-        rt::asarray((exact_data(5 * 4, 71), &dcpu)).into_shape([5, 4]);
-    let b_cpu: Tensor<f64, DeviceCpuSerial, _> =
-        rt::asarray((exact_data(4 * 6, 72), &dcpu)).into_shape([4, 6]);
+    let a_cpu: Tensor<f64, DeviceCpuSerial, _> = rt::asarray((exact_data(5 * 4, 71), &dcpu)).into_shape([5, 4]);
+    let b_cpu: Tensor<f64, DeviceCpuSerial, _> = rt::asarray((exact_data(4 * 6, 72), &dcpu)).into_shape([4, 6]);
     let (a, b) = (a_cpu.to_device(&d), b_cpu.to_device(&d));
     assert_eq!(
         host_nd(&rt::tensordot(&a, &b, 1)),
@@ -1477,8 +1423,7 @@ fn tensordot_views_only_vs_cpu() {
     // A left operand whose `m` axis is contiguous. The canonical block is already `[m, k]` with
     // strides `[1, m]`, i.e. a 2-D layout cuBLAS takes as `OP_T` with `lda = m` — the case that
     // would silently transpose if the planner or the geometry got the roles wrong.
-    let base_cpu: Tensor<f64, DeviceCpuSerial, _> =
-        rt::asarray((exact_data(4 * 5, 73), &dcpu)).into_shape([4, 5]);
+    let base_cpu: Tensor<f64, DeviceCpuSerial, _> = rt::asarray((exact_data(4 * 5, 73), &dcpu)).into_shape([4, 5]);
     let at_cpu = base_cpu.swapaxes(0, 1);
     let at = at_cpu.to_device(&d);
     assert_eq!(at.layout().stride()[0], 1, "fixture: the m axis must be the contiguous one");
@@ -1490,10 +1435,8 @@ fn tensordot_views_only_vs_cpu() {
 
     // (2,3,4) @ (3,4,5) contracting a's trailing *block* with b's leading block: the K factor is a
     // merge of two axes on each side, still a view.
-    let a3_cpu: Tensor<f64, DeviceCpuSerial, _> =
-        rt::asarray((exact_data(2 * 3 * 4, 74), &dcpu)).into_shape([2, 3, 4]);
-    let b3_cpu: Tensor<f64, DeviceCpuSerial, _> =
-        rt::asarray((exact_data(3 * 4 * 5, 75), &dcpu)).into_shape([3, 4, 5]);
+    let a3_cpu: Tensor<f64, DeviceCpuSerial, _> = rt::asarray((exact_data(2 * 3 * 4, 74), &dcpu)).into_shape([2, 3, 4]);
+    let b3_cpu: Tensor<f64, DeviceCpuSerial, _> = rt::asarray((exact_data(3 * 4 * 5, 75), &dcpu)).into_shape([3, 4, 5]);
     let (a3, b3) = (a3_cpu.to_device(&d), b3_cpu.to_device(&d));
     assert_eq!(
         host_nd(&rt::tensordot(&a3, &b3, ([1, 2], [0, 1]))),
@@ -1504,12 +1447,10 @@ fn tensordot_views_only_vs_cpu() {
     // The *leading*-axis orientation: contract a's axis 0 of (3,4,5) with (3,2). The free block of
     // `a` is (4,5) with the contracted axis trailing in memory, so the 2-D block comes back as
     // [20, 3] with strides [1, 20] — unit stride on `M`, i.e. an `OP_T` handover. This was the case
-    // I expected tier 0 to refuse; the audit in `probe/geomprobe` showed it does not, so it is pinned
-    // here rather than left to the doc comment.
-    let l_cpu: Tensor<f64, DeviceCpuSerial, _> =
-        rt::asarray((exact_data(3 * 4 * 5, 82), &dcpu)).into_shape([3, 4, 5]);
-    let m_cpu: Tensor<f64, DeviceCpuSerial, _> =
-        rt::asarray((exact_data(3 * 2, 83), &dcpu)).into_shape([3, 2]);
+    // I expected tier 0 to refuse; the audit in `probe/geomprobe` showed it does not, so it is
+    // pinned here rather than left to the doc comment.
+    let l_cpu: Tensor<f64, DeviceCpuSerial, _> = rt::asarray((exact_data(3 * 4 * 5, 82), &dcpu)).into_shape([3, 4, 5]);
+    let m_cpu: Tensor<f64, DeviceCpuSerial, _> = rt::asarray((exact_data(3 * 2, 83), &dcpu)).into_shape([3, 2]);
     let (l, m) = (l_cpu.to_device(&d), m_cpu.to_device(&d));
     assert_eq!(
         host_nd(&rt::tensordot(&l, &m, ([0], [0]))),
@@ -1519,10 +1460,8 @@ fn tensordot_views_only_vs_cpu() {
 
     // The DF-MP2 shape: one contracted axis, two free axes on the left, one on the right. This is
     // `(i, a, P) x (P, b) -> (i, a, b)`, the pair-energy tile, and it must not need a pack.
-    let c_cpu: Tensor<f64, DeviceCpuSerial, _> =
-        rt::asarray((exact_data(3 * 4 * 5, 76), &dcpu)).into_shape([3, 4, 5]);
-    let v_cpu: Tensor<f64, DeviceCpuSerial, _> =
-        rt::asarray((exact_data(5 * 2, 77), &dcpu)).into_shape([5, 2]);
+    let c_cpu: Tensor<f64, DeviceCpuSerial, _> = rt::asarray((exact_data(3 * 4 * 5, 76), &dcpu)).into_shape([3, 4, 5]);
+    let v_cpu: Tensor<f64, DeviceCpuSerial, _> = rt::asarray((exact_data(5 * 2, 77), &dcpu)).into_shape([5, 2]);
     let (c, v) = (c_cpu.to_device(&d), v_cpu.to_device(&d));
     assert_eq!(
         host_nd(&rt::tensordot(&c, &v, ([2], [0]))),
@@ -1541,10 +1480,8 @@ fn tensordot_col_major_vs_cpu() {
     let mut dcpu = DeviceCpuSerial::default();
     dcpu.set_default_order(ColMajor);
 
-    let a_cpu: Tensor<f64, DeviceCpuSerial, _> =
-        rt::asarray((exact_data(4 * 5 * 3, 78), &dcpu)).into_shape([4, 5, 3]);
-    let b_cpu: Tensor<f64, DeviceCpuSerial, _> =
-        rt::asarray((exact_data(3 * 6, 79), &dcpu)).into_shape([3, 6]);
+    let a_cpu: Tensor<f64, DeviceCpuSerial, _> = rt::asarray((exact_data(4 * 5 * 3, 78), &dcpu)).into_shape([4, 5, 3]);
+    let b_cpu: Tensor<f64, DeviceCpuSerial, _> = rt::asarray((exact_data(3 * 6, 79), &dcpu)).into_shape([3, 6]);
     let (a, b) = (a_cpu.to_device(&d), b_cpu.to_device(&d));
 
     let got = host_nd(&rt::tensordot(&a, &b, ([2], [0])));
@@ -1554,11 +1491,11 @@ fn tensordot_col_major_vs_cpu() {
 
 /// The boundary, pinned rather than discovered later: a `K` that is not one stride declines.
 ///
-/// Contracting `a`'s axes `[0, 2]` of `(2, 3, 4)` leaves the two contracted axes with a hole between
-/// them in memory (strides `24` and `1`), so no single leading dimension spans `K`. That is the only
-/// kind of case tier 0 refuses: an *orientation* is not a problem — a block with unit stride on `M`
-/// instead of `N` is handed to cuBLAS as `OP_T`, which is why the leading-axis form in
-/// [`tensordot_views_only_vs_cpu`] works.
+/// Contracting `a`'s axes `[0, 2]` of `(2, 3, 4)` leaves the two contracted axes with a hole
+/// between them in memory (strides `24` and `1`), so no single leading dimension spans `K`. That is
+/// the only kind of case tier 0 refuses: an *orientation* is not a problem — a block with unit
+/// stride on `M` instead of `N` is handed to cuBLAS as `OP_T`, which is why the leading-axis form
+/// in [`tensordot_views_only_vs_cpu`] works.
 ///
 /// The verdict is a property of shape and strides alone, so it reproduces without a GPU; the
 /// companion audit in `probe/geomprobe` (bin `tensordot`) walks both sides of it.
@@ -1587,8 +1524,8 @@ fn tensordot_refuses_a_contraction_that_needs_a_pack() {
 /// The `correction` is handed to the device, which computes the factor from the reduced size and
 /// folds it in; the public wrappers carry no element bound and no host-closure bound.
 ///
-/// The first assertion is the `None` path (no factor at all); the second pins `M / (M - correction)`
-/// against the CPU.
+/// The first assertion is the `None` path (no factor at all); the second pins `M / (M -
+/// correction)` against the CPU.
 #[test]
 fn var_std_with_dtype_vs_cpu() {
     require_cuda!();
@@ -1629,9 +1566,9 @@ fn var_std_with_dtype_vs_cpu() {
 
 /// `argmax`/`argmin`/`nanargmax`/`nanargmin`, compared against the CPU's own answer.
 ///
-/// The comparison is the test: the index of an extremum is a *convention* (which of two equal values
-/// wins, what a NaN does), and the only authority is what the CPU device returns. Ties and NaNs are
-/// therefore placed deliberately rather than left to the data.
+/// The comparison is the test: the index of an extremum is a *convention* (which of two equal
+/// values wins, what a NaN does), and the only authority is what the CPU device returns. Ties and
+/// NaNs are therefore placed deliberately rather than left to the data.
 #[test]
 fn arg_reductions_vs_cpu() {
     require_cuda!();
@@ -1652,14 +1589,11 @@ fn arg_reductions_vs_cpu() {
     }
     assert_eq!(rt::argmax(&a), rt::argmax(&a_cpu), "argmax over every axis");
 
-    // (2) ties. `[3, 3, 1, 3]` has its maximum at three positions; the CPU keeps the smallest index,
-    // and the kernel's lexicographic combine has to agree even though the tree visits blocks in an
-    // order the fold never sees.
-    let tie_cpu: Tensor<f64, DeviceCpuSerial, _> = rt::asarray((
-        vec![3.0, 3.0, 1.0, 3.0, 1.0, 3.0, 3.0, 1.0, 2.0, 2.0, 2.0, 2.0],
-        &dcpu,
-    ))
-    .into_shape([3, 4]);
+    // (2) ties. `[3, 3, 1, 3]` has its maximum at three positions; the CPU keeps the smallest
+    // index, and the kernel's lexicographic combine has to agree even though the tree visits blocks
+    // in an order the fold never sees.
+    let tie_cpu: Tensor<f64, DeviceCpuSerial, _> =
+        rt::asarray((vec![3.0, 3.0, 1.0, 3.0, 1.0, 3.0, 3.0, 1.0, 2.0, 2.0, 2.0, 2.0], &dcpu)).into_shape([3, 4]);
     let tie = tie_cpu.to_device(&d);
     assert_eq!(
         host_nd(&rt::argmax_axes(&tie, 1)),
@@ -1675,11 +1609,9 @@ fn arg_reductions_vs_cpu() {
     // (3) NaN. The two policies disagree *on purpose*: a leading NaN wins for `argmax` and is
     // skipped for `nanargmax` (CPU: `f_comp_std_max` vs `f_comp_nan_max`). Both are pinned, because
     // "do the sane thing" would silently differ from the CPU on one of them.
-    let nan_cpu: Tensor<f64, DeviceCpuSerial, _> = rt::asarray((
-        vec![f64::NAN, 5.0, 1.0, 9.0, 5.0, f64::NAN, 9.0, f64::NAN, 2.0, 2.0, f64::NAN, 2.0],
-        &dcpu,
-    ))
-    .into_shape([3, 4]);
+    let nan_cpu: Tensor<f64, DeviceCpuSerial, _> =
+        rt::asarray((vec![f64::NAN, 5.0, 1.0, 9.0, 5.0, f64::NAN, 9.0, f64::NAN, 2.0, 2.0, f64::NAN, 2.0], &dcpu))
+            .into_shape([3, 4]);
     let nan = nan_cpu.to_device(&d);
     assert_eq!(
         host_nd(&rt::argmax_axes(&nan, 1)),
@@ -1691,11 +1623,7 @@ fn arg_reductions_vs_cpu() {
         host_nd(&rt::nanargmax_axes(&nan_cpu, 1)),
         "nanargmax with NaNs (NaN is skipped)"
     );
-    assert_eq!(
-        host_nd(&rt::nanargmin_axes(&nan, 1)),
-        host_nd(&rt::nanargmin_axes(&nan_cpu, 1)),
-        "nanargmin with NaNs"
-    );
+    assert_eq!(host_nd(&rt::nanargmin_axes(&nan, 1)), host_nd(&rt::nanargmin_axes(&nan_cpu, 1)), "nanargmin with NaNs");
 
     // (4) an all-NaN slice: the CPU raises, so the kernel writes an out-of-range index and the impl
     // turns it into the same error.
@@ -1727,11 +1655,11 @@ fn arg_reductions_vs_cpu() {
 ///
 /// - a *single* axis is always in logical order, however strided it is — `argmax(t, 1)` on a
 ///   transposed view has one contracted axis with stride 2, and must simply work;
-/// - a *multi-axis* contraction can be out of order. Over a transposed `[2, 3]` view (strides
-///   `[1, 2]`), the flat enumeration runs axis 0 fastest while the logical index runs axis 1
-///   fastest. The reduce plan merges it happily — it sorts by stride, and `1*2 == 2` is a clean
-///   arithmetic progression — so the step is 1 where the logical step is 2. Values would be right
-///   and every index wrong, which is why this is checked rather than assumed.
+/// - a *multi-axis* contraction can be out of order. Over a transposed `[2, 3]` view (strides `[1,
+///   2]`), the flat enumeration runs axis 0 fastest while the logical index runs axis 1 fastest.
+///   The reduce plan merges it happily — it sorts by stride, and `1*2 == 2` is a clean arithmetic
+///   progression — so the step is 1 where the logical step is 2. Values would be right and every
+///   index wrong, which is why this is checked rather than assumed.
 #[test]
 fn arg_refuses_a_contraction_not_in_logical_order() {
     require_cuda!();
@@ -1764,8 +1692,8 @@ fn arg_refuses_a_contraction_not_in_logical_order() {
     assert_eq!(rt::argmax(&contig), rt::argmax(&t_cpu), "to_contig should make it answerable");
 }
 
-/// `cumulative_sum`/`cumulative_prod` against the CPU, over the shapes that exercise each part of the
-/// kernel:
+/// `cumulative_sum`/`cumulative_prod` against the CPU, over the shapes that exercise each part of
+/// the kernel:
 ///
 /// - a 1-D scan, which is the trivial line split;
 /// - axis 1 and axis 0 of a 2-D array, i.e. the innermost and the outermost axis (different strides
@@ -1786,11 +1714,7 @@ fn cumulative_sum_prod_vs_cpu() {
     // 1-D
     let v_cpu: Tensor<f64, DeviceCpuSerial, _> = rt::asarray((exact_data(9, 141), &dcpu));
     let v = v_cpu.to_device(&d);
-    assert_close(
-        &host_nd(&rt::cumulative_sum(&v, 0)),
-        &host_nd(&rt::cumulative_sum(&v_cpu, 0)),
-        "cumsum 1-D",
-    );
+    assert_close(&host_nd(&rt::cumulative_sum(&v, 0)), &host_nd(&rt::cumulative_sum(&v_cpu, 0)), "cumsum 1-D");
     assert_close(
         &host_nd(&rt::cumulative_sum(&v, (0, true))),
         &host_nd(&rt::cumulative_sum(&v_cpu, (0, true))),
@@ -1834,7 +1758,8 @@ fn cumulative_sum_prod_vs_cpu() {
         "cumsum 600 elements (two chunks)",
     );
 
-    // transposed input: the two rest layouts have different strides, so a shared assumption would fail
+    // transposed input: the two rest layouts have different strides, so a shared assumption would
+    // fail
     let t_cpu = a_cpu.swapaxes(0, 1);
     let t = t_cpu.to_device(&d);
     assert_close(
@@ -1844,11 +1769,8 @@ fn cumulative_sum_prod_vs_cpu() {
     );
 
     // cumprod on small integers, so every partial product is exact
-    let p_cpu: Tensor<f64, DeviceCpuSerial, _> = rt::asarray((
-        (0..24).map(|i| 1.0 + (i % 3) as f64).collect::<Vec<f64>>(),
-        &dcpu,
-    ))
-    .into_shape([4, 6]);
+    let p_cpu: Tensor<f64, DeviceCpuSerial, _> =
+        rt::asarray(((0..24).map(|i| 1.0 + (i % 3) as f64).collect::<Vec<f64>>(), &dcpu)).into_shape([4, 6]);
     let p = p_cpu.to_device(&d);
     for init in [false, true] {
         assert_close(
@@ -1867,8 +1789,9 @@ fn cumulative_sum_prod_vs_cpu() {
 ///
 /// These had no CUDA impls at all, and nothing caught it: `&a + &b` goes through the out-of-place
 /// traits and worked, so every existing test passed while the most natural expression in the crate
-/// failed to compile. The census missed it too, because the CPU device declares these traits through
-/// `#[duplicate_item]`, which hides both sides from a scan for `impl … for DeviceCpuSerial`.
+/// failed to compile. The census missed it too, because the CPU device declares these traits
+/// through `#[duplicate_item]`, which hides both sides from a scan for `impl … for
+/// DeviceCpuSerial`.
 ///
 /// The two directions are separate impls because they are not symmetric: the left-consuming form
 /// writes `a = a op b` (destination is the first operand) and the right-consuming form writes
@@ -1885,22 +1808,14 @@ fn owned_binary_operands_vs_cpu() {
     let (a, b) = (a_cpu.to_device(&d), b_cpu.to_device(&d));
 
     // left-consuming, commutative
-    assert_eq!(
-        host_nd(&(a.clone() + b.clone())),
-        host_nd(&(a_cpu.clone() + b_cpu.clone())),
-        "owned a + b"
-    );
+    assert_eq!(host_nd(&(a.clone() + b.clone())), host_nd(&(a_cpu.clone() + b_cpu.clone())), "owned a + b");
     // left-consuming, non-commutative: a swapped operand order would show here and nowhere else
-    assert_eq!(
-        host_nd(&(a.clone() - b.clone())),
-        host_nd(&(a_cpu.clone() - b_cpu.clone())),
-        "owned a - b"
-    );
+    assert_eq!(host_nd(&(a.clone() - b.clone())), host_nd(&(a_cpu.clone() - b_cpu.clone())), "owned a - b");
     // right-consuming: the scalar is the left operand, the tensor the destination
     assert_eq!(host_nd(&(2.0 - a.clone())), host_nd(&(2.0 - a_cpu.clone())), "owned 2.0 - a");
     assert_eq!(host_nd(&(3.0 * b.clone())), host_nd(&(3.0 * b_cpu.clone())), "owned 3.0 * b");
-    // and the borrowed forms must still work — they are a different trait, and the new impls must not
-    // have shadowed them
+    // and the borrowed forms must still work — they are a different trait, and the new impls must
+    // not have shadowed them
     assert_eq!(host_nd(&(&a * &b)), host_nd(&(&a_cpu * &b_cpu)), "borrowed a * b");
 }
 
@@ -1997,7 +1912,8 @@ fn index_select_and_put_vs_cpu() {
     let v1_cpu: Tensor<f64, DeviceCpuSerial, _> = rt::asarray((exact_data(6 * 2, 156), &dcpu)).into_shape([6, 2]);
     let v1 = v1_cpu.to_device(&d);
     // `to_owned` gathers the visible elements, so the reference is contiguous — the *values* are
-    // what is being compared, and the device side is the one that must cope with the view's strides.
+    // what is being compared, and the device side is the one that must cope with the view's
+    // strides.
     let mut want_t = t_cpu.to_owned();
     rt::index_put(&mut want_t, 1, vec![4isize, 1], &v1_cpu);
     let mut got_t = t_cpu.to_device(&d);
@@ -2061,8 +1977,8 @@ fn foreign_stream_temporary_kernel_input_ordered() {
     for out in &outs {
         assert_eq!(host_vec1(out), expected);
     }
-    dev_s0.synchronize().unwrap();
-    dev_s2.synchronize().unwrap();
+    dev_s0.synchronize();
+    dev_s2.synchronize();
 }
 
 /* #endregion */

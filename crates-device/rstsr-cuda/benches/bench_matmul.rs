@@ -26,9 +26,9 @@ use std::time::Instant;
 
 use num::Complex;
 use rstsr::prelude::*;
-use rstsr_cuda::funcs;
 use rstsr_cuda::matmul::{ComputeType32F, MatMulDrivers, MatMulUseSyrk, TensorCudaMatMulAPI};
 use rstsr_cuda::prelude_dev::*;
+use rstsr_cuda::registry::is_available;
 
 fn data(n: usize, seed: u64) -> Vec<f64> {
     let mut s = seed | 1;
@@ -73,10 +73,10 @@ fn bench_cell<T>(d: &DeviceCuda, f: impl Fn() -> T) -> f64 {
     for _ in 0..3 {
         let _ = f();
     }
-    funcs::synchronize(d).unwrap();
+    d.synchronize();
     let t0 = Instant::now();
     let _ = f();
-    funcs::synchronize(d).unwrap();
+    d.synchronize();
     let one = t0.elapsed().as_secs_f64().max(1e-7);
     let n_iter = ((budget / one) as usize).clamp(1, 5000);
     let mut samples = Vec::with_capacity(repeat);
@@ -85,7 +85,7 @@ fn bench_cell<T>(d: &DeviceCuda, f: impl Fn() -> T) -> f64 {
         for _ in 0..n_iter {
             let _ = f();
         }
-        funcs::synchronize(d).unwrap();
+        d.synchronize();
         samples.push(t0.elapsed().as_secs_f64() / n_iter as f64);
     }
     samples.sort_by(|x, y| x.total_cmp(y));
@@ -102,7 +102,7 @@ struct Row {
 }
 
 fn main() {
-    if !funcs::is_available() {
+    if !is_available() {
         eprintln!("no CUDA device");
         return;
     }

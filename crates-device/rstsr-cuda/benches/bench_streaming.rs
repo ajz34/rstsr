@@ -5,14 +5,12 @@
 //! Modes (all on the same bytes, interleaved round-robin, per-mode medians):
 //! - `h2d` / `compute` / `d2h`: each phase alone over all chunks;
 //! - `serial_all`: pageable host + blocking transfers (today's `to_device`);
-//! - `pipeline`: pinned host + non-blocking transfers + 3 streams (H, C, D),
-//!   issued per chunk;
+//! - `pipeline`: pinned host + non-blocking transfers + 3 streams (H, C, D), issued per chunk;
 //! - `pipeline_blocking`: pipeline, but a `synchronize()` after every stage;
 //! - `pipeline_1stream`: pipeline, but H/C/D on one stream;
-//! - `pipeline_pageable`: the same 3-stream issue order over pageable host
-//!   tensors. Informational only: rstsr's pageable paths order the device
-//!   stream but leave the host waiting only on its own chunk, so the overlap
-//!   survives and this probe does NOT isolate the pinned ingredient
+//! - `pipeline_pageable`: the same 3-stream issue order over pageable host tensors. Informational
+//!   only: rstsr's pageable paths order the device stream but leave the host waiting only on its
+//!   own chunk, so the overlap survives and this probe does NOT isolate the pinned ingredient
 //!   (`pipeline_1stream` / `pipeline_blocking` are the controls that do);
 //! - `d2h_writecombined`: D2H into write-combined pages vs the default.
 //!
@@ -38,10 +36,7 @@ const ROUNDS: usize = 7;
 const ELEMS: usize = CHUNK_MIB << 20 >> 3; // f64
 
 fn env_usize(key: &str, default: usize) -> usize {
-    std::env::var(key)
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(default)
+    std::env::var(key).ok().and_then(|v| v.parse().ok()).unwrap_or(default)
 }
 
 fn arange_vec(n: usize, offset: usize) -> Vec<f64> {
@@ -71,7 +66,7 @@ fn warm_clocks(dev: &DeviceCuda, ms: u64) {
         for _ in 0..8 {
             y = rt::sin(&y);
         }
-        dev.synchronize().unwrap();
+        dev.synchronize();
     }
 }
 
@@ -99,9 +94,9 @@ fn pipeline_pageable(
         let r = compute(&g_c, iters);
         let _back = r.to_device(dev_d); // pageable D2H (blocking)
     }
-    dev_h.synchronize().unwrap();
-    dev_c.synchronize().unwrap();
-    dev_d.synchronize().unwrap();
+    dev_h.synchronize();
+    dev_c.synchronize();
+    dev_d.synchronize();
     t0.elapsed()
 }
 
@@ -110,7 +105,7 @@ type PinnedChunk = Tensor<f64, DeviceCudaPinned>;
 fn phase_h2d(fix: &Fixture, dev: &DeviceCuda) -> Duration {
     let t0 = Instant::now();
     let keep: Vec<_> = fix.pin_in.iter().map(|t| t.to_device(dev)).collect();
-    dev.synchronize().unwrap();
+    dev.synchronize();
     let d = t0.elapsed();
     drop(keep);
     d
@@ -118,10 +113,10 @@ fn phase_h2d(fix: &Fixture, dev: &DeviceCuda) -> Duration {
 
 fn phase_compute(fix: &Fixture, dev: &DeviceCuda, iters: usize) -> Duration {
     let staged: Vec<_> = fix.pin_in.iter().map(|t| t.to_device(dev)).collect();
-    dev.synchronize().unwrap();
+    dev.synchronize();
     let t0 = Instant::now();
     let keep: Vec<_> = staged.iter().map(|g| compute(g, iters)).collect();
-    dev.synchronize().unwrap();
+    dev.synchronize();
     let d = t0.elapsed();
     drop(keep);
     drop(staged);
@@ -130,12 +125,12 @@ fn phase_compute(fix: &Fixture, dev: &DeviceCuda, iters: usize) -> Duration {
 
 fn phase_d2h(fix: &Fixture, dev: &DeviceCuda, pin_out: &mut [PinnedChunk]) -> Duration {
     let staged: Vec<_> = fix.pin_in.iter().map(|t| t.to_device(dev)).collect();
-    dev.synchronize().unwrap();
+    dev.synchronize();
     let t0 = Instant::now();
     for (g, o) in staged.iter().zip(pin_out.iter_mut()) {
         d2h_pinned_async(dev, g.raw(), o.raw_mut()).unwrap();
     }
-    dev.synchronize().unwrap();
+    dev.synchronize();
     let d = t0.elapsed();
     drop(staged);
     d
@@ -178,32 +173,30 @@ fn pipeline(
     for (c, t) in fix.pin_in.iter().enumerate() {
         keep.push(t.to_device(dev_h)); // H2D on H
         if blocking {
-            dev_h.synchronize().unwrap();
+            dev_h.synchronize();
         }
         let g_c = keep[c].to_device(dev_c);
         let r = compute(&g_c, iters); // on C, waits for H2D(c) only
         if blocking {
-            dev_c.synchronize().unwrap();
+            dev_c.synchronize();
         }
         let r_d = r.to_device(dev_d);
-        d2h_pinned_async(dev_d, r_d.raw(), pin_out[c].raw_mut()).unwrap(); // on D, waits for compute(c)
+        d2h_pinned_async(dev_d, r_d.raw(), pin_out[c].raw_mut()).unwrap(); // on D, waits for
+                                                                           // compute(c)
         if blocking {
-            dev_d.synchronize().unwrap();
+            dev_d.synchronize();
         }
         results.push(r);
     }
     let t_enq = t0.elapsed();
-    dev_h.synchronize().unwrap();
-    dev_c.synchronize().unwrap();
-    dev_d.synchronize().unwrap();
+    dev_h.synchronize();
+    dev_c.synchronize();
+    dev_d.synchronize();
     let d = t0.elapsed();
     if std::env::var("RSTSR_BENCH_TRACE").is_ok() {
         println!("    enqueue {t_enq:?}, final sync {:?}", d - t_enq);
     }
-    let out: Vec<Vec<f64>> = pin_out
-        .iter()
-        .map(|o| o.raw().to_vec_f().unwrap())
-        .collect();
+    let out: Vec<Vec<f64>> = pin_out.iter().map(|o| o.raw().to_vec_f().unwrap()).collect();
     drop(results);
     drop(keep);
     (d, out)
@@ -223,7 +216,7 @@ fn main() {
     let rounds = env_usize("RSTSR_BENCH_ROUNDS", ROUNDS);
     let iters = env_usize("RSTSR_BENCH_ITERS", 0); // 0 = autotune
 
-    if !rstsr_cuda::funcs::is_available() {
+    if !rstsr_cuda::registry::is_available() {
         eprintln!("skipping: no CUDA device visible");
         return;
     }
@@ -242,30 +235,16 @@ fn main() {
     for c in 0..chunks {
         let v = arange_vec(ELEMS, c * ELEMS);
         cpu_in.push(rt::asarray((v.clone(), &cpu)));
-        pin_in.push(
-            pinned
-                .tensor_f(pinned.from_vec_f(v).unwrap(), [ELEMS])
-                .unwrap(),
-        );
+        pin_in.push(pinned.tensor_f(pinned.from_vec_f(v).unwrap(), [ELEMS]).unwrap());
     }
-    let mut pin_out: Vec<PinnedChunk> = (0..chunks)
-        .map(|_| {
-            pinned
-                .tensor_f(pinned.zeros_f::<f64>(ELEMS).unwrap(), [ELEMS])
-                .unwrap()
-        })
-        .collect();
+    let mut pin_out: Vec<PinnedChunk> =
+        (0..chunks).map(|_| pinned.tensor_f(pinned.zeros_f::<f64>(ELEMS).unwrap(), [ELEMS]).unwrap()).collect();
     let fix = Fixture { pin_in, cpu_in };
     // write-combined pages as D2H destinations (fast device writes, uncached
     // host reads) vs the default cached pages
     let mut wc_out: Vec<PinnedChunk> = (0..chunks)
         .map(|_| {
-            let buf = PinnedBuffer::<f64>::with_flags_f(
-                pinned.context(),
-                ELEMS,
-                pinned_flags::WRITE_COMBINED,
-            )
-            .unwrap();
+            let buf = PinnedBuffer::<f64>::with_flags_f(pinned.context(), ELEMS, pinned_flags::WRITE_COMBINED).unwrap();
             pinned.tensor_f(buf, [ELEMS]).unwrap()
         })
         .collect();
@@ -284,12 +263,8 @@ fn main() {
     println!("h2d {t_h:.2} ms  d2h {t_d:.2} ms  -> compute links per chunk: {iters}");
 
     let dev_h = base.new_stream();
-    let dev_c = base
-        .clone()
-        .with_stream(DeviceCuda::new_stream_with_ordinal(0).stream());
-    let dev_d = base
-        .clone()
-        .with_stream(DeviceCuda::new_stream_with_ordinal(0).stream());
+    let dev_c = base.clone().with_stream(DeviceCuda::new_stream_with_ordinal(0).stream());
+    let dev_d = base.clone().with_stream(DeviceCuda::new_stream_with_ordinal(0).stream());
     let one = base.clone();
 
     // warm every mode once (kernel compile, pool growth)
@@ -336,60 +311,30 @@ fn main() {
     let bound = med[1].max(med[0] + med[2]);
     println!();
     println!("phase totals (isolated, interleaved median)");
-    println!(
-        "  h2d         {:7.2} ms   {:.2} GB/s",
-        ms(med[0]),
-        bytes as f64 / med[0].as_secs_f64() / 1e9
-    );
+    println!("  h2d         {:7.2} ms   {:.2} GB/s", ms(med[0]), bytes as f64 / med[0].as_secs_f64() / 1e9);
     println!("  compute     {:7.2} ms", ms(med[1]));
-    println!(
-        "  d2h         {:7.2} ms   {:.2} GB/s",
-        ms(med[2]),
-        bytes as f64 / med[2].as_secs_f64() / 1e9
-    );
+    println!("  d2h         {:7.2} ms   {:.2} GB/s", ms(med[2]), bytes as f64 / med[2].as_secs_f64() / 1e9);
     println!("  predicted serial (sum)        {:7.2} ms", ms(phase_sum));
     println!("  predicted pipeline (max term) {:7.2} ms", ms(bound));
     println!();
     println!("mode                       ms   vs serial_all   pipeline eff");
     for (name, m) in names.iter().zip(med.iter()) {
-        let eff = if *name == "pipeline" {
-            ms(bound) / ms(*m) * 100.0
-        } else {
-            0.0
-        };
-        println!(
-            "{name:<22} {:8.2}       {:5.2}x        {:5.1}%",
-            ms(*m),
-            ms(serial) / ms(*m),
-            eff
-        );
+        let eff = if *name == "pipeline" { ms(bound) / ms(*m) * 100.0 } else { 0.0 };
+        println!("{name:<22} {:8.2}       {:5.2}x        {:5.1}%", ms(*m), ms(serial) / ms(*m), eff);
     }
     println!();
     println!(
         "transfer time hidden by the pipeline: {:.1}% of h2d+d2h",
         ms(phase_sum - pipe) / ms(med[0] + med[2]) * 100.0
     );
-    println!(
-        "speedup, serial_all (pageable, blocking) -> pipeline: {:.2}x",
-        ms(serial) / ms(pipe)
-    );
-    println!(
-        "speedup, pipeline_1stream (pinned, no overlap) -> pipeline: {:.2}x",
-        ms(med[6]) / ms(pipe)
-    );
+    println!("speedup, serial_all (pageable, blocking) -> pipeline: {:.2}x", ms(serial) / ms(pipe));
+    println!("speedup, pipeline_1stream (pinned, no overlap) -> pipeline: {:.2}x", ms(med[6]) / ms(pipe));
 
     // correctness: pipeline output bitwise equal to the serial flow
     for c in 0..chunks {
         assert_eq!(pipe_out[c].len(), serial_ref[c].len());
-        let bad = pipe_out[c]
-            .iter()
-            .zip(serial_ref[c].iter())
-            .filter(|(a, b)| a.to_bits() != b.to_bits())
-            .count();
-        assert_eq!(
-            bad, 0,
-            "chunk {c}: {bad} elements differ from the serial flow"
-        );
+        let bad = pipe_out[c].iter().zip(serial_ref[c].iter()).filter(|(a, b)| a.to_bits() != b.to_bits()).count();
+        assert_eq!(bad, 0, "chunk {c}: {bad} elements differ from the serial flow");
     }
     // the controls are pinned no-overlap flows: they must sit at the sum of the phases
     assert!(
@@ -404,12 +349,7 @@ fn main() {
         ms(med[6]),
         ms(phase_sum)
     );
-    assert!(
-        ms(pipe) < 0.7 * ms(serial),
-        "pipeline {:.2} ms is not < 0.7 x serial {:.2} ms",
-        ms(pipe),
-        ms(serial)
-    );
+    assert!(ms(pipe) < 0.7 * ms(serial), "pipeline {:.2} ms is not < 0.7 x serial {:.2} ms", ms(pipe), ms(serial));
     assert!(
         ms(pipe) < 0.75 * ms(med[6]),
         "pipeline {:.2} ms is not < 0.75 x pipeline_1stream {:.2} ms",

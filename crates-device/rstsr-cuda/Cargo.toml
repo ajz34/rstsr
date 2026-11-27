@@ -27,7 +27,10 @@ cudarc = { version = "0.19", default-features = false, features = [
 ] }
 
 [dev-dependencies]
-rstsr = { path = "../../rstsr", default-features = false }
+# the facade with our own feature: circular dev-dependency (rstsr optionally
+# depends back on this crate), so tests and doctests exercise the user surface
+# (`use rstsr::prelude::*` + `cuda::...`) the way downstream writes it
+rstsr = { path = "../../rstsr", default-features = false, features = ["cuda"] }
 
 [features]
 default = []

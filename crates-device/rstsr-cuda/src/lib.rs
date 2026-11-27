@@ -8,9 +8,9 @@
 //!   stored by `same_device`. No flag is read from the environment.
 //! - [`matmul`]: the matmul driver chain, its compute modes and the driver enable set.
 //! - [`stream::CudaStreamObj`]: user-visible, strictly compared.
-//! - [`pinned::DeviceCudaPinned`] / [`pinned::PinnedBuffer<T>`]: page-locked *host* tensors
-//!   (`Raw = PinnedBuffer<T>`), a transfer endpoint for non-blocking H2D/D2H and a zero-copy source
-//!   of `DeviceCpuSerial` views ([`pinned::TensorPinnedHostViewAPI`]).
+//! - [`pinned::DeviceCudaPinned`] / [`pinned::PinnedBuffer<T>`]: page-locked *host* tensors (`Raw =
+//!   PinnedBuffer<T>`), a transfer endpoint for non-blocking H2D/D2H and a zero-copy source of
+//!   `DeviceCpuSerial` views ([`pinned::TensorPinnedHostViewAPI`]).
 //! - [`event::CudaEvent`] / [`sync::CudaSyncAPI`]: user-side cross-stream ordering and an explicit
 //!   "data is ready" wait.
 //!
@@ -35,9 +35,9 @@
 //! - Integer `matmul` wraps on overflow (C semantics, as NumPy does); the CPU reference devices
 //!   panic in debug builds.
 //! - `fill`/`ones`/`zeros` take the kernel path for every supported dtype (complex included).
-//! - `matmul` of operands with different dtypes (`matmul_from`/`matmul_with_output`, which have
-//!   no `Mul` bound) casts each operand to the output type in the naive kernel: no copy, and no
-//!   cuBLAS driver. Same-dtype `f32`, `f64`, complex and half products run on cuBLAS.
+//! - `matmul` of operands with different dtypes (`matmul_from`/`matmul_with_output`, which have no
+//!   `Mul` bound) casts each operand to the output type in the naive kernel: no copy, and no cuBLAS
+//!   driver. Same-dtype `f32`, `f64`, complex and half products run on cuBLAS.
 //!
 //! # What is implemented
 //!
@@ -53,8 +53,9 @@
 //! **Absent, and why** — these are deliberate, not pending:
 //!
 //! - `take_along_axis`/`put_along_axis`, `mask_select`: the first two take a *device* index buffer,
-//!   so an out-of-range index cannot be caught without a read-back on every call; `mask_select` is a
-//!   compaction and needs a mask prefix sum to be deterministic. No caller in the current programs.
+//!   so an out-of-range index cannot be caught without a read-back on every call; `mask_select` is
+//!   a compaction and needs a mask prefix sum to be deterministic. No caller in the current
+//!   programs.
 //! - `sort`, `argsort`, `unique`, `searchsorted`, `isin`: no caller. A GPU sort is a bitonic or
 //!   radix kernel family, not an afternoon.
 //! - `nonzero`: compaction, same shape of work as `mask_select`.
@@ -68,36 +69,36 @@
 //! A GPU backend owes the reader an answer to "will this match the CPU device?", and the honest
 //! answer has three tiers rather than one.
 //!
-//! **Bit-identical: elementwise arithmetic and comparisons.** One IEEE operation per element, in the
-//! same order, so `a * b` produces the same bits on every element whatever the device.
+//! **Bit-identical: elementwise arithmetic and comparisons.** One IEEE operation per element, in
+//! the same order, so `a * b` produces the same bits on every element whatever the device.
 //!
-//! **Deterministic, differently ordered: reductions.** A shuffle tree adds in a different order than
-//! a left-to-right loop, and float addition is not associative. Two things follow, and the second is
-//! the one worth stating:
+//! **Deterministic, differently ordered: reductions.** A shuffle tree adds in a different order
+//! than a left-to-right loop, and float addition is not associative. Two things follow, and the
+//! second is the one worth stating:
 //!
 //! - The difference is *bounded*, not random. No kernel here uses an atomic, and the plan
 //!   (`kernels::reduce_plan`) is a pure function of shape, strides and the device's default order —
 //!   `MIN_BLOCKS` is a policy constant rather than a device query, so the tree does not change with
-//!   SM count, block count or occupancy. Two devices running the same plan produce **the same bits**,
-//!   which is a stronger promise than "reproducible on this machine".
-//! - Bit-identity with the CPU is *not worth buying*. It would mean one lane per output and a serial
-//!   walk over the contraction: the kernel's entire reason to exist, surrendered for a discrepancy
-//!   at the level of ordinary summation error. The trade is deliberate. What a caller gets instead is
-//!   a result that is stable across runs and across devices of the same capability.
+//!   SM count, block count or occupancy. Two devices running the same plan produce **the same
+//!   bits**, which is a stronger promise than "reproducible on this machine".
+//! - Bit-identity with the CPU is *not worth buying*. It would mean one lane per output and a
+//!   serial walk over the contraction: the kernel's entire reason to exist, surrendered for a
+//!   discrepancy at the level of ordinary summation error. The trade is deliberate. What a caller
+//!   gets instead is a result that is stable across runs and across devices of the same capability.
 //!
 //! FMA contraction belongs to this tier too. `-fmad=true` is NVRTC's **default**, so `l2_norm`,
 //! `var` and `vecdot` may compute `fma(x, x, a)` where the CPU computes `fl(a + fl(x * x))` — one
-//! rounding instead of two. `RSTSR_CUDA_STRICT_FP=1` disables it at a throughput cost; the tree order
-//! stays different either way, so it narrows the gap rather than closing it.
+//! rounding instead of two. `RSTSR_CUDA_STRICT_FP=1` disables it at a throughput cost; the tree
+//! order stays different either way, so it narrows the gap rather than closing it.
 //!
-//! **Different implementation: transcendentals.** `sinf`/`expf`/`pow` are NVIDIA's implementations of
-//! the same mathematical function — accurate to the last ulp, by a different route than Rust's libm.
-//! No flag makes them bit-identical, and nothing here pretends otherwise.
+//! **Different implementation: transcendentals.** `sinf`/`expf`/`pow` are NVIDIA's implementations
+//! of the same mathematical function — accurate to the last ulp, by a different route than Rust's
+//! libm. No flag makes them bit-identical, and nothing here pretends otherwise.
 //!
 //! The practical rule: compare against the CPU with a **tolerance**, never with `==`. That is what
-//! this crate's tests do (`assert_close`, `ATOL 1e-9`), and what any cross-implementation comparison
-//! of floating point has to do. Reproducibility *across runs* is guaranteed; identity *with the CPU*
-//! is not, and buying it would cost the kernel.
+//! this crate's tests do (`assert_close`, `ATOL 1e-9`), and what any cross-implementation
+//! comparison of floating point has to do. Reproducibility *across runs* is guaranteed; identity
+//! *with the CPU* is not, and buying it would cost the kernel.
 //!
 //! # Running the tests
 //!
@@ -141,15 +142,15 @@
 //! # Kernel compilation has two accept/reject points, not one
 //!
 //! `NVRTC` compiles the generated source to PTX; the **driver** then loads that PTX and JITs it for
-//! the actual device. Both can refuse, independently, and only the first happens on the machine that
-//! wrote the kernel. Reference case: `max.NaN.f64` is accepted by NVRTC and rejected by one driver's
-//! JIT with `CUDA_ERROR_INVALID_PTX`.
+//! the actual device. Both can refuse, independently, and only the first happens on the machine
+//! that wrote the kernel. Reference case: `max.NaN.f64` is accepted by NVRTC and rejected by one
+//! driver's JIT with `CUDA_ERROR_INVALID_PTX`.
 //!
 //! So "it compiled here" says nothing about the second gate, and the failure surfaces at first use,
-//! on the user's machine, as a launch error. The mitigation is to move the arch flag rather than the
-//! code: `RSTSR_CUDA_ARCH=compute_NN cargo test -p rstsr-cuda` exercises the whole suite — hence
-//! every kernel it touches — compiled for a different arch, with the disk cache keyed on that arch
-//! so the runs do not collide. Four runs on one card cover the four arches that card can host.
+//! on the user's machine, as a launch error. The mitigation is to move the arch flag rather than
+//! the code: `RSTSR_CUDA_ARCH=compute_NN cargo test -p rstsr-cuda` exercises the whole suite —
+//! hence every kernel it touches — compiled for a different arch, with the disk cache keyed on that
+//! arch so the runs do not collide. Four runs on one card cover the four arches that card can host.
 //!
 //! What this does **not** cover: different driver versions (the driver JIT is host-side, so that
 //! needs a second host), and arches above the card's own (`compute_89`/`compute_90` need those
@@ -175,16 +176,18 @@ pub mod event;
 pub mod flags;
 pub mod format;
 pub mod kernel;
-pub mod pinned;
-pub mod linalg;
 pub(crate) mod kernels;
+pub mod linalg;
 pub mod matmul;
+pub mod pinned;
+pub mod prelude;
+pub mod prelude_dev;
 
 pub(crate) mod kernels_ops;
 pub mod operators;
 pub mod reduce_ops;
-pub mod scan_ops;
 pub mod registry;
+pub mod scan_ops;
 pub mod stream;
 pub mod sync;
 pub mod transfer;
@@ -194,53 +197,3 @@ pub mod transfer;
 #[allow(dead_code)] // `main` and the env/nvcc resolution are the build's, not the tests'
 #[path = "../build.rs"]
 mod build_script;
-
-pub mod prelude_dev {
-    pub use crate::buffer::CudaBuffer;
-    pub use crate::device::DeviceCuda;
-    pub use crate::event::CudaEvent;
-    pub use crate::flags::{default_flags, set_default_flags, ComputeType32F, CudaRuntimeFlags};
-    pub use crate::matmul::{CudaMatMulMode, MatMulDrivers, MatMulUseSyrk, TensorCudaMatMulAPI};
-    pub use crate::pinned::{DeviceCudaPinned, PinnedBuffer, TensorPinnedHostViewAPI, TensorPinnedHostViewMutAPI};
-    pub use crate::registry::CudaOrdinalObj;
-    pub use crate::stream::CudaStreamObj;
-    pub use crate::sync::CudaSyncAPI;
-    pub use rstsr_core::prelude_dev::*;
-}
-
-/// Device-level free functions (`rt::cuda::*` candidates for the facade).
-pub mod funcs {
-    pub use crate::flags::{default_flags, set_default_flags};
-    use crate::prelude_dev::*;
-    use cudarc::driver::CudaContext;
-
-    /// A device on ordinal `ordinal` (registry-canonical).
-    pub fn device(ordinal: usize) -> DeviceCuda {
-        DeviceCuda::new(ordinal)
-    }
-
-    /// Number of visible CUDA devices (0 if CUDA is unavailable).
-    pub fn device_count() -> usize {
-        CudaContext::device_count().unwrap_or(0).max(0) as usize
-    }
-
-    /// Whether any CUDA device is available.
-    pub fn is_available() -> bool {
-        device_count() > 0
-    }
-
-    /// `(free, total)` memory of `device` in bytes.
-    pub fn memory_info(device: &DeviceCuda) -> Result<(usize, usize)> {
-        device.memory_info()
-    }
-
-    /// Block until all work on `device`'s execution stream completes.
-    pub fn synchronize(device: &DeviceCuda) -> Result<()> {
-        device.synchronize()
-    }
-
-    /// Block until the data of `tensor` (CUDA or pinned) is observable on the host.
-    pub fn synchronize_tensor<T: CudaSyncAPI>(tensor: &T) -> Result<()> {
-        tensor.synchronize_f()
-    }
-}

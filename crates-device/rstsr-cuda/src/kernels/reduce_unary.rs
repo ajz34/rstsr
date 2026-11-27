@@ -2,10 +2,10 @@
 //!
 //! # Why this is a second kernel and not a parameter of [`super::reduce`]
 //!
-//! `vecdot` reads two operands per element. A unary reduction reads one. The *geometry* is identical
-//! — the plan from [`super::reduce_plan`] is shared verbatim — but the per-element body and the
-//! argument list are not, so pretending they are one entry point would mean a null pointer and a
-//! stride nobody uses. Two entries, one plan, and the unary operators share this one:
+//! `vecdot` reads two operands per element. A unary reduction reads one. The *geometry* is
+//! identical — the plan from [`super::reduce_plan`] is shared verbatim — but the per-element body
+//! and the argument list are not, so pretending they are one entry point would mean a null pointer
+//! and a stride nobody uses. Two entries, one plan, and the unary operators share this one:
 //!
 //! ```text
 //! op       INIT      FOLD(A, X)              COMB(A, B)    POST(V)
@@ -20,22 +20,22 @@
 //! count_nz 0         A + (X != 0)            A + B         V
 //! ```
 //!
-//! The last three are the rows whose accumulator is *not* the operand type: `all`/`any` fold into an
-//! `int` and `count_nonzero` into an `unsigned long long`, which is why the accumulator travels as an
-//! [`AccSpec`] value rather than being inferred from `T`.
+//! The last three are the rows whose accumulator is *not* the operand type: `all`/`any` fold into
+//! an `int` and `count_nonzero` into an `unsigned long long`, which is why the accumulator travels
+//! as an [`AccSpec`] value rather than being inferred from `T`.
 //!
 //! # Three types, not one
 //!
-//! `@TIN@` is what is loaded, `@TACC@` is what the tree adds up, `@TOUT@` is what is stored. They are
-//! equal for most rows, but the split is load-bearing:
+//! `@TIN@` is what is loaded, `@TACC@` is what the tree adds up, `@TOUT@` is what is stored. They
+//! are equal for most rows, but the split is load-bearing:
 //!
 //! - `sum_axes_dtype` casts a narrower input into a wider accumulator (`f32 → f64`, `i32 → f64`),
 //!   which is what `into_cast` means on the CPU side. Every fold casts the element **explicitly**
 //!   (`(@TACC@)(X)`) rather than relying on C++'s implicit promotion, because `acc + x` with mixed
 //!   types rounds to the wider type first and then narrows on assignment — one rounding too many.
 //! - `l2_norm` accumulates a *real* quantity from a possibly complex operand. Only real dtypes are
-//!   wired up here (`Real = Self`), so the three names coincide; a complex operand needs `|x|^2`
-//!   in the fold and is not supported yet.
+//!   wired up here (`Real = Self`), so the three names coincide; a complex operand needs `|x|^2` in
+//!   the fold and is not supported yet.
 //!
 //! # The identity is what makes the guard safe
 //!
@@ -47,27 +47,26 @@
 //!
 //! # min/max are NaN-*propagating*
 //!
-//! The CPU folds with `ExtReal::ext_min`, which is IEEE 754-2019 `minimum`: if either operand is NaN
-//! the result is NaN. CUDA's `fmin`/`fmax` are the opposite convention — they return the non-NaN
-//! operand — so the macros below add the guard, and `fmin` is kept for its signed-zero handling
-//! (`minimum(-0.0, +0.0) == -0.0`, which a bare `<` test gets wrong). The *payload* of a NaN can
-//! differ from the CPU's, because which operand is returned depends on the tree shape; that is not
-//! observable in `x != x` terms, and summation order was never promised.
+//! The CPU folds with `ExtReal::ext_min`, which is IEEE 754-2019 `minimum`: if either operand is
+//! NaN the result is NaN. CUDA's `fmin`/`fmax` are the opposite convention — they return the
+//! non-NaN operand — so the macros below add the guard, and `fmin` is kept for its signed-zero
+//! handling (`minimum(-0.0, +0.0) == -0.0`, which a bare `<` test gets wrong). The *payload* of a
+//! NaN can differ from the CPU's, because which operand is returned depends on the tree shape; that
+//! is not observable in `x != x` terms, and summation order was never promised.
 //!
 //! # The tree
 //!
 //! Identical to [`super::reduce`]: an in-warp butterfly masked by `lane + off < LANES`, then — only
 //! when `LANES > warpSize` — a shared-memory stage. It is duplicated rather than shared because the
-//! two files differ in the body and in the argument list; if a third kernel appears, factor the tree
-//! into an included source fragment before it becomes four copies.
+//! two files differ in the body and in the argument list; if a third kernel appears, factor the
+//! tree into an included source fragment before it becomes four copies.
 
 use crate::prelude_dev::*;
-use std::fmt::Write as _;
 use std::sync::Arc;
 
-use cudarc::driver::CudaFunction;
-use crate::dtype::CudaDType;
 use super::reduce_plan::{ReducePlan, BLOCK};
+use crate::dtype::CudaDType;
+use cudarc::driver::CudaFunction;
 
 /// Largest number of warps a block can contain, assuming a warp is at least 32 lanes.
 ///
@@ -78,8 +77,8 @@ pub(super) const MAX_WARPS_PER_BLOCK: usize = BLOCK / 32;
 ///
 /// Carried **by value** into the launcher rather than as a type parameter. A phantom `TAcc` cannot
 /// be inferred at the call site — nothing in the argument list mentions it — so every caller would
-/// need an explicit turbofish, and the one that forgets gets `E0283`. A value has no such problem and
-/// costs three `&'static str` in the launch, not in the kernel.
+/// need an explicit turbofish, and the one that forgets gets `E0283`. A value has no such problem
+/// and costs three `&'static str` in the launch, not in the kernel.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct AccSpec {
     /// C name of the accumulator — the same spelling `CudaDType::CNAME` gives this type, so the
@@ -96,28 +95,24 @@ impl AccSpec {
     /// one silent conversion more than this needs.
     pub(crate) const INT: AccSpec = AccSpec { cname: "int", pos_inf: "", neg_inf: "" };
 
-    /// Accumulator for the counting rows (`count_nonzero`, `sum` over `bool`). `usize` and `u64` are
-    /// both `unsigned long long` on the device, which is what `CudaDType` gives them.
-    pub(crate) const U64: AccSpec =
-        AccSpec { cname: "unsigned long long", pos_inf: "", neg_inf: "" };
+    /// Accumulator for the counting rows (`count_nonzero`, `sum` over `bool`). `usize` and `u64`
+    /// are both `unsigned long long` on the device, which is what `CudaDType` gives them.
+    pub(crate) const U64: AccSpec = AccSpec { cname: "unsigned long long", pos_inf: "", neg_inf: "" };
 }
 
 /// The accumulator types the fold table can be written in.
 ///
 /// This exists for the two infinities, not for the name: NVRTC is not assumed to provide
-/// `<math.h>`'s `INFINITY` without an include path. `f32`/`f64` are the only rows, which is also the
-/// honest statement of which dtypes the table supports — a complex accumulator would need
+/// `<math.h>`'s `INFINITY` without an include path. `f32`/`f64` are the only rows, which is also
+/// the honest statement of which dtypes the table supports — a complex accumulator would need
 /// `@TACC@` to be a struct.
 pub(crate) trait ReduceAcc {
     const SPEC: AccSpec;
 }
 
 impl ReduceAcc for f32 {
-    const SPEC: AccSpec = AccSpec {
-        cname: "float",
-        pos_inf: "(__int_as_float(0x7f800000))",
-        neg_inf: "(__int_as_float(0xff800000))",
-    };
+    const SPEC: AccSpec =
+        AccSpec { cname: "float", pos_inf: "(__int_as_float(0x7f800000))", neg_inf: "(__int_as_float(0xff800000))" };
 }
 
 impl ReduceAcc for f64 {
@@ -183,7 +178,8 @@ impl UnaryOp {
             Self::Min => "RSTSR_MIN((A), (@TACC@)(X))",
             Self::Max => "RSTSR_MAX((A), (@TACC@)(X))",
             Self::L2Norm => "((A) + (@TACC@)(X) * (@TACC@)(X))",
-            // `(int)(X)` on a `bool` is 0/1, so `&` and `|` are the folds and the tree stays integer.
+            // `(int)(X)` on a `bool` is 0/1, so `&` and `|` are the folds and the tree stays
+            // integer.
             Self::All => "((A) & (@TACC@)(X))",
             Self::Any => "((A) | (@TACC@)(X))",
             // The cast wraps the *predicate*, not the element: there is no widening to do here.
@@ -299,7 +295,6 @@ extern "C" __global__ void @NAME@(
 }
 "#;
 
-
 /// Token substitution, in the caller's order. Shared with [`super::reduce_arg`]: the ordering rule
 /// (producers before consumers) is the caller's problem, but the mechanics are not worth a copy.
 pub(super) fn render(template: &str, subs: &[(&str, &str)]) -> String {
@@ -342,13 +337,13 @@ pub(super) fn reduce_unary_function(
 
 /// Launch a unary reduction for a plan produced by [`super::reduce_plan::classify_reduce`].
 ///
-/// `c` is the caller's output buffer, already sized to `plan.n_out`; `a` is the operand and `las` its
-/// contracted part (only for the base offset — all addressing comes from `plan`).
+/// `c` is the caller's output buffer, already sized to `plan.n_out`; `a` is the operand and `las`
+/// its contracted part (only for the base offset — all addressing comes from `plan`).
 ///
 /// The three roles from the module docs appear here as two type parameters (`TIn` loaded, `TOut`
-/// stored) and one value (`acc`, the accumulator's C name and infinities). The accumulator is a value
-/// rather than a third type parameter because nothing in the argument list would constrain it, so
-/// every caller would need an explicit turbofish to avoid `E0283`.
+/// stored) and one value (`acc`, the accumulator's C name and infinities). The accumulator is a
+/// value rather than a third type parameter because nothing in the argument list would constrain
+/// it, so every caller would need an explicit turbofish to avoid `E0283`.
 pub(crate) fn reduce_unary_launch<TIn, TOut>(
     device: &DeviceCuda,
     op: UnaryOp,
@@ -363,15 +358,7 @@ where
     TIn: CudaDType,
     TOut: CudaDType,
 {
-    let ReducePlan {
-        lanes,
-        block,
-        n_contract,
-        step_a,
-        n_out,
-        out_step_a,
-        ..
-    } = *plan;
+    let ReducePlan { lanes, block, n_contract, step_a, n_out, out_step_a, .. } = *plan;
 
     if n_out == 0 || n_contract == 0 {
         return Ok(());
@@ -389,12 +376,7 @@ where
     let _ga = crate::kernel::order_input(a, exec)?;
 
     let name = format!("rstsr_reduce_{}", op.name());
-    let disc = format!(
-        "{name}|{}|{}|{}|L{lanes}|B{block}",
-        TIn::CNAME,
-        acc.cname,
-        TOut::CNAME
-    );
+    let disc = format!("{name}|{}|{}|{}|L{lanes}|B{block}", TIn::CNAME, acc.cname, TOut::CNAME);
     let init = op.init(acc.cname, acc.pos_inf, acc.neg_inf);
 
     // A mixed-dtype instantiation may need both types' includes; the same-dtype case is a no-op.
@@ -411,27 +393,24 @@ where
     let maxw_s = MAX_WARPS_PER_BLOCK.to_string();
 
     let f = reduce_unary_function(device, &name, &disc, &includes, || {
-        render(
-            REDUCE_UNARY_ENTRY,
-            &[
-                // Order matters: an entry that *expands to* text containing another token must come
-                // first, or the inner token is never substituted. `FOLD`/`COMB`/`POST` all contain
-                // `@TACC@`/`@TIN@` references, and `@PREAMBLE@` supplies macros the body uses.
-                ("@PREAMBLE@", op.preamble()),
-                ("@NAME@", name.as_str()),
-                ("@FOLD@", op.fold()),
-                ("@COMB@", op.comb()),
-                ("@POST@", op.post()),
-                ("@INIT@", init.as_str()),
-                ("@TIN@", TIn::CNAME),
-                ("@TACC@", acc.cname),
-                ("@TOUT@", TOut::CNAME),
-                ("@LANES@", lanes_s.as_str()),
-                ("@LOG2_LANES@", log2_s.as_str()),
-                ("@OPB@", opb.as_str()),
-                ("@MAXW@", maxw_s.as_str()),
-            ],
-        )
+        render(REDUCE_UNARY_ENTRY, &[
+            // Order matters: an entry that *expands to* text containing another token must come
+            // first, or the inner token is never substituted. `FOLD`/`COMB`/`POST` all contain
+            // `@TACC@`/`@TIN@` references, and `@PREAMBLE@` supplies macros the body uses.
+            ("@PREAMBLE@", op.preamble()),
+            ("@NAME@", name.as_str()),
+            ("@FOLD@", op.fold()),
+            ("@COMB@", op.comb()),
+            ("@POST@", op.post()),
+            ("@INIT@", init.as_str()),
+            ("@TIN@", TIn::CNAME),
+            ("@TACC@", acc.cname),
+            ("@TOUT@", TOut::CNAME),
+            ("@LANES@", lanes_s.as_str()),
+            ("@LOG2_LANES@", log2_s.as_str()),
+            ("@OPB@", opb.as_str()),
+            ("@MAXW@", maxw_s.as_str()),
+        ])
     })?;
 
     // SAFETY: `MaybeUninit<TOut>` and `TOut` are layout-identical; the kernel writes every visited
@@ -494,18 +473,14 @@ mod tests {
         // promotion would round to the wider type first and narrow on assignment. `count_nonzero`
         // is excluded on purpose: its cast wraps the predicate, not the element.
         for op in [UnaryOp::Sum, UnaryOp::Prod, UnaryOp::Mean, UnaryOp::L2Norm, UnaryOp::Min, UnaryOp::Max] {
-            assert!(
-                op.fold().contains("(@TACC@)(X)"),
-                "{:?}: fold must cast the element to the accumulator",
-                op
-            );
+            assert!(op.fold().contains("(@TACC@)(X)"), "{:?}: fold must cast the element to the accumulator", op);
         }
     }
 
     /// Every token that appears in the template or in a table row must have a substitution, and the
-    /// rows that expand *into* other tokens must be substituted first. Both checks are cheap here and
-    /// expensive on a rented GPU: an unsubstituted token reaches NVRTC and fails at launch time, not
-    /// at `cargo test` time.
+    /// rows that expand *into* other tokens must be substituted first. Both checks are cheap here
+    /// and expensive on a rented GPU: an unsubstituted token reaches NVRTC and fails at launch
+    /// time, not at `cargo test` time.
     #[test]
     fn every_token_is_substituted_in_the_right_order() {
         fn tokens(text: &str) -> Vec<&str> {
@@ -528,8 +503,19 @@ mod tests {
         // The substitution list, in the order the launcher applies it. Kept in one place so the
         // ordering assertion below is about the real order, not a copy of it.
         let order = [
-            "@PREAMBLE@", "@NAME@", "@FOLD@", "@COMB@", "@POST@", "@INIT@", "@TIN@", "@TACC@",
-            "@TOUT@", "@LANES@", "@LOG2_LANES@", "@OPB@", "@MAXW@",
+            "@PREAMBLE@",
+            "@NAME@",
+            "@FOLD@",
+            "@COMB@",
+            "@POST@",
+            "@INIT@",
+            "@TIN@",
+            "@TACC@",
+            "@TOUT@",
+            "@LANES@",
+            "@LOG2_LANES@",
+            "@OPB@",
+            "@MAXW@",
         ];
 
         for op in ALL_OPS {
@@ -546,15 +532,17 @@ mod tests {
         // A token whose replacement text contains another token must come first.
         for producer in ["@FOLD@", "@COMB@", "@POST@"] {
             for consumer in ["@TIN@", "@TACC@", "@TOUT@"] {
-                let (p, c) = (order.iter().position(|t| *t == producer).unwrap(),
-                              order.iter().position(|t| *t == consumer).unwrap());
+                let (p, c) = (
+                    order.iter().position(|t| *t == producer).unwrap(),
+                    order.iter().position(|t| *t == consumer).unwrap(),
+                );
                 assert!(p < c, "{producer} must be substituted before {consumer}");
             }
         }
     }
 
-    /// `Min`/`Max` are the only rows that need the type-dependent infinities, and both must actually
-    /// use them — a `0` there would make every negative result wrong.
+    /// `Min`/`Max` are the only rows that need the type-dependent infinities, and both must
+    /// actually use them — a `0` there would make every negative result wrong.
     #[test]
     fn extremes_start_from_the_infinities() {
         assert_eq!(UnaryOp::Min.init("double", "POSINF", "NEGINF"), "POSINF");
@@ -592,20 +580,15 @@ mod tests {
         assert_eq!(plan.outputs_per_block * plan.lanes, plan.block);
     }
 
-    /// Full reductions are the case `*_all` needs: rank-0 output, one block, and as many lanes as the
-    /// contraction can fill (which is *not* always a whole block — a 60-element reduction gets 64
-    /// lanes and leaves the rest of the block idle; that is the known scalar-reduction ceiling).
+    /// Full reductions are the case `*_all` needs: rank-0 output, one block, and as many lanes as
+    /// the contraction can fill (which is *not* always a whole block — a 60-element reduction gets
+    /// 64 lanes and leaves the rest of the block idle; that is the known scalar-reduction ceiling).
     #[test]
     fn full_reduction_is_one_block() {
-        for (shape, want_lanes) in [
-            (&[100usize, 1024][..], 256u32),
-            (&[64][..], 64),
-            (&[3, 4, 5][..], 64),
-        ] {
+        for (shape, want_lanes) in [(&[100usize, 1024][..], 256u32), (&[64][..], 64), (&[3, 4, 5][..], 64)] {
             let n: usize = shape.iter().product();
-            let stride: Vec<isize> = (0..shape.len())
-                .map(|k| shape[k + 1..].iter().product::<usize>() as isize)
-                .collect();
+            let stride: Vec<isize> =
+                (0..shape.len()).map(|k| shape[k + 1..].iter().product::<usize>() as isize).collect();
             let la = layout(shape, &stride, 0);
             let lc = layout(&[], &[], 0);
             let axes: Vec<isize> = (0..shape.len() as isize).collect();

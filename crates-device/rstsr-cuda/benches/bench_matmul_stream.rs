@@ -37,7 +37,7 @@ macro_rules! run {
 }
 
 fn main() {
-    if !rstsr_cuda::funcs::is_available() {
+    if !rstsr_cuda::registry::is_available() {
         eprintln!("skipping: no CUDA device visible");
         return;
     }
@@ -121,13 +121,13 @@ where
     let dev_a: Vec<Dev<T>> = pin_a.iter().map(|t| t.to_device(&dev_c)).collect();
     let dev_b: Vec<Dev<T>> = pin_b.iter().map(|t| t.to_device(&dev_c)).collect();
     let warm: Vec<_> = dev_a.iter().zip(&dev_b).map(|(a, b)| rt::matmul(a, b)).collect();
-    dev_c.synchronize().unwrap();
+    dev_c.synchronize();
     drop(warm);
 
     let phase_h2d = || -> Duration {
         let t0 = Instant::now();
         let keep: Vec<_> = pin_a.iter().chain(&pin_b).map(|t| t.to_device(&dev_h)).collect();
-        dev_h.synchronize().unwrap();
+        dev_h.synchronize();
         let d = t0.elapsed();
         drop(keep);
         d
@@ -135,7 +135,7 @@ where
     let phase_matmul = || -> Duration {
         let t0 = Instant::now();
         let keep: Vec<_> = dev_a.iter().zip(&dev_b).map(|(a, b)| rt::matmul(a, b)).collect();
-        dev_c.synchronize().unwrap();
+        dev_c.synchronize();
         let d = t0.elapsed();
         drop(keep);
         d
@@ -144,7 +144,7 @@ where
         let t0 = Instant::now();
         let keep: Vec<_> =
             cpu_a.iter().zip(&cpu_b).map(|(a, b)| rt::matmul(a.to_device(&base), b.to_device(&base))).collect();
-        base.synchronize().unwrap();
+        base.synchronize();
         let d = t0.elapsed();
         (d, keep.iter().map(&read).collect())
     };
@@ -162,8 +162,8 @@ where
                 keep.push((a, b));
             }
         }
-        dev_h.synchronize().unwrap();
-        c.synchronize().unwrap();
+        dev_h.synchronize();
+        c.synchronize();
         let d = t0.elapsed();
         (d, products.iter().map(&read).collect())
     };

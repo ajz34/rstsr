@@ -224,7 +224,11 @@ fn set_pref(
 
 /// The status as a refusal; `None` on success.
 fn refused(status: lt::cublasStatus_t) -> Option<Refusal> {
-    if succeeded(status) { None } else { Some(Refusal::CublasLtStatus(status)) }
+    if succeeded(status) {
+        None
+    } else {
+        Some(Refusal::CublasLtStatus(status))
+    }
 }
 
 /// Build the descriptors of a `gemm` call and ask the heuristic for its algorithm.
@@ -691,7 +695,8 @@ mod tests {
         let ptrs = [0x1000, 0x2000, 0x3000];
         let compute = unsafe { retyped(ComputeType32F::default().gemm_ex()) };
         let f32 = key::<f32>(&a, ptrs, all(D::CUDA_R_32F), compute);
-        let h_f32 = key::<f32>(&a, ptrs, CublasGemmTypes { a: D::CUDA_R_16F, b: D::CUDA_R_16F, c: D::CUDA_R_32F }, compute);
+        let h_f32 =
+            key::<f32>(&a, ptrs, CublasGemmTypes { a: D::CUDA_R_16F, b: D::CUDA_R_16F, c: D::CUDA_R_32F }, compute);
         let h16 = key::<f32>(&a, ptrs, all(D::CUDA_R_16F), compute);
         assert_ne!(f32, h_f32);
         assert_ne!(f32, h16);
@@ -717,22 +722,18 @@ mod tests {
     /// batch-1 layout — only the first slice written, the rest of the output untouched).
     #[test]
     fn batch_attributes_read_back() {
-        if !crate::funcs::is_available() {
+        if !crate::registry::is_available() {
             eprintln!("skipping: no CUDA device visible");
             return;
         }
         let mut handle = core::mem::MaybeUninit::uninit();
-        assert_eq!(
-            unsafe { lt::cublasLtCreate(handle.as_mut_ptr()) },
-            lt::cublasStatus_t::CUBLAS_STATUS_SUCCESS
-        );
+        assert_eq!(unsafe { lt::cublasLtCreate(handle.as_mut_ptr()) }, lt::cublasStatus_t::CUBLAS_STATUS_SUCCESS);
         let handle = unsafe { handle.assume_init() };
         let a = arguments(&[4, 1], &[5, 1], 3);
         use cb::cudaDataType_t as D;
         let st = CublasGemmTypes { a: D::CUDA_R_64F, b: D::CUDA_R_64F, c: D::CUDA_R_64F };
         // SAFETY: a fresh handle used by this test alone; `build` enqueues nothing.
-        let entry =
-            unsafe { build::<f64>(handle, &a, st, lt::cublasComputeType_t::CUBLAS_COMPUTE_64F) }.unwrap();
+        let entry = unsafe { build::<f64>(handle, &a, st, lt::cublasComputeType_t::CUBLAS_COMPUTE_64F) }.unwrap();
         // the strides cuBLASLt must see, by its slots: A holds `geom.b`, B `geom.a`, D mirrors C
         let (stride_a, stride_b, stride_c) = batch_strides(&a);
         fn read<T: Sized>(
@@ -757,15 +758,11 @@ mod tests {
         }
         for (l, stride) in entry.layouts.iter().zip([stride_a, stride_b, stride_c, stride_c]) {
             let mut count = 0i32;
-            let written =
-                read(*l, lt::cublasLtMatrixLayoutAttribute_t::CUBLASLT_MATRIX_LAYOUT_BATCH_COUNT, &mut count);
+            let written = read(*l, lt::cublasLtMatrixLayoutAttribute_t::CUBLASLT_MATRIX_LAYOUT_BATCH_COUNT, &mut count);
             assert_eq!((written, count), (4, a.batch), "batch count");
             let mut offset = 0i64;
-            let written = read(
-                *l,
-                lt::cublasLtMatrixLayoutAttribute_t::CUBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET,
-                &mut offset,
-            );
+            let written =
+                read(*l, lt::cublasLtMatrixLayoutAttribute_t::CUBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET, &mut offset);
             assert_eq!((written, offset), (8, stride), "batch stride");
         }
         drop(entry);

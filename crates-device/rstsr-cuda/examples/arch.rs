@@ -2,9 +2,9 @@
 //! archs it can host.
 //!
 //! Why this exists: `nvidia-smi --query-gpu=compute_cap` is not available on every driver, and the
-//! alternative — mapping a product name to an arch — is a guess. This asks the same query the launch
-//! path uses (`DeviceCuda::compute_capability`), so the number cannot disagree with what the kernels
-//! actually compile for.
+//! alternative — mapping a product name to an arch — is a guess. This asks the same query the
+//! launch path uses (`DeviceCuda::compute_capability`), so the number cannot disagree with what the
+//! kernels actually compile for.
 //!
 //! It reports the **device**, not `RSTSR_CUDA_ARCH`: the point is the ceiling, and an override can
 //! only lower the target.
@@ -20,7 +20,7 @@ fn main() {
     std::panic::set_hook(Box::new(|_| {}));
     let probe = std::panic::catch_unwind(|| {
         let device = DeviceCuda::new_f(0).map_err(|e| e.to_string())?;
-        device.compute_capability().map_err(|e| e.to_string())
+        device.compute_capability_f().map_err(|e| e.to_string())
     });
     std::panic::set_hook(hook);
 

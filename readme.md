@@ -47,6 +47,7 @@ For users coming from NumPy, the [NumPy-RSTSR Cheatsheet](https://docs.rs/rstsr/
 | BLIS/FLAME | `DeviceBLIS` | rstsr-blis | `rstsr/blis` |
 | AOCL | `DeviceAOCL` | rstsr-aocl | `rstsr/aocl` |
 | KML | `DeviceKML` | rstsr-kml | `rstsr/kml` |
+| CUDA GPU | `DeviceCuda` | rstsr-cuda | `rstsr/cuda` |
 
 ## Illustrative Example
 

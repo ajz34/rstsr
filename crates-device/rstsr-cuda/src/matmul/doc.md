@@ -29,10 +29,10 @@ itself is missing.
 
 ```rust
 use rstsr::prelude::*;
-use rstsr_cuda::prelude_dev::*;
+use rstsr::cuda::prelude::*;
 
 // skip without a CUDA device (`is_available` panics when `libcuda` is missing, hence the catch)
-if !std::panic::catch_unwind(rstsr_cuda::funcs::is_available).unwrap_or(false) {
+if !std::panic::catch_unwind(cuda::is_available).unwrap_or(false) {
     return;
 }
 let device = DeviceCuda::new(0);
@@ -63,8 +63,8 @@ element is written twice:
 
 ```rust
 # use rstsr::prelude::*;
-# use rstsr_cuda::prelude_dev::*;
-# if !std::panic::catch_unwind(rstsr_cuda::funcs::is_available).unwrap_or(false) { return; }
+# use rstsr::cuda::prelude::*;
+# if !std::panic::catch_unwind(cuda::is_available).unwrap_or(false) { return; }
 # let device = DeviceCuda::new(0);
 # let cpu = DeviceCpuSerial::default();
 # let a = rt::tensor_from_nested!([[1.0, 2.0], [3.0, 4.0]], &device);
@@ -100,9 +100,9 @@ compiler checks the pairing:
 
 ```rust
 use rstsr::prelude::*;
-use rstsr_cuda::prelude_dev::*; // `ComputeType32F` and `TensorCudaMatMulAPI` are here
+use rstsr::cuda::prelude::*; // `ComputeType32F` and `TensorCudaMatMulAPI` are here
 
-# if !std::panic::catch_unwind(rstsr_cuda::funcs::is_available).unwrap_or(false) { return; }
+# if !std::panic::catch_unwind(cuda::is_available).unwrap_or(false) { return; }
 # let device = DeviceCuda::new(0);
 # let cpu = DeviceCpuSerial::default();
 // this `f32` product on TF32 tensor cores, whatever the device flags say
@@ -136,8 +136,8 @@ product of the last one:
 
 ```rust
 # use rstsr::prelude::*;
-# use rstsr_cuda::prelude_dev::*;
-# if !std::panic::catch_unwind(rstsr_cuda::funcs::is_available).unwrap_or(false) { return; }
+# use rstsr::cuda::prelude::*;
+# if !std::panic::catch_unwind(cuda::is_available).unwrap_or(false) { return; }
 let base = DeviceCuda::new(0);
 let dev_h = base.new_stream(); // uploads
 let dev_c = base.new_stream(); // products
@@ -303,8 +303,8 @@ driver: a product the driver cannot serve is then the error above, never a diffe
 
 ```rust
 # use rstsr::prelude::*;
-# use rstsr_cuda::prelude_dev::*;
-# if !std::panic::catch_unwind(rstsr_cuda::funcs::is_available).unwrap_or(false) { return; }
+# use rstsr::cuda::prelude::*;
+# if !std::panic::catch_unwind(cuda::is_available).unwrap_or(false) { return; }
 // this device value: the tiled kernel and the naive kernel, nothing from cuBLAS
 let mut flags = CudaRuntimeFlags::default();
 flags.matmul_drivers = MatMulDrivers::TILED | MatMulDrivers::NAIVE;
@@ -413,8 +413,8 @@ Through the device flags, for every product of the family on that device (the sa
 
 ```rust
 # use rstsr::prelude::*;
-# use rstsr_cuda::prelude_dev::*;
-# if !std::panic::catch_unwind(rstsr_cuda::funcs::is_available).unwrap_or(false) { return; }
+# use rstsr::cuda::prelude::*;
+# if !std::panic::catch_unwind(cuda::is_available).unwrap_or(false) { return; }
 let mut flags = CudaRuntimeFlags::default();
 flags.compute_type_32f = ComputeType32F::FastTF32; // every `f32` product of this device
 let device = DeviceCuda::new(0).with_flags(flags);

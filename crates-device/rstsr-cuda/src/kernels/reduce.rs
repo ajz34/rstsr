@@ -1,8 +1,8 @@
 //! Reduction kernels.
 //!
-//! One kernel, `vecdot` (`pi,pi->p`), parameterised by the plan's `lanes` / `outputs_per_block` pair
-//! from [`super::reduce_plan`]. There is no longer a `ContigS` kernel and a `ContigM` kernel: those
-//! names now describe the two ends of the same source, and which end you get is decided by
+//! One kernel, `vecdot` (`pi,pi->p`), parameterised by the plan's `lanes` / `outputs_per_block`
+//! pair from [`super::reduce_plan`]. There is no longer a `ContigS` kernel and a `ContigM` kernel:
+//! those names now describe the two ends of the same source, and which end you get is decided by
 //! `classify_reduce`, not by a branch here.
 //!
 //! # Thread mapping
@@ -14,31 +14,32 @@
 //!
 //! Lane in the **low** bits is the whole design. It puts consecutive lanes on consecutive addresses
 //! when the contracted axis is unit-stride, and — just as important — it keeps the lanes that share
-//! an output inside one warp, which is what lets the tree be a `__shfl_down_sync` chain instead of a
-//! shared-memory reduction. CuPy does the opposite (`output = tid & (block_stride - 1)`) and pays for
-//! it with a shared-memory tree in every reduction it runs.
+//! an output inside one warp, which is what lets the tree be a `__shfl_down_sync` chain instead of
+//! a shared-memory reduction. CuPy does the opposite (`output = tid & (block_stride - 1)`) and pays
+//! for it with a shared-memory tree in every reduction it runs.
 //!
 //! # Two stages, one of which is usually compiled out
 //!
-//! - **Stage 1** butterflies over the lanes of one output, with offsets below `min(LANES, warpSize)`.
-//!   When `LANES < warpSize` several outputs share a warp, so the cross-group value the shuffle
-//!   still delivers is discarded with `lane + off < LANES` rather than by making the loop divergent.
+//! - **Stage 1** butterflies over the lanes of one output, with offsets below `min(LANES,
+//!   warpSize)`. When `LANES < warpSize` several outputs share a warp, so the cross-group value the
+//!   shuffle still delivers is discarded with `lane + off < LANES` rather than by making the loop
+//!   divergent.
 //! - **Stage 2** appears only when one output spans more than one warp (`LANES > warpSize`): each
 //!   warp's partial goes to shared memory and the first warp of each output's group finishes the
-//!   reduction. `LANES` is a compile-time token, so for `LANES <= 32` the whole stage — shared array
-//!   included — is dead code and disappears.
+//!   reduction. `LANES` is a compile-time token, so for `LANES <= 32` the whole stage — shared
+//!   array included — is dead code and disappears.
 //!
 //! # The guard is not a `return`
 //!
 //! `if (j >= n_out) return;` would take part of a warp out of the shuffles below and make the mask
-//! undefined. The guard wraps only the accumulation and the final store; an out-of-range thread keeps
-//! `acc == 0`, participates in the tree, and writes nothing. This matters as soon as
+//! undefined. The guard wraps only the accumulation and the final store; an out-of-range thread
+//! keeps `acc == 0`, participates in the tree, and writes nothing. This matters as soon as
 //! `outputs_per_block > 1`, i.e. whenever several outputs share a warp.
 //!
 //! # Arithmetic
 //!
-//! `acc + x * y` as written — NVRTC contracts it to a single-rounding FMA. No CPU parity is claimed,
-//! so `__dadd_rn` / `__dmul_rn` are not needed; see `reduce_plan`'s module docs.
+//! `acc + x * y` as written — NVRTC contracts it to a single-rounding FMA. No CPU parity is
+//! claimed, so `__dadd_rn` / `__dmul_rn` are not needed; see `reduce_plan`'s module docs.
 //!
 //! # Reproducibility
 //!
@@ -49,12 +50,11 @@
 //! whenever several outputs share a warp.
 
 use crate::prelude_dev::*;
-use std::fmt::Write as _;
 use std::sync::Arc;
 
-use cudarc::driver::CudaFunction;
-use crate::dtype::CudaDType;
 use super::reduce_plan::{ReducePlan, BLOCK};
+use crate::dtype::CudaDType;
+use cudarc::driver::CudaFunction;
 
 /// Largest number of warps a block can contain, assuming a warp is at least 32 lanes.
 ///
@@ -128,7 +128,6 @@ extern "C" __global__ void rstsr_vecdot(
 }
 "#;
 
-
 fn render(template: &str, subs: &[(&str, &str)]) -> String {
     let mut s = template.to_string();
     for (name, text) in subs {
@@ -189,17 +188,8 @@ pub(crate) fn vecdot_launch<T>(
 where
     T: CudaDType,
 {
-    let ReducePlan {
-        lanes,
-        outputs_per_block,
-        block,
-        n_contract,
-        step_a,
-        step_b,
-        n_out,
-        out_step_a,
-        out_step_b,
-    } = *plan;
+    let ReducePlan { lanes, outputs_per_block, block, n_contract, step_a, step_b, n_out, out_step_a, out_step_b } =
+        *plan;
 
     if n_out == 0 || n_contract == 0 {
         return Ok(());
@@ -222,22 +212,19 @@ where
 
     let disc = format!("{}|L{lanes}|B{block}", T::CNAME);
     let f = reduce_function(device, "rstsr_vecdot", T::INCLUDES, &disc, || {
-        render(
-            VECDOT_ENTRY,
-            &[
-                ("@T@", T::CNAME),
-                ("@LANES@", &lanes.to_string()),
-                ("@LOG2_LANES@", &lanes.trailing_zeros().to_string()),
-                ("@OPB@", &outputs_per_block.to_string()),
-                ("@MAXW@", &MAX_WARPS_PER_BLOCK.to_string()),
-            ],
-        )
+        render(VECDOT_ENTRY, &[
+            ("@T@", T::CNAME),
+            ("@LANES@", &lanes.to_string()),
+            ("@LOG2_LANES@", &lanes.trailing_zeros().to_string()),
+            ("@OPB@", &outputs_per_block.to_string()),
+            ("@MAXW@", &MAX_WARPS_PER_BLOCK.to_string()),
+        ])
     })?;
 
-    // SAFETY: `MaybeUninit<T>` and `T` are layout-identical; the kernel writes every visited element
-    // (exactly once per `j < n_out`, by the lane-0 or tile-leader thread) and `c` holds `n_out`.
-    let c_typed: &mut CudaBuffer<T> =
-        unsafe { &mut *(c as *mut CudaBuffer<MaybeUninit<T>> as *mut CudaBuffer<T>) };
+    // SAFETY: `MaybeUninit<T>` and `T` are layout-identical; the kernel writes every visited
+    // element (exactly once per `j < n_out`, by the lane-0 or tile-leader thread) and `c` holds
+    // `n_out`.
+    let c_typed: &mut CudaBuffer<T> = unsafe { &mut *(c as *mut CudaBuffer<MaybeUninit<T>> as *mut CudaBuffer<T>) };
 
     crate::kernel::FlatLaunch::new(exec, &f, grid_blocks)
         .arg_ptr(c_typed, lc.offset())

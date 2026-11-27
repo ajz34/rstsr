@@ -161,19 +161,39 @@ impl DeviceCuda {
         self.ordinal.default_stream.clone()
     }
 
-    /// Block the host until this device's execution stream completes.
-    pub fn synchronize(&self) -> Result<()> {
-        self.stream.synchronize()
+    /// Block the host until this device value's execution stream completes.
+    /// Panics through the error mapping; use [`DeviceCuda::synchronize_f`]
+    /// for the fallible form.
+    pub fn synchronize(&self) {
+        self.synchronize_f().rstsr_unwrap()
     }
 
-    /// Compute capability `(major, minor)` of this device.
-    pub fn compute_capability(&self) -> Result<(i32, i32)> {
-        self.ordinal.compute_capability()
+    /// Fallible form of [`DeviceCuda::synchronize`].
+    pub fn synchronize_f(&self) -> Result<()> {
+        self.stream.synchronize_f()
     }
 
-    /// `(free, total)` device memory in bytes.
-    pub fn memory_info(&self) -> Result<(usize, usize)> {
-        self.ordinal.memory_info()
+    /// Compute capability `(major, minor)` of this device. Panics through
+    /// the error mapping; use [`DeviceCuda::compute_capability_f`] for the
+    /// fallible form.
+    pub fn compute_capability(&self) -> (i32, i32) {
+        self.compute_capability_f().rstsr_unwrap()
+    }
+
+    /// Fallible form of [`DeviceCuda::compute_capability`].
+    pub fn compute_capability_f(&self) -> Result<(i32, i32)> {
+        self.ordinal.compute_capability_f()
+    }
+
+    /// `(free, total)` device memory in bytes. Panics through the error
+    /// mapping; use [`DeviceCuda::memory_info_f`] for the fallible form.
+    pub fn memory_info(&self) -> (usize, usize) {
+        self.memory_info_f().rstsr_unwrap()
+    }
+
+    /// Fallible form of [`DeviceCuda::memory_info`].
+    pub fn memory_info_f(&self) -> Result<(usize, usize)> {
+        self.ordinal.memory_info_f()
     }
 }
 
@@ -271,4 +291,26 @@ impl core::fmt::Display for DeviceCuda {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(f, "cuda:{}", self.ordinal.ordinal())
     }
+}
+
+/// A device on ordinal `ordinal` (registry-canonical). Panics through the
+/// error mapping; use [`device_f`] for the fallible form.
+pub fn device(ordinal: usize) -> DeviceCuda {
+    DeviceCuda::new(ordinal)
+}
+
+/// Fallible form of [`device`].
+pub fn device_f(ordinal: usize) -> Result<DeviceCuda> {
+    DeviceCuda::new_f(ordinal)
+}
+
+/// `(free, total)` memory of `device` in bytes. Panics through the error
+/// mapping; use [`memory_info_f`] for the fallible form.
+pub fn memory_info(device: &DeviceCuda) -> (usize, usize) {
+    device.memory_info()
+}
+
+/// Fallible form of [`memory_info`].
+pub fn memory_info_f(device: &DeviceCuda) -> Result<(usize, usize)> {
+    device.memory_info_f()
 }

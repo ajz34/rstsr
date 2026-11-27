@@ -9,8 +9,8 @@
 //! two files both paths have hardware evidence.
 
 use rstsr::prelude::*;
-use rstsr_cuda::funcs;
 use rstsr_cuda::prelude_dev::*;
+use rstsr_cuda::registry::is_available;
 
 /// A device on which the tiled driver is the only enabled matmul driver.
 fn forced(drivers: MatMulDrivers) -> DeviceCuda {
@@ -21,7 +21,7 @@ fn forced(drivers: MatMulDrivers) -> DeviceCuda {
 
 macro_rules! tiled_and_cuda {
     ($d:ident) => {
-        let available = std::panic::catch_unwind(funcs::is_available).unwrap_or(false);
+        let available = std::panic::catch_unwind(is_available).unwrap_or(false);
         if !available {
             eprintln!("skipping: no CUDA device visible");
             return;
@@ -64,11 +64,7 @@ fn tiled_gemm22_vs_cpu() {
             rt::asarray((exact_data(k * n, n as u64 + 2), &dcpu)).into_shape([k, n]);
         let a = a_cpu.to_device(&d);
         let b = b_cpu.to_device(&d);
-        assert_eq!(
-            host_nd(&rt::matmul(&a, &b)),
-            host_nd(&rt::matmul(&a_cpu, &b_cpu)),
-            "({m} x {k}) @ ({k} x {n})"
-        );
+        assert_eq!(host_nd(&rt::matmul(&a, &b)), host_nd(&rt::matmul(&a_cpu, &b_cpu)), "({m} x {k}) @ ({k} x {n})");
     }
 }
 
@@ -83,10 +79,8 @@ fn tiled_transposed_operands() {
     let at_cpu = a_base.swapaxes(0, 1);
     let b_base = rt::asarray((exact_data(n * k, 4), &dcpu)).into_shape([n, k]);
     let bt_cpu = b_base.swapaxes(0, 1);
-    let a0_cpu: Tensor<f64, DeviceCpuSerial, _> =
-        rt::asarray((exact_data(m * k, 6), &dcpu)).into_shape([m, k]);
-    let b0_cpu: Tensor<f64, DeviceCpuSerial, _> =
-        rt::asarray((exact_data(k * n, 5), &dcpu)).into_shape([k, n]);
+    let a0_cpu: Tensor<f64, DeviceCpuSerial, _> = rt::asarray((exact_data(m * k, 6), &dcpu)).into_shape([m, k]);
+    let b0_cpu: Tensor<f64, DeviceCpuSerial, _> = rt::asarray((exact_data(k * n, 5), &dcpu)).into_shape([k, n]);
 
     let at = at_cpu.to_device(&d);
     let bt = bt_cpu.to_device(&d);
@@ -105,22 +99,15 @@ fn tiled_batched_vs_cpu() {
     let dcpu = DeviceCpuSerial::default();
     let (p, m, k, n) = (5usize, 12usize, 16usize, 8usize);
 
-    let a_cpu: Tensor<f64, DeviceCpuSerial, _> =
-        rt::asarray((exact_data(p * m * k, 11), &dcpu)).into_shape([p, m, k]);
-    let b_cpu: Tensor<f64, DeviceCpuSerial, _> =
-        rt::asarray((exact_data(p * k * n, 12), &dcpu)).into_shape([p, k, n]);
+    let a_cpu: Tensor<f64, DeviceCpuSerial, _> = rt::asarray((exact_data(p * m * k, 11), &dcpu)).into_shape([p, m, k]);
+    let b_cpu: Tensor<f64, DeviceCpuSerial, _> = rt::asarray((exact_data(p * k * n, 12), &dcpu)).into_shape([p, k, n]);
     let a = a_cpu.to_device(&d);
     let b = b_cpu.to_device(&d);
     assert_eq!(host_nd(&rt::matmul(&a, &b)), host_nd(&rt::matmul(&a_cpu, &b_cpu)), "batched");
 
-    let a2_cpu: Tensor<f64, DeviceCpuSerial, _> =
-        rt::asarray((exact_data(m * k, 13), &dcpu)).into_shape([m, k]);
+    let a2_cpu: Tensor<f64, DeviceCpuSerial, _> = rt::asarray((exact_data(m * k, 13), &dcpu)).into_shape([m, k]);
     let a2 = a2_cpu.to_device(&d);
-    assert_eq!(
-        host_nd(&rt::matmul(&a2, &b)),
-        host_nd(&rt::matmul(&a2_cpu, &b_cpu)),
-        "broadcast batch"
-    );
+    assert_eq!(host_nd(&rt::matmul(&a2, &b)), host_nd(&rt::matmul(&a2_cpu, &b_cpu)), "broadcast batch");
 }
 
 /// `matmul_from`: the path that reads `c`, and the only one that hands the device a strided output.
@@ -130,16 +117,13 @@ fn tiled_matmul_from_vs_cpu() {
     let dcpu = DeviceCpuSerial::default();
     let (m, k, n) = (20usize, 12usize, 16usize);
 
-    let a_cpu: Tensor<f64, DeviceCpuSerial, _> =
-        rt::asarray((exact_data(m * k, 21), &dcpu)).into_shape([m, k]);
-    let b_cpu: Tensor<f64, DeviceCpuSerial, _> =
-        rt::asarray((exact_data(k * n, 22), &dcpu)).into_shape([k, n]);
+    let a_cpu: Tensor<f64, DeviceCpuSerial, _> = rt::asarray((exact_data(m * k, 21), &dcpu)).into_shape([m, k]);
+    let b_cpu: Tensor<f64, DeviceCpuSerial, _> = rt::asarray((exact_data(k * n, 22), &dcpu)).into_shape([k, n]);
     let a = a_cpu.to_device(&d);
     let b = b_cpu.to_device(&d);
 
     let mut c: Tensor<f64, _, _> = rt::full(([m * n], 1.0f64, &d)).into_shape([m, n]);
-    let mut c_cpu: Tensor<f64, DeviceCpuSerial, _> =
-        rt::full(([m * n], 1.0f64, &dcpu)).into_shape([m, n]);
+    let mut c_cpu: Tensor<f64, DeviceCpuSerial, _> = rt::full(([m * n], 1.0f64, &dcpu)).into_shape([m, n]);
     rt::matmul_from(&mut c, &a, &b, 2.0f64, 3.0f64);
     rt::matmul_from(&mut c_cpu, &a_cpu, &b_cpu, 2.0f64, 3.0f64);
     assert_eq!(host_nd(&c), host_nd(&c_cpu), "c = 2*(a@b) + 3*c");
@@ -148,11 +132,11 @@ fn tiled_matmul_from_vs_cpu() {
 /// The two fixtures that used to be cuBLAS-only: `ColMajor`, and the length-1 axis of GEMV/GEVM.
 ///
 /// This exists to make one comparison possible. Both paths share `resolve_geom` — the col-major
-/// reversal, the operand swap, the batch steps, the degenerate-axis strides — and differ only in how
-/// the geometry is consumed. So if these shapes pass here and fail through cuBLAS, the geometry is
-/// not the difference. That is exactly what happened: `cuda matmul` failed on col-major, batched,
-/// transposed and gevm while this file was green for the latter two, and a parallel-run corruption of
-/// the shared cuBLAS handle was the only explanation left standing.
+/// reversal, the operand swap, the batch steps, the degenerate-axis strides — and differ only in
+/// how the geometry is consumed. So if these shapes pass here and fail through cuBLAS, the geometry
+/// is not the difference. That is exactly what happened: `cuda matmul` failed on col-major,
+/// batched, transposed and gevm while this file was green for the latter two, and a parallel-run
+/// corruption of the shared cuBLAS handle was the only explanation left standing.
 #[test]
 fn tiled_col_major_and_gemv_gevm() {
     tiled_and_cuda!(d);
@@ -163,10 +147,8 @@ fn tiled_col_major_and_gemv_gevm() {
     let mut dcpu = DeviceCpuSerial::default();
     dcpu.set_default_order(ColMajor);
     let (m, k, n) = (20usize, 12usize, 32usize);
-    let a_cpu: Tensor<f64, DeviceCpuSerial, _> =
-        rt::asarray((exact_data(m * k, 41), &dcpu)).into_shape([m, k]);
-    let b_cpu: Tensor<f64, DeviceCpuSerial, _> =
-        rt::asarray((exact_data(k * n, 42), &dcpu)).into_shape([k, n]);
+    let a_cpu: Tensor<f64, DeviceCpuSerial, _> = rt::asarray((exact_data(m * k, 41), &dcpu)).into_shape([m, k]);
+    let b_cpu: Tensor<f64, DeviceCpuSerial, _> = rt::asarray((exact_data(k * n, 42), &dcpu)).into_shape([k, n]);
     let a = a_cpu.to_device(&d);
     let b = b_cpu.to_device(&d);
     assert_eq!(
@@ -179,12 +161,10 @@ fn tiled_col_major_and_gemv_gevm() {
     // into a 2-D matmul part (`dim_insert`, i.e. a stride-1 axis of extent 1).
     let dcpu = DeviceCpuSerial::default();
     let (m, k, n) = (24usize, 16usize, 18usize);
-    let a_cpu: Tensor<f64, DeviceCpuSerial, _> =
-        rt::asarray((exact_data(m * k, 31), &dcpu)).into_shape([m, k]);
+    let a_cpu: Tensor<f64, DeviceCpuSerial, _> = rt::asarray((exact_data(m * k, 31), &dcpu)).into_shape([m, k]);
     let v_cpu: Tensor<f64, DeviceCpuSerial, _> = rt::asarray((exact_data(k, 32), &dcpu));
     let w_cpu: Tensor<f64, DeviceCpuSerial, _> = rt::asarray((exact_data(k, 33), &dcpu));
-    let c_cpu: Tensor<f64, DeviceCpuSerial, _> =
-        rt::asarray((exact_data(k * n, 34), &dcpu)).into_shape([k, n]);
+    let c_cpu: Tensor<f64, DeviceCpuSerial, _> = rt::asarray((exact_data(k * n, 34), &dcpu)).into_shape([k, n]);
     let a = a_cpu.to_device(&d);
     let v = v_cpu.to_device(&d);
     let w = w_cpu.to_device(&d);

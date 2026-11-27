@@ -6,8 +6,8 @@
 //! (no issue numbers yet); move them to `tests/issues/<n>` once filed.
 
 use rstsr::prelude::*;
-use rstsr_cuda::funcs;
 use rstsr_cuda::prelude_dev::*;
+use rstsr_cuda::registry::is_available;
 
 /// Layout-ordered host values of a tensor (D2H through the trusted CPU
 /// device, so strided views gather correctly).
@@ -39,7 +39,7 @@ where
 
 macro_rules! require_cuda {
     () => {
-        if !funcs::is_available() {
+        if !is_available() {
             eprintln!("skipping: no CUDA device visible");
             return;
         }

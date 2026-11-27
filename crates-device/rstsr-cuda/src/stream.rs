@@ -19,11 +19,11 @@ use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 /// behaviour, and it fails silently rather than with an error.
 ///
 /// The sharing itself is deliberate, not accidental: [`crate::registry`] caches one
-/// [`CudaStreamObj`] per ordinal, so every `DeviceCuda::new(0)` in a process runs on one stream. That
-/// is a good default — a stream *is* thread-safe at the CUDA API level, so kernel launches and copies
-/// from several threads order correctly — and it is why the tiled kernel never needed this while the
-/// cuBLAS path did. The handle therefore needs its own serialization, and it is kept *inside* this
-/// type so a caller cannot forget it: every entry into this handle takes the guard —
+/// [`CudaStreamObj`] per ordinal, so every `DeviceCuda::new(0)` in a process runs on one stream.
+/// That is a good default — a stream *is* thread-safe at the CUDA API level, so kernel launches and
+/// copies from several threads order correctly — and it is why the tiled kernel never needed this
+/// while the cuBLAS path did. The handle therefore needs its own serialization, and it is kept
+/// *inside* this type so a caller cannot forget it: every entry into this handle takes the guard —
 /// `matmul::drivers::cublas::launch` (the classic entries), the `cublasGemmEx` driver and the
 /// symmetric form. The cuBLASLt driver serializes through its own per-ordinal lock.
 ///
@@ -110,8 +110,8 @@ impl CudaStreamObj {
     ///
     /// `cudarc` resolves cuBLAS symbols lazily through `libloading` and **panics** when a symbol is
     /// missing rather than returning an error, so a machine without `libcublas` would abort here.
-    /// The probe is therefore wrapped in `catch_unwind`; the panic message still reaches stderr once
-    /// per stream, which is the only signal the user gets that they are on the slow path.
+    /// The probe is therefore wrapped in `catch_unwind`; the panic message still reaches stderr
+    /// once per stream, which is the only signal the user gets that they are on the slow path.
     ///
     /// The returned handle is shared by every thread that uses this stream, and a `cublasHandle_t`
     /// is not thread-safe — take [`CublasHandle::lock`] before every call, or better, call
@@ -119,9 +119,8 @@ impl CudaStreamObj {
     pub(crate) fn cublas(&self) -> Option<&Arc<CublasHandle>> {
         self.cublas_slot
             .get_or_init(|| {
-                let made = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    CudaBlas::new(self.stream.clone())
-                }));
+                let made =
+                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| CudaBlas::new(self.stream.clone())));
                 made.ok().and_then(|r| r.ok()).map(|blas| Arc::new(CublasHandle::new(blas)))
             })
             .as_ref()
@@ -142,7 +141,14 @@ impl CudaStreamObj {
     }
 
     /// Block the host until all work submitted to this stream completes.
-    pub fn synchronize(&self) -> Result<()> {
+    /// Panics through the error mapping; use [`CudaStreamObj::synchronize_f`]
+    /// for the fallible form.
+    pub fn synchronize(&self) {
+        self.synchronize_f().rstsr_unwrap()
+    }
+
+    /// Fallible form of [`CudaStreamObj::synchronize`].
+    pub fn synchronize_f(&self) -> Result<()> {
         map_driver_result(self.stream.synchronize())
     }
 }

@@ -57,8 +57,15 @@ impl CudaOrdinalObj {
         &self.ctx
     }
 
-    /// Compute capability `(major, minor)` of this ordinal's device.
-    pub fn compute_capability(&self) -> Result<(i32, i32)> {
+    /// Compute capability `(major, minor)` of this ordinal's device. Panics
+    /// through the error mapping; use [`CudaOrdinalObj::compute_capability_f`]
+    /// for the fallible form.
+    pub fn compute_capability(&self) -> (i32, i32) {
+        self.compute_capability_f().rstsr_unwrap()
+    }
+
+    /// Fallible form of [`CudaOrdinalObj::compute_capability`].
+    pub fn compute_capability_f(&self) -> Result<(i32, i32)> {
         map_driver_result(self.ctx.compute_capability())
     }
 
@@ -76,10 +83,26 @@ impl CudaOrdinalObj {
             .as_ref()
     }
 
-    /// `(free, total)` device memory in bytes.
-    pub fn memory_info(&self) -> Result<(usize, usize)> {
+    /// `(free, total)` device memory in bytes. Panics through the error
+    /// mapping; use [`CudaOrdinalObj::memory_info_f`] for the fallible form.
+    pub fn memory_info(&self) -> (usize, usize) {
+        self.memory_info_f().rstsr_unwrap()
+    }
+
+    /// Fallible form of [`CudaOrdinalObj::memory_info`].
+    pub fn memory_info_f(&self) -> Result<(usize, usize)> {
         map_driver_result(self.ctx.mem_get_info())
     }
+}
+
+/// Number of visible CUDA devices (0 if CUDA is unavailable).
+pub fn device_count() -> usize {
+    CudaContext::device_count().unwrap_or(0).max(0) as usize
+}
+
+/// Whether any CUDA device is available.
+pub fn is_available() -> bool {
+    device_count() > 0
 }
 
 impl Debug for CudaOrdinalObj {

@@ -15,9 +15,9 @@ use half::{bf16, f16};
 use num::Complex;
 use rstsr::prelude::*;
 use rstsr_cuda::dtype::CudaDType;
-use rstsr_cuda::funcs;
 use rstsr_cuda::matmul::{matmul_with_mode_f, ComputeType16F, ComputeType32F, ComputeType64F, TensorCudaMatMulAPI};
 use rstsr_cuda::prelude_dev::*;
+use rstsr_cuda::registry::is_available;
 
 /// Uniform data in `[-1, 1]`.
 fn data(n: usize, seed: u64) -> Vec<f64> {
@@ -32,7 +32,7 @@ fn data(n: usize, seed: u64) -> Vec<f64> {
 
 macro_rules! require_cuda {
     () => {
-        if !std::panic::catch_unwind(funcs::is_available).unwrap_or(false) {
+        if !std::panic::catch_unwind(is_available).unwrap_or(false) {
             eprintln!("skipping: no CUDA device visible");
             return;
         }
@@ -660,8 +660,7 @@ fn tensor_level_modes() {
 
     let plain: Tensor<f32, DeviceCuda, IxD> =
         matmul_with_mode_f::<f16, f16, f32, IxD, IxD, IxD>(&a, &b, 1.0, ComputeType32F::Pedantic).rstsr_unwrap();
-    let with_output: Tensor<f32, DeviceCuda, IxD> =
-        a.matmul_with_mode(&b, ComputeType32F::Pedantic).out::<f32>();
+    let with_output: Tensor<f32, DeviceCuda, IxD> = a.matmul_with_mode(&b, ComputeType32F::Pedantic).out::<f32>();
     let mut c: Tensor<f32, DeviceCuda, IxD> = rt::full(([m * n], 2.0f32, &d)).into_shape([m, n]);
     c.matmul_from_mode(&a, &b, 1.0, 0.0, ComputeType32F::Pedantic);
     let mut scaled: Tensor<f32, DeviceCuda, IxD> = rt::full(([m * n], 2.0f32, &d)).into_shape([m, n]);
@@ -695,8 +694,7 @@ fn tensor_level_modes() {
         rt::asarray((data(m * k, 3).into_iter().map(|x| x as f32).collect::<Vec<_>>(), &d)).into_shape([m, k]);
     let b32: Tensor<f32, DeviceCuda, IxD> =
         rt::asarray((data(k * n, 4).into_iter().map(|x| x as f32).collect::<Vec<_>>(), &d)).into_shape([k, n]);
-    let pedantic: Tensor<f32, DeviceCuda, IxD> =
-        a32.matmul_with_mode(&b32, ComputeType32F::Pedantic).out();
+    let pedantic: Tensor<f32, DeviceCuda, IxD> = a32.matmul_with_mode(&b32, ComputeType32F::Pedantic).out();
     let fast: Tensor<f32, DeviceCuda, IxD> = a32.matmul_with_mode(&b32, ComputeType32F::FastTF32).out();
     assert_ne!(read(&pedantic), read(&fast), "the mode of the call is the one run");
 

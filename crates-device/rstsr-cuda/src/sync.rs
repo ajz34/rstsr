@@ -21,7 +21,7 @@ pub trait CudaSyncAPI {
 impl CudaSyncAPI for DeviceCuda {
     /// Wait for this device value's execution stream.
     fn synchronize_f(&self) -> Result<()> {
-        DeviceCuda::synchronize(self)
+        DeviceCuda::synchronize_f(self)
     }
 }
 
@@ -41,7 +41,7 @@ where
     /// Wait for the execution stream, then for the buffer's allocation stream
     /// (host reads only observe the allocation stream).
     fn synchronize_f(&self) -> Result<()> {
-        self.storage().device().synchronize()?;
+        self.storage().device().synchronize_f()?;
         map_driver_result(self.storage().raw().alloc_stream().inner().synchronize())
     }
 }
@@ -56,4 +56,28 @@ where
     fn synchronize_f(&self) -> Result<()> {
         self.storage().raw().sync_f()
     }
+}
+
+/// Block the host until all work on `device`'s execution stream completes.
+/// Panics through the error mapping; use [`synchronize_f`] for the fallible
+/// form.
+pub fn synchronize(device: &DeviceCuda) {
+    device.synchronize()
+}
+
+/// Fallible form of [`synchronize`].
+pub fn synchronize_f(device: &DeviceCuda) -> Result<()> {
+    device.synchronize_f()
+}
+
+/// Block until the data of `tensor` (CUDA or pinned) is observable on the
+/// host. Panics through the error mapping; use [`synchronize_tensor_f`] for
+/// the fallible form.
+pub fn synchronize_tensor<T: CudaSyncAPI>(tensor: &T) {
+    tensor.synchronize()
+}
+
+/// Fallible form of [`synchronize_tensor`].
+pub fn synchronize_tensor_f<T: CudaSyncAPI>(tensor: &T) -> Result<()> {
+    tensor.synchronize_f()
 }

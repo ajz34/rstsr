@@ -13,7 +13,7 @@ use rstsr_cuda::prelude_dev::*;
 use std::sync::Arc;
 
 fn has_cuda() -> bool {
-    rstsr_cuda::funcs::is_available()
+    rstsr_cuda::registry::is_available()
 }
 
 macro_rules! require_cuda {
@@ -161,8 +161,8 @@ fn foreign_stream_temporary_source_ordered() {
                                                // be reused immediately
         let _churn = rt::add(&base, &base);
         assert_eq!(out.raw().to_vec_f().unwrap(), vec.iter().map(|x| x + 1.0).collect::<Vec<_>>());
-        dev_s0.synchronize().unwrap();
-        dev_s2.synchronize().unwrap();
+        dev_s0.synchronize();
+        dev_s2.synchronize();
     }
 }
 
@@ -252,9 +252,9 @@ fn event_orders_copy_behind_foreign_kernel() {
     let src = pinned.tensor_f(pinned.from_vec_f(vec![1.0f64; n]).unwrap(), [n]).unwrap().to_device(&dev_b);
     let s = rt::add(&src, &src); // kernel on B
     let ev = CudaEvent::new_f(&dev_b).unwrap();
-    ev.record(dev_b.stream()).unwrap();
+    ev.record(dev_b.stream());
     let mut out = pinned.alloc_f::<f64>(n).unwrap();
-    ev.wait(dev_a.stream()).unwrap();
+    ev.wait(dev_a.stream());
     transfer::d2h_pinned_async(&dev_a, s.raw(), &mut out).unwrap();
     assert_eq!(out.into_vec_f().unwrap(), vec![2.0; n]);
     assert!(ev.is_complete_f().unwrap());
@@ -272,9 +272,9 @@ fn synchronize_readiness() {
     assert!(out.raw().event().is_complete_f().unwrap());
     assert_eq!(out.raw().to_vec_f().unwrap(), arange_vec(n));
     g.synchronize();
-    dev.synchronize().unwrap();
+    dev.synchronize();
     pinned.synchronize();
-    rstsr_cuda::funcs::synchronize_tensor(&out).unwrap();
+    out.synchronize();
 }
 
 #[test]

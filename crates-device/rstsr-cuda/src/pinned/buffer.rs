@@ -97,12 +97,26 @@ impl<T> PinnedBuffer<T> {
     }
 
     /// Make `stream` wait for every copy previously recorded on this buffer.
-    pub fn wait(&self, stream: &CudaStream) -> Result<()> {
+    /// Panics through the error mapping; use [`PinnedBuffer::wait_f`] for the
+    /// fallible form.
+    pub fn wait(&self, stream: &CudaStream) {
+        self.wait_f(stream).rstsr_unwrap()
+    }
+
+    /// Fallible form of [`PinnedBuffer::wait`].
+    pub fn wait_f(&self, stream: &CudaStream) -> Result<()> {
         map_driver_result(stream.wait(self.event.raw()))
     }
 
-    /// Record this buffer's event on `stream` (after a copy was enqueued there).
-    pub fn record(&self, stream: &CudaStream) -> Result<()> {
+    /// Record this buffer's event on `stream` (after a copy was enqueued
+    /// there). Panics through the error mapping; use [`PinnedBuffer::record_f`]
+    /// for the fallible form.
+    pub fn record(&self, stream: &CudaStream) {
+        self.record_f(stream).rstsr_unwrap()
+    }
+
+    /// Fallible form of [`PinnedBuffer::record`].
+    pub fn record_f(&self, stream: &CudaStream) -> Result<()> {
         map_driver_result(self.event.raw().record(stream))
     }
 

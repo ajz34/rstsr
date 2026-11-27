@@ -8,6 +8,9 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 pub mod prelude;
 
+#[cfg(feature = "cuda")]
+pub mod cuda;
+
 // re-exported so the crate-level doc pages can link `crate::order_semantics`
 pub use rstsr_core::order_semantics;
 
@@ -109,4 +112,32 @@ fn test_dlpack_prelude() {
 
     // a second function of the namespace, pinned by signature
     let _: fn(Tensor<f64, DeviceCpuSerial, IxD>) -> rt::dlpack::DlpackExport = rt::dlpack::into_dlpack;
+}
+
+#[cfg(feature = "cuda")]
+#[test]
+fn test_cuda_prelude() {
+    use crate::prelude::*;
+
+    // the CUDA backend is surfaced through the prelude namespace `rt::cuda`
+    if !rt::cuda::is_available() {
+        println!("skipping: no CUDA device visible");
+        return;
+    }
+
+    let device_cpu = DeviceCpuSerial::default();
+    let device = rt::cuda::device_f(0).unwrap();
+    let a: Tensor<f64, rt::cuda::DeviceCuda, IxD> = rt::arange_f((0.0, 5.0, 1.0, &device)).unwrap();
+    let b = rt::sin_f(&a).unwrap();
+    rt::cuda::synchronize(&device);
+    let host = b.to_device_f(&device_cpu).unwrap();
+    let expected = rt::sin_f(&rt::arange_f((0.0, 5.0, 1.0, &device_cpu)).unwrap()).unwrap();
+    // GPU transcendentals differ from libm in the last ulp; compare with a tolerance
+    assert!(rt::allclose_f(&expected, &host, None).unwrap());
+
+    // a second function of the namespace, pinned by signature
+    let _: fn(&rt::cuda::DeviceCuda) = rt::cuda::synchronize;
+
+    // the top-level alias module `rstsr::cuda` carries the same prelude
+    let _: fn(&crate::cuda::prelude::DeviceCuda) = rt::cuda::synchronize;
 }

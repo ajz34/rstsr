@@ -16,8 +16,8 @@ use half::f16;
 use num::Complex;
 use rstsr::prelude::*;
 use rstsr_cuda::dtype::CudaDType;
-use rstsr_cuda::funcs;
 use rstsr_cuda::prelude_dev::*;
+use rstsr_cuda::registry::is_available;
 
 /// Integer-valued data in `[-4, 4]`, exactly representable in every dtype used here.
 fn exact_data(n: usize, seed: u64) -> Vec<f64> {
@@ -38,7 +38,7 @@ fn forced(drivers: MatMulDrivers) -> DeviceCuda {
 
 macro_rules! require_cuda {
     () => {
-        if !std::panic::catch_unwind(funcs::is_available).unwrap_or(false) {
+        if !std::panic::catch_unwind(is_available).unwrap_or(false) {
             eprintln!("skipping: no CUDA device visible");
             return;
         }
@@ -382,7 +382,9 @@ fn bf16_triples_on_naive() {
     let d = forced(MatMulDrivers::NAIVE);
     let dcpu = DeviceCpuSerial::default();
     let (m, k, n) = (8usize, 16usize, 6usize);
-    let round = |seed: u64, cnt: usize| -> Vec<half::bf16> { exact_data(cnt, seed).into_iter().map(half::bf16::from_f64).collect() };
+    let round = |seed: u64, cnt: usize| -> Vec<half::bf16> {
+        exact_data(cnt, seed).into_iter().map(half::bf16::from_f64).collect()
+    };
     let a: Tensor<half::bf16, DeviceCpuSerial, _> = rt::asarray((round(1, m * k), &dcpu)).into_shape([m, k]);
     let b: Tensor<half::bf16, DeviceCpuSerial, _> = rt::asarray((round(2, k * n), &dcpu)).into_shape([k, n]);
     let (ag, bg) = (a.to_device(&d), b.to_device(&d));

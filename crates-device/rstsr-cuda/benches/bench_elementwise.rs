@@ -31,22 +31,22 @@
 use std::time::Instant;
 
 use rstsr::prelude::*;
-use rstsr_cuda::funcs;
 use rstsr_cuda::prelude_dev::*;
+use rstsr_cuda::registry::is_available;
 
 fn bench_cell<F: FnMut()>(d: &DeviceCuda, name: &str, n_iter: usize, repeat: usize, mut f: F) -> f64 {
     // warmup: NVRTC compile + driver JIT on first call
     for _ in 0..30 {
         f();
     }
-    funcs::synchronize(d).unwrap();
+    d.synchronize();
     let mut samples = Vec::with_capacity(repeat);
     for _ in 0..repeat {
         let t0 = Instant::now();
         for _ in 0..n_iter {
             f();
         }
-        funcs::synchronize(d).unwrap();
+        d.synchronize();
         samples.push(t0.elapsed().as_secs_f64() / n_iter as f64);
     }
     samples.sort_by(|x, y| x.total_cmp(y));
@@ -56,7 +56,7 @@ fn bench_cell<F: FnMut()>(d: &DeviceCuda, name: &str, n_iter: usize, repeat: usi
 }
 
 fn main() {
-    if !funcs::is_available() {
+    if !is_available() {
         eprintln!("no CUDA device");
         return;
     }
@@ -78,7 +78,7 @@ fn main() {
             let m = rt::pow(&rt::sin(&w), 2.5);
             std::hint::black_box(&m);
         }
-        funcs::synchronize(&d).unwrap();
+        d.synchronize();
     }
 
     // fill
@@ -234,5 +234,5 @@ fn main() {
     }
 
     let _ = (dt_fill, dt_add, dt_add_t, dt_rem, dt_sin);
-    funcs::synchronize(&d).unwrap();
+    d.synchronize();
 }

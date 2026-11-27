@@ -57,6 +57,7 @@ rstsr-sci-traits = { path = "./rstsr-sci-traits", default-features = false, vers
 # members (device)
 rstsr-openblas = { path = "./crates-device/rstsr-openblas", default-features = false, version = "0.10.3" }
 rstsr-mkl = { path = "./crates-device/rstsr-mkl", default-features = false, version = "0.10.3" }
+rstsr-cuda = { path = "./crates-device/rstsr-cuda", default-features = false, version = "0.10.3" }
 rstsr-blis = { path = "./crates-device/rstsr-blis", default-features = false, version = "0.10.3" }
 rstsr-aocl = { path = "./crates-device/rstsr-aocl", default-features = false, version = "0.10.3" }
 rstsr-kml = { path = "./crates-device/rstsr-kml", default-features = false, version = "0.10.3" }

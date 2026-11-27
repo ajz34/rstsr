@@ -14,13 +14,13 @@ pub fn h2d_pinned_async<T: Copy>(device: &DeviceCuda, src: &PinnedBuffer<T>) -> 
     let mut buf = CudaBuffer::<T>::new_f(device.stream(), src.len())?;
     if byte_len > 0 {
         let stream = device.stream().inner();
-        src.wait(stream)?;
+        src.wait_f(stream)?;
         let ptr = base_ptr_mut(&mut buf);
         // SAFETY: `ptr` owns `byte_len` device bytes; `src` is an initialized pinned buffer.
         unsafe {
             map_driver_result_alloc(result::memcpy_htod_async(ptr, src.uninit_bytes(), stream.cu_stream()), byte_len)?;
         }
-        src.record(stream)?;
+        src.record_f(stream)?;
     }
     Ok(buf)
 }
@@ -38,7 +38,7 @@ pub fn d2h_pinned_async<T: Copy>(device: &DeviceCuda, src: &CudaBuffer<T>, dst: 
     let byte_len = dst.byte_len();
     if byte_len > 0 {
         let stream = device.stream().inner();
-        dst.wait(stream)?;
+        dst.wait_f(stream)?;
         let _input = crate::kernel::order_input_raw(src, stream)?;
         // cudarc records a read event on `stream` when `_read` drops; `CudaSlice::drop`
         // makes the allocation stream wait for it before the stream-ordered free.
@@ -49,7 +49,7 @@ pub fn d2h_pinned_async<T: Copy>(device: &DeviceCuda, src: &CudaBuffer<T>, dst: 
         }
         drop(_read);
         drop(_input);
-        dst.record(stream)?;
+        dst.record_f(stream)?;
     }
     Ok(())
 }

@@ -22,6 +22,7 @@ num = { workspace = true }
 # device dependencies
 rstsr-openblas = { workspace = true, optional = true }
 rstsr-mkl = { workspace = true, optional = true }
+rstsr-cuda = { workspace = true, optional = true }
 rstsr-blis = { workspace = true, optional = true }
 rstsr-aocl = { workspace = true, optional = true }
 rstsr-kml = { workspace = true, optional = true }
@@ -53,6 +54,9 @@ mkl = ["dep:rstsr-mkl", "use_blas_traits"]
 blis = ["dep:rstsr-blis", "use_blas_traits"]
 aocl = ["dep:rstsr-aocl", "use_blas_traits"]
 kml = ["dep:rstsr-kml", "use_blas_traits"]
+
+# CUDA device
+cuda = ["dep:rstsr-cuda"]
 
 # dependencies specification
 linalg = [
@@ -92,7 +96,7 @@ ilp64 = [
 ]
 
 [package.metadata.docs.rs]
-features = ["default", "openblas", "linalg", "sci", "tblis", "dlpack"]
+features = ["default", "openblas", "linalg", "sci", "tblis", "dlpack", "cuda"]
 rustdoc-args = ["--cfg", "docsrs", "--document-private-items", "--html-in-header", "katex-header.html"]
 
 # The linalg cheat-sheet examples use the `rt::linalg` family, available only

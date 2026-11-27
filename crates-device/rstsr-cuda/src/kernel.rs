@@ -342,7 +342,7 @@ impl CudaOrdinalObj {
         // One choke point: the returned string becomes the NVRTC flag, part of the key, and part of
         // the disk-cache hash, so overriding it here cannot leave the three out of step.
         if let Some(a) = arch_override() {
-            if let (Some(want), Ok((maj, min))) = (arch_number(a), self.compute_capability()) {
+            if let (Some(want), Ok((maj, min))) = (arch_number(a), self.compute_capability_f()) {
                 if want > (maj as u32) * 10 + (min as u32) {
                     eprintln!(
                         "rstsr-cuda: compiling for {a} on a compute_{maj}{min} device; PTX is only \
@@ -353,7 +353,7 @@ impl CudaOrdinalObj {
             return Ok(a.to_string());
         }
         let cached =
-            self.arch_slot.get_or_init(|| self.compute_capability().map(|(maj, min)| format!("compute_{maj}{min}")));
+            self.arch_slot.get_or_init(|| self.compute_capability_f().map(|(maj, min)| format!("compute_{maj}{min}")));
         match cached {
             Ok(s) => Ok(s.clone()),
             Err(e) => Err(rstsr_error!(DeviceError, "arch query failed: {e}")),
@@ -375,7 +375,7 @@ pub(crate) fn make_key(ordinal: &CudaOrdinalObj, name: &str, source: &str, extra
     // This is also the answer to "is the cache-key namespace complete?" for the *name* half: a key
     // can no longer disagree with the entry it will load.
     match source.find(&format!("void {name}(")) {
-        Some(_) => {}
+        Some(_) => {},
         None => rstsr_raise!(
             DeviceError,
             "kernel `{name}` is not defined as `void {name}(...)` in the source it was keyed with; \
@@ -430,7 +430,15 @@ pub(crate) struct FlatLaunch<'a> {
 
 impl<'a> FlatLaunch<'a> {
     pub fn new(stream: &'a Arc<CudaStreamObj>, function: &'a CudaFunction, n: usize) -> Self {
-        Self { stream, function, n, elems_per_thread: 1, explicit_shape: None, params: Vec::with_capacity(8), reads: Vec::new() }
+        Self {
+            stream,
+            function,
+            n,
+            elems_per_thread: 1,
+            explicit_shape: None,
+            params: Vec::with_capacity(8),
+            reads: Vec::new(),
+        }
     }
 
     /// Grid covers `elems_per_thread` consecutive elements per thread
@@ -673,7 +681,8 @@ mod tests {
         assert_eq!(parse_arch_override("compute_80"), Some("compute_80"));
         assert_eq!(parse_arch_override("compute_90"), Some("compute_90"));
         assert_eq!(parse_arch_override("compute_120"), Some("compute_120"));
-        // Anything else must be refused, because a silently-forced bogus arch looks like a driver bug.
+        // Anything else must be refused, because a silently-forced bogus arch looks like a driver
+        // bug.
         for bad in ["", "compute_", "compute_x", "sm_80", "compute_8o", " compute_80", "compute_-1"] {
             assert_eq!(parse_arch_override(bad), None, "{bad:?} should be refused");
         }

@@ -6,7 +6,6 @@
 //! is visible (CI machines without GPU).
 
 use rstsr::prelude::*;
-use rstsr_cuda::funcs;
 use rstsr_cuda::prelude_dev::*;
 use std::sync::Arc;
 
@@ -30,7 +29,7 @@ where
 }
 
 fn has_cuda() -> bool {
-    funcs::is_available()
+    cuda::is_available()
 }
 
 macro_rules! require_cuda {
@@ -84,7 +83,7 @@ fn flags_resolution() {
     require_cuda!();
     let d = DeviceCuda::new(0);
     // None tracks the global
-    let before = funcs::default_flags();
+    let before = cuda::default_flags();
     let mut d2 = d.clone();
     let mut pinned = CudaRuntimeFlags::default();
     pinned.compute_type_32f = ComputeType32F::FastTF32;
@@ -213,14 +212,14 @@ fn format_matches_cpu() {
 fn allocator_valves() {
     require_cuda!();
     let device = DeviceCuda::new(0);
-    let (free0, total) = funcs::memory_info(&device).unwrap();
+    let (free0, total) = device.memory_info();
     assert!(total > 0);
     // churn then trim; free memory should not shrink monotonically forever
     for _ in 0..4 {
         let _big: Tensor<f64, _> = rt::zeros(([64 * 1024 * 1024], &device)); // 512 MiB
     }
-    funcs::synchronize(&device).unwrap();
-    let (free1, _) = funcs::memory_info(&device).unwrap();
+    device.synchronize();
+    let (free1, _) = device.memory_info();
     assert!(free1 > 0 && free0 > 0);
 }
 
