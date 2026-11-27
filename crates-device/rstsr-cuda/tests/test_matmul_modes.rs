@@ -873,6 +873,28 @@ fn inner_dot() {
     dot_matrix::<Complex<f32>>("c32", true, re32, |a, b| (a - b).norm() <= 1e-5 * (1.0 + b.norm()));
     dot_matrix::<Complex<f64>>("c64", true, re64, |a, b| (a - b).norm() <= 1e-13 * (1.0 + b.norm()));
 }
+
+/// The degenerate inner dots, on every cuBLAS driver set: `[0] @ [0]` is exactly `0.0` — the
+/// lifted `1 x 0` operand declares `ld = 1`, which cuBLAS accepts (`ld = 0` was an
+/// `INVALID_VALUE` from `cublasGemmEx` and the classic entries) — and `[3] @ [3]` is exact.
+#[test]
+fn degenerate_dots() {
+    require_cuda!();
+    let dcpu = DeviceCpuSerial::default();
+    for drivers in
+        [MatMulDrivers::all(), MatMulDrivers::CUBLAS_LT, MatMulDrivers::CUBLAS_EX, MatMulDrivers::CUBLAS]
+    {
+        let d = device(drivers, |_| {});
+        for (k, val) in [(0usize, 0.0f64), (1, 3.0)] {
+            let cpu: Tensor<f64, DeviceCpuSerial, _> = rt::asarray((vec![val; k], &dcpu)).into_shape([k]);
+            let g = cpu.to_device(&d);
+            let got = rt::matmul(&g, g.t());
+            let got = DeviceToCpuAPI::<f64>::to_cpu_vec(got.to_contig(RowMajor).storage()).rstsr_unwrap();
+            let want = val * val * k as f64;
+            assert!(got.len() == 1 && got[0] == want, "{drivers:?}, k = {k}: got {got:?}, want {want}");
+        }
+    }
+}
 /// An operand broadcast along a matmul axis (a zero stride with extent over 1): the cuBLAS
 /// drivers have no expression for it (forced alone, an error), and the chain serves it through
 /// the tiled or naive driver, with the broadcast repeated. The symmetric form on such an operand

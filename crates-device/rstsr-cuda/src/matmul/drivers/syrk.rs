@@ -53,13 +53,15 @@ pub(crate) fn args(v: &CallerGeom<'_>) -> Option<SyrkArgs> {
     if n > i32::MAX as usize || k > i32::MAX as usize || sam < 0 || sak < 0 || scm < 0 || scn < 0 {
         return None;
     }
-    // a broadcast along a matmul axis (a zero stride with extent over 1) has no expression either
+    // a broadcast along a matmul axis (a zero stride with an extent over 1) has no expression
+    // either, and a stride that does not fit `i32` cannot be declared (clamping it would
+    // address the wrong elements)
     for (stride, extent) in [(sam, n), (sak, k), (scm, n), (scn, n)] {
-        if stride == 0 && extent > 1 {
+        if (stride == 0 && extent > 1) || stride > i32::MAX as isize {
             return None;
         }
     }
-    let ld = |stride: isize, rows: usize| (stride.max(0).max(rows as isize)).min(i32::MAX as isize) as i32;
+    let ld = |stride: isize, rows: usize| (stride.max(0).max(rows as isize)).min(i32::MAX as isize).max(1) as i32;
     let (trans, lda) = if sam == 1 {
         (false, ld(sak, n))
     } else if sak == 1 {
@@ -281,5 +283,23 @@ mod tests {
         let lc = layout(&[n, n], &[n as isize, 1], 7);
         let g = resolve_geom(RowMajor, &lc, &la, &la.reverse_axes()).unwrap();
         assert!(args(&g.caller()).is_some(), "a k = 1 zero stride is served");
+    }
+
+    /// The `[0] @ [0]` dot lifts to a `1 x 0` operand whose leading dimension would be 0: it
+    /// floors at 1, which cuBLAS accepts (`?syrk` with `k = 0` writes the zero). A stride that
+    /// does not fit `i32` is refused, not clamped to `i32::MAX`.
+    #[test]
+    fn empty_dot_floors_and_wide_strides_refuse() {
+        let la = layout(&[1, 0], &[0, 1], 0);
+        let lc = layout(&[1, 1], &[1, 1], 0);
+        let g = resolve_geom(RowMajor, &lc, &la, &la.reverse_axes()).unwrap();
+        let a = args(&g.caller()).unwrap();
+        assert_eq!((a.n, a.k, a.lda, a.ldc), (1, 0, 1, 1), "empty syrk: every ld floored at 1");
+
+        let (n, k) = (5usize, 8usize);
+        let la = layout(&[n, k], &[i32::MAX as isize + 1, 1], n * k - 1);
+        let lc = layout(&[n, n], &[n as isize, 1], 7);
+        let g = resolve_geom(RowMajor, &lc, &la, &la.reverse_axes()).unwrap();
+        assert!(args(&g.caller()).is_none(), "a stride over i32::MAX is refused");
     }
 }

@@ -26,8 +26,8 @@
 //! - neither stride of an operand is 1: cuBLAS needs one leading dimension, so a stepped 2-D block
 //!   needs a pack.
 //! - a negative stride with extent > 1: no negative leading dimension.
-//! - a batch part that is not one linear run (cuBLAS takes one step per operand), or a dimension
-//!   over `i32`.
+//! - a batch part that is not one linear run (cuBLAS takes one step per operand), a dimension or
+//!   leading dimension over `i32`, or a stride over `i32`.
 //!
 //! Every refusal hands the problem to the next driver.
 
@@ -58,15 +58,16 @@ pub(crate) struct CublasArgs {
     pub batch: i32,
 }
 
-/// Largest leading dimension cuBLAS accepts for a declared matrix of `rows` rows.
+/// The leading dimension declared for a matrix of `rows` rows.
 ///
-/// An extent-1 axis may carry stride 0; then the leading dimension would be 0, which cuBLAS
-/// rejects, and clamping to the declared row count is safe because that axis has only index 0.
-/// The guard in `args` keeps every other zero stride out.
+/// An extent-1 axis may carry stride 0; then the declared dimension would be 0, which cuBLAS
+/// rejects (`ld >= max(1, rows)`, an empty matrix included), so the value floors at 1. `args`
+/// guarantees both bounds in: the stride fits `i32` (wider strides are refused, not clamped) and
+/// `rows <= i32::MAX`; the `min` here only documents that invariant.
 fn ld(stride: isize, rows: usize) -> i32 {
     let s = stride.max(0);
     let clamped = s.max(rows as isize);
-    clamped.min(i32::MAX as isize) as i32
+    clamped.min(i32::MAX as isize).max(1) as i32
 }
 
 /// Derive the cuBLAS arguments, or `None` when this layout is not expressible.
@@ -80,9 +81,11 @@ pub(crate) fn args(geom: &GemmGeom) -> Option<CublasArgs> {
     let (_, scm, scn) = geom.c;
 
     // An extent-1 axis may legitimately carry stride 0; anything else with a non-positive stride
-    // (a broadcast along a matmul axis, or a reversed view) has no cuBLAS expression at all.
+    // (a broadcast along a matmul axis, or a reversed view) has no cuBLAS expression at all. A
+    // stride that does not fit `i32` cannot be declared either: clamping it down would address
+    // the wrong elements.
     for (stride, extent) in [(sam, m), (sak, k), (sbk, k), (sbn, n), (scm, m), (scn, n)] {
-        if stride <= 0 && extent > 1 {
+        if (stride <= 0 && extent > 1) || stride > i32::MAX as isize {
             return None;
         }
     }
@@ -118,7 +121,8 @@ pub(crate) fn args(geom: &GemmGeom) -> Option<CublasArgs> {
 
     let (lda, ldb, ldc) = (ld(lda_raw, rows_a), ld(ldb_raw, rows_b), ld(scm, n));
     // `ld(a/b)` went through `max(0)`, so a genuinely negative stride can hide there; re-check.
-    if lda_raw < 0 || ldb_raw < 0 || ldc == 0 {
+    // (`ldc` needs no re-check: its floor of 1 comes from `ld` itself.)
+    if lda_raw < 0 || ldb_raw < 0 {
         return None;
     }
 
@@ -359,5 +363,31 @@ mod tests {
         let g = resolve_geom(RowMajor, &lc1, &la, &lb).unwrap();
         let args = args(&g).unwrap();
         assert_eq!(args.ldb, k as i32, "the extent-1 zero stride is clamped up");
+    }
+
+    /// The `[0] @ [0]` dot lifts to a `1 x 0` operand whose declared leading dimension would be 0:
+    /// cuBLAS rejects `ld = 0` even for an empty matrix, so every `ld` floors at 1. And a stride
+    /// that does not fit `i32` is refused, not clamped to `i32::MAX` (which would address the
+    /// wrong elements); an in-range stride of the same shape is served.
+    #[test]
+    fn empty_dots_floor_and_wide_strides_refuse() {
+        let la = layout(&[1, 0], &[0, 1], 0);
+        let lb = layout(&[0, 1], &[1, 0], 0);
+        let lc = layout(&[1, 1], &[1, 1], 0);
+        let g = resolve_geom(RowMajor, &lc, &la, &lb).unwrap();
+        let a = args(&g).unwrap();
+        assert_eq!((a.lda, a.ldb, a.ldc), (1, 1, 1), "empty dot: every ld floored at 1");
+        assert_eq!(a.ko, 0, "fixture: the contraction is empty");
+
+        let wide = i32::MAX as isize + 1;
+        let lb = layout(&[4, 3], &[3, 1], 0);
+        let lc = layout(&[2, 3], &[3, 1], 0);
+        let la = layout(&[2, 4], &[wide, 1], 0);
+        let g = resolve_geom(RowMajor, &lc, &la, &lb).unwrap();
+        assert!(args(&g).is_none(), "a stride over i32::MAX is refused");
+        let la = layout(&[2, 4], &[i32::MAX as isize / 2, 1], 0);
+        let g = resolve_geom(RowMajor, &lc, &la, &lb).unwrap();
+        let args = args(&g).unwrap();
+        assert_eq!(args.ldb, i32::MAX / 2, "an in-range stride is declared as is");
     }
 }
