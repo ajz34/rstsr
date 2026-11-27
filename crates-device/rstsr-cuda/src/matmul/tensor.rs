@@ -10,12 +10,14 @@ use crate::prelude_dev::*;
 /// the **output** type: `<TC as CudaMatMulMode>::Mode`. `matmul_from_mode` and
 /// `matmul_with_output_mode` get the output type from `c`; `matmul_with_mode` allocates it, so
 /// its result waits for the type to be named: `a.matmul_with_mode(&b, mode).out::<TC>()` (the
-/// output is always an `IxD` tensor).
+/// output is always an `IxD` tensor). Every entry has a fallible `_f` twin that returns
+/// [`Result`]; the infallible forms are its `.rstsr_unwrap()`.
 ///
 /// # Panics
 ///
-/// As [`matmul`], [`matmul_with_output`] and [`matmul_from`]: on shapes that do not follow the
-/// rules, on mismatched devices, and (like their `.rstsr_unwrap()`) on an error of the device.
+/// The infallible entries panic as [`matmul`], [`matmul_with_output`] and [`matmul_from`]: on
+/// shapes that do not follow the rules, on mismatched devices, and on an error of the device
+/// (exactly the [`Result`] their `_f` twin carries).
 pub trait TensorCudaMatMulAPI<R, T, D>
 where
     T: CudaMatMulMode + num::Zero,
@@ -26,16 +28,15 @@ where
     /// ([`WithMode`]), completed by `out::<TC>()`. The mode is read as
     /// `<TC as CudaMatMulMode>::Mode` (so it may differ from the operands' family, as for `f16`
     /// operands into an `f32` output); `TC` is the only type to name. The output is an `IxD`
-    /// tensor.
-    fn matmul_with_mode<'a, M, TB, DB, RB>(
+    /// tensor. The operands take any tensor argument, as [`Self::matmul_with_output_mode`] does.
+    fn matmul_with_mode<'a, M, TB, DB>(
         &'a self,
-        rhs: &'a TensorAny<RB, TB, DeviceCuda, DB>,
+        rhs: &'a impl TensorViewAPI<Type = TB, Backend = DeviceCuda, Dim = DB>,
         mode: M,
     ) -> WithMode<'a, T, D, TB, DB, M>
     where
         TB: CudaMatMulMode + num::Zero,
-        DB: DimAPI,
-        RB: DataAPI<Data = CudaBuffer<TB>> + 'a;
+        DB: DimAPI;
 
     /// [`matmul_with_output`] under `mode` (the mode of the output `c`).
     fn matmul_with_output_mode<TB, TC, DB, DC>(
@@ -44,6 +45,19 @@ where
         c: impl TensorViewMutAPI<Type = TC, Backend = DeviceCuda, Dim = DC>,
         mode: <TC as CudaMatMulMode>::Mode,
     ) where
+        TB: CudaMatMulMode + num::Zero,
+        TC: CudaMatMulMode + num::Zero + num::One,
+        DB: DimAPI,
+        DC: DimAPI;
+
+    /// The fallible form of [`Self::matmul_with_output_mode`].
+    fn matmul_with_output_mode_f<TB, TC, DB, DC>(
+        &self,
+        rhs: impl TensorViewAPI<Type = TB, Backend = DeviceCuda, Dim = DB>,
+        c: impl TensorViewMutAPI<Type = TC, Backend = DeviceCuda, Dim = DC>,
+        mode: <TC as CudaMatMulMode>::Mode,
+    ) -> Result<()>
+    where
         TB: CudaMatMulMode + num::Zero,
         TC: CudaMatMulMode + num::Zero + num::One,
         DB: DimAPI,
@@ -64,6 +78,22 @@ where
         DA: DimAPI,
         DB: DimAPI,
         R: DataMutAPI<Data = CudaBuffer<T>>;
+
+    /// The fallible form of [`Self::matmul_from_mode`].
+    fn matmul_from_mode_f<TA, TB, DA, DB>(
+        &mut self,
+        a: impl TensorViewAPI<Type = TA, Backend = DeviceCuda, Dim = DA>,
+        b: impl TensorViewAPI<Type = TB, Backend = DeviceCuda, Dim = DB>,
+        alpha: T,
+        beta: T,
+        mode: <T as CudaMatMulMode>::Mode,
+    ) -> Result<()>
+    where
+        TA: CudaMatMulMode + num::Zero,
+        TB: CudaMatMulMode + num::Zero,
+        DA: DimAPI,
+        DB: DimAPI,
+        R: DataMutAPI<Data = CudaBuffer<T>>;
 }
 
 impl<R, T, D> TensorCudaMatMulAPI<R, T, D> for TensorAny<R, T, DeviceCuda, D>
@@ -72,15 +102,14 @@ where
     D: DimAPI,
     R: DataAPI<Data = CudaBuffer<T>>,
 {
-    fn matmul_with_mode<'a, M, TB, DB, RB>(
+    fn matmul_with_mode<'a, M, TB, DB>(
         &'a self,
-        rhs: &'a TensorAny<RB, TB, DeviceCuda, DB>,
+        rhs: &'a impl TensorViewAPI<Type = TB, Backend = DeviceCuda, Dim = DB>,
         mode: M,
     ) -> WithMode<'a, T, D, TB, DB, M>
     where
         TB: CudaMatMulMode + num::Zero,
         DB: DimAPI,
-        RB: DataAPI<Data = CudaBuffer<TB>> + 'a,
     {
         WithMode { a: self.view(), b: rhs.view(), mode }
     }
@@ -96,7 +125,22 @@ where
         DB: DimAPI,
         DC: DimAPI,
     {
-        with_mode(c, self.view(), rhs, TC::one(), TC::zero(), mode).rstsr_unwrap()
+        self.matmul_with_output_mode_f(rhs, c, mode).rstsr_unwrap()
+    }
+
+    fn matmul_with_output_mode_f<TB, TC, DB, DC>(
+        &self,
+        rhs: impl TensorViewAPI<Type = TB, Backend = DeviceCuda, Dim = DB>,
+        c: impl TensorViewMutAPI<Type = TC, Backend = DeviceCuda, Dim = DC>,
+        mode: <TC as CudaMatMulMode>::Mode,
+    ) -> Result<()>
+    where
+        TB: CudaMatMulMode + num::Zero,
+        TC: CudaMatMulMode + num::Zero + num::One,
+        DB: DimAPI,
+        DC: DimAPI,
+    {
+        with_mode(c, self.view(), rhs, TC::one(), TC::zero(), mode)
     }
 
     fn matmul_from_mode<TA, TB, DA, DB>(
@@ -113,7 +157,25 @@ where
         DB: DimAPI,
         R: DataMutAPI<Data = CudaBuffer<T>>,
     {
-        with_mode(self.view_mut(), a, b, alpha, beta, mode).rstsr_unwrap()
+        self.matmul_from_mode_f(a, b, alpha, beta, mode).rstsr_unwrap()
+    }
+
+    fn matmul_from_mode_f<TA, TB, DA, DB>(
+        &mut self,
+        a: impl TensorViewAPI<Type = TA, Backend = DeviceCuda, Dim = DA>,
+        b: impl TensorViewAPI<Type = TB, Backend = DeviceCuda, Dim = DB>,
+        alpha: T,
+        beta: T,
+        mode: <T as CudaMatMulMode>::Mode,
+    ) -> Result<()>
+    where
+        TA: CudaMatMulMode + num::Zero,
+        TB: CudaMatMulMode + num::Zero,
+        DA: DimAPI,
+        DB: DimAPI,
+        R: DataMutAPI<Data = CudaBuffer<T>>,
+    {
+        with_mode(self.view_mut(), a, b, alpha, beta, mode)
     }
 }
 

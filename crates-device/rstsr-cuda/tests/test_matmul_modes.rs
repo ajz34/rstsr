@@ -645,8 +645,9 @@ fn modes_half() {
 }
 
 /// The entries that pass the mode per call: `matmul_from_mode`, `matmul_with_mode(..).out()` and
-/// `matmul_with_output_mode`, with `f16` operands into an `f32` output and with `f32` operands,
-/// whatever the device flags say. `rt::matmul` and `%` infer the `f16` output from `Mul`.
+/// `matmul_with_output_mode` with their `_f` twins, with `f16` operands into an `f32` output and
+/// with `f32` operands, whatever the device flags say. `rt::matmul` and `%` infer the `f16`
+/// output from `Mul`.
 #[test]
 fn tensor_level_modes() {
     require_cuda!();
@@ -654,7 +655,7 @@ fn tensor_level_modes() {
     let (m, k, n) = (24usize, 64usize, 12usize);
     let a: Tensor<f16, DeviceCuda, IxD> =
         rt::asarray((data(m * k, 1).into_iter().map(f16::from_f64).collect::<Vec<_>>(), &d)).into_shape([m, k]);
-    let b: Tensor<f16, DeviceCuda, IxD> =
+    let mut b: Tensor<f16, DeviceCuda, IxD> =
         rt::asarray((data(k * n, 2).into_iter().map(f16::from_f64).collect::<Vec<_>>(), &d)).into_shape([k, n]);
 
     let plain: Tensor<f32, DeviceCuda, IxD> =
@@ -674,6 +675,21 @@ fn tensor_level_modes() {
     for (x, y) in p.iter().zip(&s) {
         assert!((3.0 * x + 1.0 - y).abs() <= 1e-5 * (1.0 + (3.0 * x).abs()), "matmul_from_mode with alpha, beta");
     }
+    // the `_f` twins return the error, and `matmul_with_mode` takes any tensor argument as its
+    // siblings do (a mutable handle here)
+    let mut w: Tensor<f32, DeviceCuda, IxD> = rt::full(([m * n], 2.0f32, &d)).into_shape([m, n]);
+    a.matmul_with_output_mode_f(&b, &mut w, ComputeType32F::Pedantic).rstsr_unwrap();
+    assert_eq!(p, read(&w), "matmul_with_output_mode_f");
+    let mut z: Tensor<f32, DeviceCuda, IxD> = rt::full(([m * n], 2.0f32, &d)).into_shape([m, n]);
+    z.matmul_from_mode_f(&a, &b, 3.0, 0.5, ComputeType32F::Pedantic).rstsr_unwrap();
+    for (x, y) in p.iter().zip(read(&z)) {
+        assert!((3.0 * x + 1.0 - y).abs() <= 1e-5 * (1.0 + (3.0 * x).abs()), "matmul_from_mode_f with alpha, beta");
+    }
+    let through: Tensor<f32, DeviceCuda, IxD> =
+        a.matmul_with_mode(&b.i_mut(s![.., ..]), ComputeType32F::Pedantic).out::<f32>();
+    assert_eq!(p, read(&through), "matmul_with_mode through a mutable handle");
+    // `c` is `[m, n]` while `b @ b` would be `[k, n] @ [k, n]`: an `Err`, not a panic
+    assert!(c.matmul_from_mode_f(&b, &b, 1.0, 0.0, ComputeType32F::Pedantic).is_err(), "k-dim mismatch is an Err");
     // f32 operands: the mode given, not the flags'
     let a32: Tensor<f32, DeviceCuda, IxD> =
         rt::asarray((data(m * k, 3).into_iter().map(|x| x as f32).collect::<Vec<_>>(), &d)).into_shape([m, k]);
