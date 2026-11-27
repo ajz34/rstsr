@@ -52,8 +52,10 @@
 //!
 //! # Layouts
 //!
-//! Every layout the rule table admits is served: strided, negative and zero strides, broadcast
-//! and non-affine batches, either default order. The inner dot (`[k] @ [k]`) is served as the
+//! Every layout the rule table admits is served: strided and negative strides, broadcast and
+//! non-affine batches, either default order. A zero stride is served on an extent-1 axis; a
+//! broadcast along a matmul axis has no cuBLAS expression and runs on the tiled or naive driver.
+//! The inner dot (`[k] @ [k]`) is served as the
 //! `1 x k @ k x 1` GEMM it is, which cuBLAS runs at memory bandwidth.
 //!
 //! Where the batch axis sits follows the default order of the operands, as in every rstsr matmul:

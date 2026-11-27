@@ -818,3 +818,82 @@ fn inner_dot() {
     dot_matrix::<Complex<f32>>("c32", true, re32, |a, b| (a - b).norm() <= 1e-5 * (1.0 + b.norm()));
     dot_matrix::<Complex<f64>>("c64", true, re64, |a, b| (a - b).norm() <= 1e-13 * (1.0 + b.norm()));
 }
+/// An operand broadcast along a matmul axis (a zero stride with extent over 1): the cuBLAS
+/// drivers have no expression for it (forced alone, an error), and the chain serves it through
+/// the tiled or naive driver, with the broadcast repeated. The symmetric form on such an operand
+/// is declined by the form and served by the chain as well.
+#[test]
+fn broadcast_along_matmul_axis() {
+    require_cuda!();
+    let (m, k, n) = (5usize, 4usize, 3usize);
+    // (base shape, broadcast shape, whether the left operand is the broadcast one)
+    let cases: [(&str, [usize; 2], [usize; 2], bool); 4] = [
+        ("b broadcast along k", [1, n], [k, n], false),
+        ("b broadcast along n", [k, 1], [k, n], false),
+        ("a broadcast along m", [1, k], [m, k], true),
+        ("a broadcast along k", [m, 1], [m, k], true),
+    ];
+    for order in [RowMajor, ColMajor] {
+        let mut dcpu = DeviceCpuSerial::default();
+        dcpu.set_default_order(order);
+        let mut d = DeviceCuda::new(0);
+        d.set_default_order(order);
+        let av = data(m * k, 1);
+        let bv = data(k * n, 2);
+        let a_cpu = rt::asarray((av.clone(), &dcpu)).into_shape([m, k]);
+        let b_cpu = rt::asarray((bv.clone(), &dcpu)).into_shape([k, n]);
+        let a_dev = rt::asarray((av.clone(), &d)).into_shape([m, k]);
+        let b_dev = rt::asarray((bv.clone(), &d)).into_shape([k, n]);
+        for (what, base, full, left) in cases {
+            // the reference multiplies materialized operands: a broadcast view's own product is
+            // no oracle here, the same zero stride that breaks cuBLAS may break the oracle
+            let cnt = base[0] * base[1];
+            let base_v = if left { &av[..cnt] } else { &bv[..cnt] }.to_vec();
+            let base_cpu = rt::asarray((base_v.clone(), &dcpu)).into_shape(base.to_vec());
+            let full_cpu = base_cpu.broadcast_to(full.to_vec()).to_owned();
+            let want = if left { rt::matmul(&full_cpu, &b_cpu) } else { rt::matmul(&a_cpu, &full_cpu) };
+            let want = DeviceToCpuAPI::<f64>::to_cpu_vec(want.to_contig(RowMajor).storage()).rstsr_unwrap();
+            // the chain on the broadcast operands
+            let base_dev = rt::asarray((base_v.clone(), &d)).into_shape(base.to_vec());
+            let got = if left {
+                rt::matmul(base_dev.broadcast_to(full.to_vec()), b_dev.clone())
+            } else {
+                rt::matmul(a_dev.clone(), base_dev.broadcast_to(full.to_vec()))
+            };
+            let got = DeviceToCpuAPI::<f64>::to_cpu_vec(got.to_contig(RowMajor).storage()).rstsr_unwrap();
+            let err = rel_err(&got, &want);
+            assert!(err <= 1e-12, "{what}, {order:?}: max rel err {err:.3e} > 1e-12");
+            // a cuBLAS driver forced alone refuses instead of reading a wrong leading dimension
+            let mut forced = device(MatMulDrivers::CUBLAS, |_| {});
+            forced.set_default_order(order);
+            let base = rt::asarray((base_v.clone(), &forced)).into_shape(base.to_vec());
+            let a_forced = rt::asarray((av.clone(), &forced)).into_shape([m, k]);
+            let b_forced = rt::asarray((bv.clone(), &forced)).into_shape([k, n]);
+            let (fa, fb) = if left {
+                (base.broadcast_to(full.to_vec()), b_forced.view())
+            } else {
+                (a_forced.view(), base.broadcast_to(full.to_vec()))
+            };
+            match rt::matmul_f(fa, fb) {
+                Ok(_) => panic!("{what}, {order:?}: the classic driver should have refused"),
+                Err(e) => {
+                    let msg = format!("{e:?}");
+                    assert!(msg.contains("no enabled driver can serve"), "{what}, {order:?}: {msg}");
+                },
+            }
+        }
+        // the symmetric form on a broadcast operand: declined by the form, served by the chain
+        let n2 = 8usize;
+        let col_v = data(n2, 3);
+        let col_cpu = rt::asarray((col_v.clone(), &dcpu)).into_shape([n2, 1]);
+        let full_cpu = col_cpu.broadcast_to(vec![n2, n2]).to_owned();
+        let want = rt::matmul(&full_cpu, full_cpu.t());
+        let want = DeviceToCpuAPI::<f64>::to_cpu_vec(want.to_contig(RowMajor).storage()).rstsr_unwrap();
+        let col_base = rt::asarray((col_v, &d)).into_shape([n2, 1]);
+        let col_dev = col_base.broadcast_to(vec![n2, n2]);
+        let got = rt::matmul(&col_dev, col_dev.t());
+        let got = DeviceToCpuAPI::<f64>::to_cpu_vec(got.to_contig(RowMajor).storage()).rstsr_unwrap();
+        let err = rel_err(&got, &want);
+        assert!(err <= 1e-12, "syrk of a broadcast operand, {order:?}: max rel err {err:.3e} > 1e-12");
+    }
+}

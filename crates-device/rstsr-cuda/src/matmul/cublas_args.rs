@@ -60,8 +60,9 @@ pub(crate) struct CublasArgs {
 
 /// Largest leading dimension cuBLAS accepts for a declared matrix of `rows` rows.
 ///
-/// A broadcast axis (extent 1, stride 0) gives a leading dimension of 0, which cuBLAS rejects;
-/// clamping to the declared row count is safe because that axis has only index 0.
+/// An extent-1 axis may carry stride 0; then the leading dimension would be 0, which cuBLAS
+/// rejects, and clamping to the declared row count is safe because that axis has only index 0.
+/// The guard in `args` keeps every other zero stride out.
 fn ld(stride: isize, rows: usize) -> i32 {
     let s = stride.max(0);
     let clamped = s.max(rows as isize);
@@ -79,9 +80,9 @@ pub(crate) fn args(geom: &GemmGeom) -> Option<CublasArgs> {
     let (_, scm, scn) = geom.c;
 
     // An extent-1 axis may legitimately carry stride 0; anything else with a non-positive stride
-    // (a reversed view) has no cuBLAS expression at all.
+    // (a broadcast along a matmul axis, or a reversed view) has no cuBLAS expression at all.
     for (stride, extent) in [(sam, m), (sak, k), (sbk, k), (sbn, n), (scm, m), (scn, n)] {
-        if stride < 0 && extent > 1 {
+        if stride <= 0 && extent > 1 {
             return None;
         }
     }
@@ -332,5 +333,31 @@ mod tests {
         assert_eq!(args.batch_b, (k * n) as isize);
         assert_eq!(args.batch_c, (m * n) as isize);
         assert!(args.lda >= n as i32 && args.ldb >= k as i32 && args.ldc >= n as i32);
+    }
+
+    /// A broadcast along a **matmul** axis (stride 0, extent over 1) has no cuBLAS expression at
+    /// all: declaring the clamped-up leading dimension would have cuBLAS read past the buffer.
+    /// An extent-1 axis may still carry stride 0.
+    #[test]
+    fn broadcast_matmul_axis_is_refused() {
+        let (m, k, n) = (3usize, 4usize, 5usize);
+        let lc = layout(&[m, n], &[n as isize, 1], 0);
+        // b broadcast along k: `sbk = 0`
+        let la = layout(&[m, k], &[k as isize, 1], 0);
+        let lb = layout(&[k, n], &[0, 1], 0);
+        let g = resolve_geom(RowMajor, &lc, &la, &lb).unwrap();
+        assert!(args(&g).is_none(), "b broadcast along k is refused");
+        // a broadcast along m: `sam = 0`
+        let la = layout(&[m, k], &[0, 1], 0);
+        let lb = layout(&[k, n], &[n as isize, 1], 0);
+        let g = resolve_geom(RowMajor, &lc, &la, &lb).unwrap();
+        assert!(args(&g).is_none(), "a broadcast along m is refused");
+        // an extent-1 axis may carry stride 0: the lifted `1 x k @ k x 1` dot
+        let la = layout(&[1, k], &[0, 1], 0);
+        let lb = layout(&[k, 1], &[1, k as isize], 0);
+        let lc1 = layout(&[1, 1], &[1, 1], 0);
+        let g = resolve_geom(RowMajor, &lc1, &la, &lb).unwrap();
+        let args = args(&g).unwrap();
+        assert_eq!(args.ldb, k as i32, "the extent-1 zero stride is clamped up");
     }
 }

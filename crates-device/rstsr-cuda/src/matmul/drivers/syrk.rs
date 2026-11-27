@@ -44,6 +44,12 @@ pub(crate) fn args(v: &CallerGeom<'_>) -> Option<SyrkArgs> {
     if n > i32::MAX as usize || k > i32::MAX as usize || sam < 0 || sak < 0 || scm < 0 || scn < 0 {
         return None;
     }
+    // a broadcast along a matmul axis (a zero stride with extent over 1) has no expression either
+    for (stride, extent) in [(sam, n), (sak, k), (scm, n), (scn, n)] {
+        if stride == 0 && extent > 1 {
+            return None;
+        }
+    }
     let ld = |stride: isize, rows: usize| (stride.max(0).max(rows as isize)).min(i32::MAX as isize) as i32;
     let (trans, lda) = if sam == 1 {
         (false, ld(sak, n))
@@ -212,5 +218,22 @@ mod tests {
         assert!(args(&geom(RowMajor, (16, 2), (5, 1)).caller()).is_none());
         assert!(args(&geom(RowMajor, (8, 1), (10, 2)).caller()).is_none());
         assert!(args(&geom(RowMajor, (-1, -5), (5, 1)).caller()).is_none());
+    }
+
+    /// A broadcast along a matmul axis (a zero stride with extent over 1) has no syrk expression
+    /// either; an extent-1 axis may still carry stride 0.
+    #[test]
+    fn broadcast_matmul_axis_is_refused() {
+        // a column broadcast along k: `sak = 0` with k over 1
+        let (n, k) = (5usize, 8usize);
+        let la = layout(&[n, k], &[1, 0], n * k - 1);
+        let lc = layout(&[n, n], &[n as isize, 1], 7);
+        let g = resolve_geom(RowMajor, &lc, &la, &la.reverse_axes()).unwrap();
+        assert!(args(&g.caller()).is_none(), "a broadcast along k is refused");
+        // an extent-1 axis may carry stride 0 (k = 1)
+        let la = layout(&[n, 1], &[1, 0], n - 1);
+        let lc = layout(&[n, n], &[n as isize, 1], 7);
+        let g = resolve_geom(RowMajor, &lc, &la, &la.reverse_axes()).unwrap();
+        assert!(args(&g.caller()).is_some(), "a k = 1 zero stride is served");
     }
 }
