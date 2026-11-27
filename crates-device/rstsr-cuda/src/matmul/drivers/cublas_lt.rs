@@ -25,7 +25,7 @@ use cudarc::cublaslt::sys as lt;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use super::cublas::{prepare, GemmCall, Served};
+use super::cublas::{prepare, Served};
 use super::cublas_ex::ExScalar;
 use super::{scale, AlignedScale, CublasGemmTypes, CublasPlan, Problem, Refusal, Verdict};
 use crate::kernel::order_output;
@@ -227,7 +227,7 @@ fn refused(status: lt::cublasStatus_t) -> Option<Refusal> {
     if succeeded(status) { None } else { Some(Refusal::CublasLtStatus(status)) }
 }
 
-/// Build the descriptors of `call` and ask the heuristic for its algorithm.
+/// Build the descriptors of a `gemm` call and ask the heuristic for its algorithm.
 ///
 /// Every failure is a refusal: nothing has been enqueued at this point.
 ///
@@ -235,7 +235,7 @@ fn refused(status: lt::cublasStatus_t) -> Option<Refusal> {
 /// The handle must be live and its lock held.
 unsafe fn build<T: ExScalar>(
     handle: lt::cublasLtHandle_t,
-    call: &GemmCall<'_>,
+    a: &crate::matmul::cublas_args::CublasArgs,
     st: CublasGemmTypes,
     compute: lt::cublasComputeType_t,
 ) -> Served<Entry> {
@@ -244,7 +244,6 @@ unsafe fn build<T: ExScalar>(
     let data: [lt::cudaDataType_t; 4] = [st.b, st.a, st.c, st.c].map(|d| unsafe { retyped(d) });
     // SAFETY: `cudaDataType_t` is the same enum in both modules.
     let scale: lt::cudaDataType_t = unsafe { retyped(T::SCALE) };
-    let a = &call.args;
     let mut desc = core::mem::MaybeUninit::uninit();
     if let Some(r) = refused(unsafe { lt::cublasLtMatmulDescCreate(desc.as_mut_ptr(), compute, scale) }) {
         return Err(r);
@@ -279,8 +278,21 @@ unsafe fn build<T: ExScalar>(
             return Err(r);
         }
         if a.batch > 1 {
-            set_layout(*l, lt::cublasLtMatrixLayoutAttribute_t::CUBLASLT_MATRIX_LAYOUT_BATCH_COUNT, &a.batch);
-            set_layout(*l, lt::cublasLtMatrixLayoutAttribute_t::CUBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET, &stride);
+            // a dropped status here would leave a batch-1 layout: only the first slice written
+            if let Some(r) = refused(set_layout(
+                *l,
+                lt::cublasLtMatrixLayoutAttribute_t::CUBLASLT_MATRIX_LAYOUT_BATCH_COUNT,
+                &a.batch,
+            )) {
+                return Err(r);
+            }
+            if let Some(r) = refused(set_layout(
+                *l,
+                lt::cublasLtMatrixLayoutAttribute_t::CUBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET,
+                &stride,
+            )) {
+                return Err(r);
+            }
         }
     }
     let mut pref = core::mem::MaybeUninit::uninit();
@@ -447,7 +459,7 @@ where
     let mut cache = lt_state.lock();
     if !cache.contains_key(&key) {
         // SAFETY: the handle is live and this thread holds its lock.
-        let entry = match unsafe { build::<S>(lt_state.handle, &call, st, compute) } {
+        let entry = match unsafe { build::<S>(lt_state.handle, &call.args, st, compute) } {
             Ok(entry) => entry,
             Err(r) => return Ok(Verdict::Declined(r)),
         };
@@ -698,5 +710,65 @@ mod tests {
     #[test]
     fn fixed_point_emulation_is_left_to_the_classic_driver() {
         assert!(ComputeType64F::EmulatedFixedPoint.gemm_ex().is_none());
+    }
+
+    /// The batch attributes of a built entry read back as declared, on every slot: this is what
+    /// the status-checked `set_layout` calls write (a dropped status there used to leave a
+    /// batch-1 layout — only the first slice written, the rest of the output untouched).
+    #[test]
+    fn batch_attributes_read_back() {
+        if !crate::funcs::is_available() {
+            eprintln!("skipping: no CUDA device visible");
+            return;
+        }
+        let mut handle = core::mem::MaybeUninit::uninit();
+        assert_eq!(
+            unsafe { lt::cublasLtCreate(handle.as_mut_ptr()) },
+            lt::cublasStatus_t::CUBLAS_STATUS_SUCCESS
+        );
+        let handle = unsafe { handle.assume_init() };
+        let a = arguments(&[4, 1], &[5, 1], 3);
+        use cb::cudaDataType_t as D;
+        let st = CublasGemmTypes { a: D::CUDA_R_64F, b: D::CUDA_R_64F, c: D::CUDA_R_64F };
+        // SAFETY: a fresh handle used by this test alone; `build` enqueues nothing.
+        let entry =
+            unsafe { build::<f64>(handle, &a, st, lt::cublasComputeType_t::CUBLAS_COMPUTE_64F) }.unwrap();
+        // the strides cuBLASLt must see, by its slots: A holds `geom.b`, B `geom.a`, D mirrors C
+        let (stride_a, stride_b, stride_c) = batch_strides(&a);
+        fn read<T: Sized>(
+            l: lt::cublasLtMatrixLayout_t,
+            attr: lt::cublasLtMatrixLayoutAttribute_t,
+            buf: &mut T,
+        ) -> usize {
+            let mut written = 0usize;
+            assert_eq!(
+                unsafe {
+                    lt::cublasLtMatrixLayoutGetAttribute(
+                        l,
+                        attr,
+                        buf as *mut T as *mut c_void,
+                        core::mem::size_of::<T>(),
+                        &mut written,
+                    )
+                },
+                lt::cublasStatus_t::CUBLAS_STATUS_SUCCESS
+            );
+            written
+        }
+        for (l, stride) in entry.layouts.iter().zip([stride_a, stride_b, stride_c, stride_c]) {
+            let mut count = 0i32;
+            let written =
+                read(*l, lt::cublasLtMatrixLayoutAttribute_t::CUBLASLT_MATRIX_LAYOUT_BATCH_COUNT, &mut count);
+            assert_eq!((written, count), (4, a.batch), "batch count");
+            let mut offset = 0i64;
+            let written = read(
+                *l,
+                lt::cublasLtMatrixLayoutAttribute_t::CUBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET,
+                &mut offset,
+            );
+            assert_eq!((written, offset), (8, stride), "batch stride");
+        }
+        drop(entry);
+        unsafe { lt::cublasLtDestroy(handle) };
     }
 }
