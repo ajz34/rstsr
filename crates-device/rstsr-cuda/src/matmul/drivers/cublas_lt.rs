@@ -28,6 +28,7 @@ use std::sync::{Arc, Mutex};
 use super::cublas::{prepare, GemmCall, Served};
 use super::cublas_ex::ExScalar;
 use super::{scale, AlignedScale, CublasGemmTypes, CublasPlan, Problem, Refusal, Verdict};
+use crate::kernel::order_output;
 use crate::matmul::cublas_args::CublasArgs;
 use crate::matmul::mode::ComputeType16F;
 use crate::prelude_dev::*;
@@ -480,7 +481,12 @@ where
         )
     };
     match refused(status) {
-        None => Ok(Verdict::Ran),
+        None => {
+            // the product is enqueued: order the output's allocation stream behind it, so a
+            // later read of `c` sees the product
+            order_output(u.c, call.exec)?;
+            Ok(Verdict::Ran)
+        },
         Some(r) => Ok(Verdict::Declined(r)),
     }
 }

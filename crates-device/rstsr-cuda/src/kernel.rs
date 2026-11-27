@@ -593,7 +593,8 @@ pub(crate) fn order_input_raw<T>(buf: &CudaBuffer<T>, exec: &Arc<CudaStream>) ->
 /// Order execution on `exec` before later work on `buf`'s allocation stream
 /// (no-op when they match), the mirror of [`order_input`]. Required after an
 /// op writes into an existing buffer: host reads only synchronize that
-/// buffer's allocation stream.
+/// buffer's allocation stream. Call it after the op is enqueued: the event
+/// captures everything enqueued so far.
 pub(crate) fn order_output<T>(buf: &CudaBuffer<T>, exec: &Arc<CudaStreamObj>) -> Result<Option<Event>> {
     order_output_raw(buf, exec.inner())
 }

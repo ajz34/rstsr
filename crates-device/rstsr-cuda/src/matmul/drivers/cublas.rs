@@ -452,7 +452,9 @@ pub(crate) struct GemmCall<'a> {
     /// `[a, b, c]` named after the **geom** operands: each the buffer's base folded with its
     /// layout's own offset in bytes.
     pub ptrs: [u64; 3],
-    /// Cross-stream ordering events and read-event guards; held until the enqueue is done.
+    /// Cross-stream ordering events of the three buffers (all are read, `c` also written) and
+    /// the read-event guards; held until the enqueue is done. The write ordering of `c` happens
+    /// after the enqueue, in [`with_gemm_call`].
     #[allow(dead_code)]
     orders: [Option<crate::kernel::Event>; 3],
     #[allow(dead_code)]
@@ -489,8 +491,10 @@ where
     };
     let exec = p.device.stream();
     // The pointers are named after the **geom** operands: `geom.a` is the caller's `b` under
-    // `ColMajor`, so each operand's buffer, element size and input order follow the swap.
-    let (ord_a, ord_b, ord_c) = (order_input(u.a, exec)?, order_input(u.b, exec)?, order_output(u.c, exec)?);
+    // `ColMajor`, so each operand's buffer, element size and input order follow the swap. `c` is
+    // an input too (read when `beta != 0`, written in place either way): ordered before, like
+    // the operands; its write ordering follows the enqueue, in [`with_gemm_call`].
+    let (ord_a, ord_b, ord_c) = (order_input(u.a, exec)?, order_input(u.b, exec)?, order_input(u.c, exec)?);
     let (ua, ra) = u.a.read_ptr_on(exec);
     let (ub, rb) = u.b.read_ptr_on(exec);
     let (uc, rc) = u.c.read_ptr_on(exec);
@@ -542,7 +546,13 @@ where
     let Some(blas) = call.exec.cublas() else {
         return Ok(Verdict::Declined(Refusal::NoCublas));
     };
-    f(blas, &call.args, call.ptrs)
+    let verdict = f(blas, &call.args, call.ptrs)?;
+    // the product is enqueued by now (a refusal enqueues nothing): order the output's
+    // allocation stream behind it, so a later read of `c` sees the product
+    if let Verdict::Ran = verdict {
+        order_output(u.c, call.exec)?;
+    }
+    Ok(verdict)
 }
 
 /// The status as a verdict: a non-success status is a refusal (nothing was enqueued).

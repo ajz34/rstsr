@@ -203,9 +203,7 @@ where
     let f = planned_function(p.device, "rstsr_matmul_naive", &includes, &disc, || source)?;
 
     let exec = p.device.stream();
-    let _ga = order_input(p.a, exec)?;
-    let _gb = order_input(p.b, exec)?;
-    let _gc = order_output(p.c, exec)?;
+    let (_ga, _gb, _gc) = (order_input(p.a, exec)?, order_input(p.b, exec)?, order_input(p.c, exec)?);
     let total = p.geom.n_batch as u64 * p.geom.m as u64 * p.geom.n as u64;
     let abytes = super::scalar_bytes(&p.alpha);
     let bbytes = super::scalar_bytes(&p.beta);
@@ -235,6 +233,8 @@ where
         .arg_bytes(&abytes[..nb])
         .arg_bytes(&bbytes[..nb])
         .launch()?;
+    // the product is enqueued: order the output's allocation stream behind it
+    let _gc = order_output(p.c, exec)?;
 
     Ok(Verdict::Ran)
 }

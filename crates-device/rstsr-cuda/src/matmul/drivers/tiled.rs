@@ -264,9 +264,7 @@ fn typed<T: CudaDType, TA, TB, TC, TBuf>(
 
     let exec = p.device.stream();
     let (buf_a, buf_b) = if geom.swapped { (u.b, u.a) } else { (u.a, u.b) };
-    let _ga = order_input(buf_a, exec)?;
-    let _gb = order_input(buf_b, exec)?;
-    let _gc = order_output(u.c, exec)?;
+    let (_ga, _gb, _gc) = (order_input(buf_a, exec)?, order_input(buf_b, exec)?, order_input(u.c, exec)?);
 
     // The two fragments differ only in which axis the linear id follows; that is what makes each
     // variant coalesced on both operands' loads.
@@ -338,6 +336,8 @@ fn typed<T: CudaDType, TA, TB, TC, TBuf>(
         .arg_bytes(&abytes[..nb])
         .arg_bytes(&bbytes[..nb])
         .launch()?;
+    // the tile product is enqueued: order the output's allocation stream behind it
+    let _gc = order_output(u.c, exec)?;
 
     Ok(Verdict::Ran)
 }

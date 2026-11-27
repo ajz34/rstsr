@@ -108,8 +108,9 @@ where
     let Some(blas) = exec.cublas() else {
         return Ok(Verdict::Declined(Refusal::NoCublas));
     };
-    // held until the mirror is enqueued too
-    let orders = [order_input(u.a, exec)?, order_output(u.c, exec)?];
+    // the output is written in place (and never read: `beta` is zero): order it in before the
+    // enqueues and out after them
+    let orders = [order_input(u.a, exec)?, order_input(u.c, exec)?];
     let (pa, ra) = u.a.read_ptr_on(exec);
     let (pc, rc) = u.c.read_ptr_on(exec);
     let esz = core::mem::size_of::<T>();
@@ -138,7 +139,10 @@ where
         return Ok(Verdict::Declined(Refusal::CublasStatus(status)));
     }
     let mirrored = mirror::<T>(p.device, &u, view, a.lower);
-    drop((orders, ra, rc));
+    // the syrk and the mirror are enqueued by now (a syrk refusal above enqueues nothing, a
+    // mirror failure at most the syrk): order the output's allocation stream behind that
+    let written = order_output(u.c, exec)?;
+    drop((orders, ra, rc, written));
     mirrored?;
     Ok(Verdict::Ran)
 }
@@ -156,6 +160,9 @@ extern "C" __global__ void rstsr_matmul_mirror(
 "#;
 
 /// Copy the written triangle of `c` across the diagonal into the other one.
+///
+/// Runs on the executing stream right after the syrk it follows, so `c` needs no ordering of its
+/// own here: the caller orders it before and after the enqueues.
 fn mirror<T: CudaDType>(
     device: &DeviceCuda,
     u: &super::Buffers<'_, T, T, T>,
@@ -172,8 +179,6 @@ fn mirror<T: CudaDType>(
         MIRROR_ENTRY.replace("@T@", T::CNAME)
     })?;
     let exec = device.stream();
-    let _gr = order_input(u.c, exec)?;
-    let _gw = order_output(u.c, exec)?;
     FlatLaunch::new(exec, &f, total)
         .arg_ptr(u.c, view.c.0)
         .arg_bytes(&scm.to_ne_bytes())

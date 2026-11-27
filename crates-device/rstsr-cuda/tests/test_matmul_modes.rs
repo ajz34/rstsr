@@ -897,3 +897,41 @@ fn broadcast_along_matmul_axis() {
         assert!(err <= 1e-12, "syrk of a broadcast operand, {order:?}: max rel err {err:.3e} > 1e-12");
     }
 }
+
+/// In-place matmul with the output re-tagged onto another stream: the host read-back must see
+/// every update, i.e. the product is ordered behind the output buffer's allocation stream
+/// before the read (`order_output` after the enqueue, not before it).
+#[test]
+fn inplace_cross_stream_is_ordered() {
+    require_cuda!();
+    use rstsr_cuda::stream::CudaStreamObj;
+    use std::sync::Arc;
+    // the same-stream control: the accumulation is exact
+    let (n, iters) = (256usize, 2usize);
+    let d = DeviceCuda::new(0);
+    let a = rt::asarray((vec![1.0f64; n * n], &d)).into_shape([n, n]);
+    let b = rt::asarray((vec![1.0f64; n * n], &d)).into_shape([n, n]);
+    let mut c = rt::asarray((vec![0.0f64; n * n], &d)).into_shape([n, n]);
+    for i in 1..=iters {
+        rt::matmul_from(&mut c, &a, &b, 1.0, 1.0);
+        let got = DeviceToCpuAPI::<f64>::to_cpu_vec(c.to_contig(RowMajor).storage()).rstsr_unwrap();
+        let want = (i * n) as f64;
+        assert!(got.iter().all(|&x| x == want), "same stream, iteration {i}: {:?}", &got[..4]);
+    }
+    // the cross-stream case: the output allocated on the default stream, then re-tagged
+    let d1 = DeviceCuda::new(0);
+    let s2 = d1.ordinal_obj().context().new_stream().unwrap();
+    let mut d2 = d1.clone();
+    d2.set_stream(Arc::new(CudaStreamObj::wrap(d1.ordinal(), s2)));
+    let (n, iters) = (1024usize, 4usize);
+    let a = rt::asarray((vec![1.0f64; n * n], &d2)).into_shape([n, n]);
+    let b = rt::asarray((vec![1.0f64; n * n], &d2)).into_shape([n, n]);
+    let c = rt::asarray((vec![0.0f64; n * n], &d1)).into_shape([n, n]);
+    let mut c = c.into_device(&d2);
+    for i in 1..=iters {
+        rt::matmul_from(&mut c, &a, &b, 1.0, 1.0);
+        let got = DeviceToCpuAPI::<f64>::to_cpu_vec(c.to_contig(RowMajor).storage()).rstsr_unwrap();
+        let want = (i * n) as f64;
+        assert!(got.iter().all(|&x| x == want), "cross stream, iteration {i}: {:?}", &got[..4]);
+    }
+}
