@@ -188,6 +188,12 @@ pub mod stream;
 pub mod sync;
 pub mod transfer;
 
+// the build script's own tests run here: `cargo test` does not execute `build.rs` as a target
+#[cfg(test)]
+#[allow(dead_code)] // `main` and the env/nvcc resolution are the build's, not the tests'
+#[path = "../build.rs"]
+mod build_script;
+
 pub mod prelude_dev {
     pub use crate::buffer::CudaBuffer;
     pub use crate::device::DeviceCuda;

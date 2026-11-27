@@ -32,13 +32,12 @@ fn main() {
 /// `(major, minor)` of the CUDA version `cudarc` binds, or `None` when it cannot be told (nvcc
 /// absent: `cudarc`'s own build script then fails unless it pins a version feature).
 fn cudarc_cuda_version() -> Option<(u32, u32)> {
-    // cudarc's own spelling of 12.6 is `12060`: `major`, `0`, `minor`, `0`.
     if let Ok(v) = std::env::var("CUDARC_CUDA_VERSION") {
-        // cudarc's own spelling of 12.6 is `12060`: `major`, `0`, `minor`, `0`.
-        if v.len() == 6 && v.as_bytes()[1] == b'0' && v.as_bytes()[5] == b'0' {
-            if let (Ok(major), Ok(minor)) = (v[0..1].parse::<u32>(), v[2..4].parse::<u32>()) {
-                return Some((major, minor));
-            }
+        // cudarc spells a version `format!("{major}0{minor}0")` and matches the whole value
+        // against that pattern (`12060` is 12.6, `13000` is 13.0), panicking on anything else in
+        // its own build script; so this parse sees every value that builds.
+        if let Some((major, minor)) = parse_cudarc_version(&v) {
+            return Some((major, minor));
         }
         // an unparsable value is cudarc's build script's error to report
         return None;
@@ -52,4 +51,43 @@ fn cudarc_cuda_version() -> Option<(u32, u32)> {
     let number = release.strip_prefix("release ")?;
     let (major, minor) = number.split_once('.')?;
     Some((major.parse().ok()?, minor.parse().ok()?))
+}
+
+/// Parse the `{major}0{minor}0` spelling `cudarc` matches `CUDARC_CUDA_VERSION` against: `12060`
+/// is (12, 6), `13000` is (13, 0). The zeros are literal separators, and `cudarc` 0.19's supported
+/// majors are two-digit and its minors one-digit, which pins the lengths here.
+fn parse_cudarc_version(v: &str) -> Option<(u32, u32)> {
+    let rest = v.strip_suffix('0')?;
+    let (major, minor) = rest.split_once('0')?;
+    if major.len() != 2 || minor.len() != 1 {
+        return None;
+    }
+    Some((major.parse().ok()?, minor.parse().ok()?))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_cudarc_version as parse;
+
+    /// The spellings `cudarc`'s supported versions produce all parse to their version.
+    #[test]
+    fn cudarc_spelling_parses() {
+        assert_eq!(parse("12060"), Some((12, 6)));
+        assert_eq!(parse("12090"), Some((12, 9)));
+        assert_eq!(parse("13000"), Some((13, 0)));
+        assert_eq!(parse("13040"), Some((13, 4)));
+        assert_eq!(parse("11080"), Some((11, 8)));
+        assert_eq!(parse("12000"), Some((12, 0)));
+    }
+
+    /// Anything `cudarc` would panic on stays `None` here, including the six-character spelling
+    /// this file once assumed.
+    #[test]
+    fn other_spellings_are_refused() {
+        assert_eq!(parse("120600"), None);
+        assert_eq!(parse("1206"), None);
+        assert_eq!(parse("13.0"), None);
+        assert_eq!(parse("1206x"), None);
+        assert_eq!(parse(""), None);
+    }
 }

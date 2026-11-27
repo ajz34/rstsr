@@ -1,12 +1,15 @@
 # Tier 3 — rstsr-cuda.
 #
-# There is deliberately **no GPU runner** here. This job does two things a GPU cannot help with:
+# There is deliberately **no GPU runner** here. This job does three things a GPU cannot help with:
 #
 #   1. runs the host-side tests (`--lib`), which are where most of this crate's logic lives: the
 #      reduction plan, the kernel-token substitution checks, the cuBLAS argument derivation, the
 #      index/scan addressing rules. 68 tests, no device required.
 #   2. compiles the hardware test suite (`tests/*.rs`) so a change that breaks their *signatures*
 #      fails here rather than on the first rented A100.
+#   3. checks, for each pinned CUDA version, that the `cfg`s `build.rs` derives from the cudarc
+#      bindings are the ones the pin names (a pin without its `cfg`s compiles and mis-answers at
+#      runtime, which is exactly the bug this caught).
 #
 # It does not *run* the hardware suite. Those tests start with `require_cuda!()` and print
 # "skipping: no CUDA device visible" when there is no driver, so running them on this runner would
@@ -21,13 +24,18 @@ on:
 
 env:
   RUSTUP_TOOLCHAIN: stable
-  # cudarc resolves the CUDA ABI version at build time. Without this the build stops with an
-  # instruction to set it; the value only has to match the toolkit used at *runtime*.
-  CUDARC_CUDA_VERSION: "12060"
 
 jobs:
   host-tests:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        # cudarc resolves the CUDA ABI version from this pin (spelled `{major}0{minor}0`). Both
+        # ends of the math-mode gates must build: `cublasSetMathMode` is bound from 12.9 on, the
+        # fixed-point FP64 emulation from 13.0 on, and `build.rs` turns each into a crate `cfg`.
+        cudarc_cuda_version: ["12060", "13000"]
+    env:
+      CUDARC_CUDA_VERSION: ${{ matrix.cudarc_cuda_version }}
     steps:
       - uses: actions/checkout@v4
       - uses: Swatinem/rust-cache@v2
@@ -35,3 +43,13 @@ jobs:
         run: cargo test -p rstsr-cuda --lib --release
       - name: compile the hardware test suite (not run — no device on this runner)
         run: cargo test -p rstsr-cuda --all-targets --no-run --release
+      - name: the build's cfgs match the pinned CUDA version
+        run: |
+          cfgs=$(cargo rustc -p rstsr-cuda --lib -- --print cfg)
+          echo "$cfgs"
+          if [ "${{ matrix.cudarc_cuda_version }}" = 13000 ]; then
+            grep -qx cublas_math_mode <<<"$cfgs"
+            grep -qx cublas_fixedpoint_math <<<"$cfgs"
+          else
+            ! grep -q cublas <<<"$cfgs"
+          fi
