@@ -60,11 +60,21 @@ impl DeviceCudaPinned {
         PinnedBuffer::new_f(self.context(), len)
     }
 
+    /// Panicking form of [`Self::alloc_f`].
+    pub fn alloc<T: Copy>(&self, len: usize) -> PinnedBuffer<T> {
+        self.alloc_f(len).rstsr_unwrap()
+    }
+
     /// Allocate `len` zeroed pinned elements (host memset).
     pub fn zeros_f<T: Copy + ValidAsZeroBits>(&self, len: usize) -> Result<PinnedBuffer<T>> {
         let mut buf = self.alloc_f::<T>(len)?;
         buf.uninit_bytes_mut().fill(MaybeUninit::new(0));
         Ok(buf)
+    }
+
+    /// Panicking form of [`Self::zeros_f`].
+    pub fn zeros<T: Copy + ValidAsZeroBits>(&self, len: usize) -> PinnedBuffer<T> {
+        self.zeros_f(len).rstsr_unwrap()
     }
 
     /// Allocate `len` pinned elements set to `value` (host fill).
@@ -74,11 +84,21 @@ impl DeviceCudaPinned {
         Ok(buf)
     }
 
+    /// Panicking form of [`Self::full_f`].
+    pub fn full<T: Copy>(&self, len: usize, value: T) -> PinnedBuffer<T> {
+        self.full_f(len, value).rstsr_unwrap()
+    }
+
     /// Copy a host `Vec` into a new pinned buffer (host memcpy).
     pub fn from_vec_f<T: Copy>(&self, vec: Vec<T>) -> Result<PinnedBuffer<T>> {
         let mut buf = self.alloc_f::<T>(vec.len())?;
         copy_vec_into(&mut buf, &vec)?;
         Ok(buf)
+    }
+
+    /// Panicking form of [`Self::from_vec_f`].
+    pub fn from_vec<T: Copy>(&self, vec: Vec<T>) -> PinnedBuffer<T> {
+        self.from_vec_f(vec).rstsr_unwrap()
     }
 
     /// Wrap a pinned buffer with the row/column-major layout of `shape`.
@@ -94,6 +114,15 @@ impl DeviceCudaPinned {
         let storage = Storage::new(DataOwned::from(buf), self.clone());
         let tensor = TensorAny::new_f(storage, layout.into_dim()?)?;
         Ok(tensor)
+    }
+
+    /// Panicking form of [`Self::tensor_f`].
+    pub fn tensor<T, D>(&self, buf: PinnedBuffer<T>, shape: D) -> Tensor<T, Self, IxD>
+    where
+        T: Copy + Send + Sync + 'static,
+        D: DimAPI,
+    {
+        self.tensor_f(buf, shape).rstsr_unwrap()
     }
 }
 

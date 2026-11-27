@@ -59,3 +59,7 @@ harness = false
 [[bench]]
 name = "bench_streaming"
 harness = false
+
+[[bench]]
+name = "bench_matmul_stream"
+harness = false
