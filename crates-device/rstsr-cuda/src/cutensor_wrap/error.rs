@@ -22,6 +22,9 @@ pub enum Stage {
     Plan,
     /// `cutensorContract` / `cutensorReduce` / `cutensorPermute` / `cutensorElementwise*Execute`.
     Execute,
+    /// The handle-level attribute and cache entries (`cutensorHandle{Resize,Read,Write}*`,
+    /// `cutensor{Read,Write}KernelCache*`).
+    HandleAttribute,
 }
 
 impl Stage {
@@ -36,6 +39,7 @@ impl Stage {
             Stage::WorkspaceEstimate => "workspace estimate",
             Stage::Plan => "plan",
             Stage::Execute => "execute",
+            Stage::HandleAttribute => "handle attribute",
         }
     }
 }

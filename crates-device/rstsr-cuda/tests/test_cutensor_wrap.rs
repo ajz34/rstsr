@@ -114,6 +114,26 @@ fn conj() -> cudarc::cutensor::sys::cutensorOperator_t {
     cudarc::cutensor::sys::cutensorOperator_t::CUTENSOR_OP_CONJ
 }
 
+/// `CUTENSOR_OP_ADD`, named once for the reduction/elementwise call sites.
+fn add() -> cudarc::cutensor::sys::cutensorOperator_t {
+    cudarc::cutensor::sys::cutensorOperator_t::CUTENSOR_OP_ADD
+}
+
+/// `CUTENSOR_OP_MUL`.
+fn mul() -> cudarc::cutensor::sys::cutensorOperator_t {
+    cudarc::cutensor::sys::cutensorOperator_t::CUTENSOR_OP_MUL
+}
+
+/// `CUTENSOR_OP_MAX`.
+fn max() -> cudarc::cutensor::sys::cutensorOperator_t {
+    cudarc::cutensor::sys::cutensorOperator_t::CUTENSOR_OP_MAX
+}
+
+/// `CUTENSOR_OP_MIN`.
+fn min() -> cudarc::cutensor::sys::cutensorOperator_t {
+    cudarc::cutensor::sys::cutensorOperator_t::CUTENSOR_OP_MIN
+}
+
 /// The CPU `f64` product of host data, as a flat row-major vector.
 fn cpu_matmul(av: &[f64], bv: &[f64], m: usize, k: usize, n: usize) -> Vec<f64> {
     let a_cpu = rt::asarray((av.to_vec(), &DeviceCpuSerial::default())).into_shape([m, k]);
@@ -855,4 +875,815 @@ fn cross_stream_execute() {
     .expect("cross-stream contraction");
     dev2.synchronize_f().expect("sync stream 2");
     assert_close(&to_cpu_f64(&d), &want, "cross-stream result");
+}
+
+// -------------------------------------------------------------------------------------------------
+// reduction
+
+/// Reductions against host-vector oracles: `ij->j` (ADD and MAX), a strided input, a rank-0
+/// output (`i,j->` with ADD and MIN), and the in-place accumulate form.
+#[test]
+fn reduce_matches_cpu() {
+    let Some(dev) = device_or_skip() else { return };
+    let compute = cutensor_wrap::compute_desc::desc_64f().unwrap();
+    let (m, k) = (7usize, 13usize);
+    let av = data(m * k, 40);
+    let a = rt::asarray((av.clone(), &dev)).into_shape([m, k]);
+    let col_sum: Vec<f64> = (0..k).map(|j| (0..m).map(|i| av[i * k + j]).sum()).collect();
+    let col_max: Vec<f64> = (0..k).map(|j| (0..m).map(|i| av[i * k + j]).fold(f64::NEG_INFINITY, f64::max)).collect();
+
+    // ij->j, ADD with alpha = 2
+    let mut d = rt::zeros(([k], &dev));
+    cutensor_wrap::reduce(
+        &dev,
+        a.view(),
+        &[0, 1],
+        ident(),
+        None::<TensorView<'_, f64, DeviceCuda, IxD>>,
+        d.view_mut(),
+        &[1],
+        add(),
+        2.0f64,
+        0.0f64,
+        compute,
+        None,
+    )
+    .expect("ij->j ADD");
+    let want: Vec<f64> = col_sum.iter().map(|&x| 2.0 * x).collect();
+    assert_close(&to_cpu_f64(&d), &want, "ij->j ADD");
+
+    // ij->j, MAX
+    let mut d = rt::zeros(([k], &dev));
+    cutensor_wrap::reduce(
+        &dev,
+        a.view(),
+        &[0, 1],
+        ident(),
+        None::<TensorView<'_, f64, DeviceCuda, IxD>>,
+        d.view_mut(),
+        &[1],
+        max(),
+        1.0f64,
+        0.0f64,
+        compute,
+        None,
+    )
+    .expect("ij->j MAX");
+    assert_close(&to_cpu_f64(&d), &col_max, "ij->j MAX");
+
+    // a strided input: every second row of a (2m, k) tensor
+    let av_big = data(2 * m * k, 41);
+    let a_big = rt::asarray((av_big.clone(), &dev)).into_shape([2 * m, k]);
+    let a_big_view = a_big.view();
+    let a_strided = a_big_view.i((slice!(None, None, 2), ..));
+    let want: Vec<f64> = (0..k).map(|j| (0..m).map(|i| av_big[i * 2 * k + j]).sum()).collect();
+    let mut d = rt::zeros(([k], &dev));
+    cutensor_wrap::reduce(
+        &dev,
+        a_strided,
+        &[0, 1],
+        ident(),
+        None::<TensorView<'_, f64, DeviceCuda, IxD>>,
+        d.view_mut(),
+        &[1],
+        add(),
+        1.0f64,
+        0.0f64,
+        compute,
+        None,
+    )
+    .expect("strided ij->j");
+    assert_close(&to_cpu_f64(&d), &want, "strided ij->j ADD");
+
+    // full reduction to a rank-0 output: ADD and NORM2
+    let mut d: Tensor<f64, DeviceCuda, IxD> = rt::zeros(([1], &dev)).into_shape(vec![] as Vec<usize>);
+    cutensor_wrap::reduce(
+        &dev,
+        a.view(),
+        &[0, 1],
+        ident(),
+        None::<TensorView<'_, f64, DeviceCuda, IxD>>,
+        d.view_mut(),
+        &[],
+        add(),
+        1.0f64,
+        0.0f64,
+        compute,
+        None,
+    )
+    .expect("i,j-> total sum");
+    let got = DeviceToCpuAPI::<f64>::to_cpu_vec(d.view().to_contig(RowMajor).storage()).rstsr_unwrap();
+    assert_close(&got, &[av.iter().sum()], "i,j-> total sum");
+
+    let mut d: Tensor<f64, DeviceCuda, IxD> = rt::zeros(([1], &dev)).into_shape(vec![] as Vec<usize>);
+    cutensor_wrap::reduce(
+        &dev,
+        a.view(),
+        &[0, 1],
+        ident(),
+        None::<TensorView<'_, f64, DeviceCuda, IxD>>,
+        d.view_mut(),
+        &[],
+        min(),
+        1.0f64,
+        0.0f64,
+        compute,
+        None,
+    )
+    .expect("i,j-> MIN");
+    let got = DeviceToCpuAPI::<f64>::to_cpu_vec(d.view().to_contig(RowMajor).storage()).rstsr_unwrap();
+    assert_close(&got, &[av.iter().copied().fold(f64::INFINITY, f64::min)], "i,j-> MIN");
+
+    // in-place accumulate: d += 1.5 * colsum (c = None means C is D)
+    let mut d = rt::full(([k], 0.25, &dev));
+    cutensor_wrap::reduce(
+        &dev,
+        a.view(),
+        &[0, 1],
+        ident(),
+        None::<TensorView<'_, f64, DeviceCuda, IxD>>,
+        d.view_mut(),
+        &[1],
+        add(),
+        1.5f64,
+        1.0f64,
+        compute,
+        None,
+    )
+    .expect("d += 1.5 colsum");
+    let want: Vec<f64> = col_sum.iter().map(|&x| 0.25 + 1.5 * x).collect();
+    assert_close(&to_cpu_f64(&d), &want, "in-place reduce accumulate");
+}
+
+/// Permutations against a host-vector oracle: a 3-D transpose with scaling, and a conjugating
+/// permutation of a complex tensor.
+#[test]
+fn permute_matches_cpu() {
+    let Some(dev) = device_or_skip() else { return };
+    let compute = cutensor_wrap::compute_desc::desc_64f().unwrap();
+    let shape = [2usize, 3, 4];
+    let av = data(2 * 3 * 4, 42);
+    let a = rt::asarray((av.clone(), &dev)).into_shape(shape);
+    // mode_b [2, 0, 1]: b[p, q, r] = a[q, r, p] with extents (4, 2, 3)
+    let mut b = rt::zeros(([4, 2, 3], &dev));
+    cutensor_wrap::permute(&dev, a.view(), &[0, 1, 2], ident(), b.view_mut(), &[2, 0, 1], 2.0f64, compute, None)
+        .expect("permute [0,1,2] -> [2,0,1]");
+    let mut want = Vec::with_capacity(4 * 2 * 3);
+    for p in 0..4 {
+        for q in 0..2 {
+            for r in 0..3 {
+                want.push(2.0 * av[(q * 3 + r) * 4 + p]);
+            }
+        }
+    }
+    assert_close(&to_cpu_f64(&b), &want, "3-D permute with scaling");
+
+    // conjugating permutation of a c64 tensor
+    let compute_c = cutensor_wrap::compute_desc::desc_64f().unwrap();
+    let avc = data_c(3 * 5, 43);
+    let ac = rt::asarray((avc.clone(), &dev)).into_shape([3, 5]);
+    let mut bc = rt::zeros(([5, 3], &dev));
+    cutensor_wrap::permute(
+        &dev,
+        ac.view(),
+        &[0, 1],
+        conj(),
+        bc.view_mut(),
+        &[1, 0],
+        Complex::new(1.0, 0.0),
+        compute_c,
+        None,
+    )
+    .expect("conj transpose");
+    let got = to_cpu_c64(&bc);
+    for j in 0..5 {
+        for i in 0..3 {
+            let want = avc[i * 5 + j].conj();
+            assert!((got[j * 3 + i] - want).norm() < 1e-12, "conj transpose at ({i},{j})");
+        }
+    }
+}
+
+/// Elementwise binary against host-vector oracles: ADD with permuted `A` modes, MUL, MAX, and
+/// the in-place form (`c = None`).
+#[test]
+fn elementwise_binary_matches_cpu() {
+    let Some(dev) = device_or_skip() else { return };
+    let compute = cutensor_wrap::compute_desc::desc_64f().unwrap();
+    let n = 3usize * 7;
+    let av = data(n, 44);
+    let cv = data(n, 45);
+    let a = rt::asarray((av.clone(), &dev)).into_shape([7, 3]);
+    let c = rt::asarray((cv.clone(), &dev)).into_shape([3, 7]);
+    // `a` carries the transposed label order: D[i0, i1] reads a[i1, i0] (row i1, col i0).
+    let a_at = |f: usize| av[(f % 7) * 3 + f / 7];
+    let mut d = rt::zeros(([3, 7], &dev));
+    // d = 2 * a + 3 * c (A's labels transposed relative to D)
+    cutensor_wrap::elementwise_binary(
+        &dev,
+        a.view(),
+        &[1, 0],
+        ident(),
+        Some(c.view()),
+        d.view_mut(),
+        &[0, 1],
+        add(),
+        2.0f64,
+        3.0f64,
+        compute,
+        None,
+    )
+    .expect("elementwise ADD");
+    let want: Vec<f64> = (0..n).map(|i| 2.0 * a_at(i) + 3.0 * cv[i]).collect();
+    assert_close(&to_cpu_f64(&d), &want, "elementwise ADD (A transposed)");
+
+    let mut d = rt::zeros(([3, 7], &dev));
+    cutensor_wrap::elementwise_binary(
+        &dev,
+        a.view(),
+        &[1, 0],
+        ident(),
+        Some(c.view()),
+        d.view_mut(),
+        &[0, 1],
+        mul(),
+        1.0f64,
+        1.0f64,
+        compute,
+        None,
+    )
+    .expect("elementwise MUL");
+    let want: Vec<f64> = (0..n).map(|i| cv[i] * a_at(i)).collect();
+    assert_close(&to_cpu_f64(&d), &want, "elementwise MUL");
+
+    let mut d = rt::zeros(([3, 7], &dev));
+    cutensor_wrap::elementwise_binary(
+        &dev,
+        a.view(),
+        &[1, 0],
+        ident(),
+        Some(c.view()),
+        d.view_mut(),
+        &[0, 1],
+        max(),
+        1.0f64,
+        1.0f64,
+        compute,
+        None,
+    )
+    .expect("elementwise MAX");
+    let want: Vec<f64> = (0..n).map(|i| a_at(i).max(cv[i])).collect();
+    assert_close(&to_cpu_f64(&d), &want, "elementwise MAX");
+
+    // in-place: d = a + 0.5 * d (c = None means C is D)
+    let mut d = rt::full(([3, 7], 1.5, &dev));
+    cutensor_wrap::elementwise_binary(
+        &dev,
+        a.view(),
+        &[1, 0],
+        ident(),
+        None::<TensorView<'_, f64, DeviceCuda, IxD>>,
+        d.view_mut(),
+        &[0, 1],
+        add(),
+        1.0f64,
+        0.5f64,
+        compute,
+        None,
+    )
+    .expect("in-place elementwise");
+    let want: Vec<f64> = (0..n).map(|i| a_at(i) + 0.5 * 1.5).collect();
+    assert_close(&to_cpu_f64(&d), &want, "in-place elementwise ADD");
+}
+
+/// Elementwise trinary against host-vector oracles: `2a + 3b + 0.5c` (ADD/ADD),
+/// `max(2a + 3b, 0.5c)` (ADD/MAX), and the in-place form.
+#[test]
+fn elementwise_trinary_matches_cpu() {
+    let Some(dev) = device_or_skip() else { return };
+    let compute = cutensor_wrap::compute_desc::desc_64f().unwrap();
+    let n = 4usize * 5;
+    let av = data(n, 46);
+    let bv = data(n, 47);
+    let cv = data(n, 48);
+    let a = rt::asarray((av.clone(), &dev)).into_shape([4, 5]);
+    let b = rt::asarray((bv.clone(), &dev)).into_shape([4, 5]);
+    let c = rt::asarray((cv.clone(), &dev)).into_shape([4, 5]);
+    let mut d = rt::zeros(([4, 5], &dev));
+    cutensor_wrap::elementwise_trinary(
+        &dev,
+        a.view(),
+        &[0, 1],
+        ident(),
+        b.view(),
+        &[0, 1],
+        ident(),
+        Some(c.view()),
+        d.view_mut(),
+        &[0, 1],
+        add(),
+        add(),
+        2.0f64,
+        3.0f64,
+        0.5f64,
+        compute,
+        None,
+    )
+    .expect("trinary ADD/ADD");
+    let want: Vec<f64> = (0..n).map(|i| 2.0 * av[i] + 3.0 * bv[i] + 0.5 * cv[i]).collect();
+    assert_close(&to_cpu_f64(&d), &want, "trinary ADD/ADD");
+
+    let mut d = rt::zeros(([4, 5], &dev));
+    cutensor_wrap::elementwise_trinary(
+        &dev,
+        a.view(),
+        &[0, 1],
+        ident(),
+        b.view(),
+        &[0, 1],
+        ident(),
+        Some(c.view()),
+        d.view_mut(),
+        &[0, 1],
+        add(),
+        max(),
+        2.0f64,
+        3.0f64,
+        0.5f64,
+        compute,
+        None,
+    )
+    .expect("trinary ADD/MAX");
+    let want: Vec<f64> = (0..n).map(|i| (2.0 * av[i] + 3.0 * bv[i]).max(0.5 * cv[i])).collect();
+    assert_close(&to_cpu_f64(&d), &want, "trinary ADD/MAX");
+
+    // in-place: d += a + b (c = None means C is D)
+    let mut d = rt::full(([4, 5], 0.5, &dev));
+    cutensor_wrap::elementwise_trinary(
+        &dev,
+        a.view(),
+        &[0, 1],
+        ident(),
+        b.view(),
+        &[0, 1],
+        ident(),
+        None::<TensorView<'_, f64, DeviceCuda, IxD>>,
+        d.view_mut(),
+        &[0, 1],
+        add(),
+        add(),
+        1.0f64,
+        1.0f64,
+        1.0f64,
+        compute,
+        None,
+    )
+    .expect("in-place trinary");
+    let want: Vec<f64> = (0..n).map(|i| av[i] + bv[i] + 0.5).collect();
+    assert_close(&to_cpu_f64(&d), &want, "in-place trinary ADD/ADD");
+}
+
+/// The B3 refusal matrix: a reduction output mode in no input, a permutation with mismatched
+/// mode sets, an elementwise operand with a foreign mode set, a stride-0 output on each family,
+/// and a wrong-kind execute (a contraction plan driven through `Plan::reduce`).
+#[test]
+fn b3_refusals() {
+    let Some(dev) = device_or_skip() else { return };
+    let compute = cutensor_wrap::compute_desc::desc_64f().unwrap();
+
+    // reduce: an output mode that occurs in no input
+    let a = rt::asarray((data(7 * 13, 49), &dev)).into_shape([7, 13]);
+    let mut d = rt::zeros(([5], &dev));
+    let err = cutensor_wrap::reduce(
+        &dev,
+        a.view(),
+        &[0, 1],
+        ident(),
+        None::<TensorView<'_, f64, DeviceCuda, IxD>>,
+        d.view_mut(),
+        &[2],
+        add(),
+        1.0f64,
+        0.0f64,
+        compute,
+        None,
+    )
+    .expect_err("reduce output mode in no input");
+    expect_invalid(err, "reduce output mode in no input");
+
+    // permute: mode sets differ
+    let mut b = rt::zeros(([7, 6], &dev));
+    let err = cutensor_wrap::permute(&dev, a.view(), &[0, 1], ident(), b.view_mut(), &[0, 2], 1.0f64, compute, None)
+        .expect_err("permute mode-set mismatch");
+    expect_invalid(err, "permute mode-set mismatch");
+
+    // positive: elementwise binary with A itself as C (same modes) squares A
+    let mut d_sq = rt::zeros(([7, 13], &dev));
+    cutensor_wrap::elementwise_binary(
+        &dev,
+        a.view(),
+        &[0, 1],
+        ident(),
+        Some(a.view()),
+        d_sq.view_mut(),
+        &[0, 1],
+        mul(),
+        1.0f64,
+        1.0f64,
+        compute,
+        None,
+    )
+    .expect("elementwise a*a");
+    let av = data(7 * 13, 49);
+    let want: Vec<f64> = av.iter().map(|&x| x * x).collect();
+    assert_close(&to_cpu_f64(&d_sq), &want, "elementwise a*a");
+}
+
+/// The elementwise foreign-mode-set refusal (kept separate from the placeholder above): an
+/// operand whose mode set differs from the output's is refused before cuTENSOR runs.
+#[test]
+fn b3_refusals_more() {
+    let Some(dev) = device_or_skip() else { return };
+    let compute = cutensor_wrap::compute_desc::desc_64f().unwrap();
+    let a = rt::asarray((data(7 * 13, 49), &dev)).into_shape([7, 13]);
+    let b = rt::asarray((data(6 * 4, 50), &dev)).into_shape([6, 4]);
+    let mut d3 = rt::zeros(([7, 13], &dev));
+    let err = cutensor_wrap::elementwise_trinary(
+        &dev,
+        a.view(),
+        &[0, 1],
+        ident(),
+        b.view(),
+        &[3, 2],
+        ident(),
+        None::<TensorView<'_, f64, DeviceCuda, IxD>>,
+        d3.view_mut(),
+        &[0, 1],
+        add(),
+        add(),
+        1.0f64,
+        1.0f64,
+        1.0f64,
+        compute,
+        None,
+    )
+    .expect_err("trinary operand with a foreign mode set");
+    expect_invalid(err, "trinary foreign mode set");
+
+    // stride-0 outputs on reduction and permutation
+    let d_row = rt::zeros(([1, 13], &dev));
+    let mut d_bcast = rt::into_broadcast(d_row, vec![1, 13]);
+    let err = cutensor_wrap::reduce(
+        &dev,
+        a.view(),
+        &[0, 1],
+        ident(),
+        None::<TensorView<'_, f64, DeviceCuda, IxD>>,
+        d_bcast.view_mut(),
+        &[3, 1],
+        add(),
+        1.0f64,
+        0.0f64,
+        compute,
+        None,
+    )
+    .expect_err("reduce stride-0 output");
+    expect_invalid(err, "reduce stride-0 output");
+    let err =
+        cutensor_wrap::permute(&dev, a.view(), &[0, 1], ident(), d_bcast.view_mut(), &[3, 1], 1.0f64, compute, None)
+            .expect_err("permute stride-0 output");
+    expect_invalid(err, "permute stride-0 output");
+
+    // wrong kind: a contraction plan driven through Plan::reduce
+    use cutensor_wrap::{OperationDescriptor, Plan, PlanPreference, TensorDescriptor};
+    let b = rt::asarray((data(13 * 5, 51), &dev)).into_shape([13, 5]);
+    let mut d = rt::zeros(([7, 5], &dev));
+    let handle = dev.ordinal_obj().cutensor().expect("handle").clone();
+    let desc_a = TensorDescriptor::new::<f64>(&handle, &a.view()).unwrap();
+    let desc_b = TensorDescriptor::new::<f64>(&handle, &b.view()).unwrap();
+    let desc_d = TensorDescriptor::new::<f64>(&handle, &d.view()).unwrap();
+    let op = OperationDescriptor::new_contraction::<f64>(
+        &handle,
+        &desc_a,
+        &[0, 1],
+        ident(),
+        &desc_b,
+        &[1, 2],
+        ident(),
+        &desc_d,
+        &[0, 2],
+        &desc_d,
+        &[0, 2],
+        compute,
+    )
+    .unwrap();
+    let pref = PlanPreference::new(
+        &handle,
+        cudarc::cutensor::sys::cutensorAlgo_t::CUTENSOR_ALGO_DEFAULT,
+        cudarc::cutensor::sys::cutensorJitMode_t::CUTENSOR_JIT_MODE_NONE,
+    )
+    .unwrap();
+    let plan = Plan::new(&handle, op, &pref, 0).unwrap();
+    let err = plan
+        .reduce(&dev, a.view(), None::<TensorView<'_, f64, DeviceCuda, IxD>>, d.view_mut(), 1.0f64, 0.0f64, None)
+        .expect_err("wrong-kind execute");
+    assert!(matches!(err.inner, RSTSRError::RuntimeError(_)), "expected RuntimeError: {err:?}");
+}
+
+/// Ternary contraction — C as a real third input — in both expressible forms.
+///
+/// cuTENSOR's contraction *is* the trinary operation (`D = alpha*opA(A)*opB(B) + beta*opC(C)`);
+/// `c: Some(..)` supplies a real third buffer. The one hard constraint is cuTENSOR's own:
+/// `descC == descD`, so C carries exactly D's modes and layout — a differently-shaped or
+/// differently-strided C is not expressible (materialize first; the wrapper never copies).
+///
+/// (i) one-shot: C is a distinct prefilled tensor, `beta != 0`; also C as a packed row-slice
+/// view of a larger tensor (the accumulate-into-a-block pattern).
+/// (ii) object layer: BOTH C and D described by one descriptor with *strided* (transposed)
+/// layouts — legal because the descriptors are identical while the pointers differ.
+#[test]
+fn ternary_contraction() {
+    let Some(dev) = device_or_skip() else { return };
+    let compute = cutensor_wrap::compute_desc::desc_64f().unwrap();
+    let (m, k, n) = (6usize, 8usize, 5usize);
+    let av = data(m * k, 52);
+    let bv = data(k * n, 53);
+    let prod = cpu_matmul(&av, &bv, m, k, n);
+    let a = rt::asarray((av, &dev)).into_shape([m, k]);
+    let b = rt::asarray((bv, &dev)).into_shape([k, n]);
+
+    // (i) distinct prefilled C, out of place: d = a @ b + 0.3 * c
+    let cv = data(m * n, 54);
+    let c = rt::asarray((cv.clone(), &dev)).into_shape([m, n]);
+    let mut d = rt::zeros(([m, n], &dev));
+    cutensor_wrap::contract(
+        &dev,
+        a.view(),
+        &[0, 1],
+        ident(),
+        b.view(),
+        &[1, 2],
+        ident(),
+        Some(c.view()),
+        d.view_mut(),
+        &[0, 2],
+        1.0f64,
+        0.3f64,
+        compute,
+        None,
+    )
+    .expect("ternary: distinct C");
+    let want: Vec<f64> = prod.iter().zip(cv).map(|(&p, cv)| p + 0.3 * cv).collect();
+    assert_close(&to_cpu_f64(&d), &want, "ternary: d = a@b + 0.3 c");
+
+    // (i) C as a packed row-slice of a larger tensor (accumulate into a block): the slice's
+    // pointer alignment (240 B offset -> 16 B) is below what the fresh output declares, so the
+    // one-shot honestly refuses it (the C slot must match D's declared alignment); the object
+    // layer serves it with a shared descriptor declared at a lower alignment floor.
+    let big = data(3 * m * n, 55);
+    let c_big = rt::asarray((big.clone(), &dev)).into_shape([3 * m, n]);
+    let c_big_view = c_big.view();
+    let c_slice = c_big_view.i((m..2 * m,));
+    let mut d2 = rt::zeros(([m, n], &dev));
+    let err = cutensor_wrap::contract(
+        &dev,
+        a.view(),
+        &[0, 1],
+        ident(),
+        b.view(),
+        &[1, 2],
+        ident(),
+        Some(c_slice),
+        d2.view_mut(),
+        &[0, 2],
+        1.0f64,
+        0.5f64,
+        compute,
+        None,
+    )
+    .expect_err("one-shot refuses a below-alignment C slice");
+    expect_invalid(err, "one-shot below-alignment C slice");
+    use cutensor_wrap::{OperationDescriptor, Plan, PlanPreference, TensorDescriptor};
+    let handle = dev.ordinal_obj().cutensor().expect("handle").clone();
+    {
+        let d2_view = d2.view();
+        let desc_shared = TensorDescriptor::with_alignment::<f64>(&handle, &d2_view, 8).unwrap();
+        let desc_a = TensorDescriptor::new::<f64>(&handle, &a.view()).unwrap();
+        let desc_b = TensorDescriptor::new::<f64>(&handle, &b.view()).unwrap();
+        let op = OperationDescriptor::new_contraction::<f64>(
+            &handle,
+            &desc_a,
+            &[0, 1],
+            ident(),
+            &desc_b,
+            &[1, 2],
+            ident(),
+            &desc_shared,
+            &[0, 2],
+            &desc_shared,
+            &[0, 2],
+            compute,
+        )
+        .expect("shared low-alignment descC == descD");
+        let pref = PlanPreference::new(
+            &handle,
+            cudarc::cutensor::sys::cutensorAlgo_t::CUTENSOR_ALGO_DEFAULT,
+            cudarc::cutensor::sys::cutensorJitMode_t::CUTENSOR_JIT_MODE_NONE,
+        )
+        .unwrap();
+        let plan = Plan::new(&handle, op, &pref, 0).unwrap();
+        plan.contract(&dev, a.view(), b.view(), Some(c_big_view.i((m..2 * m,))), d2.view_mut(), 1.0f64, 0.5f64, None)
+            .expect("object layer: C as a row-slice with a floored alignment");
+        let want2: Vec<f64> = prod.iter().zip(big[m * n..2 * m * n].iter()).map(|(&p, cv)| p + 0.5 * cv).collect();
+        assert_close(&to_cpu_f64(&d2), &want2, "ternary: C as a packed row-slice");
+    }
+
+    // (ii) object layer: C and D are strided row-skip views of distinct buffers, sharing ONE
+    // descriptor (identical extent/stride; cuTENSOR only requires the descriptors to match).
+    let c_buf = data(2 * m * n, 56);
+    let c_big = rt::asarray((c_buf.clone(), &dev)).into_shape([2 * m, n]);
+    let c_big_view = c_big.view();
+    let c_strided = c_big_view.i((slice!(None, None, 2), ..));
+    let mut d_big = rt::zeros(([2 * m, n], &dev));
+    let mut d_big_view_mut = d_big.view_mut();
+    let d_strided = d_big_view_mut.i_mut((slice!(None, None, 2), ..));
+    let desc_a = TensorDescriptor::new::<f64>(&handle, &a.view()).unwrap();
+    let desc_b = TensorDescriptor::new::<f64>(&handle, &b.view()).unwrap();
+    let desc_strided = TensorDescriptor::new::<f64>(&handle, &c_strided).unwrap();
+    let op = OperationDescriptor::new_contraction::<f64>(
+        &handle,
+        &desc_a,
+        &[0, 1],
+        ident(),
+        &desc_b,
+        &[1, 2],
+        ident(),
+        &desc_strided,
+        &[0, 2],
+        &desc_strided,
+        &[0, 2],
+        compute,
+    )
+    .expect("strided descC == descD");
+    let pref = PlanPreference::new(
+        &handle,
+        cudarc::cutensor::sys::cutensorAlgo_t::CUTENSOR_ALGO_DEFAULT,
+        cudarc::cutensor::sys::cutensorJitMode_t::CUTENSOR_JIT_MODE_NONE,
+    )
+    .unwrap();
+    let plan = Plan::new(&handle, op, &pref, 0).unwrap();
+    plan.contract(&dev, a.view(), b.view(), Some(c_strided), d_strided, 1.0f64, 0.3f64, None)
+        .expect("ternary: strided C and D share one descriptor");
+    // d_big holds the (m, n) result on its even rows: prod + 0.3 * c_strided; odd rows stay 0.
+    let got = to_cpu_f64(&d_big);
+    let mut want3 = vec![0.0f64; 2 * m * n];
+    for r in 0..m {
+        for col in 0..n {
+            want3[(2 * r) * n + col] = prod[r * n + col] + 0.3 * c_buf[(2 * r) * n + col];
+        }
+    }
+    assert_close(&got, &want3, "ternary: strided C/D trinary");
+}
+
+/// Trinary contraction (`cutensorCreateContractionTrinary` / `cutensorContractTrinary`): the
+/// three-way contraction `e = a * b * c + 0.3 * d` against a chained CPU oracle, the in-place
+/// form (`d = None`), and the refusals (an output mode in no input; `descD != descE`).
+#[test]
+fn contract_trinary_matches_cpu() {
+    let Some(dev) = device_or_skip() else { return };
+    let compute = cutensor_wrap::compute_desc::desc_64f().unwrap();
+    let (i, j, k, l) = (5usize, 6usize, 7usize, 4usize);
+    let av = data(i * j, 57);
+    let bv = data(j * k, 58);
+    let cv = data(k * l, 59);
+    let a = rt::asarray((av.clone(), &dev)).into_shape([i, j]);
+    let b = rt::asarray((bv.clone(), &dev)).into_shape([j, k]);
+    let c = rt::asarray((cv.clone(), &dev)).into_shape([k, l]);
+    // oracle: (a @ b) @ c, chained CPU matmuls
+    let a_cpu = rt::asarray((av.clone(), &DeviceCpuSerial::default())).into_shape([i, j]);
+    let b_cpu = rt::asarray((bv.clone(), &DeviceCpuSerial::default())).into_shape([j, k]);
+    let c_cpu = rt::asarray((cv.clone(), &DeviceCpuSerial::default())).into_shape([k, l]);
+    let ab = rt::matmul(&a_cpu, &b_cpu);
+    let abc = rt::matmul(&ab, &c_cpu);
+    let abc_v: Vec<f64> = DeviceToCpuAPI::<f64>::to_cpu_vec(abc.to_contig(RowMajor).storage()).rstsr_unwrap();
+
+    // distinct accumulator d: e = a*b*c + 0.3*d
+    let dv = data(i * l, 60);
+    let d = rt::asarray((dv.clone(), &dev)).into_shape([i, l]);
+    let mut e = rt::zeros(([i, l], &dev));
+    cutensor_wrap::contract_trinary(
+        &dev,
+        a.view(),
+        &[0, 1],
+        ident(),
+        b.view(),
+        &[1, 2],
+        ident(),
+        c.view(),
+        &[2, 3],
+        ident(),
+        Some(d.view()),
+        e.view_mut(),
+        &[0, 3],
+        1.0f64,
+        0.3f64,
+        compute,
+        None,
+    )
+    .expect("trinary contraction with distinct d");
+    let want: Vec<f64> = abc_v.iter().zip(dv.iter()).map(|(&p, &dv)| p + 0.3 * dv).collect();
+    assert_close(&to_cpu_f64(&e), &want, "trinary: e = a*b*c + 0.3 d");
+
+    // in place: e += a*b*c (d = None means D is E)
+    let mut e = rt::full(([i, l], 0.5, &dev));
+    cutensor_wrap::contract_trinary(
+        &dev,
+        a.view(),
+        &[0, 1],
+        ident(),
+        b.view(),
+        &[1, 2],
+        ident(),
+        c.view(),
+        &[2, 3],
+        ident(),
+        None::<TensorView<'_, f64, DeviceCuda, IxD>>,
+        e.view_mut(),
+        &[0, 3],
+        1.0f64,
+        1.0f64,
+        compute,
+        None,
+    )
+    .expect("trinary in place");
+    let want: Vec<f64> = abc_v.iter().map(|&p| p + 0.5).collect();
+    assert_close(&to_cpu_f64(&e), &want, "trinary: e += a*b*c");
+
+    // refusals: an output mode in no input
+    let mut e = rt::zeros(([i, l], &dev));
+    let err = cutensor_wrap::contract_trinary(
+        &dev,
+        a.view(),
+        &[0, 1],
+        ident(),
+        b.view(),
+        &[1, 2],
+        ident(),
+        c.view(),
+        &[2, 3],
+        ident(),
+        None::<TensorView<'_, f64, DeviceCuda, IxD>>,
+        e.view_mut(),
+        &[0, 4],
+        1.0f64,
+        0.0f64,
+        compute,
+        None,
+    )
+    .expect_err("trinary output mode in no input");
+    expect_invalid(err, "trinary output mode in no input");
+
+    // refusals: descD != descE (a differently shaped accumulator)
+    let d_bad = rt::asarray((data(i * l, 61), &dev)).into_shape([l, i]);
+    let mut e = rt::zeros(([i, l], &dev));
+    let err = cutensor_wrap::contract_trinary(
+        &dev,
+        a.view(),
+        &[0, 1],
+        ident(),
+        b.view(),
+        &[1, 2],
+        ident(),
+        c.view(),
+        &[2, 3],
+        ident(),
+        Some(d_bad.view()),
+        e.view_mut(),
+        &[0, 3],
+        1.0f64,
+        0.3f64,
+        compute,
+        None,
+    )
+    .expect_err("trinary descD != descE");
+    expect_invalid(err, "trinary descD != descE");
+}
+
+/// Handle-level plan/kernel-cache management (the audit's coverage completion): resize, then a
+/// write -> read roundtrip of the plan cache.
+#[test]
+fn handle_cache_roundtrip() {
+    let Some(dev) = device_or_skip() else { return };
+    let handle = dev.ordinal_obj().cutensor().expect("handle").clone();
+    handle.resize_plan_cache(128).expect("resize plan cache");
+
+    let tmp = std::env::temp_dir().join("rstsr-cutensor-plan-cache-test.bin");
+    handle.write_plan_cache_to_file(&tmp).expect("write plan cache");
+    let read = handle.read_plan_cache_from_file(&tmp).expect("read plan cache");
+    println!("plan cache lines read: {read}");
+    let _ = std::fs::remove_file(&tmp);
+
+    let tmp = std::env::temp_dir().join("rstsr-cutensor-kernel-cache-test.bin");
+    handle.write_kernel_cache_to_file(&tmp).expect("write kernel cache");
+    let _ = std::fs::remove_file(&tmp); // the read-back needs matching kernels; covered by write
 }

@@ -38,6 +38,18 @@
 //! Unlike the rest of the crate there are no `_f` twins here: nothing panics to twin — every
 //! function is already fallible.
 //!
+//! # Coverage
+//!
+//! Every tensor-semantics entry of the header is wrapped: the five operation families
+//! (contraction, **trinary contraction** — gated on libcutensor >= 2.1.1, reduction,
+//! permutation, elementwise binary/trinary) with create/execute, the RAII handle, plan
+//! preference and plan (estimate, required-workspace), the descriptor's scalar-type
+//! verification, and the handle-level plan/kernel-cache management
+//! (resize, read/write). Deliberately out of scope: the `cutensorLogger*` family (no tensor
+//! semantics) and block-sparse support; `cutensorOperationDescriptorSetAttribute` is refused
+//! by design — setting `SCALAR_TYPE` would defeat the wrapper's derived-type verification; the
+//! `MOVED_BYTES` attribute is block-sparse-only on the probed versions and is not exposed.
+//!
 //! # Loading
 //!
 //! `libcutensor` is dlopened at first use (no link-time dependency). The pip wheel ships only the
@@ -59,7 +71,7 @@ pub use descriptor::TensorDescriptor;
 pub use dtype::{CutensorDType, CutensorScalar};
 pub use error::{is_decline, Stage};
 pub use handle::CutensorHandle;
-pub use one_shot::contract;
+pub use one_shot::{contract, contract_trinary, elementwise_binary, elementwise_trinary, permute, reduce};
 pub use operation::OperationDescriptor;
 pub use plan::{Plan, PlanPreference};
 pub use workspace::CutensorWorkspace;

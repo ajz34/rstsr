@@ -93,6 +93,83 @@ impl CutensorHandle {
         self.plan_lock.lock().unwrap_or_else(|e| e.into_inner())
     }
 
+    /// Whether the loaded library exports `name` (NUL-terminated). The trinary contraction
+    /// arrived in libcutensor 2.1.1 and cudarc's `load` panics on a missing symbol, so the
+    /// gated entries probe first.
+    pub(crate) fn has_symbol(&self, name: &[u8]) -> bool {
+        if !unsafe { sys::is_culib_present() } {
+            return false;
+        }
+        unsafe { sys::culib().get::<*const ()>(name) }.is_ok()
+    }
+
+    /// The CUDA runtime version the loaded library was built against.
+    pub fn cudart_version(&self) -> usize {
+        unsafe { sys::cutensorGetCudartVersion() }
+    }
+
+    /// Resize the handle's per-handle plan cache to `num_entries` entries (default 64).
+    pub fn resize_plan_cache(&self, num_entries: u32) -> Result<()> {
+        self.bind()?;
+        let status = unsafe { sys::cutensorHandleResizePlanCache(self.ptr, num_entries) };
+        if status != sys::cutensorStatus_t::CUTENSOR_STATUS_SUCCESS {
+            return Err(error::status_error(Stage::HandleAttribute, status, "resize plan cache"));
+        }
+        Ok(())
+    }
+
+    fn cache_file(path: impl AsRef<std::path::Path>) -> Result<std::ffi::CString> {
+        std::ffi::CString::new(path.as_ref().as_os_str().to_string_lossy().as_bytes())
+            .map_err(|_| rstsr_error!(InvalidValue, "cutensor: cache path contains a NUL byte"))
+    }
+
+    /// Write the handle's plan cache to `path`.
+    pub fn write_plan_cache_to_file(&self, path: impl AsRef<std::path::Path>) -> Result<()> {
+        self.bind()?;
+        let file = Self::cache_file(path)?;
+        let status = unsafe { sys::cutensorHandleWritePlanCacheToFile(self.ptr, file.as_ptr()) };
+        if status != sys::cutensorStatus_t::CUTENSOR_STATUS_SUCCESS {
+            return Err(error::status_error(Stage::HandleAttribute, status, "write plan cache"));
+        }
+        Ok(())
+    }
+
+    /// Read a plan cache from `path`, overwriting this handle's cache lines; returns the number
+    /// of cache lines read.
+    pub fn read_plan_cache_from_file(&self, path: impl AsRef<std::path::Path>) -> Result<u32> {
+        self.bind()?;
+        let file = Self::cache_file(path)?;
+        let mut read = 0u32;
+        let status =
+            unsafe { sys::cutensorHandleReadPlanCacheFromFile(self.ptr, file.as_ptr(), core::ptr::addr_of_mut!(read)) };
+        if status != sys::cutensorStatus_t::CUTENSOR_STATUS_SUCCESS {
+            return Err(error::status_error(Stage::HandleAttribute, status, "read plan cache"));
+        }
+        Ok(read)
+    }
+
+    /// Write this handle's JIT kernel cache to `path`.
+    pub fn write_kernel_cache_to_file(&self, path: impl AsRef<std::path::Path>) -> Result<()> {
+        self.bind()?;
+        let file = Self::cache_file(path)?;
+        let status = unsafe { sys::cutensorWriteKernelCacheToFile(self.ptr, file.as_ptr()) };
+        if status != sys::cutensorStatus_t::CUTENSOR_STATUS_SUCCESS {
+            return Err(error::status_error(Stage::HandleAttribute, status, "write kernel cache"));
+        }
+        Ok(())
+    }
+
+    /// Read a JIT kernel cache from `path`, adding every kernel this handle lacks.
+    pub fn read_kernel_cache_from_file(&self, path: impl AsRef<std::path::Path>) -> Result<()> {
+        self.bind()?;
+        let file = Self::cache_file(path)?;
+        let status = unsafe { sys::cutensorReadKernelCacheFromFile(self.ptr, file.as_ptr()) };
+        if status != sys::cutensorStatus_t::CUTENSOR_STATUS_SUCCESS {
+            return Err(error::status_error(Stage::HandleAttribute, status, "read kernel cache"));
+        }
+        Ok(())
+    }
+
     /// Bind the handle's context to the calling thread. Every entry that will call cuTENSOR does
     /// this first: current-context is per-thread state (`cuCtxSetCurrent`), and a worker thread
     /// without it fails with `CUTENSOR_STATUS_NOT_INITIALIZED` (as the tests caught).

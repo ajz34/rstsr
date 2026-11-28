@@ -17,6 +17,7 @@ use std::sync::Arc;
 /// ([`CudaStreamObj::cutensor_workspace`][crate::stream::CudaStreamObj::cutensor_workspace], sized
 /// by `CudaRuntimeFlags::cutensor_workspace_bytes`); `CutensorWorkspace` is for callers that want
 /// their own size or lifetime.
+#[derive(Clone)]
 pub struct CutensorWorkspace {
     buf: Arc<CudaBuffer<u8>>,
 }
