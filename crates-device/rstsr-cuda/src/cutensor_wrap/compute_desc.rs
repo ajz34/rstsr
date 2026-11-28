@@ -23,11 +23,19 @@ fn symbol(name: &[u8]) -> Result<sys::cutensorComputeDescriptor_t> {
     if !unsafe { sys::is_culib_present() } {
         return Err(error::not_loadable());
     }
-    // SAFETY: `name` is NUL-terminated. The symbol addresses a `const cutensorComputeDescriptor_t`
-    // global, so one dereference of the looked-up address copies the descriptor pointer value.
-    let sym =
-        unsafe { sys::culib().get::<sys::cutensorComputeDescriptor_t>(name) }.map_err(|_| error::not_loadable())?;
-    Ok(*sym)
+    // SAFETY: `name` is NUL-terminated. libloading's `Symbol` deref yields the *dlsym address*
+    // itself ("an additional reference level": for a function the address is the callable; for a
+    // data global it is the address of the variable), so the descriptor pointer is one further
+    // dereference of that address — the value stored in the `const` global. (Getting this wrong
+    // passes the address where the descriptor is expected; cuTENSOR answers
+    // `NOT_INITIALIZED` at operation creation — found by the B2 tests.)
+    let sym = unsafe { sys::culib().get::<*mut core::ffi::c_void>(name) }.map_err(|_| error::not_loadable())?;
+    let addr = *sym;
+    if addr.is_null() {
+        return Err(error::not_loadable());
+    }
+    let desc = unsafe { core::ptr::read(addr.cast::<sys::cutensorComputeDescriptor_t>()) };
+    Ok(desc)
 }
 
 #[cfg(not(cutensor_dynamic_loading))]

@@ -10,9 +10,9 @@ use rstsr_core::prelude_dev::*;
 /// cuTENSOR reads these from **host** pointers and decides their type from the output dtype and
 /// the compute descriptor ("its data type is determined by 'descCompute'"); it never checks the
 /// pointer, so a wrong type is silently wrong (e.g. an all-zeros result). Scalars travel through
-/// [`AlignedScale`], and the operation descriptor's `CUTENSOR_OPERATION_DESCRIPTOR_SCALAR_TYPE` is
+/// `AlignedScale`, and the operation descriptor's `CUTENSOR_OPERATION_DESCRIPTOR_SCALAR_TYPE` is
 /// verified against [`CutensorScalar::DATA_TYPE`] when an operation is created.
-pub trait CutensorScalar: Copy + Send + Sync + Debug + 'static {
+pub trait CutensorScalar: Copy + Send + Sync + Debug + 'static + num::Zero {
     /// The `cudaDataType_t` of this scalar.
     const DATA_TYPE: sys::cudaDataType_t;
 }
@@ -79,18 +79,15 @@ impl CutensorDType for Complex<f64> {
 /// Host storage for one scalar passed to cuTENSOR by pointer, over-aligned so any load width the
 /// library picks is safe (the cuBLASLt scale lesson: it loads 16-byte `c64` scales with aligned
 /// SIMD loads).
-#[allow(dead_code)] // wired by the B2 scalar passing
 #[repr(C, align(16))]
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct AlignedScale<T>(pub T);
 
 impl<T> AlignedScale<T> {
-    #[allow(dead_code)]
     pub(crate) fn new(value: T) -> Self {
         Self(value)
     }
 
-    #[allow(dead_code)]
     pub(crate) fn as_ptr(&self) -> *const T {
         &self.0
     }

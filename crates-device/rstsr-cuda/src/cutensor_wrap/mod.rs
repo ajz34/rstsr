@@ -46,12 +46,20 @@
 //! run against any installed version by pointing at a different directory.
 
 pub mod compute_desc;
+pub mod descriptor;
 pub mod dtype;
 pub mod error;
 pub mod handle;
+pub mod one_shot;
+pub mod operation;
+pub mod plan;
 pub mod workspace;
 
+pub use descriptor::TensorDescriptor;
 pub use dtype::{CutensorDType, CutensorScalar};
 pub use error::{is_decline, Stage};
 pub use handle::CutensorHandle;
+pub use one_shot::contract;
+pub use operation::OperationDescriptor;
+pub use plan::{Plan, PlanPreference};
 pub use workspace::CutensorWorkspace;

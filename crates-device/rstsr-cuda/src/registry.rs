@@ -92,8 +92,7 @@ impl CudaOrdinalObj {
     /// [`crate::cutensor_wrap::handle::CutensorHandle`]), or `None` when `libcutensor` is not
     /// loadable (cached: the probe either works once or never).
     #[cfg(cutensor_bindings)]
-    #[allow(dead_code)] // wired by the B2 one-shot
-    pub(crate) fn cutensor(&self) -> Option<&Arc<crate::cutensor_wrap::handle::CutensorHandle>> {
+    pub fn cutensor(&self) -> Option<&Arc<crate::cutensor_wrap::handle::CutensorHandle>> {
         self.cutensor_slot
             .get_or_init(|| {
                 // cudarc resolves the symbols lazily and panics when one is missing.

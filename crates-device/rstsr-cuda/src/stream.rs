@@ -153,8 +153,7 @@ impl CudaStreamObj {
     /// slot reads it once per stream, so a stream initialized by one device value keeps that size
     /// for every device value sharing the stream.
     #[cfg(cutensor_bindings)]
-    #[allow(dead_code)] // wired by the B2 one-shot
-    pub(crate) fn cutensor_workspace(self: &Arc<Self>, bytes: usize) -> Option<&Arc<CudaBuffer<u8>>> {
+    pub fn cutensor_workspace(self: &Arc<Self>, bytes: usize) -> Option<&Arc<CudaBuffer<u8>>> {
         self.cutensor_workspace_slot
             .get_or_init(|| {
                 if bytes == 0 {

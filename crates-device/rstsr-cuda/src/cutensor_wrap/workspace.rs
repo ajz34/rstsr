@@ -34,8 +34,7 @@ impl CutensorWorkspace {
     }
 
     /// Wrap the per-stream default slot buffer.
-    #[allow(dead_code)] // wired by the B2 one-shot
-    pub(crate) fn from_slot(buf: Arc<CudaBuffer<u8>>) -> Self {
+    pub fn from_slot(buf: Arc<CudaBuffer<u8>>) -> Self {
         Self { buf }
     }
 
@@ -55,7 +54,6 @@ impl CutensorWorkspace {
     }
 
     /// Device pointer for an execute call on `exec`, with the ordering event recorded on it.
-    #[allow(dead_code)] // wired by the B2 one-shot
     pub(crate) fn ptr_on(&self, exec: &Arc<CudaStreamObj>) -> *mut core::ffi::c_void {
         self.buf.device_ptr_on(exec) as *mut core::ffi::c_void
     }

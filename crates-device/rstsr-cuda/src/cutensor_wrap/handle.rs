@@ -3,6 +3,7 @@
 use crate::cutensor_wrap::error::{self, Stage};
 use crate::prelude_dev::*;
 use cudarc::cutensor::sys;
+use cudarc::driver::CudaContext;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 /// Whether `libcutensor` can be loaded on this machine (no panic). Under `dynamic-linking` the
@@ -20,6 +21,16 @@ pub(crate) fn libcutensor_available() -> bool {
     }
 }
 
+/// Whether the wrapper can run on this machine: a CUDA device is visible and its cuTENSOR handle
+/// could be created. Probing (`skip unless`) for tests and evaluation entry points.
+pub fn is_available() -> bool {
+    if !crate::registry::is_available() {
+        return false;
+    }
+    let device = DeviceCuda::new(0);
+    device.ordinal_obj().cutensor().is_some()
+}
+
 /// A cuTENSOR library handle bound to one ordinal's device, plus the lock that serializes the
 /// planning calls the header leaves without a thread-safety remark.
 ///
@@ -32,11 +43,15 @@ pub(crate) fn libcutensor_available() -> bool {
 /// The header marks the execute calls and the
 /// `cutensorCreate{Contraction,Reduction,Permutation,Elementwise*}` calls "thread-safe";
 /// `cutensorCreatePlan`, `cutensorEstimateWorkspaceSize` and the attribute get/set entries carry no
-/// remark, and the handle's plan cache is shared by all threads. [`CutensorHandle::lock`] is held
+/// remark, and the handle's plan cache is shared by all threads. `lock` is held
 /// across the planning sequence and the attribute calls; the execute calls run unlocked, which is
 /// what multi-stream overlap needs.
 pub struct CutensorHandle {
     ptr: sys::cutensorHandle_t,
+    /// The context the handle was created under; every entry binds it to the calling thread
+    /// (cuTENSOR calls need a current context, and cudarc's safe API does this per call — the
+    /// raw FFI here must do it itself).
+    ctx: Arc<CudaContext>,
     plan_lock: Mutex<()>,
     version: (u32, u32, u32),
 }
@@ -48,7 +63,8 @@ impl CutensorHandle {
         if !libcutensor_available() {
             return Err(error::not_loadable());
         }
-        stream.inner().context().bind_to_thread().map_err(crate::error::map_driver_error)?;
+        let ctx = stream.inner().context().clone();
+        ctx.bind_to_thread().map_err(crate::error::map_driver_error)?;
         let mut handle = core::mem::MaybeUninit::<sys::cutensorHandle_t>::uninit();
         // SAFETY: `handle` is a valid output slot for the one-pointer `cutensorHandle_t`.
         let status = unsafe { sys::cutensorCreate(handle.as_mut_ptr()) };
@@ -57,7 +73,7 @@ impl CutensorHandle {
         }
         // SAFETY: the call wrote the handle on success.
         let ptr = unsafe { handle.assume_init() };
-        Ok(Self { ptr, plan_lock: Mutex::new(()), version: Self::query_version() })
+        Ok(Self { ptr, ctx, plan_lock: Mutex::new(()), version: Self::query_version() })
     }
 
     /// The cuTENSOR runtime version as `(major, minor, patch)` of the loaded library. Diagnostic
@@ -68,15 +84,20 @@ impl CutensorHandle {
 
     /// The raw handle for the rest of the module. Every call the header leaves without a
     /// thread-safety remark must hold [`Self::lock`].
-    #[allow(dead_code)] // wired by the B2 descriptors/plan
     pub(crate) fn ptr(&self) -> sys::cutensorHandle_t {
         self.ptr
     }
 
     /// Serialize one planning / attribute sequence.
-    #[allow(dead_code)] // wired by the B2 planning sequence
     pub(crate) fn lock(&self) -> MutexGuard<'_, ()> {
         self.plan_lock.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Bind the handle's context to the calling thread. Every entry that will call cuTENSOR does
+    /// this first: current-context is per-thread state (`cuCtxSetCurrent`), and a worker thread
+    /// without it fails with `CUTENSOR_STATUS_NOT_INITIALIZED` (as the tests caught).
+    pub(crate) fn bind(&self) -> Result<()> {
+        self.ctx.bind_to_thread().map_err(crate::error::map_driver_error)
     }
 
     fn query_version() -> (u32, u32, u32) {

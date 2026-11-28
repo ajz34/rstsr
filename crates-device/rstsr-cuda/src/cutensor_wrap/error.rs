@@ -50,6 +50,16 @@ pub fn not_loadable() -> Error {
     )
 }
 
+/// The "cuTENSOR is not usable on this device" error for the entry points that resolve the
+/// per-ordinal handle: the library did not load, or its handle could not be created.
+pub fn unavailable() -> Error {
+    rstsr_error!(
+        UnImplemented,
+        "cutensor: load library: cuTENSOR is not available on this device (libcutensor did not \
+         load, or cutensorCreate failed on it)"
+    )
+}
+
 /// Map a cuTENSOR status to an RSTSR error, naming the stage, the library's own error string and
 /// the caller's context. The variant carries the meaning:
 ///
