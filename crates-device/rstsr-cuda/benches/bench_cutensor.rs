@@ -3,17 +3,24 @@
 //! families (reduction, elementwise binary) and the trinary contraction.
 //!
 //! Output: one `family,dtype,shape,path,median_ms,metric` CSV line per cell (TFLOP/s for
-//! contractions, GB/s for the streaming families), then the same as a markdown table.
-//! `RSTSR_BENCH_TIME` is the time budget per repeat in seconds (default 0.2) and
-//! `RSTSR_BENCH_REPEAT` the number of repeats (default 5); the iteration count follows from one
-//! timed call.
+//! contractions, GB/s for the streaming families, a percentage for the multi-stream cells:
+//! 100 x sequential wall time over concurrent, 100 = serialized, lower = more overlap), then the
+//! same as a markdown table. `RSTSR_BENCH_TIME` is the time budget per repeat in seconds (default
+//! 0.2) and `RSTSR_BENCH_REPEAT` the number of repeats (default 5); the iteration count follows
+//! from one timed call.
 //!
 //! Run: cargo bench --bench bench_cutensor   (or: cargo run --release --bench bench_cutensor)
 //!
 //! The one-shot pays the planning cost (20-50 us per call, plus a one-time ~28 ms lazy cuBLAS
 //! initialization on the first cuBLAS-mapped problem) on every call; the held plan pays planning
 //! once outside the timed region. The cuBLAS rows are the same `ij,jk->ik` product through the
-//! crate's matmul chain, for an honest placement of the cuTENSOR contraction.
+//! crate's matmul chain, for an honest placement of the cuTENSOR contraction. The `overlap`
+//! family runs a contraction on the default stream against a 256 MiB D2H / H2D on a second
+//! stream and thread — the multi-stream premise of the unlocked execute path, measured.
+
+// The cuTENSOR wrapper exists only under the `cutensor_bindings` cfg (CUDA >= 12.0 pins); the
+// bench binary is empty otherwise.
+#![cfg_attr(not(cutensor_bindings), allow(dead_code, unused_imports))]
 
 use std::time::Instant;
 
@@ -60,6 +67,60 @@ fn bench_cell<T>(d: &DeviceCuda, mut f: impl FnMut() -> T) -> f64 {
     samples[samples.len() / 2]
 }
 
+/// Wall time of one call of `f` (enqueue + device sync), median of `RSTSR_BENCH_REPEAT` runs.
+fn once_ms<T>(d: &DeviceCuda, mut f: impl FnMut() -> T) -> f64 {
+    let repeat = std::env::var("RSTSR_BENCH_REPEAT").ok().and_then(|v| v.parse::<usize>().ok()).unwrap_or(5);
+    for _ in 0..3 {
+        let _ = f();
+    }
+    d.synchronize();
+    let mut samples = Vec::with_capacity(repeat);
+    for _ in 0..repeat {
+        d.synchronize();
+        let t0 = Instant::now();
+        let _ = f();
+        d.synchronize();
+        samples.push(t0.elapsed().as_secs_f64() * 1e3);
+    }
+    samples.sort_by(|x, y| x.total_cmp(y));
+    samples[samples.len() / 2]
+}
+
+/// `(sequential, concurrent)` wall times in ms of `main_fn` on this thread against `side_fn` on
+/// a spawned thread: sequential runs the side first (joined) then the main; concurrent starts
+/// the side and runs the main without waiting. Median of `RSTSR_BENCH_REPEAT` runs.
+fn overlap_ms(d: &DeviceCuda, mut main_fn: impl FnMut(), side_fn: impl Fn() + Clone + Send + 'static) -> (f64, f64) {
+    let repeat = std::env::var("RSTSR_BENCH_REPEAT").ok().and_then(|v| v.parse::<usize>().ok()).unwrap_or(5);
+    let mut seq = Vec::with_capacity(repeat);
+    let mut par = Vec::with_capacity(repeat);
+    for _ in 0..3 {
+        main_fn();
+        side_fn();
+    }
+    d.synchronize();
+    for _ in 0..repeat {
+        d.synchronize();
+        let t0 = Instant::now();
+        let side = std::thread::spawn(side_fn.clone());
+        side.join().expect("side thread");
+        main_fn();
+        d.synchronize();
+        seq.push(t0.elapsed().as_secs_f64() * 1e3);
+        d.synchronize();
+        let t0 = Instant::now();
+        let side = std::thread::spawn(side_fn.clone());
+        main_fn();
+        side.join().expect("side thread");
+        d.synchronize();
+        par.push(t0.elapsed().as_secs_f64() * 1e3);
+    }
+    let med = |v: &mut Vec<f64>| {
+        v.sort_by(|x, y| x.total_cmp(y));
+        v[v.len() / 2]
+    };
+    (med(&mut seq), med(&mut par))
+}
+
 /// One bench cell: the closure and its display name.
 type Cell<'a> = (&'a str, Box<dyn FnMut() + 'a>);
 
@@ -75,12 +136,18 @@ struct Row {
     metric: f64,
 }
 
+#[cfg(cutensor_bindings)]
 fn main() {
     if !is_available() {
         eprintln!("no CUDA device");
         return;
     }
     let dev = DeviceCuda::new(0);
+    let Some(handle) = dev.ordinal_obj().cutensor().cloned() else {
+        eprintln!("libcutensor is not loadable");
+        return;
+    };
+    eprintln!("cuTENSOR runtime version: {:?}", handle.version());
     let mut rows: Vec<Row> = Vec::new();
 
     // ---- contraction: one-shot vs held plan vs cuBLAS-chain matmul -------------------------
@@ -339,10 +406,93 @@ fn main() {
         }
     }
 
+    // ---- multi-stream overlap: contraction on stream 1 vs a transfer on stream 2 ------------
+    // Execute is unlocked by design (the wrapper's multi-stream premise): one handle serves an
+    // f64 contraction on the default stream from this thread while a second thread drives a
+    // 256 MiB transfer on another stream. Per sample, `seq` runs transfer then contraction back
+    // to back and `par` runs them concurrently; the metric is 100 x seq/par (100 = serialized,
+    // lower = more of the contraction hidden under the transfer). Transfers: D2H of a device
+    // buffer, H2D of the same payload.
+    {
+        fn contract_f64(
+            dev: &DeviceCuda,
+            a: &Tensor<f64, DeviceCuda, IxD>,
+            b: &Tensor<f64, DeviceCuda, IxD>,
+            d: &mut Tensor<f64, DeviceCuda, IxD>,
+            compute: cudarc::cutensor::sys::cutensorComputeDescriptor_t,
+        ) {
+            cutensor_wrap::contract(
+                dev,
+                a.view(),
+                &[0, 1],
+                ident(),
+                b.view(),
+                &[1, 2],
+                ident(),
+                None::<TensorView<'_, f64, DeviceCuda, IxD>>,
+                d.view_mut(),
+                &[0, 2],
+                1.0f64,
+                0.0f64,
+                compute,
+                None,
+            )
+            .expect("contraction");
+        }
+        let dev2 = dev.new_stream_f().expect("second stream");
+        let (m, k, n) = (1024usize, 1024usize, 1024usize);
+        let a = rt::asarray((data(m * k, 90), &dev)).into_shape([m, k]);
+        let b = rt::asarray((data(k * n, 91), &dev)).into_shape([k, n]);
+        let mut d = rt::asarray((vec![0.0f64; m * n], &dev)).into_shape([m, n]);
+        let compute = cutensor_wrap::compute_desc::desc_64f().unwrap();
+        let n_copy = (256usize << 20) / core::mem::size_of::<f64>();
+        let big = std::sync::Arc::new(rt::asarray((data(n_copy, 92), &dev2)).into_shape([n_copy]));
+        let host =
+            std::sync::Arc::new(rt::asarray((data(n_copy, 92), &DeviceCpuSerial::default())).into_shape([n_copy]));
+        let shape = format!("{m}x{k}x{n} vs {} MiB", (n_copy * 8) >> 20);
+        let t_contract = once_ms(&dev, || contract_f64(&dev, &a, &b, &mut d, compute));
+        let d2h = || {
+            let big = big.clone();
+            move || {
+                let out: Vec<f64> = DeviceToCpuAPI::<f64>::to_cpu_vec(big.view().storage()).expect("d2h");
+                std::hint::black_box(out.len());
+            }
+        };
+        let h2d = || {
+            let host = host.clone();
+            let dev2 = dev2.clone();
+            move || {
+                let t = host.to_device_f(&dev2).expect("h2d");
+                std::hint::black_box(&t);
+            }
+        };
+        let t_d2h = once_ms(&dev2, d2h());
+        let (d2h_seq, d2h_par) = overlap_ms(&dev, || contract_f64(&dev, &a, &b, &mut d, compute), d2h());
+        let t_h2d = once_ms(&dev2, h2d());
+        let (h2d_seq, h2d_par) = overlap_ms(&dev, || contract_f64(&dev, &a, &b, &mut d, compute), h2d());
+        for (name, alone, seq_ms, par_ms) in [("d2h", t_d2h, d2h_seq, d2h_par), ("h2d", t_h2d, h2d_seq, h2d_par)] {
+            let factor = 100.0 * seq_ms / par_ms;
+            let mut push = |path: &str, ms: f64| {
+                rows.push(Row {
+                    family: "overlap",
+                    dtype: "f64",
+                    shape: shape.clone(),
+                    path: path.to_string(),
+                    ms,
+                    metric: factor,
+                });
+            };
+            push("contract alone", t_contract);
+            push(&format!("{name} alone"), alone);
+            push(&format!("{name} ; contract (seq)"), seq_ms);
+            push(&format!("{name} || contract (par)"), par_ms);
+        }
+    }
+
     // ---- measured ceilings: large cuBLAS-chain GEMMs per dtype -------------------------------
     // The "maximum achievable" reference on this machine: the same matmul chain at a size large
-    // enough to saturate. The datasheet theory is quoted in the README (FP32 shader rate on
-    // consumer Blackwell; FP64 = FP32/64; c64 counted as 4 real flops per MAC).
+    // enough to saturate. Theory: FP32 shader rate of consumer Blackwell; FP64 = FP32/64; c64
+    // counted as 4 real flops per MAC.
     {
         let av64 = data(4096 * 4096, 80);
         let a64 = rt::asarray((av64, &dev)).into_shape([4096, 4096]);
@@ -523,7 +673,7 @@ fn main() {
     for r in &rows {
         println!("{},{},{},{},{:.3},{:.1}", r.family, r.dtype, r.shape, r.path, r.ms, r.metric);
     }
-    println!("\n| family | dtype | shape | path | median ms | TFLOP/s or GB/s |");
+    println!("\n| family | dtype | shape | path | median ms | TFLOP/s, GB/s or overlap % |");
     println!("|---|---|---|---|---|---|");
     for r in &rows {
         println!("| {} | {} | {} | {} | {:.3} | {:.1} |", r.family, r.dtype, r.shape, r.path, r.ms, r.metric);
@@ -537,3 +687,6 @@ fn ident() -> cudarc::cutensor::sys::cutensorOperator_t {
 fn add() -> cudarc::cutensor::sys::cutensorOperator_t {
     cudarc::cutensor::sys::cutensorOperator_t::CUTENSOR_OP_ADD
 }
+
+#[cfg(not(cutensor_bindings))]
+fn main() {}
