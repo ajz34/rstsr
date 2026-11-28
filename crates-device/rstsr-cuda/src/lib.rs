@@ -169,6 +169,8 @@ pub mod buffer;
 pub mod conversion;
 pub mod cpu;
 pub mod creation;
+#[cfg(cutensor_bindings)]
+pub mod cutensor_wrap;
 pub mod device;
 pub mod dtype;
 pub mod error;

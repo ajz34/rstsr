@@ -4,6 +4,8 @@
 //! lives in [`crate::prelude`].
 
 pub use crate::buffer::CudaBuffer;
+#[cfg(cutensor_bindings)]
+pub use crate::cutensor_wrap;
 pub use crate::device::DeviceCuda;
 pub use crate::event::CudaEvent;
 pub use crate::flags::{default_flags, set_default_flags, ComputeType32F, CudaRuntimeFlags};

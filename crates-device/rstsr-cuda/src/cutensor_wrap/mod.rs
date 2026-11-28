@@ -1,0 +1,57 @@
+//! A safe wrapper over the cuTENSOR library: RAII objects plus one function per operation.
+//!
+//! This is the machine layer of the CUDA contractions — no device traits, no high-level tensor
+//! API; the einsum/tensordot entries are built on it, and it can be used directly for evaluation.
+//! The C pipeline of every cuTENSOR 2.x call is
+//! *tensor descriptors* (extent, stride, dtype, alignment) -> *operation descriptor* (the
+//! operands, their modes and unary operators, the compute descriptor) -> *plan preference*
+//! (algorithm, JIT mode) -> *workspace estimate* -> *plan* -> one execute call on a stream. The
+//! object layer here owns each of those as an RAII type (`Drop` calls the matching
+//! `cutensorDestroy*`, raw pointers never public); the one-shot functions build the objects and
+//! execute in one call, for callers that do not reuse a problem (planning costs 20-50 us per new
+//! plan, plus a one-time ~28 ms lazy cuBLAS initialization inside the first cuBLAS-mapped
+//! estimate; execute is ~2 us host-side).
+//!
+//! # Safety policy
+//!
+//! Memory safety comes from RAII, checked lengths and the borrows. Beyond that the wrapper
+//! **refuses before calling cuTENSOR** (a named `InvalidValue`/`InvalidLayout` error) every case
+//! the library accepts with wrong results or leaves undocumented — cuTENSOR validates very little
+//! itself: stride-0 outputs and extent mismatches produce garbage on every version probed
+//! (2.4.1-2.8.0), `opC != IDENTITY` is silently ignored through 2.7.0, and the scalar pointer type
+//! is never checked. The wrapper never copies; materializing an operand is the caller's job.
+//!
+//! # Raw FFI at the boundary
+//!
+//! Modes are `&[i32]`, operators and algorithm choices are the `cudarc::cutensor::sys` enums, and
+//! the compute descriptor is the raw `cutensorComputeDescriptor_t` (an opaque pointer; its nine
+//! legal values come from [`compute_desc`], because they are exported `const` globals that the
+//! bindings do not carry). Signatures name `cudarc` types directly; every `unsafe` stays inside
+//! this module.
+//!
+//! # Errors
+//!
+//! Every function returns [`rstsr_core::prelude_dev::Result`]; a non-SUCCESS status is raised with
+//! the pipeline stage and the library's own error string in the message, and the variant carries
+//! the meaning (`NOT_SUPPORTED` -> `UnImplemented`, ... — see [`error`]). [`is_decline`] tells a
+//! caller with a fallback whether the call was *not served* (try the next tier) rather than broken.
+//! Unlike the rest of the crate there are no `_f` twins here: nothing panics to twin — every
+//! function is already fallible.
+//!
+//! # Loading
+//!
+//! `libcutensor` is dlopened at first use (no link-time dependency). The pip wheel ships only the
+//! versioned `libcutensor.so.2`, which is not among the names cudarc searches: point
+//! `LD_LIBRARY_PATH` at a directory containing a `libcutensor.so` symlink to it. The Rust tests
+//! run against any installed version by pointing at a different directory.
+
+pub mod compute_desc;
+pub mod dtype;
+pub mod error;
+pub mod handle;
+pub mod workspace;
+
+pub use dtype::{CutensorDType, CutensorScalar};
+pub use error::{is_decline, Stage};
+pub use handle::CutensorHandle;
+pub use workspace::CutensorWorkspace;

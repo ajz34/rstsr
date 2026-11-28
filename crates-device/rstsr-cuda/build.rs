@@ -19,6 +19,8 @@ fn main() {
     println!("cargo:rerun-if-env-changed=CUDARC_CUDA_VERSION");
     println!("cargo:rustc-check-cfg=cfg(cublas_math_mode)");
     println!("cargo:rustc-check-cfg=cfg(cublas_fixedpoint_math)");
+    println!("cargo:rustc-check-cfg=cfg(cutensor_bindings)");
+    println!("cargo:rustc-check-cfg=cfg(cutensor_dynamic_loading)");
 
     let (major, minor) = cudarc_cuda_version().unwrap_or((0, 0));
     if (major, minor) >= (12, 9) {
@@ -27,6 +29,20 @@ fn main() {
     if (major, minor) >= (13, 0) {
         println!("cargo:rustc-cfg=cublas_fixedpoint_math");
     }
+    if cutensor_bindings(Some((major, minor))) {
+        println!("cargo:rustc-cfg=cutensor_bindings");
+        // Under `dynamic-linking` cudarc links `-lcutensor` and drops `culib()`, so the compute
+        // descriptor globals must come from `extern` statics instead of `libloading` lookups.
+        if std::env::var_os("CARGO_FEATURE_DYNAMIC_LINKING").is_none() {
+            println!("cargo:rustc-cfg=cutensor_dynamic_loading");
+        }
+    }
+}
+
+/// Whether cudarc compiles its `cutensor` module for this resolved CUDA version: every supported
+/// pin from 12.0 up (cudarc compiles the module out for the 11.4-11.8 pins).
+fn cutensor_bindings(version: Option<(u32, u32)>) -> bool {
+    version.is_some_and(|(major, _)| major >= 12)
 }
 
 /// `(major, minor)` of the CUDA version `cudarc` binds, or `None` when it cannot be told (nvcc
@@ -89,5 +105,17 @@ mod tests {
         assert_eq!(parse("13.0"), None);
         assert_eq!(parse("1206x"), None);
         assert_eq!(parse(""), None);
+    }
+
+    /// The `cutensor_bindings` cfg follows the cudarc pin: on from 12.0, off for the 11.x pins
+    /// cudarc compiles its `cutensor` module out for, and off when the version is unresolvable.
+    #[test]
+    fn cutensor_bindings_track_the_cudarc_pin() {
+        assert!(super::cutensor_bindings(Some((13, 2))));
+        assert!(super::cutensor_bindings(Some((12, 0))));
+        assert!(!super::cutensor_bindings(Some((11, 8))));
+        assert!(!super::cutensor_bindings(Some((11, 4))));
+        assert!(!super::cutensor_bindings(Some((0, 0))));
+        assert!(!super::cutensor_bindings(None));
     }
 }

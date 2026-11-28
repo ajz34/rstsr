@@ -29,6 +29,9 @@ pub struct CudaOrdinalObj {
     pub(crate) arch_slot: OnceLock<core::result::Result<String, rstsr_core::prelude_dev::Error>>,
     /// The cuBLASLt handle and heuristic cache, or a cached "not available".
     pub(crate) cublaslt_slot: OnceLock<Option<Arc<CublasLtHandle>>>,
+    /// The cuTENSOR handle, or a cached "not available".
+    #[cfg(cutensor_bindings)]
+    pub(crate) cutensor_slot: OnceLock<Option<Arc<crate::cutensor_wrap::handle::CutensorHandle>>>,
 }
 
 impl CudaOrdinalObj {
@@ -44,6 +47,8 @@ impl CudaOrdinalObj {
             planned_cache_slot: OnceLock::new(),
             arch_slot: OnceLock::new(),
             cublaslt_slot: OnceLock::new(),
+            #[cfg(cutensor_bindings)]
+            cutensor_slot: OnceLock::new(),
         })
     }
 
@@ -77,6 +82,23 @@ impl CudaOrdinalObj {
                 // cudarc resolves the symbols lazily and panics when one is missing.
                 let made = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     CublasLtHandle::new(&self.default_stream)
+                }));
+                made.ok().and_then(|r| r.ok()).map(Arc::new)
+            })
+            .as_ref()
+    }
+
+    /// The cuTENSOR handle of this ordinal (see
+    /// [`crate::cutensor_wrap::handle::CutensorHandle`]), or `None` when `libcutensor` is not
+    /// loadable (cached: the probe either works once or never).
+    #[cfg(cutensor_bindings)]
+    #[allow(dead_code)] // wired by the B2 one-shot
+    pub(crate) fn cutensor(&self) -> Option<&Arc<crate::cutensor_wrap::handle::CutensorHandle>> {
+        self.cutensor_slot
+            .get_or_init(|| {
+                // cudarc resolves the symbols lazily and panics when one is missing.
+                let made = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    crate::cutensor_wrap::handle::CutensorHandle::new(&self.default_stream)
                 }));
                 made.ok().and_then(|r| r.ok()).map(Arc::new)
             })

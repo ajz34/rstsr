@@ -76,6 +76,10 @@ pub struct CudaStreamObj {
     /// The cuBLASLt workspace of this stream (32 MiB, lazy): scratch memory of the kernels, so
     /// two streams never share one.
     cublaslt_workspace_slot: OnceLock<Option<Arc<CudaBuffer<u8>>>>,
+    /// The cuTENSOR workspace of this stream (lazy, sized by
+    /// `CudaRuntimeFlags::cutensor_workspace_bytes`).
+    #[cfg(cutensor_bindings)]
+    cutensor_workspace_slot: OnceLock<Option<Arc<CudaBuffer<u8>>>>,
 }
 
 impl CudaStreamObj {
@@ -92,6 +96,8 @@ impl CudaStreamObj {
             ordinal: ctx.ordinal(),
             cublas_slot: OnceLock::new(),
             cublaslt_workspace_slot: OnceLock::new(),
+            #[cfg(cutensor_bindings)]
+            cutensor_workspace_slot: OnceLock::new(),
         })
     }
 
@@ -103,7 +109,14 @@ impl CudaStreamObj {
     /// Wrap an existing cudarc stream of the given ordinal (test/interop
     /// helper; production code goes through `CudaOrdinalObj::new`).
     pub fn wrap(ordinal: usize, stream: Arc<CudaStream>) -> Self {
-        Self { stream, ordinal, cublas_slot: OnceLock::new(), cublaslt_workspace_slot: OnceLock::new() }
+        Self {
+            stream,
+            ordinal,
+            cublas_slot: OnceLock::new(),
+            cublaslt_workspace_slot: OnceLock::new(),
+            #[cfg(cutensor_bindings)]
+            cutensor_workspace_slot: OnceLock::new(),
+        }
     }
 
     /// The cuBLAS handle for this stream, or `None` when the library cannot be loaded.
@@ -131,6 +144,23 @@ impl CudaStreamObj {
         self.cublaslt_workspace_slot
             .get_or_init(|| {
                 CudaBuffer::new_f(self, crate::matmul::drivers::cublas_lt::WORKSPACE_BYTES).ok().map(Arc::new)
+            })
+            .as_ref()
+    }
+
+    /// The cuTENSOR workspace of this stream, or `None` when `bytes` is `0` or the allocation
+    /// failed (both cached). `bytes` is the caller's resolved `cutensor_workspace_bytes`; the
+    /// slot reads it once per stream, so a stream initialized by one device value keeps that size
+    /// for every device value sharing the stream.
+    #[cfg(cutensor_bindings)]
+    #[allow(dead_code)] // wired by the B2 one-shot
+    pub(crate) fn cutensor_workspace(self: &Arc<Self>, bytes: usize) -> Option<&Arc<CudaBuffer<u8>>> {
+        self.cutensor_workspace_slot
+            .get_or_init(|| {
+                if bytes == 0 {
+                    return None;
+                }
+                CudaBuffer::new_f(self, bytes).ok().map(Arc::new)
             })
             .as_ref()
     }
