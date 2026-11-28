@@ -9,6 +9,7 @@ use crate::cutensor_wrap::workspace::CutensorWorkspace;
 use crate::kernel::{order_input, order_output};
 use crate::prelude_dev::*;
 use cudarc::cutensor::sys;
+use num::Zero;
 use std::sync::Arc;
 
 /// The algorithm and JIT choice of a plan. Defaults live at the call sites
@@ -19,15 +20,14 @@ pub struct PlanPreference {
 }
 
 impl PlanPreference {
-    /// Create a preference on `handle` (thread-safe per the header; no lock).
+    /// Create a preference on `handle`. Unlocked: the entry allocates a standalone preference
+    /// and touches no shared handle state (the header carries no remark for it).
     pub fn new(handle: &CutensorHandle, algo: sys::cutensorAlgo_t, jit_mode: sys::cutensorJitMode_t) -> Result<Self> {
         handle.bind()?;
         let mut ptr = core::mem::MaybeUninit::<sys::cutensorPlanPreference_t>::uninit();
         // SAFETY: `ptr` is a valid output slot for the one-pointer preference.
         let status = unsafe { sys::cutensorCreatePlanPreference(handle.ptr(), ptr.as_mut_ptr(), algo, jit_mode) };
-        if status != sys::cutensorStatus_t::CUTENSOR_STATUS_SUCCESS {
-            return Err(error::status_error(Stage::PlanPreference, status, ""));
-        }
+        error::check(Stage::PlanPreference, status, "")?;
         // SAFETY: the preference was written on success.
         let ptr = unsafe { ptr.assume_init() };
         Ok(Self { ptr })
@@ -92,17 +92,12 @@ impl Plan {
                 core::ptr::addr_of_mut!(estimate),
             )
         };
-        if status != sys::cutensorStatus_t::CUTENSOR_STATUS_SUCCESS {
-            return Err(error::status_error(Stage::WorkspaceEstimate, status, ""));
-        }
-        let _estimate = estimate;
+        error::check(Stage::WorkspaceEstimate, status, "")?;
         let mut ptr = core::mem::MaybeUninit::<sys::cutensorPlan_t>::uninit();
         // SAFETY: as above; the limit is the caller's budget.
         let status =
             unsafe { sys::cutensorCreatePlan(handle.ptr(), ptr.as_mut_ptr(), op.ptr(), pref.ptr(), workspace_limit) };
-        if status != sys::cutensorStatus_t::CUTENSOR_STATUS_SUCCESS {
-            return Err(error::status_error(Stage::Plan, status, ""));
-        }
+        error::check(Stage::Plan, status, "")?;
         // SAFETY: the plan was written on success.
         let ptr = unsafe { ptr.assume_init() };
         let mut required = 0u64;
@@ -206,7 +201,11 @@ impl Plan {
         let ptr_d = operand_ptr(pd, d_view.offset(), esz_d);
         let (ptr_c, gc, gd_keep) = match c.as_ref() {
             Some(cv) => {
-                order_input(cv.raw(), exec)?;
+                // cuTENSOR does not read `C` at `beta == 0` (verified on 2.4.1-2.8.0): no input
+                // ordering is needed there; the pointer guard is still kept past the enqueue.
+                if !beta.is_zero() {
+                    order_input(cv.raw(), exec)?;
+                }
                 let (pc, gc) = cv.raw().read_ptr_on(exec);
                 (operand_ptr(pc, cv.offset(), esz_d), gc, Some(gd))
             },
@@ -214,14 +213,16 @@ impl Plan {
         };
         let alpha_s = AlignedScale::new(alpha);
         let beta_s = AlignedScale::new(beta);
-        let (ws_ptr, ws_len) = match workspace {
-            Some(ws) => (ws.ptr_on(exec), ws.len() as u64),
-            None => (core::ptr::null_mut(), 0u64),
+        let (ws_ptr, ws_len, ws_guard) = match workspace {
+            Some(ws) => {
+                let (ptr, guard) = ws.ptr_on(exec);
+                (ptr, ws.len() as u64, Some(guard))
+            },
+            None => (core::ptr::null_mut(), 0u64, None),
         };
         let stream = exec.inner().cu_stream().cast::<core::ffi::c_void>() as sys::cudaStream_t;
         // SAFETY: the plan was created on this handle for this device; every pointer is a live
-        // device buffer whose ordering events are recorded on `exec`; the scalars live on the
-        // stack across the call; the stream belongs to the device the plan is bound to.
+        // device buffer ordered on `exec`; the scalars live on the stack across the call.
         let status = unsafe {
             sys::cutensorContract(
                 self.handle.ptr(),
@@ -237,10 +238,8 @@ impl Plan {
                 stream,
             )
         };
-        drop((ga, gb, gc, gd_keep));
-        if status != sys::cutensorStatus_t::CUTENSOR_STATUS_SUCCESS {
-            return Err(error::status_error(Stage::Execute, status, ""));
-        }
+        drop((ga, gb, gc, gd_keep, ws_guard));
+        error::check(Stage::Execute, status, "")?;
         order_output(d_view.raw(), exec)?;
         Ok(())
     }
@@ -343,6 +342,8 @@ impl Plan {
         let (pc, gc) = c.raw().read_ptr_on(exec);
         let (pe, ge) = e_view.raw().read_ptr_on(exec);
         let (ptr_d, gd, ge_keep) = match d.as_ref() {
+            // `D` is ordered unconditionally: the "not read at `beta == 0`" behaviour is
+            // established for the binary contraction and the reduction, not for this entry.
             Some(dv) => {
                 order_input(dv.raw(), exec)?;
                 let (pd, gd) = dv.raw().read_ptr_on(exec);
@@ -352,9 +353,12 @@ impl Plan {
         };
         let alpha_s = AlignedScale::new(alpha);
         let beta_s = AlignedScale::new(beta);
-        let (ws_ptr, ws_len) = match workspace {
-            Some(ws) => (ws.ptr_on(exec), ws.len() as u64),
-            None => (core::ptr::null_mut(), 0u64),
+        let (ws_ptr, ws_len, ws_guard) = match workspace {
+            Some(ws) => {
+                let (ptr, guard) = ws.ptr_on(exec);
+                (ptr, ws.len() as u64, Some(guard))
+            },
+            None => (core::ptr::null_mut(), 0u64, None),
         };
         let stream = exec.inner().cu_stream().cast::<core::ffi::c_void>() as sys::cudaStream_t;
         // SAFETY: the plan was created on this handle for this device; every pointer is a live
@@ -376,10 +380,8 @@ impl Plan {
                 stream,
             )
         };
-        drop((ga, gb, gc, gd, ge_keep));
-        if status != sys::cutensorStatus_t::CUTENSOR_STATUS_SUCCESS {
-            return Err(error::status_error(Stage::Execute, status, ""));
-        }
+        drop((ga, gb, gc, gd, ge_keep, ws_guard));
+        error::check(Stage::Execute, status, "")?;
         order_output(e_view.raw(), exec)?;
         Ok(())
     }
@@ -431,7 +433,10 @@ impl Plan {
         let ptr_d = operand_ptr(pd, d_view.offset(), esz);
         let (ptr_c, gc, gd_keep) = match c.as_ref() {
             Some(cv) => {
-                order_input(cv.raw(), exec)?;
+                // as `contract`: `C` is not read at `beta == 0`, so it is ordered only otherwise.
+                if !beta.is_zero() {
+                    order_input(cv.raw(), exec)?;
+                }
                 let (pc, gc) = cv.raw().read_ptr_on(exec);
                 (operand_ptr(pc, cv.offset(), esz), gc, Some(gd))
             },
@@ -439,9 +444,12 @@ impl Plan {
         };
         let alpha_s = AlignedScale::new(alpha);
         let beta_s = AlignedScale::new(beta);
-        let (ws_ptr, ws_len) = match workspace {
-            Some(ws) => (ws.ptr_on(exec), ws.len() as u64),
-            None => (core::ptr::null_mut(), 0u64),
+        let (ws_ptr, ws_len, ws_guard) = match workspace {
+            Some(ws) => {
+                let (ptr, guard) = ws.ptr_on(exec);
+                (ptr, ws.len() as u64, Some(guard))
+            },
+            None => (core::ptr::null_mut(), 0u64, None),
         };
         let stream = exec.inner().cu_stream().cast::<core::ffi::c_void>() as sys::cudaStream_t;
         // SAFETY: the plan was created on this handle for this device; every pointer is a live
@@ -461,10 +469,8 @@ impl Plan {
                 stream,
             )
         };
-        drop((ga, gc, gd_keep));
-        if status != sys::cutensorStatus_t::CUTENSOR_STATUS_SUCCESS {
-            return Err(error::status_error(Stage::Execute, status, ""));
-        }
+        drop((ga, gc, gd_keep, ws_guard));
+        error::check(Stage::Execute, status, "")?;
         order_output(d_view.raw(), exec)?;
         Ok(())
     }
@@ -502,7 +508,8 @@ impl Plan {
         let (pb, gb) = b_view.raw().read_ptr_on(exec);
         let alpha_s = AlignedScale::new(alpha);
         let stream = exec.inner().cu_stream().cast::<core::ffi::c_void>() as sys::cudaStream_t;
-        // SAFETY: as [`Self::contract`].
+        // SAFETY: the plan was created on this handle for this device; every pointer is a live
+        // device buffer ordered on `exec`; the scalars live on the stack across the call.
         let status = unsafe {
             sys::cutensorPermute(
                 self.handle.ptr(),
@@ -514,9 +521,7 @@ impl Plan {
             )
         };
         drop((ga, gb));
-        if status != sys::cutensorStatus_t::CUTENSOR_STATUS_SUCCESS {
-            return Err(error::status_error(Stage::Execute, status, ""));
-        }
+        error::check(Stage::Execute, status, "")?;
         order_output(b_view.raw(), exec)?;
         Ok(())
     }
@@ -575,7 +580,8 @@ impl Plan {
         let alpha_s = AlignedScale::new(alpha);
         let gamma_s = AlignedScale::new(gamma);
         let stream = exec.inner().cu_stream().cast::<core::ffi::c_void>() as sys::cudaStream_t;
-        // SAFETY: as [`Self::contract`].
+        // SAFETY: the plan was created on this handle for this device; every pointer is a live
+        // device buffer ordered on `exec`; the scalars live on the stack across the call.
         let status = unsafe {
             sys::cutensorElementwiseBinaryExecute(
                 self.handle.ptr(),
@@ -589,9 +595,7 @@ impl Plan {
             )
         };
         drop((ga, gc, gd_keep));
-        if status != sys::cutensorStatus_t::CUTENSOR_STATUS_SUCCESS {
-            return Err(error::status_error(Stage::Execute, status, ""));
-        }
+        error::check(Stage::Execute, status, "")?;
         order_output(d_view.raw(), exec)?;
         Ok(())
     }
@@ -658,7 +662,8 @@ impl Plan {
         let beta_s = AlignedScale::new(beta);
         let gamma_s = AlignedScale::new(gamma);
         let stream = exec.inner().cu_stream().cast::<core::ffi::c_void>() as sys::cudaStream_t;
-        // SAFETY: as [`Self::contract`].
+        // SAFETY: the plan was created on this handle for this device; every pointer is a live
+        // device buffer ordered on `exec`; the scalars live on the stack across the call.
         let status = unsafe {
             sys::cutensorElementwiseTrinaryExecute(
                 self.handle.ptr(),
@@ -674,9 +679,7 @@ impl Plan {
             )
         };
         drop((ga, gb, gc, gd_keep));
-        if status != sys::cutensorStatus_t::CUTENSOR_STATUS_SUCCESS {
-            return Err(error::status_error(Stage::Execute, status, ""));
-        }
+        error::check(Stage::Execute, status, "")?;
         order_output(d_view.raw(), exec)?;
         Ok(())
     }

@@ -49,6 +49,7 @@
 //! | reductions | `sum`/`prod`/`mean`/`l2_norm`/`min`/`max`/`all`/`any`/`count_nonzero` (+ dtype variants), `var`/`std` (+ dtype), `argmin`/`argmax`/`nanarg*` (raveled, all + axes), `cumsum`/`cumprod` (real dtypes) |
 //! | linalg | `outer`, `cross`, `matmul`/`matmul_uninit` (driver chain: cuBLASLt, `cublasGemmEx`, classic cuBLAS, tiled kernel, naive kernel; `f32`/`f64`/`c32`/`c64`/`f16`/`bf16` on the cuBLAS drivers, everything else on the naive kernel; compute modes by the flags or per call through `TensorCudaMatMulAPI`), `tensordot` (view-only tier) |
 //! | indexing | `index_select`, `index_put` |
+//! | cuTENSOR | `cutensor_wrap` (CUDA >= 12.0 pins): contraction (incl. trinary), reduction, permutation, elementwise binary/trinary — RAII descriptors and plans plus one-shot entries over raw `cudarc` enums; the machine layer under the einsum/tensordot entries, no device traits; `libcutensor` is dlopened at first use |
 //!
 //! **Absent, and why** — these are deliberate, not pending:
 //!
@@ -110,6 +111,8 @@
 //! CUDARC_CUDA_VERSION=12060 cargo test -p rstsr-cuda --test test_matmul_modes
 //! CUDARC_CUDA_VERSION=12060 cargo bench -p rstsr-cuda --bench bench_matmul   # timing per triple, shape, driver
 //! CUDARC_CUDA_VERSION=12060 cargo test -p rstsr-cuda --test test_pinned
+//! CUDARC_CUDA_VERSION=12060 cargo test -p rstsr-cuda --test test_cutensor_wrap  # needs a libcutensor.so on LD_LIBRARY_PATH; prints the cuTENSOR version it ran against
+//! CUDARC_CUDA_VERSION=12060 cargo bench -p rstsr-cuda --bench bench_cutensor   # one-shot vs held plan vs cuBLAS chain; CSV + markdown
 //! ```
 //!
 //! Without a visible driver every hardware test prints `skipping: no CUDA device visible` and

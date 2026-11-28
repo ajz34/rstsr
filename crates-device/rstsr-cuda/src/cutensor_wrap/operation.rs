@@ -103,8 +103,8 @@ fn check_no_duplicates(name: &str, modes: &[i32]) -> Result<()> {
 
 /// The contraction's operand-consistency checks, run **before** cuTENSOR is called.
 ///
-/// No version of cuTENSOR validates these (the probe: an extent mismatch sails through create,
-/// estimate and plan, and produces wrong numbers), so the wrapper is the authority:
+/// No version of cuTENSOR validates these (an extent mismatch sails through create, estimate and
+/// plan and produces wrong numbers), so the wrapper is the authority:
 /// - mode lengths match the descriptors, at most 64 modes per operand, no duplicate label within
 ///   one operand;
 /// - `descC` must equal `descD` (cuTENSOR's own requirement) — same modes and extents;
@@ -140,35 +140,27 @@ fn check_contraction_operands(
             ));
         }
     }
-    let mut extents: std::collections::HashMap<i32, i64> = std::collections::HashMap::new();
-    for (name, modes, extent) in [("A", a.0, a.1), ("B", b.0, b.1), ("C", c.0, c.1), ("D", d.0, d.1)] {
-        for (&m, &e) in modes.iter().zip(extent.iter()) {
-            match extents.entry(m) {
-                std::collections::hash_map::Entry::Vacant(slot) => {
-                    slot.insert(e);
-                },
-                std::collections::hash_map::Entry::Occupied(slot) => {
-                    if *slot.get() != e {
-                        return Err(rstsr_error!(
-                            InvalidValue,
-                            "cutensor: operation descriptor: mode {m} has extent {e} in \
-                             operand {name} but {} elsewhere",
-                            slot.get()
-                        ));
-                    }
-                },
-            }
-        }
-    }
-    for (&m, &s) in d.0.iter().zip(d.2.iter()) {
-        let e = d.1[d.0.iter().position(|&x| x == m).expect("mode in its own array")];
-        if s == 0 && e > 1 {
-            return Err(rstsr_error!(
-                InvalidLayout,
-                "cutensor: operation descriptor: output mode {m} has extent {e} and stride 0 \
-                 (a broadcast output writes garbage on every cuTENSOR version)"
-            ));
-        }
+    check_extent_consistency([("A", a.0, a.1), ("B", b.0, b.1), ("C", c.0, c.1), ("D", d.0, d.1)])?;
+    check_output_strides(d.0, d.1, d.2)
+}
+
+/// `desc_<a> == desc_<b>` by full facts: the same mode labels and the same descriptor facts
+/// (extent, stride, dtype, alignment) — cuTENSOR's requirement for the `C`/`D` (and `D`/`E`)
+/// pairs, checked before the call.
+fn check_same_operand(
+    name_a: &str,
+    desc_a: &TensorDescriptor,
+    mode_a: &[i32],
+    name_b: &str,
+    desc_b: &TensorDescriptor,
+    mode_b: &[i32],
+) -> Result<()> {
+    if mode_a != mode_b || desc_a.plan() != desc_b.plan() {
+        return Err(rstsr_error!(
+            InvalidValue,
+            "cutensor: operation descriptor: desc{name_a} must equal desc{name_b} (cuTENSOR \
+             requirement); {name_a} and {name_b} differ in modes or layout facts"
+        ));
     }
     Ok(())
 }
@@ -404,13 +396,7 @@ impl OperationDescriptor {
             (mode_c, &desc_c.extent, &desc_c.stride),
             (mode_d, &desc_d.extent, &desc_d.stride),
         )?;
-        if mode_c != mode_d || desc_c.plan() != desc_d.plan() {
-            return Err(rstsr_error!(
-                InvalidValue,
-                "cutensor: operation descriptor: descC must equal descD (cuTENSOR requirement); \
-                 C and D differ in modes or layout facts"
-            ));
-        }
+        check_same_operand("C", desc_c, mode_c, "D", desc_d, mode_d)?;
         handle.bind()?;
         let _lock = handle.lock();
         let mut ptr = core::mem::MaybeUninit::<sys::cutensorOperationDescriptor_t>::uninit();
@@ -434,9 +420,7 @@ impl OperationDescriptor {
                 compute,
             )
         };
-        if status != sys::cutensorStatus_t::CUTENSOR_STATUS_SUCCESS {
-            return Err(error::status_error(Stage::OperationDescriptor, status, ""));
-        }
+        error::check(Stage::OperationDescriptor, status, "")?;
         // SAFETY: the descriptor was written on success.
         let ptr = unsafe { ptr.assume_init() };
         Self::finish::<T>(OpKind::Contraction, handle, ptr, vec![
@@ -449,8 +433,8 @@ impl OperationDescriptor {
 
     /// Create a trinary contraction `E = alpha * opA(A) * opB(B) * opC(C) + beta * opD(D)`:
     /// three contracted inputs accumulated with `D`. `opD` is pinned to `IDENTITY` (no
-    /// parameter) — the accumulate-side unary has no known honoured use, same reasoning as
-    /// contraction's `opC` (decision D16a); `descD == descE` is cuTENSOR's own requirement.
+    /// parameter) — no cuTENSOR version honours a non-identity unary on the accumulate side,
+    /// the same reasoning as contraction's `opC`; `descD == descE` is cuTENSOR's own requirement.
     ///
     /// Gated: the trinary contraction arrived in libcutensor 2.1.1; older libraries decline
     /// with `UnImplemented` (cudarc's own `load` panics on a missing symbol, so the wrapper
@@ -485,13 +469,7 @@ impl OperationDescriptor {
             (mode_d, &desc_d.extent, &desc_d.stride),
             (mode_e, &desc_e.extent, &desc_e.stride),
         )?;
-        if mode_d != mode_e || desc_d.plan() != desc_e.plan() {
-            return Err(rstsr_error!(
-                InvalidValue,
-                "cutensor: operation descriptor: descD must equal descE (cuTENSOR requirement); \
-                 D and E differ in modes or layout facts"
-            ));
-        }
+        check_same_operand("D", desc_d, mode_d, "E", desc_e, mode_e)?;
         handle.bind()?;
         let _lock = handle.lock();
         let mut ptr = core::mem::MaybeUninit::<sys::cutensorOperationDescriptor_t>::uninit();
@@ -518,9 +496,7 @@ impl OperationDescriptor {
                 compute,
             )
         };
-        if status != sys::cutensorStatus_t::CUTENSOR_STATUS_SUCCESS {
-            return Err(error::status_error(Stage::OperationDescriptor, status, ""));
-        }
+        error::check(Stage::OperationDescriptor, status, "")?;
         // SAFETY: the descriptor was written on success.
         let ptr = unsafe { ptr.assume_init() };
         Self::finish::<T>(OpKind::ContractionTrinary, handle, ptr, vec![
@@ -539,9 +515,16 @@ impl OperationDescriptor {
         ptr: sys::cutensorOperationDescriptor_t,
         operands: Vec<OperandPlan>,
     ) -> Result<Self> {
-        let scalar_type = read_scalar_type(handle, ptr)?;
+        // On a failed attribute read the struct (and its `Drop`) is never built: destroy here.
+        let scalar_type = read_scalar_type(handle, ptr).inspect_err(|_| {
+            // SAFETY: `ptr` came from a create call on this handle; destroyed exactly once.
+            let destroy = unsafe { sys::cutensorDestroyOperationDescriptor(ptr) };
+            debug_assert_eq!(destroy, sys::cutensorStatus_t::CUTENSOR_STATUS_SUCCESS);
+        })?;
+        let this = Self { ptr, kind, operands, scalar_type };
         let want = T::Scalar::DATA_TYPE;
         if scalar_type != want {
+            // `this` drops on return, destroying the descriptor.
             return Err(rstsr_error!(
                 InvalidValue,
                 "cutensor: operation descriptor: the compute descriptor implies scalar type \
@@ -549,7 +532,7 @@ impl OperationDescriptor {
                  misread (cuTENSOR never checks the pointer)"
             ));
         }
-        Ok(Self { ptr, kind, operands, scalar_type })
+        Ok(this)
     }
 
     /// Which family this operation encodes.
@@ -585,13 +568,7 @@ impl OperationDescriptor {
             (mode_c, &desc_c.extent, &desc_c.stride),
             (mode_d, &desc_d.extent, &desc_d.stride),
         )?;
-        if mode_c != mode_d || desc_c.plan() != desc_d.plan() {
-            return Err(rstsr_error!(
-                InvalidValue,
-                "cutensor: operation descriptor: descC must equal descD (cuTENSOR requirement); \
-                 C and D differ in modes or layout facts"
-            ));
-        }
+        check_same_operand("C", desc_c, mode_c, "D", desc_d, mode_d)?;
         handle.bind()?;
         let _lock = handle.lock();
         let mut ptr = core::mem::MaybeUninit::<sys::cutensorOperationDescriptor_t>::uninit();
@@ -613,9 +590,7 @@ impl OperationDescriptor {
                 compute,
             )
         };
-        if status != sys::cutensorStatus_t::CUTENSOR_STATUS_SUCCESS {
-            return Err(error::status_error(Stage::OperationDescriptor, status, ""));
-        }
+        error::check(Stage::OperationDescriptor, status, "")?;
         // SAFETY: the descriptor was written on success.
         let ptr = unsafe { ptr.assume_init() };
         Self::finish::<T>(OpKind::Reduction, handle, ptr, vec![desc_a.plan(), desc_c.plan(), desc_d.plan()])
@@ -639,7 +614,8 @@ impl OperationDescriptor {
         handle.bind()?;
         let _lock = handle.lock();
         let mut ptr = core::mem::MaybeUninit::<sys::cutensorOperationDescriptor_t>::uninit();
-        // SAFETY: as above.
+        // SAFETY: all descriptors were created on this handle; the mode arrays live to the end
+        // of the call.
         let status = unsafe {
             sys::cutensorCreatePermutation(
                 handle.ptr(),
@@ -652,17 +628,16 @@ impl OperationDescriptor {
                 compute,
             )
         };
-        if status != sys::cutensorStatus_t::CUTENSOR_STATUS_SUCCESS {
-            return Err(error::status_error(Stage::OperationDescriptor, status, ""));
-        }
+        error::check(Stage::OperationDescriptor, status, "")?;
         // SAFETY: the descriptor was written on success.
         let ptr = unsafe { ptr.assume_init() };
         Self::finish::<T>(OpKind::Permutation, handle, ptr, vec![desc_a.plan(), desc_b.plan()])
     }
 
     /// Create an elementwise binary `D = op_AC(alpha * opA(A), gamma * opC(C))` — `op_ac` is the
-    /// *functional* join operator (`ADD`/`MUL`/`MAX`/...), unlike contraction's pinned `opC`
-    /// (the D8 elementwise clause). `descC == descD` is cuTENSOR's own requirement.
+    /// *functional* join operator (`ADD`/`MUL`/`MAX`/...), unlike contraction's `opC`, which the
+    /// wrapper pins to `IDENTITY` and does not take as a parameter. `descC == descD` is
+    /// cuTENSOR's own requirement.
     // The raw pointers are the wrapper's own RAII descriptors, never caller-provided.
     #[allow(clippy::too_many_arguments)]
     #[allow(clippy::not_unsafe_ptr_arg_deref)]
@@ -682,17 +657,12 @@ impl OperationDescriptor {
             [("A", (mode_a, desc_a.extent.as_slice(), desc_a.stride.as_slice()))],
             (mode_d, &desc_d.extent, &desc_d.stride),
         )?;
-        if mode_c != mode_d || desc_c.plan() != desc_d.plan() {
-            return Err(rstsr_error!(
-                InvalidValue,
-                "cutensor: operation descriptor: descC must equal descD (cuTENSOR requirement); \
-                 C and D differ in modes or layout facts"
-            ));
-        }
+        check_same_operand("C", desc_c, mode_c, "D", desc_d, mode_d)?;
         handle.bind()?;
         let _lock = handle.lock();
         let mut ptr = core::mem::MaybeUninit::<sys::cutensorOperationDescriptor_t>::uninit();
-        // SAFETY: as above.
+        // SAFETY: all descriptors were created on this handle; the mode arrays live to the end
+        // of the call.
         let status = unsafe {
             sys::cutensorCreateElementwiseBinary(
                 handle.ptr(),
@@ -709,9 +679,7 @@ impl OperationDescriptor {
                 compute,
             )
         };
-        if status != sys::cutensorStatus_t::CUTENSOR_STATUS_SUCCESS {
-            return Err(error::status_error(Stage::OperationDescriptor, status, ""));
-        }
+        error::check(Stage::OperationDescriptor, status, "")?;
         // SAFETY: the descriptor was written on success.
         let ptr = unsafe { ptr.assume_init() };
         Self::finish::<T>(OpKind::ElementwiseBinary, handle, ptr, vec![desc_a.plan(), desc_c.plan(), desc_d.plan()])
@@ -746,17 +714,12 @@ impl OperationDescriptor {
             ],
             (mode_d, &desc_d.extent, &desc_d.stride),
         )?;
-        if mode_c != mode_d || desc_c.plan() != desc_d.plan() {
-            return Err(rstsr_error!(
-                InvalidValue,
-                "cutensor: operation descriptor: descC must equal descD (cuTENSOR requirement); \
-                 C and D differ in modes or layout facts"
-            ));
-        }
+        check_same_operand("C", desc_c, mode_c, "D", desc_d, mode_d)?;
         handle.bind()?;
         let _lock = handle.lock();
         let mut ptr = core::mem::MaybeUninit::<sys::cutensorOperationDescriptor_t>::uninit();
-        // SAFETY: as above.
+        // SAFETY: all descriptors were created on this handle; the mode arrays live to the end
+        // of the call.
         let status = unsafe {
             sys::cutensorCreateElementwiseTrinary(
                 handle.ptr(),
@@ -777,9 +740,7 @@ impl OperationDescriptor {
                 compute,
             )
         };
-        if status != sys::cutensorStatus_t::CUTENSOR_STATUS_SUCCESS {
-            return Err(error::status_error(Stage::OperationDescriptor, status, ""));
-        }
+        error::check(Stage::OperationDescriptor, status, "")?;
         // SAFETY: the descriptor was written on success.
         let ptr = unsafe { ptr.assume_init() };
         Self::finish::<T>(OpKind::ElementwiseTrinary, handle, ptr, vec![
@@ -813,9 +774,7 @@ fn read_scalar_type(handle: &CutensorHandle, ptr: sys::cutensorOperationDescript
             core::mem::size_of::<sys::cudaDataType_t>(),
         )
     };
-    if status != sys::cutensorStatus_t::CUTENSOR_STATUS_SUCCESS {
-        return Err(error::status_error(Stage::OperationDescriptor, status, "scalar type"));
-    }
+    error::check(Stage::OperationDescriptor, status, "scalar type")?;
     Ok(scalar)
 }
 
@@ -853,10 +812,10 @@ mod tests {
         .expect("ij,jk->ik");
     }
 
-    /// The probe's refusal cases, reproduced as wrapper refusals.
+    /// The pre-FFI refusals of the contraction checks, by variant.
     #[test]
-    fn probe_refusals() {
-        // probe2 D5a: a D mode in no input.
+    fn contraction_refusals() {
+        // an output mode in no input.
         let err = check_contraction_operands(
             (&[1], &[5], &[1]),
             (&[1, 3], &[5, 11], &[11, 1]),
@@ -865,7 +824,7 @@ mod tests {
         )
         .expect_err("mode 0 in no input");
         assert!(matches!(err.inner, RSTSRError::InvalidValue(_)));
-        // probe2 D7: an extent mismatch on the contracted mode (cuTENSOR misses this one).
+        // an extent mismatch on the contracted mode (cuTENSOR itself misses this one).
         let err = check_contraction_operands(
             (&[0, 1], &[7, 3], &[3, 1]),
             (&[1, 2], &[4, 5], &[5, 1]),

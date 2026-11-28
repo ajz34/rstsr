@@ -40,12 +40,15 @@ pub fn is_available() -> bool {
 /// ([`CudaOrdinalObj::cutensor`][crate::registry::CudaOrdinalObj::cutensor]), and one is shared by
 /// every device value of that ordinal.
 ///
-/// The header marks the execute calls and the
-/// `cutensorCreate{Contraction,Reduction,Permutation,Elementwise*}` calls "thread-safe";
-/// `cutensorCreatePlan`, `cutensorEstimateWorkspaceSize` and the attribute get/set entries carry no
-/// remark, and the handle's plan cache is shared by all threads. `lock` is held
-/// across the planning sequence and the attribute calls; the execute calls run unlocked, which is
-/// what multi-stream overlap needs.
+/// The header remarks (`cutensor.h`, `\remarks`): `cutensorCreate`/`cutensorDestroy`,
+/// `cutensorPermute`, the elementwise executes and the plan/kernel-cache file entries are
+/// "thread-safe"; `cutensorHandleResizePlanCache` is "not thread-safe"; the contraction and
+/// reduction executes, the `cutensorCreate*` operation entries, `cutensorCreatePlanPreference`,
+/// `cutensorCreatePlan`, `cutensorEstimateWorkspaceSize` and the attribute get/set entries carry
+/// no remark at all. `lock` is held across every creation, planning and attribute sequence and
+/// across `resize_plan_cache`; the execute calls run unlocked, since serializing them would end
+/// multi-stream overlap (the contraction and reduction executes are the entries the header
+/// itself does not vouch for).
 pub struct CutensorHandle {
     ptr: sys::cutensorHandle_t,
     /// The context the handle was created under; every entry binds it to the calling thread
@@ -68,9 +71,7 @@ impl CutensorHandle {
         let mut handle = core::mem::MaybeUninit::<sys::cutensorHandle_t>::uninit();
         // SAFETY: `handle` is a valid output slot for the one-pointer `cutensorHandle_t`.
         let status = unsafe { sys::cutensorCreate(handle.as_mut_ptr()) };
-        if status != sys::cutensorStatus_t::CUTENSOR_STATUS_SUCCESS {
-            return Err(error::status_error(Stage::CreateHandle, status, ""));
-        }
+        error::check(Stage::CreateHandle, status, "")?;
         // SAFETY: the call wrote the handle on success.
         let ptr = unsafe { handle.assume_init() };
         Ok(Self { ptr, ctx, plan_lock: Mutex::new(()), version: Self::query_version() })
@@ -95,27 +96,40 @@ impl CutensorHandle {
 
     /// Whether the loaded library exports `name` (NUL-terminated). The trinary contraction
     /// arrived in libcutensor 2.1.1 and cudarc's `load` panics on a missing symbol, so the
-    /// gated entries probe first.
+    /// gated entries probe first. Under `dynamic-linking` the library is a link-time dependency
+    /// and every exported symbol is present.
     pub(crate) fn has_symbol(&self, name: &[u8]) -> bool {
-        if !unsafe { sys::is_culib_present() } {
-            return false;
+        #[cfg(cutensor_dynamic_loading)]
+        {
+            // SAFETY: a loadability probe, then a symbol lookup on the loaded library (`culib()`
+            // panics when nothing loads); `name` is NUL-terminated.
+            if !unsafe { sys::is_culib_present() } {
+                return false;
+            }
+            unsafe { sys::culib().get::<*const ()>(name) }.is_ok()
         }
-        unsafe { sys::culib().get::<*const ()>(name) }.is_ok()
+        #[cfg(not(cutensor_dynamic_loading))]
+        {
+            let _ = name;
+            true
+        }
     }
 
     /// The CUDA runtime version the loaded library was built against.
     pub fn cudart_version(&self) -> usize {
+        // SAFETY: a pure query that needs no handle.
         unsafe { sys::cutensorGetCudartVersion() }
     }
 
-    /// Resize the handle's per-handle plan cache to `num_entries` entries (default 64).
+    /// Resize the handle's per-handle plan cache to `num_entries` entries (default 64). The
+    /// header marks this entry "not thread-safe": it runs under the handle's planning lock, so
+    /// it cannot interleave with a planning sequence on another thread.
     pub fn resize_plan_cache(&self, num_entries: u32) -> Result<()> {
         self.bind()?;
+        let _lock = self.lock();
+        // SAFETY: `self.ptr` is a live handle from `cutensorCreate`; serialized by the lock.
         let status = unsafe { sys::cutensorHandleResizePlanCache(self.ptr, num_entries) };
-        if status != sys::cutensorStatus_t::CUTENSOR_STATUS_SUCCESS {
-            return Err(error::status_error(Stage::HandleAttribute, status, "resize plan cache"));
-        }
-        Ok(())
+        error::check(Stage::HandleAttribute, status, "resize plan cache")
     }
 
     fn cache_file(path: impl AsRef<std::path::Path>) -> Result<std::ffi::CString> {
@@ -123,51 +137,45 @@ impl CutensorHandle {
             .map_err(|_| rstsr_error!(InvalidValue, "cutensor: cache path contains a NUL byte"))
     }
 
-    /// Write the handle's plan cache to `path`.
+    /// Write the handle's plan cache to `path` (thread-safe per the header; no lock).
     pub fn write_plan_cache_to_file(&self, path: impl AsRef<std::path::Path>) -> Result<()> {
         self.bind()?;
         let file = Self::cache_file(path)?;
+        // SAFETY: live handle; `file` is NUL-terminated.
         let status = unsafe { sys::cutensorHandleWritePlanCacheToFile(self.ptr, file.as_ptr()) };
-        if status != sys::cutensorStatus_t::CUTENSOR_STATUS_SUCCESS {
-            return Err(error::status_error(Stage::HandleAttribute, status, "write plan cache"));
-        }
-        Ok(())
+        error::check(Stage::HandleAttribute, status, "write plan cache")
     }
 
     /// Read a plan cache from `path`, overwriting this handle's cache lines; returns the number
-    /// of cache lines read.
+    /// of cache lines read (thread-safe per the header; no lock).
     pub fn read_plan_cache_from_file(&self, path: impl AsRef<std::path::Path>) -> Result<u32> {
         self.bind()?;
         let file = Self::cache_file(path)?;
         let mut read = 0u32;
+        // SAFETY: as `write_plan_cache_to_file`; `read` is a valid `u32` output slot.
         let status =
             unsafe { sys::cutensorHandleReadPlanCacheFromFile(self.ptr, file.as_ptr(), core::ptr::addr_of_mut!(read)) };
-        if status != sys::cutensorStatus_t::CUTENSOR_STATUS_SUCCESS {
-            return Err(error::status_error(Stage::HandleAttribute, status, "read plan cache"));
-        }
+        error::check(Stage::HandleAttribute, status, "read plan cache")?;
         Ok(read)
     }
 
-    /// Write this handle's JIT kernel cache to `path`.
+    /// Write this handle's JIT kernel cache to `path` (thread-safe per the header; no lock).
     pub fn write_kernel_cache_to_file(&self, path: impl AsRef<std::path::Path>) -> Result<()> {
         self.bind()?;
         let file = Self::cache_file(path)?;
+        // SAFETY: as `write_plan_cache_to_file`.
         let status = unsafe { sys::cutensorWriteKernelCacheToFile(self.ptr, file.as_ptr()) };
-        if status != sys::cutensorStatus_t::CUTENSOR_STATUS_SUCCESS {
-            return Err(error::status_error(Stage::HandleAttribute, status, "write kernel cache"));
-        }
-        Ok(())
+        error::check(Stage::HandleAttribute, status, "write kernel cache")
     }
 
-    /// Read a JIT kernel cache from `path`, adding every kernel this handle lacks.
+    /// Read a JIT kernel cache from `path`, adding every kernel this handle lacks (thread-safe
+    /// per the header; no lock).
     pub fn read_kernel_cache_from_file(&self, path: impl AsRef<std::path::Path>) -> Result<()> {
         self.bind()?;
         let file = Self::cache_file(path)?;
+        // SAFETY: as `write_plan_cache_to_file`.
         let status = unsafe { sys::cutensorReadKernelCacheFromFile(self.ptr, file.as_ptr()) };
-        if status != sys::cutensorStatus_t::CUTENSOR_STATUS_SUCCESS {
-            return Err(error::status_error(Stage::HandleAttribute, status, "read kernel cache"));
-        }
-        Ok(())
+        error::check(Stage::HandleAttribute, status, "read kernel cache")
     }
 
     /// Bind the handle's context to the calling thread. Every entry that will call cuTENSOR does
@@ -201,8 +209,11 @@ impl core::fmt::Debug for CutensorHandle {
 }
 
 // SAFETY: the header marks the handle "thread-safe" (`cutensorCreate`: "blocking, no reentrant,
-// and thread-safe"), and its plan cache is shared across threads by design. The entries it leaves
-// unremarked are serialized by `plan_lock`, which is what makes sharing the handle sound.
+// and thread-safe") and its plan cache is shared across threads by design. Every entry that
+// touches the handle's shared state without a thread-safety remark — creation, planning,
+// attribute access — and the remarked "not thread-safe" `cutensorHandleResizePlanCache` are
+// serialized by `plan_lock`, which is what makes sharing the handle sound. Execute is unlocked;
+// see the type doc.
 unsafe impl Send for CutensorHandle {}
 unsafe impl Sync for CutensorHandle {}
 

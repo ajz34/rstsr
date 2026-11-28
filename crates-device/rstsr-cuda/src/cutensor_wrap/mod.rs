@@ -20,6 +20,10 @@
 //! itself: stride-0 outputs and extent mismatches produce garbage on every version probed
 //! (2.4.1-2.8.0), `opC != IDENTITY` is silently ignored through 2.7.0, and the scalar pointer type
 //! is never checked. The wrapper never copies; materializing an operand is the caller's job.
+//! Operands are dynamic-rank (`IxD`) only: convert a static-rank tensor with `.to_dim::<IxD>()`
+//! before calling. Aliasing follows cuTENSOR's rule and is **not** checked: `A` / `B` must not
+//! overlap the written output; `C` may alias `D` (that is the in-place accumulate form, `c =
+//! None`).
 //!
 //! # Raw FFI at the boundary
 //!
@@ -48,7 +52,8 @@
 //! (resize, read/write). Deliberately out of scope: the `cutensorLogger*` family (no tensor
 //! semantics) and block-sparse support; `cutensorOperationDescriptorSetAttribute` is refused
 //! by design — setting `SCALAR_TYPE` would defeat the wrapper's derived-type verification; the
-//! `MOVED_BYTES` attribute is block-sparse-only on the probed versions and is not exposed.
+//! `cutensorPlanPreferenceGetAttribute`/`SetAttribute` pair (the 2.6+ autotuning knobs, future);
+//! the `MOVED_BYTES` attribute is block-sparse-only on the probed versions and is not exposed.
 //!
 //! # Loading
 //!

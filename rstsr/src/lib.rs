@@ -119,6 +119,14 @@ fn test_dlpack_prelude() {
 fn test_cuda_prelude() {
     use crate::prelude::*;
 
+    // the cuTENSOR wrapper module is reachable through both facade paths; the accessor is
+    // fallible and never panics, so this needs no GPU and no loadable libcutensor
+    #[cfg(feature = "cutensor")]
+    {
+        let _ = rt::cuda::cutensor_wrap::compute_desc::desc_32f();
+        let _ = cuda::cutensor_wrap::compute_desc::desc_64f();
+    }
+
     // the CUDA backend is surfaced through the prelude namespace `rt::cuda`
     if !rt::cuda::is_available() {
         println!("skipping: no CUDA device visible");

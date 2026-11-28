@@ -19,21 +19,21 @@ use std::sync::OnceLock;
 
 #[cfg(cutensor_dynamic_loading)]
 fn symbol(name: &[u8]) -> Result<sys::cutensorComputeDescriptor_t> {
-    // culib() panics when nothing loads; probe first so the failure is an error.
+    // SAFETY: `culib()` panics when nothing loads; `is_culib_present` is the loadability probe
+    // that turns that into an error.
     if !unsafe { sys::is_culib_present() } {
         return Err(error::not_loadable());
     }
     // SAFETY: `name` is NUL-terminated. libloading's `Symbol` deref yields the *dlsym address*
-    // itself ("an additional reference level": for a function the address is the callable; for a
-    // data global it is the address of the variable), so the descriptor pointer is one further
-    // dereference of that address — the value stored in the `const` global. (Getting this wrong
-    // passes the address where the descriptor is expected; cuTENSOR answers
-    // `NOT_INITIALIZED` at operation creation — found by the B2 tests.)
+    // ("an additional reference level"): for a data global that is the variable's address, so the
+    // descriptor is one further read of it. (One deref fewer passes an address where a descriptor
+    // is expected; cuTENSOR then answers NOT_INITIALIZED at operation creation.)
     let sym = unsafe { sys::culib().get::<*mut core::ffi::c_void>(name) }.map_err(|_| error::not_loadable())?;
     let addr = *sym;
     if addr.is_null() {
         return Err(error::not_loadable());
     }
+    // SAFETY: `addr` is the address of a `const` global of the loaded library, read once.
     let desc = unsafe { core::ptr::read(addr.cast::<sys::cutensorComputeDescriptor_t>()) };
     Ok(desc)
 }

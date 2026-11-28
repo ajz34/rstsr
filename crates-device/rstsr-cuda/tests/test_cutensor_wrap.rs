@@ -6,7 +6,10 @@
 //! *honesty* (every case the probes showed to be accepted-with-garbage or undocumented is refused
 //! by name before cuTENSOR runs). Skips say why: no CUDA device, or `libcutensor` not loadable —
 //! a green run without the skip lines means everything ran. Point `LD_LIBRARY_PATH` at another
-//! version's `libcutensor.so` symlink dir to run the file against that version.
+//! version's `libcutensor.so` symlink dir to run the file against that version; the runtime
+//! version it ran against is printed once.
+
+#![cfg(cutensor_bindings)]
 
 use num::Complex;
 use rstsr::prelude::*;
@@ -25,6 +28,11 @@ fn device_or_skip() -> Option<DeviceCuda> {
         eprintln!("skipping: libcutensor is not loadable (or its handle could not be created)");
         return None;
     }
+    static VERSION: std::sync::Once = std::sync::Once::new();
+    VERSION.call_once(|| {
+        let v = dev.ordinal_obj().cutensor().map(|h| h.version()).expect("handle: `is_available` held");
+        eprintln!("cuTENSOR runtime version: {v:?} (printed once per test binary)");
+    });
     Some(dev)
 }
 
@@ -471,7 +479,7 @@ fn beta_zero_stands_in_for_c() {
     assert_close(&to_cpu_f64(&d), &want, "d = a@b with NaN-prefilled d and c = None");
 }
 
-/// `opA = CONJ` on `c64` computes `conj(A) @ B` (probe A6/D9 behaviour through the wrapper).
+/// `opA = CONJ` on `c64` computes `conj(A) @ B` through the wrapper.
 #[test]
 fn conjugate_operand() {
     let Some(dev) = device_or_skip() else { return };
@@ -691,6 +699,117 @@ fn refusal_matrix() {
     expect_invalid(err, "negative stride");
 }
 
+/// A stride-0 (broadcast) *input* is not refused: it reaches cuTENSOR, which computes it
+/// correctly from 2.6.0 and declines (`NOT_SUPPORTED` -> `UnImplemented`) on older libraries.
+#[test]
+fn stride0_input_passes_through() {
+    let Some(dev) = device_or_skip() else { return };
+    let compute = cutensor_wrap::compute_desc::desc_64f().unwrap();
+    let (m, k, n) = (7usize, 5usize, 3usize);
+    // one row `[1, k]`, broadcast over `m` rows (stride `[0, 1]`)
+    let row = data(k, 30);
+    let a = rt::into_broadcast(rt::asarray((row.clone(), &dev)).into_shape([1, k]), vec![m, k]);
+    assert_eq!(a.view().stride().to_vec(), vec![0isize, 1], "the input is a stride-0 view");
+    let bv = data(k * n, 31);
+    let b = rt::asarray((bv.clone(), &dev)).into_shape([k, n]);
+    let mut d = rt::zeros(([m, n], &dev));
+    let res = cutensor_wrap::contract(
+        &dev,
+        a.view(),
+        &[0, 1],
+        ident(),
+        b.view(),
+        &[1, 2],
+        ident(),
+        None::<TensorView<'_, f64, DeviceCuda, IxD>>,
+        d.view_mut(),
+        &[0, 2],
+        1.0f64,
+        0.0f64,
+        compute,
+        None,
+    );
+    let version = dev.ordinal_obj().cutensor().map(|h| h.version()).expect("handle");
+    if version >= (2, 6, 0) {
+        res.expect("stride-0 input accepted from 2.6.0");
+        let av: Vec<f64> = row.iter().cycle().take(m * k).cloned().collect();
+        let want = cpu_matmul(&av, &bv, m, k, n);
+        assert_close(&to_cpu_f64(&d), &want, "stride-0 input");
+    } else {
+        let err = res.expect_err("stride-0 input declines before 2.6.0");
+        assert!(cutensor_wrap::is_decline(&err), "a decline, got {err:?}");
+        eprintln!("stride-0 input declined on cuTENSOR {version:?} (expected before 2.6.0)");
+    }
+}
+
+/// `c` given with the same shape as `d` but a different layout is refused before cuTENSOR
+/// (`descC == descD` is a full-facts requirement).
+#[test]
+fn c_layout_mismatch_refused() {
+    let Some(dev) = device_or_skip() else { return };
+    let compute = cutensor_wrap::compute_desc::desc_64f().unwrap();
+    let (m, k, n) = (7usize, 5usize, 3usize);
+    let a = rt::asarray((data(m * k, 32), &dev)).into_shape([m, k]);
+    let b = rt::asarray((data(k * n, 33), &dev)).into_shape([k, n]);
+    // `[m, n]` with the strides of a `[n, m]` buffer
+    let c_buf = rt::asarray((data(m * n, 34), &dev)).into_shape([n, m]);
+    let c_t = c_buf.t();
+    let mut d = rt::zeros(([m, n], &dev));
+    let err = cutensor_wrap::contract(
+        &dev,
+        a.view(),
+        &[0, 1],
+        ident(),
+        b.view(),
+        &[1, 2],
+        ident(),
+        Some(c_t),
+        d.view_mut(),
+        &[0, 2],
+        1.0f64,
+        1.0f64,
+        compute,
+        None,
+    )
+    .expect_err("c layout != d refused");
+    expect_invalid(err, "c layout != d");
+}
+
+/// The object layer's scalar guard: the scalar-type parameter is chosen independently of the
+/// descriptors there, and a mismatch with cuTENSOR's derived `SCALAR_TYPE` is refused right after
+/// the operation descriptor is created (the FFI reads the host scalars blind). `f64` scalars on
+/// `f32` descriptors is the canonical misuse; the refusal must also release the descriptor it
+/// just created.
+#[test]
+fn scalar_type_mismatch_refused() {
+    let Some(dev) = device_or_skip() else { return };
+    let handle = dev.ordinal_obj().cutensor().expect("handle").clone();
+    let (m, k, n) = (4usize, 5usize, 3usize);
+    let a = rt::asarray((data(m * k, 35).into_iter().map(|x| x as f32).collect::<Vec<_>>(), &dev)).into_shape([m, k]);
+    let b = rt::asarray((data(k * n, 36).into_iter().map(|x| x as f32).collect::<Vec<_>>(), &dev)).into_shape([k, n]);
+    let a_view = a.view();
+    let b_view = b.view();
+    let desc_a = cutensor_wrap::TensorDescriptor::new::<f32>(&handle, &a_view).unwrap();
+    let desc_b = cutensor_wrap::TensorDescriptor::new::<f32>(&handle, &b_view).unwrap();
+    let err = cutensor_wrap::OperationDescriptor::new_contraction::<f64>(
+        &handle,
+        &desc_a,
+        &[0, 1],
+        ident(),
+        &desc_b,
+        &[1, 2],
+        ident(),
+        &desc_a,
+        &[0, 1],
+        &desc_a,
+        &[0, 1],
+        cutensor_wrap::compute_desc::desc_32f().unwrap(),
+    )
+    .expect_err("f64 scalar row on f32 descriptors refused");
+    assert!(err.to_string().contains("scalar type"), "{err}");
+    expect_invalid(err, "scalar type mismatch");
+}
+
 /// `f32 x c32 -> c32` passes the operation descriptor and declines at plan creation
 /// (`NOT_SUPPORTED` -> `UnImplemented`) — the decline a fallback tier must detect by variant.
 #[test]
@@ -875,6 +994,56 @@ fn cross_stream_execute() {
     .expect("cross-stream contraction");
     dev2.synchronize_f().expect("sync stream 2");
     assert_close(&to_cpu_f64(&d), &want, "cross-stream result");
+}
+
+/// The unlocked execute path in practice: several threads drive the same per-ordinal handle at
+/// once, each on its own stream with its own operands, and every result must match the oracle.
+#[test]
+fn concurrent_execute_on_one_handle() {
+    let Some(dev) = device_or_skip() else { return };
+    let (m, k, n) = (32usize, 48usize, 40usize);
+    let av = data(m * k, 40);
+    let bv = data(k * n, 41);
+    let want = cpu_matmul(&av, &bv, m, k, n);
+    let workers: Vec<_> = (0..4usize)
+        .map(|seed| {
+            let dev = dev.clone();
+            let av = av.clone();
+            let bv = bv.clone();
+            std::thread::spawn(move || {
+                let dev2 = dev.new_stream_f().expect("stream");
+                let compute = cutensor_wrap::compute_desc::desc_64f().unwrap();
+                let a = rt::asarray((av, &dev)).into_shape([m, k]);
+                let b = rt::asarray((bv, &dev)).into_shape([k, n]);
+                let mut d = rt::asarray((vec![seed as f64; m * n], &dev)).into_shape([m, n]);
+                for _ in 0..8 {
+                    cutensor_wrap::contract(
+                        &dev2,
+                        a.view(),
+                        &[0, 1],
+                        ident(),
+                        b.view(),
+                        &[1, 2],
+                        ident(),
+                        None::<TensorView<'_, f64, DeviceCuda, IxD>>,
+                        d.view_mut(),
+                        &[0, 2],
+                        1.0f64,
+                        0.0f64,
+                        compute,
+                        None,
+                    )
+                    .expect("concurrent contraction");
+                }
+                dev2.synchronize_f().expect("sync stream");
+                d
+            })
+        })
+        .collect();
+    for worker in workers {
+        let d = worker.join().expect("worker thread");
+        assert_close(&to_cpu_f64(&d), &want, "concurrent execute on one handle");
+    }
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -1243,11 +1412,11 @@ fn elementwise_trinary_matches_cpu() {
     assert_close(&to_cpu_f64(&d), &want, "in-place trinary ADD/ADD");
 }
 
-/// The B3 refusal matrix: a reduction output mode in no input, a permutation with mismatched
-/// mode sets, an elementwise operand with a foreign mode set, a stride-0 output on each family,
-/// and a wrong-kind execute (a contraction plan driven through `Plan::reduce`).
+/// The refusal matrix of the other families: a reduction output mode in no input, a permutation
+/// with mismatched mode sets, an elementwise operand with a foreign mode set, a stride-0 output
+/// on each family, and a wrong-kind execute (a contraction plan driven through `Plan::reduce`).
 #[test]
-fn b3_refusals() {
+fn family_refusals() {
     let Some(dev) = device_or_skip() else { return };
     let compute = cutensor_wrap::compute_desc::desc_64f().unwrap();
 
@@ -1302,7 +1471,7 @@ fn b3_refusals() {
 /// The elementwise foreign-mode-set refusal (kept separate from the placeholder above): an
 /// operand whose mode set differs from the output's is refused before cuTENSOR runs.
 #[test]
-fn b3_refusals_more() {
+fn family_refusals_more() {
     let Some(dev) = device_or_skip() else { return };
     let compute = cutensor_wrap::compute_desc::desc_64f().unwrap();
     let a = rt::asarray((data(7 * 13, 49), &dev)).into_shape([7, 13]);

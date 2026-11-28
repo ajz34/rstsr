@@ -23,15 +23,9 @@ pub struct CutensorWorkspace {
 }
 
 impl CutensorWorkspace {
-    /// Fallible allocation of `bytes` on `stream`.
+    /// Fallible allocation of `bytes` on `stream` (the module has no panicking twin).
     pub fn new_f(stream: &Arc<CudaStreamObj>, bytes: usize) -> Result<Self> {
         Ok(Self { buf: Arc::new(CudaBuffer::new_f(stream, bytes)?) })
-    }
-
-    /// Allocate `bytes` on `stream`. Panics through the error mapping; use [`Self::new_f`] for
-    /// the fallible form.
-    pub fn new(stream: &Arc<CudaStreamObj>, bytes: usize) -> Self {
-        Self::new_f(stream, bytes).rstsr_unwrap()
     }
 
     /// Wrap the per-stream default slot buffer.
@@ -54,9 +48,15 @@ impl CutensorWorkspace {
         self.buf.alloc_stream()
     }
 
-    /// Device pointer for an execute call on `exec`, with the ordering event recorded on it.
-    pub(crate) fn ptr_on(&self, exec: &Arc<CudaStreamObj>) -> *mut core::ffi::c_void {
-        self.buf.device_ptr_on(exec) as *mut core::ffi::c_void
+    /// Device pointer for an execute call on `exec`, with the read-event guard handed back: the
+    /// caller keeps it alive until after the launch, so a free on the allocation stream (a
+    /// caller-owned workspace dropped right after the call) cannot race the kernel.
+    pub(crate) fn ptr_on<'a>(
+        &'a self,
+        exec: &'a Arc<CudaStreamObj>,
+    ) -> (*mut core::ffi::c_void, cudarc::driver::SyncOnDrop<'a>) {
+        let (ptr, guard) = self.buf.read_ptr_on(exec);
+        (ptr as *mut core::ffi::c_void, guard)
     }
 }
 

@@ -1,7 +1,7 @@
 //! The tensor-side wrapper functions: every entry point that takes `TensorViewAPI` operands and
 //! runs a whole cuTENSOR pipeline in one call, for callers that do not reuse a problem. All
-//! operation families live here (contraction today; reduction, permutation, elementwise, trinary
-//! contraction as they arrive), one file away from the RAII object layer.
+//! operation families live here (contraction, trinary contraction, reduction, permutation,
+//! elementwise binary/trinary), one file away from the RAII object layer.
 
 use crate::cutensor_wrap::descriptor::TensorDescriptor;
 use crate::cutensor_wrap::dtype::CutensorDType;
@@ -67,8 +67,8 @@ fn entry(
 ///
 /// Refusals (named `InvalidValue` / `InvalidLayout` errors, never silent): negative strides,
 /// zero extents, a stride-0 output, duplicate or inconsistent modes, an extent mismatch between
-/// operands, `beta != 0` without `c`. Stride-0 *inputs* are passed through — cuTENSOR's runtime
-/// status is the verdict (accepted from 2.6.0, `NOT_SUPPORTED` before).
+/// operands. Stride-0 *inputs* are passed through — cuTENSOR's runtime status is the verdict
+/// (accepted from 2.6.0, `NOT_SUPPORTED` before).
 #[allow(clippy::too_many_arguments)]
 pub fn contract<TA, TB, TD>(
     device: &DeviceCuda,
@@ -115,8 +115,9 @@ where
 /// absent from `mode_d` are the reduced ones (`i,j->j` sums over `i`; a rank-0 `mode_d` reduces
 /// everything).
 ///
-/// - `op_reduce` is the raw `cudarc` reduction operator (`ADD`, `MUL`, `MIN`, `MAX`, `NORM1`,
-///   `NORM2`); `op_a` stays raw (`CUTENSOR_OP_CONJ` conjugates first).
+/// - `op_reduce` is the raw `cudarc` reduction operator, passed through unchecked (`ADD`, `MUL`,
+///   `MIN`, `MAX` are the 2.x set; anything else is cuTENSOR's status to report); `op_a` stays raw
+///   (`CUTENSOR_OP_CONJ` conjugates first).
 /// - `c` [`Option::None`] means **C is D**: in-place accumulation at any `beta`.
 /// - `mode_c` has no parameter: `descC == descD` is cuTENSOR's own requirement, and `C`'s modes are
 ///   `D`'s.
@@ -189,8 +190,9 @@ pub fn permute<T: CutensorDType>(
 
 /// Execute the elementwise binary `D = op_ac(alpha * opA(A), gamma * opC(C))` in one call —
 /// `op_ac` is the *functional* join operator (`ADD`, `MUL`, `MAX`, `MIN`, ...), unlike
-/// contraction's pinned `opC` (the D8 elementwise clause). Every operand shares `D`'s mode set;
-/// broadcast goes through stride-0 *views* (accepted by cuTENSOR from 2.6.0).
+/// contraction's `opC`, which the wrapper pins to `IDENTITY` and does not take as a parameter.
+/// Every operand shares `D`'s mode set; broadcast goes through stride-0 *views* (accepted by
+/// cuTENSOR from 2.6.0).
 ///
 /// `c` [`Option::None`] means **C is D**: in-place elementwise (`d = alpha * a + gamma * d` at
 /// `op_ac = ADD`). `mode_c` has no parameter (`descC == descD` is cuTENSOR's own requirement).

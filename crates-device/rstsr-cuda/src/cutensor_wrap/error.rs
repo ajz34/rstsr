@@ -80,6 +80,15 @@ pub fn status_error(stage: Stage, status: sys::cutensorStatus_t, ctx: &str) -> E
     status_variant(status, msg)
 }
 
+/// `Ok(())` on `CUTENSOR_STATUS_SUCCESS`, otherwise the stage's error ([`status_error`]).
+pub(crate) fn check(stage: Stage, status: sys::cutensorStatus_t, ctx: &str) -> Result<()> {
+    if status == sys::cutensorStatus_t::CUTENSOR_STATUS_SUCCESS {
+        Ok(())
+    } else {
+        Err(status_error(stage, status, ctx))
+    }
+}
+
 /// The variant half of [`status_error`], factored out so the table is unit-testable without the
 /// library (`cutensorGetErrorString` is FFI).
 fn status_variant(status: sys::cutensorStatus_t, msg: String) -> Error {
@@ -208,6 +217,7 @@ mod tests {
             Stage::WorkspaceEstimate,
             Stage::Plan,
             Stage::Execute,
+            Stage::HandleAttribute,
         ];
         let strings: Vec<_> = stages.iter().map(|s| s.as_str()).collect();
         for (i, a) in strings.iter().enumerate() {

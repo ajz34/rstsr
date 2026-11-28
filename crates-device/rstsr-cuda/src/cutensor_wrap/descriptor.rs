@@ -12,8 +12,8 @@ const MAX_ALIGNMENT: usize = 256;
 
 /// The byte alignment of a device address: the largest power of two dividing it, capped at
 /// [`MAX_ALIGNMENT`] (`0` for the null address). This is the honest `alignmentRequirement` —
-/// cuTENSOR does not check it against the pointer (the probe: 256 declared on an 8-byte-aligned
-/// pointer works), so declaring less than the truth only gives the planner freedom.
+/// cuTENSOR does not check it against the pointer (a 256-byte declaration on an 8-byte-aligned
+/// pointer is accepted), so declaring less than the truth only gives the planner freedom.
 pub(crate) fn ptr_alignment(addr: usize) -> u32 {
     if addr == 0 {
         return 0;
@@ -124,7 +124,8 @@ impl TensorDescriptor {
             },
         };
         let mut ptr = core::mem::MaybeUninit::<sys::cutensorTensorDescriptor_t>::uninit();
-        // Rank 0 passes null arrays (numModes 0); the probe verified both null and dummy arrays.
+        // SAFETY: `ptr` is a valid output slot; the arrays have `extent.len()` entries, and rank
+        // 0 passes null (cuTENSOR accepts null and dummy arrays alike at `numModes` 0).
         let status = unsafe {
             sys::cutensorCreateTensorDescriptor(
                 handle.ptr(),
@@ -136,9 +137,7 @@ impl TensorDescriptor {
                 alignment,
             )
         };
-        if status != sys::cutensorStatus_t::CUTENSOR_STATUS_SUCCESS {
-            return Err(error::status_error(Stage::TensorDescriptor, status, ""));
-        }
+        error::check(Stage::TensorDescriptor, status, "")?;
         // SAFETY: the descriptor was written on success.
         let ptr = unsafe { ptr.assume_init() };
         Ok(Self { ptr, extent, stride, dtype: T::DATA_TYPE, alignment })
