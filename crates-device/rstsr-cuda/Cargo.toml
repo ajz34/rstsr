@@ -31,9 +31,14 @@ cudarc = { version = "0.19", default-features = false, features = [
 # the facade with our own feature: circular dev-dependency (rstsr optionally
 # depends back on this crate), so tests and doctests exercise the user surface
 # (`use rstsr::prelude::*` + `cuda::...`) the way downstream writes it
-rstsr = { path = "../../rstsr", default-features = false, features = ["cuda"] }
+rstsr = { path = "../../rstsr", default-features = false, features = ["cuda", "cutensor"] }
 
 [features]
+# Dependent-gate pass-through: lets the `rstsr` facade tie its `cutensor` re-exports
+# to this crate. `cutensor_wrap` itself needs only a CUDA >= 12.0 pin (the
+# `cutensor_bindings` cfg); CUDA 11.4-11.8 pins compile cudarc's cutensor module out.
+cutensor = []
+
 default = []
 # eprintln the planned entry/plan choice per launch (hot-path debug only)
 launch_trace = []
@@ -54,6 +59,10 @@ dynamic-linking = ["cudarc/dynamic-linking"]
 
 [[bench]]
 name = "bench_matmul"
+harness = false
+
+[[bench]]
+name = "bench_cutensor"
 harness = false
 
 [[bench]]

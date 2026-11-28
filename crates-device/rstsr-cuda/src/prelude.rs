@@ -47,3 +47,6 @@ pub mod rstsr_funcs {
 
 pub use rstsr_structs::*;
 pub use rstsr_traits::*;
+
+#[cfg(cutensor_bindings)]
+pub use crate::cutensor_wrap;

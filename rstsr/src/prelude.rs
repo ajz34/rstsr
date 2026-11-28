@@ -171,6 +171,9 @@ pub mod cuda {
     pub use rstsr_cuda::prelude::rstsr_funcs::*;
     pub use rstsr_cuda::prelude::rstsr_structs::*;
     pub use rstsr_cuda::prelude::rstsr_traits::*;
+
+    #[cfg(feature = "cutensor")]
+    pub use rstsr_cuda::cutensor_wrap;
 }
 
 pub mod rt {

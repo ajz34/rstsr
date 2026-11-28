@@ -57,6 +57,9 @@ kml = ["dep:rstsr-kml", "use_blas_traits"]
 
 # CUDA device
 cuda = ["dep:rstsr-cuda"]
+# the cuTENSOR wrapper (requires a CUDA >= 12.0 toolchain; CUDA 11.4-11.8 pins
+# compile cudarc's cutensor module out)
+cutensor = ["cuda", "rstsr-cuda/cutensor"]
 
 # dependencies specification
 linalg = [

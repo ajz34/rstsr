@@ -1687,3 +1687,37 @@ fn handle_cache_roundtrip() {
     handle.write_kernel_cache_to_file(&tmp).expect("write kernel cache");
     let _ = std::fs::remove_file(&tmp); // the read-back needs matching kernels; covered by write
 }
+
+/// The facade surface: `rstsr::cuda::cutensor_wrap` written the way downstream reaches it
+/// (`use rstsr::prelude::*` + `rt::cuda::cutensor_wrap`, enabled by the facade's `cutensor`
+/// feature). Verifies the wiring compiles and computes through the facade path.
+#[test]
+fn facade_surface() {
+    use rstsr::cuda::cutensor_wrap;
+    let Some(dev) = device_or_skip() else { return };
+    let (m, k, n) = (2usize, 3usize, 4usize);
+    let av = data(m * k, 64);
+    let bv = data(k * n, 65);
+    let want = cpu_matmul(&av, &bv, m, k, n);
+    let a = rt::asarray((av, &dev)).into_shape([m, k]);
+    let b = rt::asarray((bv, &dev)).into_shape([k, n]);
+    let mut d = rt::zeros(([m, n], &dev));
+    cutensor_wrap::contract(
+        &dev,
+        a.view(),
+        &[0, 1],
+        ident(),
+        b.view(),
+        &[1, 2],
+        ident(),
+        None::<TensorView<'_, f64, DeviceCuda, IxD>>,
+        d.view_mut(),
+        &[0, 2],
+        1.0f64,
+        0.0f64,
+        cutensor_wrap::compute_desc::desc_64f().unwrap(),
+        None,
+    )
+    .expect("facade contraction");
+    assert_close(&to_cpu_f64(&d), &want, "facade contraction");
+}
